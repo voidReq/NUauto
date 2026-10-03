@@ -14,8 +14,10 @@ import config
 SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8"]
 RSYNC = ["rsync", "-a", "-e", " ".join(SSH)]
 REMOTE = f"{config.SERVER}:{config.SERVER_DIR}"
+# Pushed with rsync -R, so paths keep their folders (docs/...). The docs go too, so agents there read current ones.
 CODE = ["config.py", "sheet.py", "jobs.py", "daily.py", "browser.py", "apply.py", "answers.py", "inspect_form.py",
-        "sync.py", "web.py", "nuworks", "TRIAGE_PROMPT.md", "SCORE_PROMPT.md", "CATEGORY_PROMPT.md"]
+        "sync.py", "web.py", "doctor.py", "nuworks", "TRIAGE_PROMPT.md", "SCORE_PROMPT.md", "CATEGORY_PROMPT.md",
+        "requirements.txt", "CLAUDE.md", "docs/DEPLOY.md", "docs/PIPELINE.md", "docs/STATUS.md"]
 
 
 def _run(cmd, what):
@@ -40,7 +42,7 @@ def pull():
 
 
 def push():
-    ok = _run(RSYNC + ["-c"] + CODE + [f"{REMOTE}/"], "push code")
+    ok = _run(RSYNC + ["-c", "-R"] + CODE + [f"{REMOTE}/"], "push code")
     ok &= _run(RSYNC + ["data/ratings.json", f"{REMOTE}/data/ratings.json"], "push ratings")
     if os.path.exists(config.LAPTOP_RESUME):
         ok &= _run(RSYNC + ["-c", config.LAPTOP_RESUME, f"{REMOTE}/resume.pdf"], "push resume")

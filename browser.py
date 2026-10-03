@@ -27,6 +27,8 @@ _extra_hosts = set()  # only filled inside sso_hosts_allowed()
 
 
 def host_allowed(url):
+    if "\\" in url:  # browsers read "\" as "/", so urlparse and Firefox could disagree on the host
+        return False
     parsed = urlparse(url)
     return parsed.scheme == "https" and (parsed.hostname in config.ALLOWED_HOSTS or parsed.hostname in _extra_hosts)
 

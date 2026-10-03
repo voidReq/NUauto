@@ -1,0 +1,11 @@
+[Unit]
+Description=NUworks job pool update, 08:00 and 18:00 New York time
+
+[Timer]
+OnCalendar=*-*-* 08:00:00 America/New_York
+OnCalendar=*-*-* 18:00:00 America/New_York
+RandomizedDelaySec=15m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

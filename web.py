@@ -76,7 +76,8 @@ class Handler(BaseHTTPRequestHandler):
     def _params(self, query):
         q = {k: v[0] for k, v in parse_qs(query).items()}
         a, r, j, s = q.get("a", ""), q.get("r", ""), q.get("j", ""), q.get("s", "")
-        if a not in ACTIONS or not r.isdigit() or not j.isalnum() or len(j) > 64:
+        # isascii first: "²".isdigit() is True, and compare_digest raises on non-ASCII strings
+        if not (r + j + s).isascii() or a not in ACTIONS or not r.isdigit() or not j.isalnum() or len(j) > 64:
             return None
         if not hmac.compare_digest(s, _sig(a, int(r), j)):
             return None

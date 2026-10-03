@@ -41,7 +41,7 @@ WRITE_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 
 def find_client_json():
-    """client_secret.json in the project dir (homelab), else the one in ~/Downloads (laptop)."""
+    """client_secret.json in the project dir (both machines since 2026-10-03), else the one in ~/Downloads."""
     local = os.path.join(PROJECT_DIR, "client_secret.json")
     if os.path.exists(local):
         return local

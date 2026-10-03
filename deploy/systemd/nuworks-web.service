@@ -1,0 +1,13 @@
+[Unit]
+Description=NUworks helper: Mark-done links (Tailscale only; published by the Pi tunnel)
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/projects/auto
+Environment=TZ=America/New_York
+ExecStart=%h/projects/auto/.venv/bin/python %h/projects/auto/web.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

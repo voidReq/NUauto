@@ -8,6 +8,8 @@
   nuworks status      sheet counts, weekly limit, Approved rows
   nuworks login       log in to NUworks by hand (also copies the session to the homelab)
   nuworks login google   fresh Google Sheets login (needed every 7 days; Discord reminds you)
+  nuworks test        run all offline tests (no network, no sheet, no browser)
+  nuworks doctor      health check of the laptop, the homelab and the Mark-done page (read-only)
 """
 import os
 import sys
@@ -25,9 +27,17 @@ import config  # noqa: E402
 def main():
     cmd, rest = (sys.argv[1], sys.argv[2:]) if len(sys.argv) > 1 else ("", [])
     laptop = not config.IS_SERVER
-    if cmd not in ("approve", "rate", "apply", "status", "update", "login") or \
+    if cmd not in ("approve", "rate", "apply", "status", "update", "login", "test", "doctor") or \
             (rest and cmd != "apply" and not (cmd == "login" and rest == ["google"])):
         sys.exit(__doc__)
+    if cmd == "test":
+        import glob
+        import subprocess
+        failed = [t for t in sorted(glob.glob("test_*.py")) if subprocess.run([sys.executable, t]).returncode]
+        sys.exit(f"FAILED: {', '.join(failed)}" if failed else 0)
+    if cmd == "doctor":
+        import doctor
+        sys.exit(doctor.main())
     if laptop:
         import sync
         if cmd == "update":
