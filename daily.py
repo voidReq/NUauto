@@ -65,6 +65,7 @@ def run_claude(prompt_file, batch_file):
     log(f"claude: {name}")
     r = subprocess.run(
         [CLAUDE, "-p", prompt, "--model", "sonnet",
+         "--strict-mcp-config",  # no MCP servers / claude.ai connectors: batches need only Read/Write
          "--allowedTools", "Read", "Write",
          "--disallowedTools", "Bash", "WebFetch", "WebSearch", "Edit",
          "--permission-mode", "acceptEdits"],
