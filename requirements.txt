@@ -1,0 +1,5 @@
+# Versions installed on the laptop 2026-10-03. Firefox for Playwright: python -m playwright install firefox
+gspread==6.2.1
+playwright==1.63.0
+pypdf==6.19.0
+scikit-learn==1.9.1

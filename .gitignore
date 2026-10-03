@@ -1,0 +1,20 @@
+# Secrets (never commit; see CLAUDE.md "Secrets")
+token.json
+session_cookies.json
+client_secret.json
+client_secret_*.json
+discord_webhook.txt
+web_secret.txt
+# Personal data / per-machine state
+answers.json
+profile.json
+google_login.txt
+resume.pdf
+browser_profile/
+# Generated
+data/
+work/
+logs/
+.venv/
+__pycache__/
+.playwright-mcp/

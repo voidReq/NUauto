@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+"""nuworks: the one command for this project.
+
+  nuworks approve     browse the best jobs; y approves (goes in the sheet as Approved), n rejects
+  nuworks apply       apply to every Approved row, up to the weekly limit  (-n 3 = at most 3)
+  nuworks rate        teach the ranking your taste (y/n only, nothing goes in the sheet)
+  nuworks update      check NUworks for new jobs now (runs on the homelab, then syncs)
+  nuworks status      sheet counts, weekly limit, Approved rows
+  nuworks login       log in to NUworks by hand (also copies the session to the homelab)
+  nuworks login google   fresh Google Sheets login (needed every 7 days; Discord reminds you)
+"""
+import os
+import sys
+
+ROOT = os.path.dirname(os.path.realpath(__file__))
+VENV_PY = os.path.join(ROOT, ".venv", "bin", "python")
+if os.path.realpath(sys.prefix) != os.path.realpath(os.path.join(ROOT, ".venv")):
+    os.execv(VENV_PY, [VENV_PY, os.path.realpath(__file__)] + sys.argv[1:])  # always run in the project venv
+os.chdir(ROOT)
+sys.path.insert(0, ROOT)
+
+import config  # noqa: E402
+
+
+def main():
+    cmd, rest = (sys.argv[1], sys.argv[2:]) if len(sys.argv) > 1 else ("", [])
+    laptop = not config.IS_SERVER
+    if cmd not in ("approve", "rate", "apply", "status", "update", "login") or \
+            (rest and cmd != "apply" and not (cmd == "login" and rest == ["google"])):
+        sys.exit(__doc__)
+    if laptop:
+        import sync
+        if cmd == "update":
+            sync.push()
+            print("Running the update on the homelab (a few minutes; Ctrl+C stops watching, not the run)...")
+            sync.ssh("systemctl --user start nuworks-daily.service; "
+                     f"tail -n 4 \"$(ls -t {config.SERVER_DIR}/logs/daily-*.txt | head -1)\"")
+            sync.pull()
+            return
+        if cmd != "login":
+            sync.pull()
+
+    try:
+        if cmd == "approve":
+            import jobs
+            jobs.cmd_approve()
+        elif cmd == "rate":
+            import jobs
+            jobs.cmd_rate()
+        elif cmd == "apply":
+            import apply
+            apply.main(rest)
+        elif cmd == "status":
+            import sheet
+            sys.argv = ["sheet.py", "status"]
+            sheet.main()
+        elif cmd == "update":  # on the homelab itself
+            import daily
+            sys.exit(daily.main())
+        elif cmd == "login" and rest == ["google"]:
+            import sheet
+            sheet.google_login()
+            if laptop:
+                sync.push()
+        elif cmd == "login":
+            import browser
+            browser.cmd_login()
+            if laptop:
+                sync.push_session()
+    finally:
+        if laptop and cmd in ("approve", "rate", "status"):
+            sync.push()  # ratings (and a fresh Google token after a re-login) go to the homelab
+
+
+if __name__ == "__main__":
+    main()
