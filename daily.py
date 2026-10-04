@@ -1,9 +1,9 @@
 """Pool update: list -> Claude triage -> details -> Claude score -> pool -> notifications (Discord + desktop).
 
-Runs on the homelab (systemd user timer nuworks-daily.timer, 08:00 and 18:00 New York time).
+Runs on the homelab (systemd user timer nuauto-daily.timer, 08:00 and 18:00 New York time).
   python daily.py          # the update; the morning run also sends deadline reminders
-  python daily.py weekly   # Sunday summary (nuworks-weekly.timer)
-From the laptop: `nuworks update` starts the homelab run and then syncs.
+  python daily.py weekly   # Sunday summary (nuauto-weekly.timer)
+From the laptop: `nuauto update` starts the homelab run and then syncs.
 Uses the hidden (headless) browser; never applies to anything and only reads the sheet.
 Claude runs as `claude -p` (Sonnet) with only Read/Write tools, one call per batch.
 """
@@ -48,7 +48,7 @@ def discord(text):
     except OSError:
         return
     req = urllib.request.Request(url, data=json.dumps({"content": text[:1900]}).encode(), method="POST",
-                                 headers={"Content-Type": "application/json", "User-Agent": "nuworks-helper"})
+                                 headers={"Content-Type": "application/json", "User-Agent": "nuauto-helper"})
     try:
         urllib.request.urlopen(req, timeout=20).close()
     except Exception as e:
@@ -87,7 +87,7 @@ def main():
     log("list")
     ok, msg = step(jobs.cmd_list)
     if not ok:
-        notify("NUworks: update stopped", f"{msg}. Run `nuworks login` on your laptop (it copies the session to the homelab).")
+        notify("NUworks: update stopped", f"{msg}. Run `nuauto login` on your laptop (it copies the session to the homelab).")
         return 1
 
     batches = jobs.cmd_triage_export()
@@ -102,7 +102,7 @@ def main():
     log("details")
     ok, msg = step(jobs.cmd_details)
     if not ok:
-        notify("NUworks: update stopped", f"{msg}. Run `nuworks login` on your laptop (it copies the session to the homelab).")
+        notify("NUworks: update stopped", f"{msg}. Run `nuauto login` on your laptop (it copies the session to the homelab).")
         return 1
 
     batches = jobs.cmd_score_export()
@@ -130,7 +130,7 @@ def main():
     if new:
         top = "\n".join(f"{r['effective']}%  {r['title'][:45]} | {r['company'][:25]}" for r in new[:5])
         notify(f"{len(new)} new job{'s' if len(new) > 1 else ''} in your NUworks pool",
-               top + "\nRun: nuworks approve")
+               top + "\nRun: nuauto approve")
     rows = sheet_rows()
     if rows is not None:
         try:
@@ -152,7 +152,7 @@ def google_notice():
     if age is not None and age >= config.GOOGLE_LOGIN_DAYS - 1:
         left = config.GOOGLE_LOGIN_DAYS - age
         title = "NUworks: Google login has expired" if left <= 0 else "NUworks: Google login expires today"
-        notify(title, "On the laptop run: `nuworks login google`")
+        notify(title, "On the laptop run: `nuauto login google`")
 
 
 def record_hand_applications(before, rows):
@@ -211,7 +211,7 @@ def sheet_rows():
     except BaseException as e:  # gspread's login flow can sys.exit
         log(f"could not read the sheet ({type(e).__name__})")
         notify("NUworks: can't read the Google sheet",
-               "Google login probably expired (it lasts 7 days). On the laptop run: `nuworks login google`")
+               "Google login probably expired (it lasts 7 days). On the laptop run: `nuauto login google`")
         return None
 
 
@@ -230,7 +230,7 @@ def approved_notice(rows):
     log(f"approved closing today/tomorrow: {len(due)}")
     if due:
         body = "\n".join(f"{jobs.closes_text(day)}  {r.title[:40]} | {r.company[:22]}" for day, r in sorted(due, key=lambda x: x[0]))
-        notify(f"{len(due)} Approved job{'s' if len(due) > 1 else ''} close today or tomorrow", body + "\nRun: nuworks apply")
+        notify(f"{len(due)} Approved job{'s' if len(due) > 1 else ''} close today or tomorrow", body + "\nRun: nuauto apply")
 
 
 def urgent_notice(pool, rows, days=3):
@@ -245,7 +245,7 @@ def urgent_notice(pool, rows, days=3):
     log(f"closing within {days} days, not in sheet: {len(soon)}")
     if soon:
         body = "\n".join(f"{r['closes'][5:]}  {r['match']}%  {r['title'][:40]} | {r['company'][:22]}" for r in soon[:5])
-        notify(f"{len(soon)} pool job{'s' if len(soon) > 1 else ''} close within {days} days", body + "\nRun: nuworks approve")
+        notify(f"{len(soon)} pool job{'s' if len(soon) > 1 else ''} close within {days} days", body + "\nRun: nuauto approve")
 
 
 def weekly():
@@ -267,9 +267,9 @@ def weekly():
              f"Approved and waiting: {len(waiting)}" + (f" ({len(soon)} close within 7 days)" if soon else "") + ".",
              f"Pool jobs you haven't looked at: {len(unseen)}."]
     if waiting:
-        lines.append(f"Run `nuworks apply` (room for {room} this week).")
+        lines.append(f"Run `nuauto apply` (room for {room} this week).")
     elif room:
-        lines.append(f"Nothing Approved. Run `nuworks approve` to pick up to {room}.")
+        lines.append(f"Nothing Approved. Run `nuauto approve` to pick up to {room}.")
     notify("NUworks weekly check-in", "\n".join(lines))
     return 0
 

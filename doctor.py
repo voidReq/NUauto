@@ -1,4 +1,4 @@
-"""Health check for the laptop and the homelab: `nuworks doctor`.
+"""Health check for the laptop and the homelab: `nuauto doctor`.
 
 Read-only: never changes the sheet, NUworks, the homelab or any file. Secret files are only
 checked for existence and mode 600, never opened.
@@ -17,7 +17,7 @@ from datetime import date
 import config
 import sync
 
-UNITS = ["nuworks-daily.timer", "nuworks-weekly.timer", "nuworks-web.service"]
+UNITS = ["nuauto-daily.timer", "nuauto-weekly.timer", "nuauto-web.service"]
 fails = []
 
 
@@ -41,7 +41,7 @@ def check_files(names):
 
 
 def check_claude():
-    """The claude CLI that `nuworks update` runs (same lookup as daily.CLAUDE)."""
+    """The claude CLI that `nuauto update` runs (same lookup as daily.CLAUDE)."""
     if not shutil.which("claude", path=os.path.expanduser("~/.local/bin") + os.pathsep + os.environ.get("PATH", "")):
         say("FAIL", "claude CLI not found (Claude triage/scoring can't run): see README.md, Setup")
 
@@ -51,11 +51,11 @@ def check_google_login():
         with open(config.GOOGLE_LOGIN_PATH) as f:
             left = config.GOOGLE_LOGIN_DAYS - (date.today() - date.fromisoformat(f.read().strip())).days
     except (OSError, ValueError):
-        return say("WARN", "no Google login date (google_login.txt): run `nuworks login google` on the laptop")
+        return say("WARN", "no Google login date (google_login.txt): run `nuauto login google` on the laptop")
     if left <= 0:
-        say("FAIL", "Google login expired: run `nuworks login google` on the laptop")
+        say("FAIL", "Google login expired: run `nuauto login google` on the laptop")
     elif left <= 1:
-        say("WARN", f"Google login expires in {left} day: run `nuworks login google` on the laptop")
+        say("WARN", f"Google login expires in {left} day: run `nuauto login google` on the laptop")
     else:
         say("ok", f"Google login: {left} days left")
 
@@ -81,9 +81,9 @@ def laptop():
     if not config.HAS_SERVER:
         check_claude()  # local mode: the update runs here
         return say("ok", "no homelab configured (local mode)")
-    if sh(["systemctl", "--user", "is-enabled", "nuworks-daily.timer"]).stdout.strip() == "enabled":
+    if sh(["systemctl", "--user", "is-enabled", "nuauto-daily.timer"]).stdout.strip() == "enabled":
         say("WARN", "the old laptop timer is enabled; the homelab runs the update now: "
-                    "systemctl --user disable --now nuworks-daily.timer")
+                    "systemctl --user disable --now nuauto-daily.timer")
 
     print("homelab")
     if sh(sync.SSH + [config.SERVER, "true"]).returncode != 0:
@@ -101,7 +101,7 @@ def laptop():
         say("WARN", "could not compare code with the homelab")
     elif diff:
         say("WARN", f"homelab code differs in {len(diff)} file(s): {', '.join(diff)} "
-                    "(the next `nuworks status` pushes them)")
+                    "(the next `nuauto status` pushes them)")
     else:
         say("ok", "homelab code matches the laptop")
     diff = changed_files(["deploy/systemd/"], f"{config.SERVER}:.config/systemd/user/")
@@ -117,7 +117,7 @@ def laptop():
 def check_public_page():
     """The Mark-done page through the Pi tunnel. "/" is a 404 page with our title when all is up."""
     import web
-    req = urllib.request.Request(web.BASE_URL + "/", headers={"User-Agent": "nuworks-doctor"})
+    req = urllib.request.Request(web.BASE_URL + "/", headers={"User-Agent": "nuauto-doctor"})
     try:
         urllib.request.urlopen(req, timeout=15).close()
         code, body = 200, ""
@@ -128,7 +128,7 @@ def check_public_page():
     if code == 404 and "NUworks helper" in body:
         say("ok", f"{web.BASE_URL} answers (Pi tunnel -> homelab web)")
     else:
-        say("FAIL", f"{web.BASE_URL} gave HTTP {code}: nuworks-web down on the homelab, or the Pi tunnel")
+        say("FAIL", f"{web.BASE_URL} gave HTTP {code}: nuauto-web down on the homelab, or the Pi tunnel")
 
 
 def server():
@@ -137,7 +137,7 @@ def server():
     check_files(["token.json", "client_secret.json", "session_cookies.json", "browser_profile",
                  "discord_webhook.txt", "web_secret.txt"])
     if not os.path.exists(config.RESUME_PATH):
-        say("FAIL", "resume.pdf missing (the laptop pushes it: `nuworks status`)")
+        say("FAIL", "resume.pdf missing (the laptop pushes it: `nuauto status`)")
     check_google_login()
     for unit in UNITS:
         enabled = sh(["systemctl", "--user", "is-enabled", unit]).stdout.strip()
@@ -146,9 +146,9 @@ def server():
             say("ok", f"{unit} enabled and active")
         else:
             say("FAIL", f"{unit} is {enabled}/{active}: systemctl --user enable --now {unit}")
-    result = sh(["systemctl", "--user", "show", "nuworks-daily.service", "-p", "Result", "--value"]).stdout.strip()
+    result = sh(["systemctl", "--user", "show", "nuauto-daily.service", "-p", "Result", "--value"]).stdout.strip()
     if result != "success":
-        say("FAIL", f"last update run ended with {result!r}: journalctl --user -u nuworks-daily -n 50")
+        say("FAIL", f"last update run ended with {result!r}: journalctl --user -u nuauto-daily -n 50")
     runs = sorted(os.path.join(config.LOGS_DIR, n) for n in os.listdir(config.LOGS_DIR) if n.startswith("daily-")) \
         if os.path.isdir(config.LOGS_DIR) else []
     hours = (time.time() - os.path.getmtime(runs[-1])) / 3600 if runs else None
@@ -166,9 +166,9 @@ def server():
 
 
 def check_web_fresh():
-    """nuworks-web keeps the code it started with; warn if web.py or a module it uses changed since.
+    """nuauto-web keeps the code it started with; warn if web.py or a module it uses changed since.
     ctime, not mtime: rsync keeps the laptop's mtime, but ctime is when the file landed here."""
-    pid = sh(["systemctl", "--user", "show", "nuworks-web.service", "-p", "MainPID", "--value"]).stdout.strip()
+    pid = sh(["systemctl", "--user", "show", "nuauto-web.service", "-p", "MainPID", "--value"]).stdout.strip()
     up = sh(["ps", "-o", "etimes=", "-p", pid]).stdout.strip() if pid not in ("", "0") else ""
     if not up.isdigit():
         return
@@ -176,7 +176,7 @@ def check_web_fresh():
     newer = [n for n in ("web.py", "config.py", "sheet.py", "jobs.py")
              if os.path.getctime(os.path.join(config.PROJECT_DIR, n)) > started]
     if newer:
-        say("WARN", f"{', '.join(newer)} changed after nuworks-web started: systemctl --user restart nuworks-web")
+        say("WARN", f"{', '.join(newer)} changed after nuauto-web started: systemctl --user restart nuauto-web")
 
 
 def main():

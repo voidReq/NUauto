@@ -11,7 +11,7 @@ Pipeline (run in order; each step only does new work):
   python jobs.py cat-import
   python jobs.py pool              # 5. thresholds + bonuses -> the pool
   python jobs.py rate              # your y/n on pool jobs (teaches the ranking model)
-  nuworks approve                  # viewer on the best unrated jobs: y = Approved in the sheet, n = no
+  nuauto approve                  # viewer on the best unrated jobs: y = Approved in the sheet, n = no
   python jobs.py suggest [N]       # top N of the pool -> sheet as Proposed, after you say y
   python jobs.py stats
 
@@ -472,7 +472,7 @@ def check_applied(ids):
         browser, log, context, page, blocked = open_browser(p, "check_applied")
         try:
             if not browser.goto_logged_in(page, context, config.NUWORKS_START_URL, log):
-                sys.exit("Not logged in. Run: nuworks login")
+                sys.exit("Not logged in. Run: nuauto login")
             for i in ids:
                 r = page.request.get(f"{HOST}/api/v3/jobs/{i}")
                 try:
@@ -1043,7 +1043,7 @@ def cmd_approve():
             print(f"Added {sheet.add_proposed(ws, items, status='Approved')} rows as Approved.")
         else:
             print("Nothing approved.")
-    print("Next: nuworks apply")
+    print("Next: nuauto apply")
 
 
 def cmd_stats():

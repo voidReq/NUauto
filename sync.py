@@ -1,9 +1,9 @@
-"""Laptop <-> homelab sync over Tailscale (ssh + rsync). Used by the `nuworks` command on the laptop.
+"""Laptop <-> homelab sync over Tailscale (ssh + rsync). Used by the `nuauto` command on the laptop.
 
 The homelab owns the job data (it runs the update); the laptop owns your ratings.
   pull()          homelab data/ -> laptop (everything except ratings.json)
   push()          laptop -> homelab: ratings.json, code, local_config.json, resume, Google token (only if newer)
-  push_session()  laptop -> homelab: NUworks browser profile + session cookies (after `nuworks login`)
+  push_session()  laptop -> homelab: NUworks browser profile + session cookies (after `nuauto login`)
 Secrets are copied file-to-file with rsync and never printed.
 """
 import os
@@ -16,7 +16,7 @@ RSYNC = ["rsync", "-a", "-e", " ".join(SSH)]
 REMOTE = f"{config.SERVER}:{config.SERVER_DIR}"
 # Pushed with rsync -R, so paths keep their folders (docs/...). The docs go too, so agents there read current ones.
 CODE = ["config.py", "sheet.py", "jobs.py", "daily.py", "browser.py", "apply.py", "answers.py", "inspect_form.py",
-        "sync.py", "web.py", "doctor.py", "nuworks", "TRIAGE_PROMPT.md", "SCORE_PROMPT.md", "CATEGORY_PROMPT.md",
+        "sync.py", "web.py", "doctor.py", "nuauto", "TRIAGE_PROMPT.md", "SCORE_PROMPT.md", "CATEGORY_PROMPT.md",
         "requirements.txt", "local_config.example.json", "CLAUDE.md", "docs/DEPLOY.md", "docs/PIPELINE.md", "docs/STATUS.md"]
 
 
@@ -63,7 +63,7 @@ def server_busy():
 
 def push_session():
     if server_busy():
-        print("Homelab is running its update right now; run `nuworks login` again in a few minutes to copy the session.")
+        print("Homelab is running its update right now; run `nuauto login` again in a few minutes to copy the session.")
         return False
     ok = _run(RSYNC + ["--delete", "--chmod=D700,F600", "browser_profile/", f"{REMOTE}/browser_profile/"], "push browser profile")
     ok &= _run(RSYNC + ["--chmod=F600", "session_cookies.json", f"{REMOTE}/session_cookies.json"], "push session cookies")

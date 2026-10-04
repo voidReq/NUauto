@@ -20,7 +20,7 @@ GIT
   work on a branch, merge when I OK it.
 - Gitignored: secrets, local_config.json, answers.json, profile.json, google_login.txt, data/, work/, logs/,
   browser_profile/, .venv/.
-- Whatever is checked out on the laptop is what the next `nuworks` command pushes to the homelab.
+- Whatever is checked out on the laptop is what the next `nuauto` command pushes to the homelab.
 
 HARD LIMITS
 - Under 100 applications total.
@@ -43,7 +43,7 @@ SAFETY RULES (most important)
    DECISION: NUworks has no upload; its Apply popup picks from resumes already in my
    profile. The script selects only the exact "resume_label" saved in profile.json and
    never uploads anything.
-7. (Changed 2026-10-03.) `nuworks apply` submits every Approved row, one at a time, with no
+7. (Changed 2026-10-03.) `nuauto apply` submits every Approved row, one at a time, with no
    per-job prompt: Approved in the sheet IS my approval. It must run in a real terminal
    (never from a background agent). A dry run (fill, screenshot, stop) exists only as the
    hidden --dry-run dev flag.
@@ -81,7 +81,7 @@ Google access is OAuth only, never service accounts (docs/DEPLOY.md, GOOGLE SHEE
 
 BROWSER (Playwright, Firefox)
 - Deterministic script, not an AI clicking around freely. Slow, human-like pacing.
-- Persistent browser profile in browser_profile/; I log in by hand (`nuworks login`) and the
+- Persistent browser profile in browser_profile/; I log in by hand (`nuauto login`) and the
   session is reused. Never handle my password in code or prompts.
 - Domain lock: only northeastern-csm.symplicity.com (config.ALLOWED_HOSTS). Jobs whose Apply
   popup links to an external site (Workday, iCIMS, Greenhouse...) are marked Needs Human; I
@@ -101,7 +101,7 @@ NUWORKS LOGIN / AUTH FLOW (read this before touching the browser)
   neuidmsso.neu.edu and lands back on NUworks logged in, with NO password or Duo prompt. Do
   that first; don't stop and ask me just because the sign-in screen appeared.
 - Only if that click ends on a page asking for a username/password (or Duo), stop and ask me
-  to log in: `nuworks login` (I log in, then close the window; it also copies the session to
+  to log in: `nuauto login` (I log in, then close the window; it also copies the session to
   the homelab). Never type, store or ask for my password.
 - Our scripts do the one click automatically (browser.relogin / goto_logged_in, used by
   apply.py, jobs.py, inspect_form.py, daily.py) and allow the two SSO hosts only during that
@@ -119,7 +119,7 @@ NUWORKS PROFILE (e.g. when another session edits it with Playwright)
   qualify for" screening; the job pool doesn't depend on it.
 
 FILES
-nuworks (the CLI; ~/.local/bin/nuworks links here)   config.py (paths, hosts; reads local_config.json)
+nuauto (the CLI; ~/.local/bin/nuauto links here)   config.py (paths, hosts; reads local_config.json)
 sheet.py (rows, limits, status updates, Google login)   apply.py (the runner)
 browser.py (login/open, domain lock, cookies)   answers.py (answer bank)   jobs.py (pool + viewers)
 daily.py (homelab update + Discord)   web.py (Mark-done page, homelab)   sync.py (laptop<->homelab)
@@ -136,21 +136,21 @@ Local only: profile.json (resume_label), answers.json, data/, work/, logs/, brow
 SECRETS, never print, log or copy their contents: token.json, session_cookies.json,
 client_secret.json, discord_webhook.txt, web_secret.txt
 
-COMMANDS (nuworks needs no venv activation; for `python ...` run `source .venv/bin/activate` first)
-nuworks approve        # viewer on best unrated jobs: y = Approved in the sheet, n = no, s skip
-nuworks apply [-n 3]   # submit every Approved row (30-60s between); real terminal only
-nuworks rate           # taste training viewer (keys in docs/PIPELINE.md)
-nuworks update         # check NUworks for new jobs now (runs on the homelab, then syncs)
-nuworks status         # Approved rows + weekly count (also pushes code to the homelab)
-nuworks login          # manual SSO login; close the window when done
-nuworks login google   # Google Sheets login, every 7 days (Discord warns the day before)
-nuworks test           # all offline tests
-nuworks doctor         # health check: laptop, homelab, Mark-done page (read-only)
+COMMANDS (nuauto needs no venv activation; for `python ...` run `source .venv/bin/activate` first)
+nuauto approve         # viewer on best unrated jobs: y = Approved in the sheet, n = no, s skip
+nuauto apply [-n 3]    # submit every Approved row (30-60s between); real terminal only
+nuauto rate            # taste training viewer (keys in docs/PIPELINE.md)
+nuauto update          # check NUworks for new jobs now (runs on the homelab, then syncs)
+nuauto status          # Approved rows + weekly count (also pushes code to the homelab)
+nuauto login           # manual SSO login; close the window when done
+nuauto login google    # Google Sheets login, every 7 days (Discord warns the day before)
+nuauto test            # all offline tests
+nuauto doctor          # health check: laptop, homelab, Mark-done page (read-only)
 python answers.py list           # answer bank; edit with: nvim answers.json
 python jobs.py stats | pool | suggest 5
 
 TESTS
-`nuworks test` runs every test_*.py: offline, no sheet, no browser, no network. Run it before
+`nuauto test` runs every test_*.py: offline, no sheet, no browser, no network. Run it before
 pushing. test_sync.py fails if a new module or prompt isn't in sync.CODE (so it would never
 reach the homelab). test_web.py covers the public Mark-done links (signatures; GET never
 changes the sheet). test_browser.py covers the domain lock.
