@@ -136,6 +136,12 @@ class FakeWS:
             self.values[start + k - 1] = row
 
 
+# apply-on-company-site detection (Liberty Mutual wording, curly apostrophe)
+assert jobs.external_hint(d(description="For this co-op position, you are asked to complete an online application "
+                                        "on the employer’s external website.  Prior to applying, read the posting."))
+assert jobs.external_hint(d(description="Please apply on our careers page."))
+assert jobs.external_hint(d(description="Apply machine learning to telematics.")) is None
+
 ws = FakeWS([HEADERS, ["https://a", "A", "T", "Applied", "", "2026-10-01"]])
 n = sheet.add_proposed(ws, [{"url": "https://a", "company": "A", "title": "T", "notes": ""},
                             {"url": "https://b", "company": "B", "title": "U", "notes": "suggested"}])
