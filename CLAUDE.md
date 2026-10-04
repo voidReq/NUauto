@@ -17,8 +17,10 @@ WHERE AM I
   Code is copied there by sync.py: never edit it on the homelab. Details: docs/DEPLOY.md.
 
 GIT
-- This folder is a git repo (since 2026-10-03; local, no remote). main only receives merges:
-  work on a branch, merge when I OK it.
+- This folder is a git repo (since 2026-10-03). Remote: github.com/voidReq/nuauto, PUBLIC (since
+  2026-10-04). main only receives merges: work on a branch, merge when I OK it, push when I OK it.
+  Before any push: no personal info in tracked files or commit messages (names, emails, hosts,
+  IPs, IDs, companies I applied to); those go in local_config.json or docs/STATUS.md.
 - Gitignored: secrets, local_config.json, answers.json, profile.json, google_login.txt, data/, work/, logs/,
   browser_profile/, .venv/.
 - Whatever is checked out on the laptop is what the next `nuauto` command pushes to the homelab.
