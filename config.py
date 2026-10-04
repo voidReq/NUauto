@@ -36,12 +36,14 @@ COOKIES_PATH = os.path.join(PROJECT_DIR, "session_cookies.json")
 PROFILE_DIR = os.path.join(PROJECT_DIR, "browser_profile")
 LOGS_DIR = os.path.join(PROJECT_DIR, "logs")
 
-# Homelab server: runs the twice-daily update and the Discord reminders. The laptop syncs with it over
+# Homelab server (optional): runs the twice-daily update and the Discord reminders. The laptop syncs with it over
 # Tailscale (sync.py): it pulls job data and pushes ratings, the NUworks session and the resume.
+# server_hostname "" in local_config.json = no homelab: everything runs on this machine, no syncing.
 SERVER = "homelab"                                  # ssh alias in ~/.ssh/config
 SERVER_HOSTNAME = LOCAL["server_hostname"]
 SERVER_DIR = LOCAL["server_dir"]
-IS_SERVER = socket.gethostname() == SERVER_HOSTNAME
+HAS_SERVER = bool(SERVER_HOSTNAME)
+IS_SERVER = HAS_SERVER and socket.gethostname() == SERVER_HOSTNAME
 DISCORD_WEBHOOK_PATH = os.path.join(PROJECT_DIR, "discord_webhook.txt")  # secret, mode 600, never print
 
 READ_SCOPES =["https://www.googleapis.com/auth/spreadsheets.readonly"]

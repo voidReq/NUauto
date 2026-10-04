@@ -1,8 +1,8 @@
 {
   "sheet_id": "YOUR_GOOGLE_SHEET_ID",
   "resume_path": "~/Documents/resume.pdf",
-  "server_hostname": "homelab-hostname",
-  "server_dir": "/home/you/projects/auto",
-  "web_base_url": "https://nuworks.example.org",
-  "web_listen_host": "100.64.0.1"
+  "server_hostname": "",
+  "server_dir": "",
+  "web_base_url": "",
+  "web_listen_host": ""
 }

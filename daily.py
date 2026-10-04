@@ -192,10 +192,12 @@ def todo_notice(rows):
     if not site and not ext:
         return
     lines = []
+    def mark(label, action, r):  # no Mark-done page configured (web_base_url "") = no link
+        return f" · [{label}]({web.link(action, r.number, jobs.job_id(r.url))})" if web.BASE_URL else ""
     for r in site:
-        lines.append(f"• {r.company[:25]}: apply on their site too ([job]({r.url})) · [Mark done]({web.link('site', r.number, jobs.job_id(r.url))})")
+        lines.append(f"• {r.company[:25]}: apply on their site too ([job]({r.url})){mark('Mark done', 'site', r)}")
     for r in ext:
-        lines.append(f"• {r.company[:25]}: external application ([job]({r.url})) · [Mark applied]({web.link('applied', r.number, jobs.job_id(r.url))})")
+        lines.append(f"• {r.company[:25]}: external application ([job]({r.url})){mark('Mark applied', 'applied', r)}")
     log(f"todo: {len(site)} company-site, {len(ext)} external")
     notify("NUworks: applications only you can finish", "\n".join(lines))
 

@@ -126,7 +126,8 @@ daily.py (homelab update + Discord)   web.py (Mark-done page, homelab)   sync.py
 doctor.py (health check)   inspect_form.py (read-only form lister)
 setup_sheet.py, oauth_test.py (one-time, done)
 TRIAGE_PROMPT.md  SCORE_PROMPT.md  CATEGORY_PROMPT.md (Claude batch prompts)
-docs/ (DEPLOY, PIPELINE, STATUS)   deploy/systemd/ (homelab units)   requirements.txt
+README.md (public, new-user setup; keep it short)   docs/ (DEPLOY, PIPELINE, STATUS)
+deploy/systemd/ (homelab units)   requirements.txt
 test_*.py (offline checks)
 local_config.json: my personal settings (sheet ID, resume path, homelab hostname/dir, Mark-done URL,
   Tailscale IP). Gitignored; local_config.example.json is the committed template. Keep personal

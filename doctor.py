@@ -65,13 +65,15 @@ def changed_files(src, dest, relative=False):
 
 def laptop():
     print("laptop")
-    check_files(["token.json", "client_secret.json", "session_cookies.json", "browser_profile",
-                 "answers.json", "profile.json"])
+    check_files(["token.json", "client_secret.json", "session_cookies.json", "browser_profile", "profile.json"]
+                + (["answers.json"] if os.path.exists(config.ANSWERS_PATH) else []))  # created on the first answer
     check_google_login()
     if not os.path.exists(config.LOCAL_CONFIG_PATH):
         say("FAIL", "local_config.json missing: copy local_config.example.json and fill it in")
     if not os.path.exists(config.LAPTOP_RESUME):
         say("FAIL", f"resume missing: {config.LAPTOP_RESUME}")
+    if not config.HAS_SERVER:
+        return say("ok", "no homelab configured (local mode)")
     if sh(["systemctl", "--user", "is-enabled", "nuworks-daily.timer"]).stdout.strip() == "enabled":
         say("WARN", "the old laptop timer is enabled; the homelab runs the update now: "
                     "systemctl --user disable --now nuworks-daily.timer")

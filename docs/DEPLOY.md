@@ -1,5 +1,7 @@
 DEPLOYMENT: laptop, homelab (prod), Pi tunnel
 (Written 2026-10-03. Keep this current when you change hosts, units, secrets or sync.)
+The homelab is optional: server_hostname "" in local_config.json = local mode (config.HAS_SERVER
+False): `nuworks update` runs daily.py on this machine, nothing syncs, no Mark links.
 
 MACHINES
 - Laptop (Fedora, ~/projects/auto). Where code is edited; the git repo.
