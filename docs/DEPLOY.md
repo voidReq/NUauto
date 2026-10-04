@@ -2,22 +2,22 @@ DEPLOYMENT: laptop, homelab (prod), Pi tunnel
 (Written 2026-10-03. Keep this current when you change hosts, units, secrets or sync.)
 
 MACHINES
-- Laptop (Fedora, user void, ~/projects/auto). Where code is edited; the git repo.
+- Laptop (Fedora, ~/projects/auto). Where code is edited; the git repo.
   Runs everything interactive: approve, rate, apply (needs a real terminal and a visible
   browser), `nuworks login` (manual SSO), `nuworks login google`. Owns data/ratings.json and
-  the resume (~/Documents/).
+  the resume (local_config.json resume_path).
 - Homelab = PROD. `ssh homelab` (alias in ~/.ssh/config, key auth, over Tailscale).
-  Ubuntu, hostname "homelab-hostname" (config.SERVER_HOSTNAME; that is how config.IS_SERVER knows),
-  user you, project at /home/you/projects/auto, venv made with uv
+  Ubuntu. Its hostname (server_hostname; that is how config.IS_SERVER knows) and project dir
+  (server_dir) are in local_config.json; below, ~/projects/auto means that dir. venv made with uv
   (Python 3.12), claude CLI at ~/.local/bin/claude (logged in), user lingering on (user
   timers run without anyone logged in). Owns data/ (the job pool). NOT a git checkout:
   code is copied there by sync.py. Never edit code on the homelab; the next push
   overwrites it.
 - Pi. `ssh pi`. Runs cloudflared (system service "cloudflared"), which publishes the
-  homelab's Mark-done page as https://nuworks.example.org. Ingress rule in
+  homelab's Mark-done page at web_base_url (local_config.json). Ingress rule in
   /etc/cloudflared/config.yml (added 2026-10-03; backup config.yml.bak-20261003-132957):
-    - hostname: nuworks.example.org
-      service: http://100.64.0.1:8765
+    - hostname: <web_base_url host>
+      service: http://<web_listen_host>:8765
   After editing: sudo systemctl restart cloudflared.
 
 WHAT RUNS ON THE HOMELAB
@@ -33,7 +33,7 @@ Unit files live in this repo (deploy/systemd/) and are installed in ~/.config/sy
 - nuworks-weekly.timer -> nuworks-weekly.service: `daily.py weekly`, Sunday 19:00 New York time
   (Discord check-in).
 - nuworks-web.service: `web.py`, always on (Restart=on-failure). Listens on the homelab's
-  Tailscale IP 100.64.0.1:8765 only (web.LISTEN). Serves the signed Discord links:
+  Tailscale IP (web_listen_host):8765 only (web.LISTEN). Serves the signed Discord links:
   GET = confirm page only, POST (button) changes the sheet. Every link is HMAC-signed with
   web_secret.txt for one action on one row + job. Log: logs/web.log.
 - The laptop used to run nuworks-daily at 14:00. Retired 2026-10-03 (disabled). Don't
@@ -50,21 +50,22 @@ SECRETS AND STATE (never print or log any of these; all mode 600)
                                          every Mark link already sent.
   answers.json, profile.json  laptop only in practice (apply runs on the laptop); not synced
 Not secret: google_login.txt (date of the last Google login; synced), resume.pdf on the
-homelab (pushed from ~/Documents/).
+homelab (pushed from resume_path), local_config.json (personal settings, gitignored; sync.push
+copies it to the homelab).
 
 GOOGLE SHEETS LOGIN (gspread + OAuth)
 - Service account keys are blocked by the Google Cloud org policy
   (iam.disableServiceAccountKeyCreation). Do NOT use service accounts. OAuth only:
   gspread.oauth(...), token in token.json (chmod 600).
-- Google Cloud project "My First Project" under org you-org. Sheets API enabled.
-  OAuth consent screen External (Testing), you@example.com the only test user
+- Google Cloud project "My First Project" under my own org. Sheets API enabled.
+  OAuth consent screen External (Testing), my Gmail account the only test user
   (Internal was rejected: that Gmail account is not in the org directory). OAuth client
   type "Desktop app".
 - Testing mode (staying that way, my choice) -> a login lasts 7 days. Re-login on the laptop:
   `nuworks login google`; it pushes the new token to the homelab. Discord warns the day
   before; laptop commands re-open the Google login by themselves when it has expired.
 - Open the sheet with open_by_key(SHEET_ID) so only the Sheets API is needed.
-  SHEET_ID: YOUR_GOOGLE_SHEET_ID (config.py).
+  SHEET_ID: sheet_id in local_config.json.
 
 SYNC (sync.py; runs automatically inside `nuworks` on the laptop)
 - Before approve / rate / apply / status: pull homelab data/ -> laptop (except ratings.json).
@@ -101,8 +102,8 @@ HEALTH AND LOGS
 
 REBUILD THE HOMELAB FROM SCRATCH
 1. Ubuntu + Tailscale; `ssh homelab` works from the laptop with a key (BatchMode).
-   If the hostname, user, path or Tailscale IP changed: update SERVER_HOSTNAME / SERVER_DIR in
-   config.py, LISTEN in web.py, and the Pi ingress rule.
+   If the hostname, user, path or Tailscale IP changed: update server_hostname / server_dir /
+   web_listen_host in local_config.json, and the Pi ingress rule.
 2. Laptop: ssh homelab mkdir -p projects/auto/data
            .venv/bin/python -c "import sync; sync.push()"     # code, resume, token, ratings
            rsync -a data/ homelab:projects/auto/data/            # keep the pool (else Claude re-scores everything)

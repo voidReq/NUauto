@@ -55,6 +55,6 @@ MY RATINGS (taste model)
   answer), s skip, u back one job, o open in browser, q quit.
 
 RESUME
-- ~/Documents/resume.pdf (the only file there). The homelab
+- The PDF at local_config.json resume_path (the only file in its folder). The homelab
   gets a copy as resume.pdf. Updated 2026-10-02 16:44 (minor: past job title/description).
   Jobs scored before that used the 10:03 version; not re-scored since the change is minor.

@@ -1,10 +1,18 @@
 import glob
+import json
 import os
 import socket
 import sys
 
-SHEET_ID = "YOUR_GOOGLE_SHEET_ID"
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+# Personal settings (sheet, resume, homelab, public URL) live in local_config.json, which is gitignored.
+# Start from local_config.example.json. Without it the example's placeholders are used (enough for the offline tests).
+LOCAL_CONFIG_PATH = os.path.join(PROJECT_DIR, "local_config.json")
+_local_path = LOCAL_CONFIG_PATH if os.path.exists(LOCAL_CONFIG_PATH) else os.path.join(PROJECT_DIR, "local_config.example.json")
+with open(_local_path) as _f:
+    LOCAL = json.load(_f)
+
+SHEET_ID = LOCAL["sheet_id"]
 TOKEN_PATH = os.path.join(PROJECT_DIR, "token.json")
 # Date of the last Google login (the app is in Testing mode, so a login lasts 7 days). Not secret.
 GOOGLE_LOGIN_PATH = os.path.join(PROJECT_DIR, "google_login.txt")
@@ -15,8 +23,8 @@ NUWORKS_START_URL = "https://northeastern-csm.symplicity.com/students/app/jobs/d
 # host is deliberately NOT here; log in by hand with `browser.py login`.
 ALLOWED_HOSTS = {"northeastern-csm.symplicity.com"}
 # Job pool (jobs.py)
-# Laptop: the resume in ~/Documents. Homelab: a copy the laptop pushes to resume.pdf in the project dir.
-LAPTOP_RESUME = os.path.expanduser("~/Documents/resume.pdf")
+# Laptop: the resume at local_config resume_path. Homelab: a copy the laptop pushes to resume.pdf in the project dir.
+LAPTOP_RESUME = os.path.expanduser(LOCAL["resume_path"])
 RESUME_PATH = LAPTOP_RESUME if os.path.exists(LAPTOP_RESUME) else os.path.join(PROJECT_DIR, "resume.pdf")
 DATA_DIR = os.path.join(PROJECT_DIR, "data")   # list, triage, details, scores, ratings, pool
 WORK_DIR = os.path.join(PROJECT_DIR, "work")   # batch files exchanged with the Claude subagents
@@ -31,8 +39,8 @@ LOGS_DIR = os.path.join(PROJECT_DIR, "logs")
 # Homelab server: runs the twice-daily update and the Discord reminders. The laptop syncs with it over
 # Tailscale (sync.py): it pulls job data and pushes ratings, the NUworks session and the resume.
 SERVER = "homelab"                                  # ssh alias in ~/.ssh/config
-SERVER_HOSTNAME = "homelab-hostname"
-SERVER_DIR = "/home/you/projects/auto"
+SERVER_HOSTNAME = LOCAL["server_hostname"]
+SERVER_DIR = LOCAL["server_dir"]
 IS_SERVER = socket.gethostname() == SERVER_HOSTNAME
 DISCORD_WEBHOOK_PATH = os.path.join(PROJECT_DIR, "discord_webhook.txt")  # secret, mode 600, never print
 

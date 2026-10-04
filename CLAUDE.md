@@ -11,14 +11,14 @@ This file has the rules. Also read (imported here; update them when you change t
 
 WHERE AM I
 - Laptop (Fedora, ~/projects/auto): code is edited here. Interactive commands run here.
-- Homelab (`ssh homelab`, hostname homelab-hostname, /home/you/projects/auto) = PROD. Runs the
+- Homelab (`ssh homelab`; hostname and path in local_config.json) = PROD. Runs the
   scheduled update, Discord messages and the Mark-done page. config.IS_SERVER is True there.
   Code is copied there by sync.py: never edit it on the homelab. Details: docs/DEPLOY.md.
 
 GIT
 - This folder is a git repo (since 2026-10-03; local, no remote). main only receives merges:
   work on a branch, merge when I OK it.
-- Gitignored: secrets, answers.json, profile.json, google_login.txt, data/, work/, logs/,
+- Gitignored: secrets, local_config.json, answers.json, profile.json, google_login.txt, data/, work/, logs/,
   browser_profile/, .venv/.
 - Whatever is checked out on the laptop is what the next `nuworks` command pushes to the homelab.
 
@@ -112,15 +112,14 @@ NUWORKS LOGIN / AUTH FLOW (read this before touching the browser)
 
 NUWORKS PROFILE (e.g. when another session edits it with Playwright)
 - If the NUworks resume is replaced or renamed, update profile.json "resume_label" to the
-  EXACT new text in the Apply popup's Resume dropdown (currently
-  "Doe, Jane Resume | S27 v5" since 2026-10-03). Until then apply.py stops safely.
-- The resume uploaded to NUworks should be the one in ~/Documents/.
+  EXACT new text in the Apply popup's Resume dropdown. Until then apply.py stops safely.
+- The resume uploaded to NUworks should be the one at local_config.json "resume_path".
 - Profile class level says Junior; I'm a sophomore. Fixing it there is my call. jobs.py
   ignores the profile value either way. Profile changes can change NUworks' own "Jobs I
   qualify for" screening; the job pool doesn't depend on it.
 
 FILES
-nuworks (the CLI; ~/.local/bin/nuworks links here)   config.py (paths, hosts, homelab)
+nuworks (the CLI; ~/.local/bin/nuworks links here)   config.py (paths, hosts; reads local_config.json)
 sheet.py (rows, limits, status updates, Google login)   apply.py (the runner)
 browser.py (login/open, domain lock, cookies)   answers.py (answer bank)   jobs.py (pool + viewers)
 daily.py (homelab update + Discord)   web.py (Mark-done page, homelab)   sync.py (laptop<->homelab)
@@ -129,6 +128,9 @@ setup_sheet.py, oauth_test.py (one-time, done)
 TRIAGE_PROMPT.md  SCORE_PROMPT.md  CATEGORY_PROMPT.md (Claude batch prompts)
 docs/ (DEPLOY, PIPELINE, STATUS)   deploy/systemd/ (homelab units)   requirements.txt
 test_*.py (offline checks)
+local_config.json: my personal settings (sheet ID, resume path, homelab hostname/dir, Mark-done URL,
+  Tailscale IP). Gitignored; local_config.example.json is the committed template. Keep personal
+  values (names, emails, hosts, IPs, IDs) out of every committed file: the repo may go public.
 Local only: profile.json (resume_label), answers.json, data/, work/, logs/, browser_profile/
 SECRETS, never print, log or copy their contents: token.json, session_cookies.json,
 client_secret.json, discord_webhook.txt, web_secret.txt
