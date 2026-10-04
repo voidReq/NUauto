@@ -1,5 +1,5 @@
 """Tiny web endpoint for the "Mark done" links in Discord. Runs on the homelab (nuauto-web.service),
-listening on its Tailscale address only; the Pi's Cloudflare tunnel publishes it at BASE_URL.
+listening on web_listen_host only (e.g. its Tailscale IP); a tunnel publishes it at BASE_URL.
 
 Every link is signed (HMAC with web_secret.txt) for one action on one sheet row + job, so a link can
 only ever do the thing it was made for. Opening a link (GET) only shows a confirm page; nothing changes

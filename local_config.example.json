@@ -2,6 +2,7 @@
   "sheet_id": "YOUR_GOOGLE_SHEET_ID",
   "resume_path": "~/Documents/resume.pdf",
   "server_hostname": "",
+  "server_ssh": "",
   "server_dir": "",
   "web_base_url": "",
   "web_listen_host": ""

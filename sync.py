@@ -17,7 +17,7 @@ REMOTE = f"{config.SERVER}:{config.SERVER_DIR}"
 # Pushed with rsync -R, so paths keep their folders (docs/...). The docs go too, so agents there read current ones.
 CODE = ["config.py", "sheet.py", "jobs.py", "daily.py", "browser.py", "apply.py", "answers.py", "inspect_form.py",
         "sync.py", "web.py", "doctor.py", "nuauto", "TRIAGE_PROMPT.md", "SCORE_PROMPT.md", "CATEGORY_PROMPT.md",
-        "requirements.txt", "local_config.example.json", "CLAUDE.md", "docs/DEPLOY.md", "docs/PIPELINE.md", "docs/STATUS.md"]
+        "requirements.txt", "local_config.example.json", "CLAUDE.md", "docs/DEPLOY.md", "docs/PIPELINE.md"]
 
 
 def _run(cmd, what):
@@ -46,6 +46,8 @@ def push():
     if os.path.exists(config.LOCAL_CONFIG_PATH):  # before the code, which reads it
         ok &= _run(RSYNC + ["-c", "local_config.json", f"{REMOTE}/local_config.json"], "push local config")
     ok &= _run(RSYNC + ["-c", "-R"] + CODE + [f"{REMOTE}/"], "push code")
+    if os.path.exists("docs/STATUS.md"):  # local log (gitignored); agents on the homelab read it too
+        ok &= _run(RSYNC + ["-c", "docs/STATUS.md", f"{REMOTE}/docs/STATUS.md"], "push status")
     ok &= _run(RSYNC + ["data/ratings.json", f"{REMOTE}/data/ratings.json"], "push ratings")
     if os.path.exists(config.LAPTOP_RESUME):
         ok &= _run(RSYNC + ["-c", config.LAPTOP_RESUME, f"{REMOTE}/resume.pdf"], "push resume")
