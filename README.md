@@ -19,7 +19,7 @@ Needs Linux or macOS, Python 3.12, a NUworks account, a Google account, and
 [Claude Code](https://claude.com/claude-code) (a Claude subscription or API key; scoring uses Sonnet).
 
 ```sh
-git clone <this repo> nuauto && cd nuauto
+git clone https://github.com/voidReq/NUauto.git && cd NUauto
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 .venv/bin/python -m playwright install firefox
