@@ -146,7 +146,7 @@ def closes_text(day, today=None):
 
 
 # Postings that (also) want an application on the company's own site; NUworks alone may not count.
-EXTERNAL = re.compile(r"(apply|application)[^.\n]{0,60}\b(our|company'?s?|the following|this) (web ?site|careers? (site|page|portal)|link|portal)"
+EXTERNAL = re.compile(r"(apply|application)[^.\n]{0,60}\b(our|(company|employer)['’]?s?|the following|this) ((own|external) )?(web ?site|careers? (site|page|portal)|link|portal)"
                       r"|must (also )?apply|apply (directly|online) (at|on|through|via)|will not be considered"
                       r"|myworkdayjobs|icims|greenhouse\.io|lever\.co|taleo|smartrecruiters|jobvite|successfactors|ashbyhq",
                       re.IGNORECASE)
