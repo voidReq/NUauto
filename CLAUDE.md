@@ -5,9 +5,10 @@ the go-ahead (since 2026-10-03 there is no per-job y/n at submit time). This is 
 mass-apply bot.
 
 This file has the rules. Also read (imported here; update them when you change things):
-- @docs/DEPLOY.md (machines, the homelab = prod, Pi tunnel, sync, secrets, Google login, health checks, rebuild steps)
+- @docs/DEPLOY.md (modes, machines, the homelab = prod, Mark-done page, sync, secrets, Google login, health checks, rebuild steps)
 - @docs/PIPELINE.md (how the job pool is built, my bounds, ranking, ratings)
-- @docs/STATUS.md (what is done, what is not yet proven for real, dated decisions)
+- @docs/STATUS.md (what is done, what is not yet proven for real, dated decisions; my local log,
+  gitignored: keep job/company names and other personal history there, never in tracked files)
 
 WHERE AM I
 - Laptop (Fedora, ~/projects/auto): code is edited here. Interactive commands run here.

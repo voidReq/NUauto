@@ -115,8 +115,10 @@ def laptop():
 
 
 def check_public_page():
-    """The Mark-done page through the Pi tunnel. "/" is a 404 page with our title when all is up."""
+    """The Mark-done page through the tunnel. "/" is a 404 page with our title when all is up."""
     import web
+    if not web.BASE_URL:
+        return say("ok", "no Mark-done page configured (web_base_url empty)")
     req = urllib.request.Request(web.BASE_URL + "/", headers={"User-Agent": "nuauto-doctor"})
     try:
         urllib.request.urlopen(req, timeout=15).close()
@@ -124,11 +126,11 @@ def check_public_page():
     except urllib.error.HTTPError as e:
         code, body = e.code, e.read(4000).decode(errors="replace")
     except OSError as e:
-        return say("FAIL", f"{web.BASE_URL} unreachable ({type(e).__name__}): Pi tunnel down?")
+        return say("FAIL", f"{web.BASE_URL} unreachable ({type(e).__name__}): tunnel down?")
     if code == 404 and "NUworks helper" in body:
-        say("ok", f"{web.BASE_URL} answers (Pi tunnel -> homelab web)")
+        say("ok", f"{web.BASE_URL} answers (tunnel -> homelab web)")
     else:
-        say("FAIL", f"{web.BASE_URL} gave HTTP {code}: nuauto-web down on the homelab, or the Pi tunnel")
+        say("FAIL", f"{web.BASE_URL} gave HTTP {code}: nuauto-web down on the homelab, or the tunnel")
 
 
 def server():

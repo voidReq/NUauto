@@ -39,8 +39,8 @@ LOGS_DIR = os.path.join(PROJECT_DIR, "logs")
 # Homelab server (optional): runs the twice-daily update and the Discord reminders. The laptop syncs with it over
 # Tailscale (sync.py): it pulls job data and pushes ratings, the NUworks session and the resume.
 # server_hostname "" in local_config.json = no homelab: everything runs on this machine, no syncing.
-SERVER = "homelab"                                  # ssh alias in ~/.ssh/config
 SERVER_HOSTNAME = LOCAL["server_hostname"]
+SERVER = LOCAL.get("server_ssh") or SERVER_HOSTNAME  # how the laptop reaches it: ssh alias or host
 SERVER_DIR = LOCAL["server_dir"]
 HAS_SERVER = bool(SERVER_HOSTNAME)
 IS_SERVER = HAS_SERVER and socket.gethostname() == SERVER_HOSTNAME

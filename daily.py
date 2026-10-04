@@ -22,6 +22,7 @@ import jobs  # noqa: E402
 
 # ~/.local/bin first: systemd units run with a short PATH
 CLAUDE = shutil.which("claude", path=os.path.expanduser("~/.local/bin") + os.pathsep + os.environ.get("PATH", "")) or "claude"
+SCANS = "scans.json"  # per-run counts for the morning summary (data/)
 LOG_PATH = os.path.join(config.LOGS_DIR, f"daily-{datetime.now():%Y%m%d-%H%M}.txt")
 
 
@@ -84,6 +85,7 @@ def step(fn, *args):
 
 def main():
     before = {r["id"] for r in jobs.load("pool.json", [])}
+    listed_before = set(jobs.load("list.json", {}))
     log("list")
     ok, msg = step(jobs.cmd_list)
     if not ok:
@@ -127,6 +129,7 @@ def main():
     new = [r for r in pool if r["id"] not in before]
     gone = len(before - {r["id"] for r in pool})
     log(f"pool {len(pool)} ({len(new)} new, {gone} closed or dropped)")
+    record_scan(len(set(jobs.load("list.json", {})) - listed_before), len(new))
     if new:
         top = "\n".join(f"{r['effective']}%  {r['title'][:45]} | {r['company'][:25]}" for r in new[:5])
         notify(f"{len(new)} new job{'s' if len(new) > 1 else ''} in your NUworks pool",
@@ -140,7 +143,7 @@ def main():
     if datetime.now().hour < 12:  # reminders once a day, with the morning run
         approved_notice(rows)
         urgent_notice(pool, rows)
-        todo_notice(rows)
+        todo_notice(rows, scan_summary(jobs.load(SCANS, []), datetime.now()))
         google_notice()
     return 0
 
@@ -182,17 +185,31 @@ def record_hand_applications(before, rows):
     return sheet.read_rows(ws)
 
 
-def todo_notice(rows):
-    """Things only you can do: company-site applications still owed, and external jobs (Needs Human)."""
-    if rows is None:
-        return
+def record_scan(listed, pooled):
+    """Remember this run's counts (new NUworks postings, new pool jobs) for the morning summary."""
+    scans = jobs.load(SCANS, [])
+    scans.append({"time": datetime.now().isoformat(timespec="minutes"), "listed": listed, "pool": pooled})
+    jobs.save(SCANS, scans[-60:])
+
+
+def scan_summary(scans, now, hours=24):
+    recent = [s for s in scans if now - datetime.fromisoformat(s["time"]) <= timedelta(hours=hours)]
+    listed, pooled = sum(s["listed"] for s in recent), sum(s["pool"] for s in recent)
+    return (f"Last {hours}h ({len(recent)} scan{'s' if len(recent) != 1 else ''}): {listed} new posting{'s' if listed != 1 else ''}"
+            f" on NUworks, {pooled} made your pool" + (" (nuauto approve)" if pooled else ""))
+
+
+def todo_notice(rows, summary):
+    """Morning message, always sent: scan counts, then things only you can do: company-site applications
+    still owed, and external jobs (Needs Human)."""
     import sheet
     import web
-    site = [r for r in rows if r.status == "Applied" and r.notes.startswith(sheet.SITE_MARK)]
-    ext = [r for r in rows if r.status == "Needs Human" and r.notes.startswith("External application")]
+    site = [r for r in rows if r.status == "Applied" and r.notes.startswith(sheet.SITE_MARK)] if rows else []
+    ext = [r for r in rows if r.status == "Needs Human" and r.notes.startswith("External application")] if rows else []
     if not site and not ext:
-        return
-    lines = []
+        log("todo: nothing owed")
+        return notify("NUworks morning", summary + ("\nNothing only you need to finish." if rows is not None else ""))
+    lines = [summary, "Only you can finish:"]
     def mark(label, action, r):  # no Mark-done page configured (web_base_url "") = no link
         return f" · [{label}]({web.link(action, r.number, jobs.job_id(r.url))})" if web.BASE_URL else ""
     for r in site:
@@ -200,7 +217,7 @@ def todo_notice(rows):
     for r in ext:
         lines.append(f"• {r.company[:25]}: external application ([job]({r.url})){mark('Mark applied', 'applied', r)}")
     log(f"todo: {len(site)} company-site, {len(ext)} external")
-    notify("NUworks: applications only you can finish", "\n".join(lines))
+    notify("NUworks morning", "\n".join(lines))
 
 
 def sheet_rows():
