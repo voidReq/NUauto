@@ -2,7 +2,7 @@
 
 The homelab owns the job data (it runs the update); the laptop owns your ratings.
   pull()          homelab data/ -> laptop (everything except ratings.json)
-  push()          laptop -> homelab: ratings.json, code, resume, Google token (only if newer)
+  push()          laptop -> homelab: ratings.json, code, local_config.json, resume, Google token (only if newer)
   push_session()  laptop -> homelab: NUworks browser profile + session cookies (after `nuworks login`)
 Secrets are copied file-to-file with rsync and never printed.
 """
@@ -17,7 +17,7 @@ REMOTE = f"{config.SERVER}:{config.SERVER_DIR}"
 # Pushed with rsync -R, so paths keep their folders (docs/...). The docs go too, so agents there read current ones.
 CODE = ["config.py", "sheet.py", "jobs.py", "daily.py", "browser.py", "apply.py", "answers.py", "inspect_form.py",
         "sync.py", "web.py", "doctor.py", "nuworks", "TRIAGE_PROMPT.md", "SCORE_PROMPT.md", "CATEGORY_PROMPT.md",
-        "requirements.txt", "CLAUDE.md", "docs/DEPLOY.md", "docs/PIPELINE.md", "docs/STATUS.md"]
+        "requirements.txt", "local_config.example.json", "CLAUDE.md", "docs/DEPLOY.md", "docs/PIPELINE.md", "docs/STATUS.md"]
 
 
 def _run(cmd, what):
@@ -42,7 +42,10 @@ def pull():
 
 
 def push():
-    ok = _run(RSYNC + ["-c", "-R"] + CODE + [f"{REMOTE}/"], "push code")
+    ok = True
+    if os.path.exists(config.LOCAL_CONFIG_PATH):  # before the code, which reads it
+        ok &= _run(RSYNC + ["-c", "local_config.json", f"{REMOTE}/local_config.json"], "push local config")
+    ok &= _run(RSYNC + ["-c", "-R"] + CODE + [f"{REMOTE}/"], "push code")
     ok &= _run(RSYNC + ["data/ratings.json", f"{REMOTE}/data/ratings.json"], "push ratings")
     if os.path.exists(config.LAPTOP_RESUME):
         ok &= _run(RSYNC + ["-c", config.LAPTOP_RESUME, f"{REMOTE}/resume.pdf"], "push resume")

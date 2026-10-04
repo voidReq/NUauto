@@ -68,6 +68,8 @@ def laptop():
     check_files(["token.json", "client_secret.json", "session_cookies.json", "browser_profile",
                  "answers.json", "profile.json"])
     check_google_login()
+    if not os.path.exists(config.LOCAL_CONFIG_PATH):
+        say("FAIL", "local_config.json missing: copy local_config.example.json and fill it in")
     if not os.path.exists(config.LAPTOP_RESUME):
         say("FAIL", f"resume missing: {config.LAPTOP_RESUME}")
     if sh(["systemctl", "--user", "is-enabled", "nuworks-daily.timer"]).stdout.strip() == "enabled":

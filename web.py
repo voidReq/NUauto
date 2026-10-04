@@ -1,5 +1,5 @@
 """Tiny web endpoint for the "Mark done" links in Discord. Runs on the homelab (nuworks-web.service),
-listening on its Tailscale address only; the Pi's Cloudflare tunnel publishes it as nuworks.example.org.
+listening on its Tailscale address only; the Pi's Cloudflare tunnel publishes it at BASE_URL.
 
 Every link is signed (HMAC with web_secret.txt) for one action on one sheet row + job, so a link can
 only ever do the thing it was made for. Opening a link (GET) only shows a confirm page; nothing changes
@@ -20,8 +20,8 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 import config
 
-BASE_URL = "https://nuworks.example.org"
-LISTEN = ("100.64.0.1", 8765)  # homelab's Tailscale IP: not reachable from the LAN or the internet directly
+BASE_URL = config.LOCAL["web_base_url"]
+LISTEN = (config.LOCAL["web_listen_host"], 8765)  # homelab's Tailscale IP: not reachable from the LAN or the internet directly
 SECRET_PATH = os.path.join(config.PROJECT_DIR, "web_secret.txt")
 ACTIONS = {"site": "Mark the company-site application as done", "applied": "Mark as Applied (you applied yourself)"}
 

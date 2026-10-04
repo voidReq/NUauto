@@ -6,6 +6,7 @@ client_secret_*.json
 discord_webhook.txt
 web_secret.txt
 # Personal data / per-machine state
+local_config.json
 answers.json
 profile.json
 google_login.txt
