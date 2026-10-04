@@ -1,9 +1,9 @@
 """Apply to every Approved row, one at a time. Marking a row Approved is the go-ahead:
-there is no per-job prompt. Run it through the `nuworks` command:
+there is no per-job prompt. Run it through the `nuauto` command:
 
-  nuworks apply          # every Approved row, up to the weekly limit: closing within 7 days
+  nuauto apply          # every Approved row, up to the weekly limit: closing within 7 days
                          # first (soonest first), then best match first
-  nuworks apply -n 3     # at most 3 this run
+  nuauto apply -n 3     # at most 3 this run
 
 Hidden dev flags: --dry-run (fill and screenshot, never submit), --row N.
 
@@ -184,11 +184,11 @@ def fill_popup(page, context, row, resume_label, entries, io, log, blocked):
     page.goto(row.url, wait_until="domcontentloaded")
     browser.pause(page)
     if blocked:
-        raise NeedsHuman("Redirected off the allowed domain (session expired? run `nuworks login`).")
+        raise NeedsHuman("Redirected off the allowed domain (session expired? run `nuauto login`).")
 
     if browser.on_login_page(page):
         if not browser.goto_logged_in(page, context, row.url, log):
-            raise SessionExpired("NUworks is showing the sign-in page. Run `nuworks login` again.")
+            raise SessionExpired("NUworks is showing the sign-in page. Run `nuauto login` again.")
 
     btn = page.get_by_role("button", name=APPLY_NAME)
     if btn.count() != 1:

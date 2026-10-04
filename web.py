@@ -1,4 +1,4 @@
-"""Tiny web endpoint for the "Mark done" links in Discord. Runs on the homelab (nuworks-web.service),
+"""Tiny web endpoint for the "Mark done" links in Discord. Runs on the homelab (nuauto-web.service),
 listening on its Tailscale address only; the Pi's Cloudflare tunnel publishes it at BASE_URL.
 
 Every link is signed (HMAC with web_secret.txt) for one action on one sheet row + job, so a link can
@@ -57,7 +57,7 @@ button{{font:inherit;padding:.7rem 1.2rem;border:0;border-radius:.5rem;backgroun
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "nuworks"
+    server_version = "nuauto"
     sys_version = ""
 
     def log_message(self, *args):

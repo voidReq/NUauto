@@ -1,15 +1,17 @@
 DEPLOYMENT: laptop, homelab (prod), Pi tunnel
 (Written 2026-10-03. Keep this current when you change hosts, units, secrets or sync.)
+The homelab is optional: server_hostname "" in local_config.json = local mode (config.HAS_SERVER
+False): `nuauto update` runs daily.py on this machine, nothing syncs, no Mark links.
 
 MACHINES
 - Laptop (Fedora, ~/projects/auto). Where code is edited; the git repo.
   Runs everything interactive: approve, rate, apply (needs a real terminal and a visible
-  browser), `nuworks login` (manual SSO), `nuworks login google`. Owns data/ratings.json and
+  browser), `nuauto login` (manual SSO), `nuauto login google`. Owns data/ratings.json and
   the resume (local_config.json resume_path).
 - Homelab = PROD. `ssh homelab` (alias in ~/.ssh/config, key auth, over Tailscale).
   Ubuntu. Its hostname (server_hostname; that is how config.IS_SERVER knows) and project dir
   (server_dir) are in local_config.json; below, ~/projects/auto means that dir. venv made with uv
-  (Python 3.12), claude CLI at ~/.local/bin/claude (logged in), user lingering on (user
+  (Python 3.12), claude CLI at ~/.local/bin/claude (logged in; daily.CLAUDE also checks PATH), user lingering on (user
   timers run without anyone logged in). Owns data/ (the job pool). NOT a git checkout:
   code is copied there by sync.py. Never edit code on the homelab; the next push
   overwrites it.
@@ -22,7 +24,7 @@ MACHINES
 
 WHAT RUNS ON THE HOMELAB
 Unit files live in this repo (deploy/systemd/) and are installed in ~/.config/systemd/user/.
-- nuworks-daily.timer -> nuworks-daily.service: `daily.py` at 08:00 and 18:00 New York time
+- nuauto-daily.timer -> nuauto-daily.service: `daily.py` at 08:00 and 18:00 New York time
   (+0-15 min random, Persistent=true so a missed run happens at boot). Steps: list -> Claude
   triage -> details -> Claude score -> Claude category -> pool -> notifications (see
   docs/PIPELINE.md). Also: marks jobs I applied to by hand as Applied, warns the day before
@@ -30,20 +32,20 @@ Unit files live in this repo (deploy/systemd/) and are installed in ~/.config/sy
   (company-site applications owed, external Needs Human rows) with signed Mark links.
   Claude runs as `claude -p --model sonnet` with Read/Write only, one call per batch file in work/.
   Headless browser; never applies to anything.
-- nuworks-weekly.timer -> nuworks-weekly.service: `daily.py weekly`, Sunday 19:00 New York time
+- nuauto-weekly.timer -> nuauto-weekly.service: `daily.py weekly`, Sunday 19:00 New York time
   (Discord check-in).
-- nuworks-web.service: `web.py`, always on (Restart=on-failure). Listens on the homelab's
+- nuauto-web.service: `web.py`, always on (Restart=on-failure). Listens on the homelab's
   Tailscale IP (web_listen_host):8765 only (web.LISTEN). Serves the signed Discord links:
   GET = confirm page only, POST (button) changes the sheet. Every link is HMAC-signed with
   web_secret.txt for one action on one row + job. Log: logs/web.log.
-- The laptop used to run nuworks-daily at 14:00. Retired 2026-10-03 (disabled). Don't
+- The laptop used to run nuauto-daily at 14:00. Retired 2026-10-03 (disabled). Don't
   re-enable it while the homelab runs: two runs = double Discord messages and Claude usage.
 
 SECRETS AND STATE (never print or log any of these; all mode 600)
   file                  laptop  homelab  how it gets to the homelab
-  token.json            yes     yes      sync.push (only if newer), after `nuworks login google`
+  token.json            yes     yes      sync.push (only if newer), after `nuauto login google`
   client_secret.json    yes     yes      copied by hand once (Google OAuth Desktop client)
-  session_cookies.json  yes     yes      `nuworks login` on the laptop (sync.push_session)
+  session_cookies.json  yes     yes      `nuauto login` on the laptop (sync.push_session)
   browser_profile/      yes     yes      same as session_cookies.json
   discord_webhook.txt   yes     yes      copied by hand
   web_secret.txt        no      yes      created by web.py on first start. Replacing it breaks
@@ -62,42 +64,42 @@ GOOGLE SHEETS LOGIN (gspread + OAuth)
   (Internal was rejected: that Gmail account is not in the org directory). OAuth client
   type "Desktop app".
 - Testing mode (staying that way, my choice) -> a login lasts 7 days. Re-login on the laptop:
-  `nuworks login google`; it pushes the new token to the homelab. Discord warns the day
+  `nuauto login google`; it pushes the new token to the homelab. Discord warns the day
   before; laptop commands re-open the Google login by themselves when it has expired.
 - Open the sheet with open_by_key(SHEET_ID) so only the Sheets API is needed.
   SHEET_ID: sheet_id in local_config.json.
 
-SYNC (sync.py; runs automatically inside `nuworks` on the laptop)
+SYNC (sync.py; runs automatically inside `nuauto` on the laptop)
 - Before approve / rate / apply / status: pull homelab data/ -> laptop (except ratings.json).
 - After approve / rate / status / login google: push to the homelab: the code (files listed
   in sync.CODE, rsync -c), data/ratings.json, the resume, token.json (if newer),
   google_login.txt.
-- `nuworks update`: push, start nuworks-daily.service on the homelab, show its log tail, pull.
-- `nuworks login`: copy browser_profile/ + session_cookies.json to the homelab (refuses while
+- `nuauto update`: push, start nuauto-daily.service on the homelab, show its log tail, pull.
+- `nuauto login`: copy browser_profile/ + session_cookies.json to the homelab (refuses while
   the homelab update is running, because that uses the profile).
-- `nuworks test` and `nuworks doctor` don't sync.
+- `nuauto test` and `nuauto doctor` don't sync.
 
 DEPLOYING A CHANGE
 1. Change code on the laptop (on a branch; merge to main when approved).
-2. Push it: any `nuworks status` (or approve/rate), or `.venv/bin/python -c "import sync; sync.push()"`.
+2. Push it: any `nuauto status` (or approve/rate), or `.venv/bin/python -c "import sync; sync.push()"`.
    Whatever is checked out on the laptop is what gets pushed.
 3. New .py file or prompt file? Add it to sync.CODE (test_sync.py fails if you forget).
 4. Changed web.py or a module it uses (config, sheet, jobs)? Restart it:
-   ssh homelab systemctl --user restart nuworks-web
+   ssh homelab systemctl --user restart nuauto-web
    (daily/weekly runs start fresh each time; no restart needed.)
 5. Changed a unit file in deploy/systemd/? Install it by hand:
    scp deploy/systemd/<unit> homelab:.config/systemd/user/
    ssh homelab 'systemctl --user daemon-reload && systemctl --user restart <unit>'
    (for a .timer: restart the timer, not the service)
-6. Check: `nuworks doctor`.
+6. Check: `nuauto doctor`.
 Roll back: `git log`, then `git revert <commit>` (or check out the old file), and push again.
 
 HEALTH AND LOGS
-  nuworks doctor                                            # both machines, read-only
-  ssh homelab 'systemctl --user list-timers "nuworks*"'     # next runs
-  ssh homelab 'journalctl --user -u nuworks-daily -n 50'    # last run's output
+  nuauto doctor                                            # both machines, read-only
+  ssh homelab 'systemctl --user list-timers "nuauto*"'     # next runs
+  ssh homelab 'journalctl --user -u nuauto-daily -n 50'    # last run's output
   ssh homelab 'ls -t ~/projects/auto/logs/daily-*.txt | head -3'   # per-run logs (homelab)
-  ssh homelab 'systemctl --user status nuworks-web'
+  ssh homelab 'systemctl --user status nuauto-web'
   ssh pi 'systemctl status cloudflared'
 
 REBUILD THE HOMELAB FROM SCRATCH
@@ -115,8 +117,8 @@ REBUILD THE HOMELAB FROM SCRATCH
    Install the claude CLI to ~/.local/bin/claude and log in once (run `claude`).
 4. Copy by hand, mode 600: client_secret.json, discord_webhook.txt (and web_secret.txt from the
    old machine if you want old Mark links to keep working).
-5. Laptop: `nuworks login` (copies the NUworks session).
+5. Laptop: `nuauto login` (copies the NUworks session).
 6. Units: scp deploy/systemd/* homelab:.config/systemd/user/
           ssh homelab 'sudo loginctl enable-linger $USER'   # asks for the sudo password
-          ssh homelab 'systemctl --user daemon-reload && systemctl --user enable --now nuworks-daily.timer nuworks-weekly.timer nuworks-web.service'
-7. Laptop: `nuworks doctor`, then `nuworks update` to see one full run.
+          ssh homelab 'systemctl --user daemon-reload && systemctl --user enable --now nuauto-daily.timer nuauto-weekly.timer nuauto-web.service'
+7. Laptop: `nuauto doctor`, then `nuauto update` to see one full run.

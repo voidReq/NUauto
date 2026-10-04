@@ -14,7 +14,7 @@ import sync
 
 ROOT = config.PROJECT_DIR
 NOT_PUSHED = ["test_*.py", "oauth_test.py", "setup_sheet.py"]  # tests and one-off setup scripts stay on the laptop
-SCRIPT = "nuworks"  # Python script without the .py extension
+SCRIPT = "nuauto"  # Python script without the .py extension
 
 
 def pushed_exempt(name):
@@ -69,7 +69,7 @@ def main():
     # tests and one-offs are never pushed
     assert not [c for c in code if pushed_exempt(c)], [c for c in code if pushed_exempt(c)]
 
-    # every local module imported by pushed code (and by the nuworks script) is itself pushed
+    # every local module imported by pushed code (and by the nuauto script) is itself pushed
     for c in code_py:
         missing = imported_local_files(c) - set(code)
         assert not missing, f"{c} imports {sorted(missing)} which are not in sync.CODE"

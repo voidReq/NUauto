@@ -40,12 +40,12 @@ RANKING
 - Extra boosts (past job experience): AR/XR/smart glasses +5, wearables (incl. medical) +3
   (not stacked with AR), embedded +5 more (so +15 total). Scaled down 2026-10-02 so real fit
   matters more (I need to pass technical interviews).
-- `nuworks approve` shows jobs closing within 7 days first. `nuworks apply` goes closing
+- `nuauto approve` shows jobs closing within 7 days first. `nuauto apply` goes closing
   within 7 days first, then best match. Past-deadline rows -> Needs Human. The daily run
   notifies about pool jobs closing within 3 days that aren't in the sheet.
 
 MY RATINGS (taste model)
-- `nuworks rate` (y/n, nothing goes in the sheet) -> data/ratings.json, which the laptop owns
+- `nuauto rate` (y/n, nothing goes in the sheet) -> data/ratings.json, which the laptop owns
   and pushes to the homelab. They train a TF-IDF model that reorders the pool (half rank,
   half my taste) once there are 5 yes + 5 no.
 - Rating order rotates categories (security, embedded, hardware, systems, robotics/test,

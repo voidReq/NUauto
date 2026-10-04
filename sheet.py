@@ -87,7 +87,7 @@ def approved(rows):
 def open_worksheet():
     if config.IS_SERVER and not os.path.exists(config.TOKEN_PATH):
         # no browser on the homelab: never start Google's login flow there (it would wait forever)
-        raise SheetError("No Google token on the homelab. Log in on the laptop; the next nuworks command syncs it.")
+        raise SheetError("No Google token on the homelab. Log in on the laptop; the next nuauto command syncs it.")
     fresh = not os.path.exists(config.TOKEN_PATH)  # gspread will open the browser for a Google login
     gc = gspread.oauth(
         scopes=config.WRITE_SCOPES,
@@ -102,7 +102,7 @@ def open_worksheet():
         return gc.open_by_key(config.SHEET_ID).sheet1
     except RefreshError:
         if config.IS_SERVER:
-            raise SheetError("Google login expired. On the laptop run: nuworks login google")
+            raise SheetError("Google login expired. On the laptop run: nuauto login google")
         print(f"Google login expired (it lasts {config.GOOGLE_LOGIN_DAYS} days). Opening the browser to log in again...")
         os.remove(config.TOKEN_PATH)
         return open_worksheet()
