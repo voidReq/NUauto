@@ -1,4 +1,4 @@
-NUWORKS APPLICATION HELPER
+NUAUTO (NUworks application helper)
 Tracks co-op jobs in a Google Sheet and fills out NUworks applications in the browser.
 I (the human) decide which jobs to apply to by marking them Approved in the sheet; that is
 the go-ahead (since 2026-10-03 there is no per-job y/n at submit time). This is NOT a
@@ -17,7 +17,7 @@ WHERE AM I
   Code is copied there by sync.py: never edit it on the homelab. Details: docs/DEPLOY.md.
 
 GIT
-- This folder is a git repo (since 2026-10-03). Remote: github.com/voidReq/nuauto, PUBLIC (since
+- This folder is a git repo (since 2026-10-03). Remote: github.com/voidReq/NUauto, PUBLIC (since
   2026-10-04). main only receives merges: work on a branch, merge when I OK it, push when I OK it.
   Before any push: no personal info in tracked files or commit messages (names, emails, hosts,
   IPs, IDs, companies I applied to); those go in local_config.json or docs/STATUS.md.
@@ -150,6 +150,7 @@ nuauto login google    # Google Sheets login, every 7 days (Discord warns the da
 nuauto test            # all offline tests
 nuauto doctor          # health check: laptop, homelab, Mark-done page (read-only)
 python answers.py list           # answer bank; edit with: nvim answers.json
+python setup_sheet.py format     # restyle the sheet (formatting only, safe to re-run)
 python jobs.py stats | pool | suggest 5
 
 TESTS

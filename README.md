@@ -1,4 +1,4 @@
-# nuauto
+# NUauto
 
 Finds Northeastern co-op postings on NUworks that fit your resume, lets you approve them, and
 submits the approved ones for you. Not affiliated with Northeastern, NUworks or Symplicity. Not a mass-apply bot: you approve every job, and it applies

@@ -1,5 +1,5 @@
 [Unit]
-Description=NUworks job pool update, 08:00 and 18:00 New York time
+Description=NUauto: job pool update, 08:00 and 18:00 New York time
 
 [Timer]
 OnCalendar=*-*-* 08:00:00 America/New_York

@@ -127,7 +127,7 @@ def check_public_page():
         code, body = e.code, e.read(4000).decode(errors="replace")
     except OSError as e:
         return say("FAIL", f"{web.BASE_URL} unreachable ({type(e).__name__}): tunnel down?")
-    if code == 404 and "NUworks helper" in body:
+    if code == 404 and "NUauto" in body:
         say("ok", f"{web.BASE_URL} answers (tunnel -> homelab web)")
     else:
         say("FAIL", f"{web.BASE_URL} gave HTTP {code}: nuauto-web down on the homelab, or the tunnel")

@@ -1,5 +1,5 @@
 [Unit]
-Description=NUworks weekly check-in (Discord)
+Description=NUauto: weekly check-in (Discord)
 
 [Service]
 Type=oneshot

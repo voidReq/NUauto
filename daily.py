@@ -37,7 +37,7 @@ def log(msg):
 def notify(title, body=""):
     log(f"NOTIFY: {title} | {body}")
     if shutil.which("notify-send"):
-        subprocess.run(["notify-send", "-a", "NUworks helper", title, body], check=False)
+        subprocess.run(["notify-send", "-a", "NUauto", title, body], check=False)
     discord(f"**{title}**\n{body}" if body else f"**{title}**")
 
 
@@ -89,7 +89,7 @@ def main():
     log("list")
     ok, msg = step(jobs.cmd_list)
     if not ok:
-        notify("NUworks: update stopped", f"{msg}. Run `nuauto login` on your laptop (it copies the session to the homelab).")
+        notify("NUauto: update stopped", f"{msg}. Run `nuauto login` on your laptop (it copies the session to the homelab).")
         return 1
 
     batches = jobs.cmd_triage_export()
@@ -98,13 +98,13 @@ def main():
     if batches:
         ok, msg = step(jobs.cmd_triage_import)
         if not ok:
-            notify("NUworks: triage results incomplete", msg[:200])
+            notify("NUauto: triage results incomplete", msg[:200])
             return 1
 
     log("details")
     ok, msg = step(jobs.cmd_details)
     if not ok:
-        notify("NUworks: update stopped", f"{msg}. Run `nuauto login` on your laptop (it copies the session to the homelab).")
+        notify("NUauto: update stopped", f"{msg}. Run `nuauto login` on your laptop (it copies the session to the homelab).")
         return 1
 
     batches = jobs.cmd_score_export()
@@ -113,7 +113,7 @@ def main():
     if batches:
         ok, msg = step(jobs.cmd_score_import)
         if not ok:
-            notify("NUworks: scoring incomplete", msg[:200])
+            notify("NUauto: scoring incomplete", msg[:200])
             return 1
 
     batches = jobs.cmd_cat_export()
@@ -122,7 +122,7 @@ def main():
     if batches:
         ok, msg = step(jobs.cmd_cat_import)
         if not ok:
-            notify("NUworks: categories incomplete", msg[:200])  # pool still builds; those jobs show 'uncategorized'
+            notify("NUauto: categories incomplete", msg[:200])  # pool still builds; those jobs show 'uncategorized'
 
     pool = jobs.build_pool()
     jobs.save("pool.json", pool)
@@ -208,7 +208,7 @@ def todo_notice(rows, summary):
     ext = [r for r in rows if r.status == "Needs Human" and r.notes.startswith("External application")] if rows else []
     if not site and not ext:
         log("todo: nothing owed")
-        return notify("NUworks morning", summary + ("\nNothing only you need to finish." if rows is not None else ""))
+        return notify("NUauto morning", summary + ("\nNothing only you need to finish." if rows is not None else ""))
     lines = [summary, "Only you can finish:"]
     def mark(label, action, r):  # no Mark-done page configured (web_base_url "") = no link
         return f" · [{label}]({web.link(action, r.number, jobs.job_id(r.url))})" if web.BASE_URL else ""
@@ -217,7 +217,7 @@ def todo_notice(rows, summary):
     for r in ext:
         lines.append(f"• {r.company[:25]}: external application ([job]({r.url})){mark('Mark applied', 'applied', r)}")
     log(f"todo: {len(site)} company-site, {len(ext)} external")
-    notify("NUworks morning", "\n".join(lines))
+    notify("NUauto morning", "\n".join(lines))
 
 
 def sheet_rows():
@@ -227,7 +227,7 @@ def sheet_rows():
         return sheet.read_rows(sheet.open_worksheet())
     except BaseException as e:  # gspread's login flow can sys.exit
         log(f"could not read the sheet ({type(e).__name__})")
-        notify("NUworks: can't read the Google sheet",
+        notify("NUauto: can't read the Google sheet",
                "Google login probably expired (it lasts 7 days). On the laptop run: `nuauto login google`")
         return None
 
@@ -287,7 +287,7 @@ def weekly():
         lines.append(f"Run `nuauto apply` (room for {room} this week).")
     elif room:
         lines.append(f"Nothing Approved. Run `nuauto approve` to pick up to {room}.")
-    notify("NUworks weekly check-in", "\n".join(lines))
+    notify("NUauto weekly check-in", "\n".join(lines))
     return 0
 
 
@@ -295,5 +295,5 @@ if __name__ == "__main__":
     try:
         sys.exit(weekly() if sys.argv[1:] == ["weekly"] else main())
     except Exception as e:  # e.g. the browser profile is busy because apply.py is running
-        notify("NUworks: daily update failed", f"{type(e).__name__}: {str(e)[:150]}")
+        notify("NUauto: daily update failed", f"{type(e).__name__}: {str(e)[:150]}")
         raise

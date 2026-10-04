@@ -39,14 +39,14 @@ assert len(daily.jobs.load(daily.SCANS, [])) == 60  # capped
 # morning message is always sent, with the summary first
 row = lambda n, status, notes: sheet.Row(n, f"https://x/jobs/{n}", f"Co{n}", "Title", status, notes, "")
 daily.todo_notice([row(2, "Applied", "")], "SUMMARY")
-assert sent[-1] == ("NUworks morning", "SUMMARY\nNothing only you need to finish."), sent[-1]
+assert sent[-1] == ("NUauto morning", "SUMMARY\nNothing only you need to finish."), sent[-1]
 daily.todo_notice(None, "SUMMARY")  # sheet unreadable: still the summary, no claim about the to-do list
-assert sent[-1] == ("NUworks morning", "SUMMARY"), sent[-1]
+assert sent[-1] == ("NUauto morning", "SUMMARY"), sent[-1]
 web.BASE_URL = ""  # no Mark-done page: no links
 daily.todo_notice([row(3, "Applied", sheet.SITE_MARK + " ..."), row(4, "Needs Human", "External application ...")], "SUMMARY")
 title, body = sent[-1]
 lines = body.split("\n")
-assert title == "NUworks morning" and lines[:2] == ["SUMMARY", "Only you can finish:"], sent[-1]
+assert title == "NUauto morning" and lines[:2] == ["SUMMARY", "Only you can finish:"], sent[-1]
 assert "Co3" in lines[2] and "Co4" in lines[3] and "Mark" not in body, body
 
 print("All morning-summary checks passed.")
