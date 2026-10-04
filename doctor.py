@@ -40,6 +40,12 @@ def check_files(names):
             say("WARN", f"{name} is readable by others: chmod 600 {name}")
 
 
+def check_claude():
+    """The claude CLI that `nuworks update` runs (same lookup as daily.CLAUDE)."""
+    if not shutil.which("claude", path=os.path.expanduser("~/.local/bin") + os.pathsep + os.environ.get("PATH", "")):
+        say("FAIL", "claude CLI not found (Claude triage/scoring can't run): see README.md, Setup")
+
+
 def check_google_login():
     try:
         with open(config.GOOGLE_LOGIN_PATH) as f:
@@ -73,6 +79,7 @@ def laptop():
     if not os.path.exists(config.LAPTOP_RESUME):
         say("FAIL", f"resume missing: {config.LAPTOP_RESUME}")
     if not config.HAS_SERVER:
+        check_claude()  # local mode: the update runs here
         return say("ok", "no homelab configured (local mode)")
     if sh(["systemctl", "--user", "is-enabled", "nuworks-daily.timer"]).stdout.strip() == "enabled":
         say("WARN", "the old laptop timer is enabled; the homelab runs the update now: "
@@ -152,8 +159,7 @@ def server():
     check_web_fresh()
     if sh(["loginctl", "show-user", os.environ.get("USER", ""), "-p", "Linger", "--value"]).stdout.strip() != "yes":
         say("FAIL", "lingering is off, so timers stop when you log out: sudo loginctl enable-linger $USER")
-    if not os.path.exists(os.path.expanduser("~/.local/bin/claude")):  # daily.CLAUDE
-        say("FAIL", "claude CLI missing at ~/.local/bin/claude (Claude triage/scoring can't run)")
+    check_claude()
     free_gb = shutil.disk_usage(config.PROJECT_DIR).free / 1e9
     if free_gb < 2:
         say("WARN", f"only {free_gb:.1f} GB free on the homelab")

@@ -15,8 +15,8 @@ text (essays, cover letters). Jobs that send you to an outside site are marked N
 
 ## Setup
 
-Needs Linux or macOS, Python 3.12, a NUworks account, a Google account, and the
-[Claude Code](https://claude.com/claude-code) CLI at `~/.local/bin/claude`.
+Needs Linux or macOS, Python 3.12, a NUworks account, a Google account, and
+[Claude Code](https://claude.com/claude-code) (a Claude subscription or API key; scoring uses Sonnet).
 
 ```sh
 git clone <this repo> nuworks-helper && cd nuworks-helper
@@ -25,6 +25,8 @@ python3 -m venv .venv
 .venv/bin/python -m playwright install firefox
 ln -s "$PWD/nuworks" ~/.local/bin/nuworks
 cp local_config.example.json local_config.json
+curl -fsSL https://claude.ai/install.sh | bash   # Claude Code, if you don't have it
+claude                                           # log in once, then /exit
 ```
 
 1. **Google:** in Google Cloud, enable the Sheets API and create an OAuth client ("Desktop app").

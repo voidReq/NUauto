@@ -20,7 +20,8 @@ os.environ["AUTO_HEADLESS"] = "1"
 import config  # noqa: E402
 import jobs  # noqa: E402
 
-CLAUDE = os.path.expanduser("~/.local/bin/claude")
+# ~/.local/bin first: systemd units run with a short PATH
+CLAUDE = shutil.which("claude", path=os.path.expanduser("~/.local/bin") + os.pathsep + os.environ.get("PATH", "")) or "claude"
 LOG_PATH = os.path.join(config.LOGS_DIR, f"daily-{datetime.now():%Y%m%d-%H%M}.txt")
 
 

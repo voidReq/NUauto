@@ -11,7 +11,7 @@ MACHINES
 - Homelab = PROD. `ssh homelab` (alias in ~/.ssh/config, key auth, over Tailscale).
   Ubuntu. Its hostname (server_hostname; that is how config.IS_SERVER knows) and project dir
   (server_dir) are in local_config.json; below, ~/projects/auto means that dir. venv made with uv
-  (Python 3.12), claude CLI at ~/.local/bin/claude (logged in), user lingering on (user
+  (Python 3.12), claude CLI at ~/.local/bin/claude (logged in; daily.CLAUDE also checks PATH), user lingering on (user
   timers run without anyone logged in). Owns data/ (the job pool). NOT a git checkout:
   code is copied there by sync.py. Never edit code on the homelab; the next push
   overwrites it.
