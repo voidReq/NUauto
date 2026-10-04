@@ -19,6 +19,7 @@ import re
 import sys
 import time
 from datetime import date
+from urllib.parse import parse_qs, urlparse
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeout
 from playwright.sync_api import sync_playwright
@@ -49,8 +50,35 @@ def load_resume_label():
     return label
 
 
+def unwrap(url):
+    """Real target of an Outlook "safelinks" redirect (employers paste them from email); other URLs as is."""
+    u = urlparse(url)
+    if u.hostname and u.hostname.endswith("safelinks.protection.outlook.com"):
+        return parse_qs(u.query).get("url", [url])[0]
+    return url
+
+
+def required_labels(popup_text):
+    """Labels marked required ("Cover Letter *") in the popup text; a lone "*" line joins the line before."""
+    lines = [l.strip() for l in popup_text.splitlines() if l.strip()]
+    out = []
+    for i, l in enumerate(lines):
+        if l == "*" and i > 0:
+            out.append(lines[i - 1] + " *")
+        elif l.endswith("*") and len(l) > 1:
+            out.append(l)
+    return [star(l) for l in out]
+
+
+def star(label):
+    """"Cover Letter*", "Cover Letter  *" -> "cover letter *" (for comparing labels)."""
+    return re.sub(r"\s*\*$", " *", label.strip()).lower()
+
+
 def check_popup(popup_text, links, fields, resume_label):
-    """Raise NeedsHuman if the popup links off-site or has no usable Resume dropdown."""
+    """Raise NeedsHuman if the popup links off-site, has no usable Resume dropdown, or requires something
+    that is not a form field we can fill (e.g. Cover Letter / Transcript pickers: "Add a new cover letter")."""
+    links = [unwrap(u) for u in links]
     if links or "how to apply" in popup_text.lower():
         hosts = sorted({re.sub(r"^https?://([^/]+).*", r"\1", u) for u in links}) or ["(no link)"]
         raise NeedsHuman(f"External application: {', '.join(hosts)}" + (f" -> {links[0]}" if links else ""))
@@ -59,6 +87,10 @@ def check_popup(popup_text, links, fields, resume_label):
         raise NeedsHuman("Expected exactly one Resume dropdown.")
     if resume_label not in [o.strip() for o in resume[0]["options"]]:
         raise NeedsHuman(f"Resume {resume_label!r} is not in the dropdown: {resume[0]['options']}")
+    known = {star(f["label"]) for f in fields}
+    missing = [l.rstrip(" *").title() for l in required_labels(popup_text) if l not in known]
+    if missing:
+        raise NeedsHuman(f"Popup requires {', '.join(missing)}: attach by hand on NUworks.")
 
 
 def is_resume(field):
@@ -229,6 +261,8 @@ def submit_flow(page, dialog, ws, row, resume_label, log, state):
     submit_btn = dialog.get_by_role("button", name="Submit", exact=True)
     if submit_btn.count() != 1:
         raise NeedsHuman(f"Expected one Submit button, found {submit_btn.count()}.")
+    if not submit_btn.is_enabled():  # NUworks still wants something; checked before the row is marked
+        raise NeedsHuman("Submit button is disabled: the popup still wants something (see filled_popup.png).")
     # Re-check the selection is still right at the moment of clicking.
     if shown_resume(dialog) != resume_label:
         raise NeedsHuman("Resume selection changed before submit.")
