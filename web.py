@@ -50,7 +50,7 @@ def _log(msg):
 
 
 PAGE = """<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
-<title>NUworks helper</title><meta name=robots content=noindex>
+<title>NUauto</title><meta name=robots content=noindex>
 <style>body{{font:17px system-ui;max-width:32rem;margin:2rem auto;padding:0 1rem;color:#222;background:#fafafa}}
 button{{font:inherit;padding:.7rem 1.2rem;border:0;border-radius:.5rem;background:#c8102e;color:#fff}}
 .dim{{color:#777}}</style>{body}"""

@@ -1,5 +1,5 @@
 [Unit]
-Description=NUworks helper: Mark-done links (web_listen_host only; publish it with a tunnel)
+Description=NUauto: Mark-done links (web_listen_host only; publish it with a tunnel)
 After=network-online.target
 
 [Service]

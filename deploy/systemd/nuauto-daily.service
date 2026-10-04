@@ -1,5 +1,5 @@
 [Unit]
-Description=NUworks job pool update (list, Claude triage/score, Discord notifications)
+Description=NUauto: job pool update (list, Claude triage/score, Discord notifications)
 
 [Service]
 Type=oneshot

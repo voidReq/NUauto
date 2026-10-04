@@ -1,5 +1,5 @@
 [Unit]
-Description=NUworks weekly check-in, Sunday 19:00 New York time
+Description=NUauto: weekly check-in, Sunday 19:00 New York time
 
 [Timer]
 OnCalendar=Sun *-*-* 19:00:00 America/New_York
