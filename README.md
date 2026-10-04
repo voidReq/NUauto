@@ -64,3 +64,5 @@ To run updates on a server twice a day instead, fill in the server fields in
 
 Check NUworks' terms of use before using this. Secret files (`token.json`, `client_secret.json`,
 `session_cookies.json`, ...) are gitignored; keep it that way.
+
+MIT licensed (see `LICENSE`).
