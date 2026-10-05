@@ -1,0 +1,109 @@
+ARCHITECTURE: a map of the code (src/nuauto/)
+(Keep this current when you add, rename or re-wire a module. Setup and machines: docs/DEPLOY.md.
+Pool rules and ranking: docs/PIPELINE.md. Safety rules: docs/SAFETY.md.)
+
+MODULES (src/nuauto/)
+  cli.py          the `nuauto` command. main() syncs, then dispatches. TOOLS run a module's own
+                  __main__ via run_tool(); COMMANDS are approve/rate/apply/status/update/login/test/doctor/assist.
+  config.py       every path and host; reads local/local_config.json. ALLOWED_HOSTS, SSO_HOSTS,
+                  HAS_SERVER, IS_SERVER, find_client_json(), lock_token(). No logic beyond that.
+  sheet.py        the Google Sheet. open_worksheet(), read_rows(), check_limits() (MAX_PER_WEEK/MAX_TOTAL),
+                  set_status(), mark_submit_started()/resolve_submit(), mark_applied_by_hand(),
+                  mark_site_done(), append_note(), add_proposed(), google_login().
+  jobs.py         the job pool + viewers. cmd_list, cmd_triage_export/import, cmd_details (hard_rules),
+                  cmd_score_export/import, cmd_cat_export/import, build_pool(), ranked_pool(),
+                  rate_viewer(), cmd_rate(), cmd_approve(), cmd_suggest(), check_applied().
+  daily.py        what the homelab timers run. main() -> scan() (steps above via step()), reminders(),
+                  run_claude(), notify()/discord(), record_hand_applications(), weekly().
+  web.py          Mark-done page. link() makes signed URLs, Handler.do_GET (confirm page) / do_POST (change sheet).
+  browser.py      Playwright Firefox. launch(), goto_logged_in(), relogin(), install_domain_lock(),
+                  RunLog (per-run logs/ dir + screenshots), cmd_login(), cmd_open().
+  apply.py        the NUworks runner. main(), apply_one(), fill_popup(), submit_flow(), check_popup(),
+                  submit_nuworks_side(), apply_order().
+  answers.py      answer bank. load()/save(), find() (exact match after norm()), resolve_answer(),
+                  TerminalIO / NoTerminalIO, Stop.
+  assist.py       company-site agent. run() launches claude; hook_main() -> hook() -> decide() /
+                  update_after() is the guard; bank() is the answer-bank command; assist_target(),
+                  nuworks_side().
+  inspect_form.py read-only lister of an Apply form. main(); FIELDS_JS is reused by apply.py.
+  sync.py         laptop<->homelab rsync. pull(), push(), push_session(), server_busy(); PACKAGE/CODE
+                  list the files that reach the homelab.
+  doctor.py       health check. main() -> laptop(), server(), check_public_page().
+  setup_sheet.py  one-time sheet setup; format_sheet() restyles. HEADERS, STATUSES.
+  __main__.py     python -m nuauto -> cli.main.
+
+WHO CALLS WHAT (from the imports)
+  config      imported by almost everything; imports nothing from nuauto.
+  sheet       -> config.
+  browser     -> config.
+  answers     -> config.
+  jobs        -> config, sheet; browser (inside open_browser only).
+  daily       -> config, jobs; sheet and web (inside functions).
+  web         -> config; jobs and sheet (inside the handler).
+  apply       -> answers, browser, config, jobs, sheet, inspect_form.FIELDS_JS.
+  assist      -> answers, config; sheet, browser, apply (inside functions).
+  inspect_form-> browser, config.
+  sync        -> config.
+  doctor      -> config, sync; web (inside a function).
+  setup_sheet -> config; sheet (SITE_MARK).
+  cli         -> config; everything else is imported lazily per command (sync, doctor, jobs, apply,
+                 sheet, daily, assist, browser). Tools via runpy: jobs, answers, sheet, setup_sheet,
+                 inspect_form, daily, web.
+  Imports are absolute (`from nuauto import sheet`); tests/test_sync.py enforces it.
+
+MAIN FLOWS
+  nuauto update / daily (homelab; laptop-only in local mode)
+    cli.main: laptop pushes code (sync.push), starts nuauto-daily.service, pulls data/.
+    daily.main -> scan(): jobs.cmd_list -> cmd_triage_export -> run_claude(TRIAGE_PROMPT.md) per
+    batch -> cmd_triage_import -> cmd_details (hard_rules) -> cmd_score_export -> run_claude(SCORE_)
+    -> cmd_score_import -> cmd_cat_export -> run_claude(CATEGORY_) -> cmd_cat_import ->
+    build_pool() -> save pool.json -> notify() (Discord). Morning run then calls reminders().
+  nuauto approve
+    cli.main (sync.pull) -> jobs.cmd_approve: load_details + ranked_pool (data/) minus rows already
+    in the sheet and rated-no -> rate_viewer; y collects jobs -> sheet.add_proposed(status="Approved")
+    on exit. Then sync.push (ratings).
+  nuauto apply
+    apply.main: sheet.check_limits -> pick_row/apply_order (closing soon first) -> apply_one:
+    browser.launch + install_domain_lock -> fill_popup (check_popup, resume dropdown,
+    fill_extra_fields via answers.resolve_answer) -> submit_flow: sheet.mark_submit_started, click,
+    confirm text -> sheet.resolve_submit (Applied or Failed). Any stop -> sheet.set_status("Needs Human").
+  nuauto assist <row>
+    assist.run: find_row, sheet.check_limits, write mcp.json + settings.json (hooks) into a
+    logs/<stamp>_assist_row<N>/ dir, start `claude` with the Playwright MCP browser. Every tool call goes
+    through `assist.py hook pre|post` -> decide()/update_after(); answer-bank Bash goes to bank().
+    After /exit, asks "did you submit?"; y -> sheet.mark_applied_by_hand -> nuworks_side ->
+    apply.submit_nuworks_side -> sheet.append_note. `assist nuworks <row>` retries only that last step.
+  Mark-done page (homelab)
+    daily builds links with web.link(action, row, job_id) (HMAC-signed). Browser GET /m ->
+    Handler.do_GET shows a confirm page only. Button POST -> do_POST -> sheet.mark_site_done or
+    sheet.mark_applied_by_hand. Bad signature = 404; row/job mismatch = 409.
+
+STATE ON DISK (repo root; all gitignored except as noted)
+  data/   job pool, owned by the homelab; laptop pulls a copy. list.json, triage.json, scores.json,
+          categories.json, pool.json, scans.json, details/ (one file per job): written by jobs.py
+          (scans.json by daily.py). ratings.json: written by jobs.cmd_rate on the laptop, pushed.
+  work/   batch files for Claude: <kind>_in_NNN.json, <kind>_out_NNN.json, resume.txt. jobs.py
+          writes the inputs and resume.txt; the claude subprocess (daily.run_claude) writes the outputs.
+  logs/   browser.RunLog: <stamp>_<label>/ per application (actions log + screenshots; assist adds
+          actions.log, state.json, mcp.json, settings.json). daily.py: daily-<stamp>.txt. web.py: web.log.
+  local/  personal and secret, mode 700, never committed. config + profile (local_config.json,
+          profile.json), answers.json (answers.py), Google files (token.json, google_login.txt;
+          sheet.py), NUworks session (session_cookies.json, browser_profile/; browser.py),
+          assist_profile/ (assist.py), web_secret.txt (web.py), discord_webhook.txt (daily.py).
+          Which of these sync to the homelab: docs/DEPLOY.md.
+  Also in the repo, tracked: prompts/ (Claude prompts), tests/ (offline checks), deploy/systemd/.
+
+SHEET (columns in sheet.HEADERS, created by setup_sheet.py)
+  Columns: URL, Company, Title, Status, Notes, Date.
+  Status values (sheet.STATUSES): Proposed, Approved, Applied, Failed, Needs Human.
+  Who sets what:
+    Proposed      jobs.cmd_suggest (add_proposed).
+    Approved      jobs.cmd_approve (add_proposed with status Approved); or you, by hand in the sheet.
+    Applied       sheet.resolve_submit (apply.py after a confirmed submit); sheet.mark_applied_by_hand
+                  (assist.run, daily.record_hand_applications, web do_POST).
+    Failed        sheet.resolve_submit (you reported the submit failed).
+    Needs Human   sheet.set_status (apply.py stops, deadline passed); mark_submit_started (the row reads
+                  Needs Human between the Submit click and the result, so it can't be sent twice).
+  set_status only changes rows still Approved. Notes starting sheet.SITE_MARK are written by
+  apply.submit_flow and cleared by sheet.mark_site_done. The weekly cap counts Applied rows with a
+  Date in the last 7 days (check_limits).

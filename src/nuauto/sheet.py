@@ -69,12 +69,29 @@ def applied_dates(rows):
     return dates
 
 
+def week_window(today=None):
+    """(first day that counts for this week's cap, a label). With local_config week_start: fixed 7-day weeks
+    from that day (week_start, +7, +14...). Before that day, or without it: the last 7 days."""
+    today = today or date.today()
+    start = config.WEEK_START
+    if start and today >= start:
+        first = start + timedelta(days=7 * ((today - start).days // 7))
+        return first, f"this week (since {first:%a %b} {first.day})"
+    return today - timedelta(days=6), "in the last 7 days"
+
+
+def week_count(dates, today=None):
+    today = today or date.today()
+    first, _ = week_window(today)
+    return sum(1 for d in dates if first <= d <= today)
+
+
 def check_limits(rows, today=None):
     today = today or date.today()
     dates = applied_dates(rows)
-    week = sum(1 for d in dates if today - timedelta(days=7) < d <= today)
+    week = week_count(dates, today)
     if week >= MAX_PER_WEEK:
-        raise LimitReached(f"Weekly limit reached: {week} applied in the last 7 days (max {MAX_PER_WEEK}).")
+        raise LimitReached(f"Weekly limit reached: {week} applied {week_window(today)[1]} (max {MAX_PER_WEEK}).")
     if len(dates) >= MAX_TOTAL:
         raise LimitReached(f"Total limit reached: {len(dates)} applied (max {MAX_TOTAL}).")
     return week, len(dates)
@@ -243,7 +260,7 @@ def main():
         sys.exit("Usage: nuauto sheet status")
     rows = read_rows(open_worksheet())
     week, total = check_limits_safe(rows)
-    print(f"Applied in last 7 days: {week}/{MAX_PER_WEEK}. Total applied: {total}/{MAX_TOTAL}.")
+    print(f"Applied {week_window()[1]}: {week}/{MAX_PER_WEEK}. Total applied: {total}/{MAX_TOTAL}.")
     for r in approved(rows):
         print(f"  row {r.number}: {r.company} | {r.title} | {r.url}")
     if not approved(rows):
@@ -253,8 +270,7 @@ def main():
 def check_limits_safe(rows):
     """Counts for display only; does not raise when a limit is hit."""
     dates = applied_dates(rows)
-    today = date.today()
-    return sum(1 for d in dates if today - timedelta(days=7) < d <= today), len(dates)
+    return week_count(dates), len(dates)
 
 
 if __name__ == "__main__":

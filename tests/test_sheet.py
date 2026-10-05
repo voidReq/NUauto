@@ -36,6 +36,23 @@ inside = [("Applied", "2026-09-26")] * (sheet.MAX_PER_WEEK - 1)
 outside = [("Applied", "2026-09-24")] * 5
 assert check_limits(rows_with(inside + outside), TODAY) == (sheet.MAX_PER_WEEK - 1, sheet.MAX_PER_WEEK + 4)
 
+# fixed weeks from local_config week_start (2026-10-06 here); before that day: the last 7 days
+from datetime import date as D  # noqa: E402
+from nuauto import config  # noqa: E402
+config.WEEK_START = D(2026, 10, 6)
+days = ["2026-10-01", "2026-10-05", "2026-10-06", "2026-10-09", "2026-10-12", "2026-10-13"]
+R = rows_with([("Applied", x) for x in days])
+assert sheet.week_window(D(2026, 10, 5)) == (D(2026, 9, 29), "in the last 7 days")  # day before: rolling
+assert check_limits(R, D(2026, 10, 5))[0] == 2                                      # Oct 1 + Oct 5
+assert check_limits(R, D(2026, 10, 6))[0] == 1                                      # the new week starts at 0 (+ Oct 6)
+assert check_limits(R, D(2026, 10, 12))[0] == 3                                     # Oct 6, 9, 12
+assert sheet.week_window(D(2026, 10, 12))[0] == D(2026, 10, 6)
+assert check_limits(R, D(2026, 10, 13))[0] == 1                                     # next week: Oct 13 only
+assert sheet.week_window(D(2026, 10, 20)) == (D(2026, 10, 20), "this week (since Tue Oct 20)")
+assert sheet.week_window(D(2026, 10, 6))[1] == "this week (since Tue Oct 6)"
+expect(LimitReached, lambda: check_limits(rows_with([("Applied", "2026-10-07")] * sheet.MAX_PER_WEEK), D(2026, 10, 12)))
+config.WEEK_START = None
+
 # hitting the weekly limit refuses
 expect(LimitReached, lambda: check_limits(rows_with([("Applied", "2026-09-30")] * sheet.MAX_PER_WEEK), TODAY))
 

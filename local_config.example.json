@@ -6,5 +6,6 @@
   "server_dir": "",
   "web_base_url": "",
   "web_listen_host": "",
-  "assist_read_paths": []
+  "assist_read_paths": [],
+  "week_start": ""
 }

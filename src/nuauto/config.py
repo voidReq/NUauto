@@ -1,5 +1,6 @@
 import glob
 import json
+from datetime import date as _date
 import os
 import socket
 import sys
@@ -18,6 +19,8 @@ with open(_local_path) as _f:
     LOCAL = json.load(_f)
 
 SHEET_ID = LOCAL["sheet_id"]
+# Weekly cap periods: fixed 7-day weeks from this day ("YYYY-MM-DD"); "" = any rolling 7 days.
+WEEK_START = _date.fromisoformat(LOCAL["week_start"]) if LOCAL.get("week_start") else None
 TOKEN_PATH = os.path.join(LOCAL_DIR, "token.json")
 # Date of the last Google login (the app is in Testing mode, so a login lasts 7 days). Not secret.
 GOOGLE_LOGIN_PATH = os.path.join(LOCAL_DIR, "google_login.txt")

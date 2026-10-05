@@ -26,8 +26,10 @@ GIT
 
 HARD LIMITS
 - Under 100 applications total.
-- Weekly cap, enforced in code (count "Applied" rows with a date in the last 7 days; refuse to
-  run past the limit). sheet.py: MAX_PER_WEEK = 11, MAX_TOTAL = 99 (decided 2026-10-03).
+- Weekly cap, enforced in code (count "Applied" rows with a date in the current week; refuse to
+  run past the limit). sheet.py: MAX_PER_WEEK = 11, MAX_TOTAL = 99 (decided 2026-10-03). A week =
+  fixed 7-day periods from local_config.json "week_start" (sheet.week_window); without it, the last
+  7 days. Mine: week_start 2026-10-06 (reset because I started applying late), then every 7 days.
   Approved rows beyond the cap just wait for the next week.
 - One application at a time.
 - I should check NUworks' terms of use before running against the real site.
