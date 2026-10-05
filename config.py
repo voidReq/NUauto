@@ -35,6 +35,10 @@ SSO_HOSTS = {"shibboleth-northeastern-csm.symplicity.com", "neuidmsso.neu.edu"}
 COOKIES_PATH = os.path.join(PROJECT_DIR, "session_cookies.json")
 PROFILE_DIR = os.path.join(PROJECT_DIR, "browser_profile")
 LOGS_DIR = os.path.join(PROJECT_DIR, "logs")
+# nuauto assist (assist.py): the agent's browser profile, never the NUworks one. Holds company-site logins.
+ASSIST_PROFILE_DIR = os.path.join(PROJECT_DIR, "assist_profile")
+# Folders/files the agent may read (notes, writeups) to suggest answers; the resume is always added.
+ASSIST_READ_PATHS = [os.path.expanduser(p) for p in LOCAL.get("assist_read_paths", [])]
 
 # Homelab server (optional): runs the twice-daily update and the Discord reminders. The laptop syncs with it over
 # Tailscale (sync.py): it pulls job data and pushes ratings, the NUworks session and the resume.

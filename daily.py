@@ -60,7 +60,7 @@ def discord(text):
 def run_claude(prompt_file, batch_file):
     name = os.path.basename(batch_file)
     d = config.PROJECT_DIR
-    prompt = (f"Follow {d}/{prompt_file} exactly: read it first, then "
+    prompt = (f"Follow {d}/prompts/{prompt_file} exactly: read it first, then "
               f"{d}/work/resume.txt. Process only {d}/work/{name} and "
               f"write {d}/work/{name.replace('_in_', '_out_')} with exactly one entry per "
               "input job, keyed by the job id. Read every job fully and judge each one individually. "

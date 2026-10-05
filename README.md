@@ -1,8 +1,8 @@
 # NUauto
 
 Finds Northeastern co-op postings on NUworks that fit your resume, lets you approve them, and
-submits the approved ones for you. Not affiliated with Northeastern, NUworks or Symplicity. Not a mass-apply bot: you approve every job, and it applies
-to at most 11 per week (99 total).
+submits the approved ones for you. Not a mass-apply bot: you approve every job, and it applies
+to at most 11 per week (99 total). Not affiliated with Northeastern, NUworks or Symplicity.
 
 ## How it works
 
@@ -50,6 +50,7 @@ nuauto rate            y/n on jobs to teach the ranking your taste
 nuauto apply [-n 3]    submit Approved jobs (run in a real terminal)
 nuauto status          sheet counts and this week's limit
 nuauto login [google]  NUworks login / Google login (Google's lasts 7 days)
+nuauto assist <row>    an agent fills a company-site application; it asks you before submitting
 nuauto doctor          health check
 nuauto test            offline tests
 ```
@@ -57,7 +58,7 @@ nuauto test            offline tests
 ## Make it yours
 
 Your preferences live in `RULES` and the term ID in `jobs.py` (term, class level, thresholds,
-bonuses) and in the Claude prompts `*_PROMPT.md`. See `docs/PIPELINE.md`.
+bonuses) and in the Claude prompts in `prompts/`. See `docs/PIPELINE.md`.
 
 To run updates on a server twice a day instead, fill in the server fields in
 `local_config.json` and follow `docs/DEPLOY.md`. Leave them empty and everything runs locally.

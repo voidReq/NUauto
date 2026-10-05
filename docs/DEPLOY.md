@@ -60,6 +60,7 @@ SECRETS AND STATE (never print or log any of these; all mode 600)
   discord_webhook.txt   yes     yes      copied by hand
   web_secret.txt        no      yes      created by web.py on first start. Replacing it breaks
                                          every Mark link already sent.
+  assist_profile/       yes     no       company-site logins of `nuauto assist`; never synced
   answers.json, profile.json  laptop only in practice (apply runs on the laptop); not synced
 Not secret, gitignored, pushed by sync.push: local_config.json (personal settings),
 docs/STATUS.md (your local log), google_login.txt (date of the last Google login), the resume

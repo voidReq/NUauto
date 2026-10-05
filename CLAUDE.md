@@ -22,7 +22,7 @@ GIT
   Before any push: no personal info in tracked files or commit messages (names, emails, hosts,
   IPs, IDs, companies I applied to); those go in local_config.json or docs/STATUS.md.
 - Gitignored: secrets, local_config.json, answers.json, profile.json, google_login.txt, data/, work/, logs/,
-  browser_profile/, .venv/.
+  browser_profile/, assist_profile/, .venv/.
 - Whatever is checked out on the laptop is what the next `nuauto` command pushes to the homelab.
 
 HARD LIMITS
@@ -35,7 +35,8 @@ HARD LIMITS
 
 SAFETY RULES (most important)
 1. No guessing, ever. If unsure about anything, stop and ask me.
-2. Only act on Approved rows.
+2. Only act on Approved rows. (Exception: `nuauto assist <row>` works on a Needs Human row I
+   approved earlier; the row only changes after I press Submit myself and answer y.)
 3. Field filling uses two local files:
    - profile.json: basic info (name, email, phone, address, school, etc.)
    - answers.json: answer bank (see below)
@@ -84,6 +85,8 @@ Google access is OAuth only, never service accounts (docs/DEPLOY.md, GOOGLE SHEE
 
 BROWSER (Playwright, Firefox)
 - Deterministic script, not an AI clicking around freely. Slow, human-like pacing.
+  (Exception: company sites, with me watching: `nuauto assist`, below; it may also upload the resume
+  and type longer answers I approved, never submit without my review.)
 - Persistent browser profile in browser_profile/; I log in by hand (`nuauto login`) and the
   session is reused. Never handle my password in code or prompts.
 - Domain lock: only northeastern-csm.symplicity.com (config.ALLOWED_HOSTS). Jobs whose Apply
@@ -95,6 +98,29 @@ BROWSER (Playwright, Firefox)
 - Only ONE Playwright session may use browser_profile/ at a time (Firefox locks it): not
   while apply.py, jobs.py or browser.py are running. Use a separate profile dir if in doubt.
   The homelab has its own copy and uses it during its update runs (08:00/18:00 New York).
+
+COMPANY-SITE AGENT (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`; added 2026-10-05)
+- Only for Needs Human rows stopped at an external application (Notes start "External application";
+  Workday, Oracle, iCIMS, SuccessFactors...). Never NUworks itself (refused even with --url), never rows
+  stopped for something on NUworks (cover letter, transcript...): those are mine (assist.assist_target).
+- Laptop, real terminal, me watching. Starts `claude --model sonnet` with the Playwright MCP browser
+  (profile assist_profile/: it holds my company-site logins, treat it as secret), Bash and Read/Glob/Grep.
+- Relaxed 2026-10-05 (my call): the agent may visit any site, fill anything, tick boxes, upload the
+  resume, and draft longer answers that I approve before it types them. The one hard rule: NOTHING is
+  submitted without my review. Enforced by code (Claude Code hooks -> `assist.py hook pre|post`, logic
+  in assist.decide / update_after, tested in tests/test_assist.py): every Submit-type click (SUBMIT_RE, incl.
+  "Apply"), Enter and type(submit) make the terminal ask me first ("ask"); element names come from the
+  latest full snapshot only (refs cleared by anything that changes the page), never from the agent's
+  description. Never: password fields, page scripts (could submit behind the review), uploads other than
+  the resume, non-web links; Bash only the answer-bank command (answer|save|once|alias|blank|wait);
+  Read/Glob/Grep only inside my resume and local_config.json "assist_read_paths" (my writeups).
+- Mine: sign-in, captchas, approving Submit. After I /exit, the launcher asks "did you submit?"; y =
+  Applied (dated today, counts toward the weekly limit), then the same job is submitted on NUworks too by
+  apply.submit_nuworks_side (the tested NUworks code; every popup check except the off-site-link stop;
+  outcome appended to Notes; retry: `nuauto assist nuworks <row>`). The agent never touches the sheet.
+  Log per run: logs/<stamp>_assist_row<N>/ (actions.log = every guard decision).
+- Proven: a first application end to end (2026-10-05, stricter version). The "ask before Submit" hook
+  prompt is proven in an interactive session; a full run with the relaxed rules is not yet.
 
 NUWORKS LOGIN / AUTH FLOW (read this before touching the browser)
 - NUworks sessions expire after a few hours. Expired = any page shows the "Sign In / Please
@@ -126,12 +152,12 @@ nuauto (the CLI; ~/.local/bin/nuauto links here)   config.py (paths, hosts; read
 sheet.py (rows, limits, status updates, Google login)   apply.py (the runner)
 browser.py (login/open, domain lock, cookies)   answers.py (answer bank)   jobs.py (pool + viewers)
 daily.py (homelab update + Discord)   web.py (Mark-done page, homelab)   sync.py (laptop<->homelab)
-doctor.py (health check)   inspect_form.py (read-only form lister)
-setup_sheet.py, oauth_test.py (one-time, done)
-TRIAGE_PROMPT.md  SCORE_PROMPT.md  CATEGORY_PROMPT.md (Claude batch prompts)
+doctor.py (health check)   inspect_form.py (read-only form lister)   assist.py (company-site agent)
+setup_sheet.py (sheet setup / `format` restyle)
+prompts/ (TRIAGE_, SCORE_, CATEGORY_PROMPT.md: Claude batch prompts; ASSIST_PROMPT.md: agent rules)
 README.md (public, new-user setup; keep it short)   docs/ (DEPLOY, PIPELINE, STATUS)
 deploy/systemd/ (homelab units)   requirements.txt
-test_*.py (offline checks)
+tests/ (test_*.py offline checks)
 local_config.json: my personal settings (sheet ID, resume path, homelab hostname/dir, Mark-done URL,
   Tailscale IP). Gitignored; local_config.example.json is the committed template. Keep personal
   values (names, emails, hosts, IPs, IDs) out of every committed file: the repo may go public.
@@ -149,15 +175,16 @@ nuauto login           # manual SSO login; close the window when done
 nuauto login google    # Google Sheets login, every 7 days (Discord warns the day before)
 nuauto test            # all offline tests
 nuauto doctor          # health check: laptop, homelab, Mark-done page (read-only)
+nuauto assist [<row>]  # company-site agent for a Needs Human row; asks me before any Submit
 python answers.py list           # answer bank; edit with: nvim answers.json
 python setup_sheet.py format     # restyle the sheet (formatting only, safe to re-run)
 python jobs.py stats | pool | suggest 5
 
 TESTS
-`nuauto test` runs every test_*.py: offline, no sheet, no browser, no network. Run it before
+`nuauto test` runs every tests/test_*.py: offline, no sheet, no browser, no network. Run it before
 pushing. test_sync.py fails if a new module or prompt isn't in sync.CODE (so it would never
 reach the homelab). test_web.py covers the public Mark-done links (signatures; GET never
-changes the sheet). test_browser.py covers the domain lock.
+changes the sheet). test_browser.py covers the domain lock. test_assist.py covers the company-site agent's guard.
 
 ENVIRONMENT / STYLE
 - Python venv in .venv; requirements.txt: playwright (Firefox), gspread, scikit-learn (ranking

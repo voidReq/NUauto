@@ -7,10 +7,10 @@ PIPELINE
 Data comes from NUworks' own search/job data, not page text.
 1. list: server filters Co-op, Spring 2027, Available, 4/6 month, not applied; plus co-ops
    with no term.
-2. Claude triage (Sonnet, TRIAGE_PROMPT.md): drops only clearly unrelated titles.
+2. Claude triage (Sonnet, prompts/TRIAGE_PROMPT.md): drops only clearly unrelated titles.
 3. details + hard rules (script).
-4. Claude match % vs my resume (Sonnet, SCORE_PROMPT.md, fixed formula).
-   4b. Claude category (CATEGORY_PROMPT.md).
+4. Claude match % vs my resume (Sonnet, prompts/SCORE_PROMPT.md, fixed formula).
+   4b. Claude category (prompts/CATEGORY_PROMPT.md).
 5. pool: thresholds + bonuses.
 Claude steps work on batch files: work/<kind>_in_NNN.json -> work/<kind>_out_NNN.json, keyed by
 job id; work/resume.txt is regenerated from the resume PDF on every export.

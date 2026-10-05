@@ -190,6 +190,14 @@ def _row_for(ws, row_number, url):
     return current
 
 
+def append_note(ws, row_number, url, text):
+    """Add text to an Applied row's Notes (e.g. the NUworks-side outcome after nuauto assist)."""
+    current = _row_for(ws, row_number, url)
+    if current.status != "Applied":
+        raise SheetError(f"Row {row_number} is not Applied. Refusing to change its notes.")
+    ws.update(range_name=f"E{row_number}", values=[[f"{current.notes} {text}".strip()]], value_input_option="RAW")
+
+
 def mark_site_done(ws, row_number, url):
     """Applied row whose company-site application is now done: replace the SITE_MARK note."""
     current = _row_for(ws, row_number, url)

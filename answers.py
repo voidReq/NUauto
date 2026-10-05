@@ -100,7 +100,9 @@ def choose_answer(label, field_type, options, io):
         choices = [o for o in options if o.strip()]
         for i, o in enumerate(choices, 1):
             io.say(f"    {i}) {o}")
-        pick = io.ask(f"  Option number for {label!r} (blank = stop): ")
+        pick = io.ask(f"  Option number (or its exact text) for {label!r} (blank = stop): ")
+        if pick in choices:  # typed the option's exact text
+            return pick
         if not pick.isdigit() or not 1 <= int(pick) <= len(choices):
             raise Stop(f"no valid option chosen for {label!r}")
         return choices[int(pick) - 1]
