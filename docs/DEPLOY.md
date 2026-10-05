@@ -38,6 +38,8 @@ Unit files live in this repo (deploy/systemd/) and are installed in ~/.config/sy
   adds deadline reminders and the "NUauto morning" message (always sent): new postings and
   new pool jobs in the last 24h, then the to-do list (company-site applications owed,
   external Needs Human rows) with signed Mark links.
+  If the scan fails (e.g. NUworks too slow; a page load gets one retry after 60s), the morning
+  reminders still go out, from the sheet and the last saved pool.
   Claude runs as `claude -p --model sonnet` with Read/Write only, one call per batch file in work/.
   Headless browser; never applies to anything.
 - nuauto-weekly.timer -> nuauto-weekly.service: `daily.py weekly`, Sunday 19:00 New York time

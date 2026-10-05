@@ -13,7 +13,7 @@ import time
 from datetime import datetime
 from urllib.parse import urlparse
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import TimeoutError as PlaywrightTimeout, sync_playwright
 
 import config
 
@@ -117,19 +117,29 @@ def on_login_page(page):
     return "sign-in" in t or "log in" in t or "login" in t
 
 
+def goto(page, url, log, retry_wait=60):
+    """page.goto, but a page-load timeout (NUworks is sometimes slow) gets one more try after retry_wait seconds."""
+    try:
+        page.goto(url, wait_until="domcontentloaded")
+    except PlaywrightTimeout:
+        log.write(f"Page load timed out; trying once more in {retry_wait}s.")
+        page.wait_for_timeout(retry_wait * 1000)
+        page.goto(url, wait_until="domcontentloaded")
+
+
 def goto_logged_in(page, context, url, log):
     """Open a NUworks page, doing the one-click re-login if the session expired.
     Returns False if still not logged in."""
-    page.goto(url, wait_until="domcontentloaded")
+    goto(page, url, log)
     pause(page)
     if not on_login_page(page):
         return True
     if "sign-in" not in page.title().lower():  # the "Log in" variant: load the sign-in screen with the button
-        page.goto(config.NUWORKS_START_URL.split("/app/")[0] + "/", wait_until="domcontentloaded")
+        goto(page, config.NUWORKS_START_URL.split("/app/")[0] + "/", log)
         pause(page)
     if not relogin(page, context, log):
         return False
-    page.goto(url, wait_until="domcontentloaded")
+    goto(page, url, log)
     pause(page)
     return not on_login_page(page)
 
