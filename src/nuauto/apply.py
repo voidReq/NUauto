@@ -428,7 +428,7 @@ def main(argv=None):
                 sys.exit(f"Refusing to run: {e}")
             print(f"Stopping: {e}")
             break
-        print(f"Applied in last 7 days: {week}/{sheet.MAX_PER_WEEK}. Total: {total}/{sheet.MAX_TOTAL}.")
+        print(f"Applied {sheet.week_window()[1]}: {week}/{sheet.MAX_PER_WEEK}. Total: {total}/{sheet.MAX_TOTAL}.")
         if first:
             row = pick_row(rows, args.row)
         else:

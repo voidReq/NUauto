@@ -1029,7 +1029,7 @@ def cmd_approve():
         print(f"{len(urgent)} job{'s' if len(urgent) > 1 else ''} closing within {URGENT_DAYS} days shown first.")
     try:
         week, total = sheet.check_limits(rows)
-        print(f"Applied in last 7 days: {week}/{sheet.MAX_PER_WEEK}. Total: {total}/{sheet.MAX_TOTAL}.")
+        print(f"Applied {sheet.week_window()[1]}: {week}/{sheet.MAX_PER_WEEK}. Total: {total}/{sheet.MAX_TOTAL}.")
     except sheet.LimitReached as e:
         print(f"Note: {e} Approving is still fine; apply.py will refuse until the limit clears.")
     approved = []
