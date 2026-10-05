@@ -37,8 +37,11 @@ def log(msg):
 
 def notify(title, body=""):
     log(f"NOTIFY: {title} | {body}")
-    if shutil.which("notify-send"):
+    if shutil.which("notify-send"):  # Linux desktop
         subprocess.run(["notify-send", "-a", "NUauto", title, body], check=False)
+    elif sys.platform == "darwin" and shutil.which("osascript"):  # macOS (local mode)
+        script = f"display notification {json.dumps(body[:200], ensure_ascii=False)} with title {json.dumps(title, ensure_ascii=False)}"
+        subprocess.run(["osascript", "-e", script], check=False)
     discord(f"**{title}**\n{body}" if body else f"**{title}**")
 
 

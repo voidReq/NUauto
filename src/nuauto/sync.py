@@ -7,6 +7,7 @@ The homelab owns the job data (it runs the update); the laptop owns your ratings
 Secrets are copied file-to-file with rsync and never printed.
 """
 import os
+import shlex
 import subprocess
 
 from nuauto import config
@@ -44,10 +45,24 @@ def pull():
     return _run(RSYNC + ["--exclude", "ratings.json", f"{REMOTE}/data/", "data/"], "pull")
 
 
+# Only rsync options that macOS's old built-in rsync (2.6.9) also has: no --mkpath, no --chmod. Folders are
+# made with mkdir over ssh, and local/ is locked down (mode 700/600) with chmod afterwards.
+def remote(command, what):
+    return _run(SSH + [config.SERVER, command], what)
+
+
+def remote_dirs(*dirs):
+    return remote("mkdir -p " + " ".join(shlex.quote(f"{config.SERVER_DIR}/{d}") for d in dirs), "make homelab folders")
+
+
+def lock_remote_local():
+    return remote(f"chmod -R go-rwx {shlex.quote(config.SERVER_DIR + '/local')}", "lock down homelab local/")
+
+
 def push():
-    ok = True
+    ok = remote_dirs("local", "data", "docs")
     if os.path.exists(config.LOCAL_CONFIG_PATH):  # before the code, which reads it
-        ok &= _run(RSYNC + ["-c", "--mkpath", "local/local_config.json", f"{REMOTE}/local/local_config.json"], "push local config")
+        ok &= _run(RSYNC + ["-c", "local/local_config.json", f"{REMOTE}/local/local_config.json"], "push local config")
     ok &= _run(RSYNC + ["-c", "-R"] + CODE + [f"{REMOTE}/"], "push code")
     if os.path.exists("docs/STATUS.md"):  # local log (gitignored); agents on the homelab read it too
         ok &= _run(RSYNC + ["-c", "docs/STATUS.md", f"{REMOTE}/docs/STATUS.md"], "push status")
@@ -55,9 +70,10 @@ def push():
     if os.path.exists(config.LAPTOP_RESUME):
         ok &= _run(RSYNC + ["-c", config.LAPTOP_RESUME, f"{REMOTE}/local/resume.pdf"], "push resume")
     if os.path.exists(config.TOKEN_PATH):
-        ok &= _run(RSYNC + ["-u", "--chmod=F600", "local/token.json", f"{REMOTE}/local/token.json"], "push Google token")
+        ok &= _run(RSYNC + ["-u", "local/token.json", f"{REMOTE}/local/token.json"], "push Google token")
     if os.path.exists(config.GOOGLE_LOGIN_PATH):
         ok &= _run(RSYNC + ["-u", "local/google_login.txt", f"{REMOTE}/local/google_login.txt"], "push Google login date")
+    ok &= lock_remote_local()
     return ok
 
 
@@ -70,9 +86,10 @@ def push_session():
     if server_busy():
         print("Homelab is running its update right now; run `nuauto login` again in a few minutes to copy the session.")
         return False
-    ok = _run(RSYNC + ["--delete", "--mkpath", "--chmod=D700,F600", "local/browser_profile/", f"{REMOTE}/local/browser_profile/"],
-              "push browser profile")
-    ok &= _run(RSYNC + ["--chmod=F600", "local/session_cookies.json", f"{REMOTE}/local/session_cookies.json"], "push session cookies")
+    ok = remote_dirs("local/browser_profile")
+    ok &= _run(RSYNC + ["--delete", "local/browser_profile/", f"{REMOTE}/local/browser_profile/"], "push browser profile")
+    ok &= _run(RSYNC + ["local/session_cookies.json", f"{REMOTE}/local/session_cookies.json"], "push session cookies")
+    ok &= lock_remote_local()
     if ok:
         print("NUworks session copied to the homelab.")
     return ok
