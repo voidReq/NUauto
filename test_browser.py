@@ -165,3 +165,28 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# goto: one more try after a page-load timeout, then give up
+class SlowPage:
+    def __init__(self, fails):
+        self.fails, self.calls, self.waited = fails, 0, 0
+    def goto(self, url, wait_until=None):
+        self.calls += 1
+        if self.calls <= self.fails:
+            raise browser.PlaywrightTimeout("Timeout 30000ms exceeded.")
+    def wait_for_timeout(self, ms):
+        self.waited += ms
+class Log:
+    def write(self, msg):
+        pass
+p = SlowPage(fails=1)
+browser.goto(p, NUW + "/students/", Log(), retry_wait=5)
+assert p.calls == 2 and p.waited == 5000, (p.calls, p.waited)
+p = SlowPage(fails=2)
+try:
+    browser.goto(p, NUW + "/students/", Log(), retry_wait=5)
+    raise AssertionError("second timeout must be raised")
+except browser.PlaywrightTimeout:
+    pass
+assert p.calls == 2
+

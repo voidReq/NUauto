@@ -12,6 +12,7 @@ import os
 import shutil
 import subprocess
 import sys
+import traceback
 import urllib.request
 from datetime import datetime, timedelta
 
@@ -84,7 +85,22 @@ def step(fn, *args):
 
 
 def main():
+    """The scan, then (morning run) the reminders. A failed scan still sends the reminders, from the sheet
+    and the last saved pool."""
     before = {r["id"] for r in jobs.load("pool.json", [])}
+    try:
+        code = scan(before)
+    except Exception as e:  # e.g. NUworks too slow, or the browser profile is busy because apply.py is running
+        traceback.print_exc()
+        notify("NUauto: daily update failed", f"{type(e).__name__}: {str(e)[:150]}")
+        code = 1
+    if datetime.now().hour < 12:  # reminders once a day, with the morning run
+        reminders(before, ok=code == 0)
+    return code
+
+
+def scan(before):
+    """list -> triage -> details -> score -> category -> pool. Returns 0, or 1 if a step stopped (already notified)."""
     listed_before = set(jobs.load("list.json", {}))
     log("list")
     ok, msg = step(jobs.cmd_list)
@@ -134,18 +150,26 @@ def main():
         top = "\n".join(f"{r['effective']}%  {r['title'][:45]} | {r['company'][:25]}" for r in new[:5])
         notify(f"{len(new)} new job{'s' if len(new) > 1 else ''} in your NUworks pool",
                top + "\nRun: nuauto approve")
+    return 0
+
+
+def reminders(before, ok):
+    """Morning reminders. After a good scan, first records jobs applied to by hand (needs the fresh list)."""
     rows = sheet_rows()
-    if rows is not None:
+    if rows is not None and ok:
         try:
             rows = record_hand_applications(before, rows) or rows
         except Exception as e:  # never let this block the reminders
             log(f"hand applications check failed: {type(e).__name__}: {str(e)[:150]}")
-    if datetime.now().hour < 12:  # reminders once a day, with the morning run
-        approved_notice(rows)
-        urgent_notice(pool, rows)
-        todo_notice(rows, scan_summary(jobs.load(SCANS, []), datetime.now()))
-        google_notice()
-    return 0
+    pool = jobs.load("pool.json", [])
+    summary = scan_summary(jobs.load(SCANS, []), datetime.now())
+    for name, fn in [("approved", lambda: approved_notice(rows)), ("urgent", lambda: urgent_notice(pool, rows)),
+                     ("todo", lambda: todo_notice(rows, summary if ok else summary + " (this morning's scan failed)")),
+                     ("google", google_notice)]:
+        try:
+            fn()
+        except Exception as e:  # one broken reminder must not stop the others
+            log(f"{name} reminder failed: {type(e).__name__}: {str(e)[:150]}")
 
 
 def google_notice():
@@ -294,6 +318,6 @@ def weekly():
 if __name__ == "__main__":
     try:
         sys.exit(weekly() if sys.argv[1:] == ["weekly"] else main())
-    except Exception as e:  # e.g. the browser profile is busy because apply.py is running
+    except Exception as e:  # main() handles scan failures itself; this catches the rest
         notify("NUauto: daily update failed", f"{type(e).__name__}: {str(e)[:150]}")
         raise

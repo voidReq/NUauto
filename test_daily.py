@@ -49,4 +49,34 @@ lines = body.split("\n")
 assert title == "NUauto morning" and lines[:2] == ["SUMMARY", "Only you can finish:"], sent[-1]
 assert "Co3" in lines[2] and "Co4" in lines[3] and "Mark" not in body, body
 
+# a failed scan (e.g. NUworks too slow) still sends the morning reminders, from the sheet + last saved pool
+class Morning(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        return datetime(2026, 10, 5, 8, 6)
+daily.datetime = Morning
+def slow(before):
+    raise TimeoutError("Page.goto: Timeout 30000ms exceeded.")
+def never(*a):
+    raise AssertionError("hand-application check needs a fresh list; must not run after a failed scan")
+daily.scan, daily.record_hand_applications = slow, never
+daily.sheet_rows = lambda: [row(4, "Needs Human", "External application ...")]
+daily.google_notice = lambda: 1 / 0  # one broken reminder must not stop the others
+sent.clear()
+assert daily.main() == 1
+titles = [t for t, _ in sent]
+assert titles[0] == "NUauto: daily update failed" and "TimeoutError" in sent[0][1], sent
+assert "NUauto morning" in titles, sent
+body = dict(sent)["NUauto morning"]
+assert "(this morning's scan failed)" in body and "Co4" in body, body
+
+# afternoon run: no reminders
+class Evening(Morning):
+    @classmethod
+    def now(cls, tz=None):
+        return datetime(2026, 10, 5, 18, 6)
+daily.datetime = Evening
+sent.clear()
+assert daily.main() == 1 and [t for t, _ in sent] == ["NUauto: daily update failed"], sent
+
 print("All morning-summary checks passed.")
