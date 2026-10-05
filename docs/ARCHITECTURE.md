@@ -106,4 +106,4 @@ SHEET (columns in sheet.HEADERS, created by setup_sheet.py)
                   Needs Human between the Submit click and the result, so it can't be sent twice).
   set_status only changes rows still Approved. Notes starting sheet.SITE_MARK are written by
   apply.submit_flow and cleared by sheet.mark_site_done. The weekly cap counts Applied rows with a
-  Date in the last 7 days (check_limits).
+  Date in the current week (sheet.week_window, check_limits).
