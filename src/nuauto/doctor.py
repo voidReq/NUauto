@@ -81,7 +81,8 @@ def laptop():
     if not config.HAS_SERVER:
         check_claude()  # local mode: the update runs here
         return say("ok", "no homelab configured (local mode)")
-    if sh(["systemctl", "--user", "is-enabled", "nuauto-daily.timer"]).stdout.strip() == "enabled":
+    if shutil.which("systemctl") and \
+            sh(["systemctl", "--user", "is-enabled", "nuauto-daily.timer"]).stdout.strip() == "enabled":  # no systemd on macOS
         say("WARN", "the old laptop timer is enabled; the homelab runs the update now: "
                     "systemctl --user disable --now nuauto-daily.timer")
 

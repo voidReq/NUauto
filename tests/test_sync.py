@@ -87,6 +87,11 @@ def main():
             if line.startswith("ExecStart="):
                 assert "/.venv/bin/nuauto " in line and ".py" not in line, f"{os.path.basename(unit)}: {line.strip()}"
 
+    # rsync options must work with macOS's old built-in rsync too (2.6.9: no --mkpath, no --chmod)
+    code_lines = [l for l in open(os.path.join(ROOT, PKG, "sync.py")) if not l.strip().startswith("#")]
+    for opt in ("--mkpath", "--chmod", "--info=", "--append-verify"):
+        assert not any(opt in l for l in code_lines), f"sync.py uses {opt}, which macOS's rsync lacks"
+
     print("All sync checks passed.")
 
 

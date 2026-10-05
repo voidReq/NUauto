@@ -17,8 +17,8 @@ longer answers for your approval and always asks you before it submits anything.
 
 ## Setup
 
-Needs Linux (tested on Fedora and Ubuntu; macOS untested), Python 3.12 or newer, a NUworks account, a Google
-account, and [Claude Code](https://claude.com/claude-code) (a Claude subscription or API key; scoring
+Needs Linux or macOS (tested on Fedora and Ubuntu; macOS should work but is untested), Python 3.12
+or newer, a NUworks account, a Google account, and [Claude Code](https://claude.com/claude-code) (a Claude subscription or API key; scoring
 uses Sonnet). `nuauto assist` also needs Node.js (`npx`) and Google Chrome.
 
 ```sh
@@ -26,7 +26,7 @@ git clone https://github.com/voidReq/NUauto.git && cd NUauto
 python3 -m venv .venv
 .venv/bin/pip install -e .                       # installs the `nuauto` command into .venv
 .venv/bin/python -m playwright install firefox
-ln -s "$PWD/.venv/bin/nuauto" ~/.local/bin/nuauto   # ~/.local/bin must be on your PATH
+ln -s "$PWD/.venv/bin/nuauto" ~/.local/bin/nuauto   # ~/.local/bin must be on your PATH (macOS: add it)
 mkdir -m 700 local && cp local_config.example.json local/local_config.json
 curl -fsSL https://claude.ai/install.sh | bash   # Claude Code, if you don't have it
 claude                                           # log in once, then /exit
@@ -67,7 +67,8 @@ Your preferences live in `RULES` and the term ID in `src/nuauto/jobs.py` (term, 
 bonuses) and in the Claude prompts in `prompts/`. See `docs/PIPELINE.md`.
 
 To run updates on a server twice a day instead, fill in the server fields in
-`local/local_config.json` and follow `docs/DEPLOY.md`. Leave them empty and everything runs locally.
+`local/local_config.json` and follow `docs/DEPLOY.md` (the server must be Linux with systemd). Leave them
+empty and everything runs locally.
 
 Check NUworks' terms of use before using this. Everything in `local/` (logins, secrets, answers) is
 gitignored; keep it that way.
