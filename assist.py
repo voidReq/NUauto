@@ -34,6 +34,7 @@ import config
 
 STATE_ENV = "NUAUTO_ASSIST_DIR"
 SERVER = "browser"  # MCP server name -> tools are mcp__browser__browser_*
+MCP_PACKAGE = "@playwright/mcp@0.0.82"  # pinned: the guard is tested against this version's tool inputs
 TOOLS = {"browser_snapshot", "browser_click", "browser_type", "browser_fill_form", "browser_select_option",
          "browser_hover", "browser_press_key", "browser_navigate", "browser_navigate_back", "browser_wait_for",
          "browser_take_screenshot", "browser_tabs", "browser_handle_dialog", "browser_find",
@@ -397,7 +398,7 @@ def run(number, url_override, allow):
         json.dump(state, f)
     os.makedirs(config.ASSIST_PROFILE_DIR, mode=0o700, exist_ok=True)
     mcp = {"mcpServers": {SERVER: {"command": "npx", "args": [
-        "@playwright/mcp@latest", "--user-data-dir", config.ASSIST_PROFILE_DIR, "--output-dir", d]}}}
+        MCP_PACKAGE, "--user-data-dir", config.ASSIST_PROFILE_DIR, "--output-dir", d]}}}
     hook_cmd = f"{shlex.quote(sys.executable)} {shlex.quote(me)} hook"
     settings = {"hooks": {
         "PreToolUse": [{"matcher": f"mcp__{SERVER}__.*|Bash", "hooks": [{"type": "command", "command": f"{hook_cmd} pre"}]}],
@@ -408,15 +409,17 @@ def run(number, url_override, allow):
     with open(os.path.join(config.PROJECT_DIR, "ASSIST_PROMPT.md")) as f:
         rules = f.read().replace("ANSWER ", " ".join(shlex.quote(a) for a in answer_cmd) + " ")
     context = (f"\n\nTHIS RUN\nRow {row.number}: {row.company} | {row.title}\nPosting: {url}\n"
-               f"Allowed sites: {', '.join(state['allowed'])}\nAnswer bank command: "
+               f"Allowed sites: {', '.join(state['allowed'])}\n"
+               "Start when the user says go (the browser tools may still be connecting before that): open the "
+               "posting and fill the application.\nAnswer bank command: "
                f"{' '.join(shlex.quote(a) for a in answer_cmd)} <answer|save|once|alias|blank> ...")
     log_.write(f"Row {row.number}: {row.company} | {row.title} -> {', '.join(state['allowed'])}")
-    log_.write("Starting the agent. Sign in / upload / Submit are yours. Type /exit when you're done.")
+    log_.write("Starting the agent. Sign in / upload / Submit are yours.")
+    print("\n>>> When the session opens, type: go     (type /exit when you're done)\n")
     cmd = [claude_bin(), "--model", "sonnet", "--strict-mcp-config", "--mcp-config", os.path.join(d, "mcp.json"),
            "--settings", os.path.join(d, "settings.json"), "--tools", "Bash",
            "--allowedTools", f"mcp__{SERVER}", f"Bash({sys.executable} {me}:*)",
-           "--append-system-prompt", rules + context,
-           f"Open {url} and fill the application for row {row.number}, following the rules."]
+           "--append-system-prompt", rules + context]
     try:
         subprocess.run(cmd, env={**os.environ, STATE_ENV: d}, cwd=config.PROJECT_DIR)
     except KeyboardInterrupt:
