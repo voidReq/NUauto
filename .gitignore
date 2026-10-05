@@ -21,5 +21,3 @@ logs/
 .venv/
 __pycache__/
 .playwright-mcp/
-workday_profile/
-workday_cookies.json

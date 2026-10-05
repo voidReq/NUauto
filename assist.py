@@ -463,7 +463,7 @@ def run(number, url_override):
     for name, obj in (("mcp.json", mcp), ("settings.json", settings)):
         with open(os.path.join(d, name), "w") as f:
             json.dump(obj, f, indent=1)
-    with open(os.path.join(config.PROJECT_DIR, "ASSIST_PROMPT.md")) as f:
+    with open(os.path.join(config.PROJECT_DIR, "prompts", "ASSIST_PROMPT.md")) as f:
         rules = f.read().replace("ANSWER ", " ".join(shlex.quote(a) for a in answer_cmd) + " ")
     context = (f"\n\nTHIS RUN\nRow {row.number}: {row.company} | {row.title}\nPosting: {url}\n"
                f"Resume file (the only file you may upload): {resume or 'not found'}\n"

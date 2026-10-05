@@ -58,7 +58,7 @@ nuauto test            offline tests
 ## Make it yours
 
 Your preferences live in `RULES` and the term ID in `jobs.py` (term, class level, thresholds,
-bonuses) and in the Claude prompts `*_PROMPT.md`. See `docs/PIPELINE.md`.
+bonuses) and in the Claude prompts in `prompts/`. See `docs/PIPELINE.md`.
 
 To run updates on a server twice a day instead, fill in the server fields in
 `local_config.json` and follow `docs/DEPLOY.md`. Leave them empty and everything runs locally.

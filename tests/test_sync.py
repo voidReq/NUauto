@@ -13,7 +13,7 @@ import config
 import sync
 
 ROOT = config.PROJECT_DIR
-NOT_PUSHED = ["test_*.py", "oauth_test.py", "setup_sheet.py"]  # tests and one-off setup scripts stay on the laptop
+NOT_PUSHED = ["test_*.py", "tests/*", "setup_sheet.py"]  # tests (tests/) and the one-off setup script stay on the laptop
 SCRIPT = "nuauto"  # Python script without the .py extension
 
 
@@ -94,11 +94,12 @@ def main():
             referenced.update(prompt.findall(s))
     assert {"TRIAGE_PROMPT.md", "SCORE_PROMPT.md", "CATEGORY_PROMPT.md"} <= referenced, referenced
     for p in sorted(referenced):
-        assert os.path.isfile(os.path.join(ROOT, p)), f"{p} is referenced but missing"
-        assert p in code, f"{p} is referenced but not in sync.CODE"
+        assert os.path.isfile(os.path.join(ROOT, "prompts", p)), f"prompts/{p} is referenced but missing"
+        assert "prompts/" + p in code, f"prompts/{p} is referenced but not in sync.CODE"
     # and a prompt file on disk that nothing pushes is a forgotten file too
-    for p in sorted(glob.glob(os.path.join(ROOT, "*_PROMPT.md"))):
-        assert os.path.basename(p) in code, f"{os.path.basename(p)} exists but is not in sync.CODE"
+    assert not glob.glob(os.path.join(ROOT, "*_PROMPT.md")), "prompt files belong in prompts/"
+    for p in sorted(glob.glob(os.path.join(ROOT, "prompts", "*.md"))):
+        assert "prompts/" + os.path.basename(p) in code, f"prompts/{os.path.basename(p)} exists but is not in sync.CODE"
 
     # reverse: every top-level project module (not a test / one-off) is in CODE, so a new one can't be forgotten
     for m in local_modules():

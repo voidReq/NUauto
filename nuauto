@@ -34,7 +34,8 @@ def main():
     if cmd == "test":
         import glob
         import subprocess
-        failed = [t for t in sorted(glob.glob("test_*.py")) if subprocess.run([sys.executable, t]).returncode]
+        env = {**os.environ, "PYTHONPATH": ROOT}  # tests live in tests/ and import the modules here
+        failed = [t for t in sorted(glob.glob("tests/test_*.py")) if subprocess.run([sys.executable, t], env=env).returncode]
         sys.exit(f"FAILED: {', '.join(failed)}" if failed else 0)
     if cmd == "doctor":
         import doctor

@@ -99,7 +99,7 @@ BROWSER (Playwright, Firefox)
   while apply.py, jobs.py or browser.py are running. Use a separate profile dir if in doubt.
   The homelab has its own copy and uses it during its update runs (08:00/18:00 New York).
 
-COMPANY-SITE AGENT (assist.py + ASSIST_PROMPT.md, `nuauto assist <row>`; added 2026-10-05)
+COMPANY-SITE AGENT (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`; added 2026-10-05)
 - Only for Needs Human rows stopped at an external application (Notes start "External application";
   Workday, Oracle, iCIMS, SuccessFactors...). Never NUworks itself (refused even with --url), never rows
   stopped for something on NUworks (cover letter, transcript...): those are mine (assist.assist_target).
@@ -108,7 +108,7 @@ COMPANY-SITE AGENT (assist.py + ASSIST_PROMPT.md, `nuauto assist <row>`; added 2
 - Relaxed 2026-10-05 (my call): the agent may visit any site, fill anything, tick boxes, upload the
   resume, and draft longer answers that I approve before it types them. The one hard rule: NOTHING is
   submitted without my review. Enforced by code (Claude Code hooks -> `assist.py hook pre|post`, logic
-  in assist.decide / update_after, tested in test_assist.py): every Submit-type click (SUBMIT_RE, incl.
+  in assist.decide / update_after, tested in tests/test_assist.py): every Submit-type click (SUBMIT_RE, incl.
   "Apply"), Enter and type(submit) make the terminal ask me first ("ask"); element names come from the
   latest full snapshot only (refs cleared by anything that changes the page), never from the agent's
   description. Never: password fields, page scripts (could submit behind the review), uploads other than
@@ -153,11 +153,11 @@ sheet.py (rows, limits, status updates, Google login)   apply.py (the runner)
 browser.py (login/open, domain lock, cookies)   answers.py (answer bank)   jobs.py (pool + viewers)
 daily.py (homelab update + Discord)   web.py (Mark-done page, homelab)   sync.py (laptop<->homelab)
 doctor.py (health check)   inspect_form.py (read-only form lister)   assist.py (company-site agent)
-setup_sheet.py, oauth_test.py (one-time, done)
-TRIAGE_PROMPT.md  SCORE_PROMPT.md  CATEGORY_PROMPT.md (Claude batch prompts)   ASSIST_PROMPT.md (agent rules)
+setup_sheet.py (sheet setup / `format` restyle)
+prompts/ (TRIAGE_, SCORE_, CATEGORY_PROMPT.md: Claude batch prompts; ASSIST_PROMPT.md: agent rules)
 README.md (public, new-user setup; keep it short)   docs/ (DEPLOY, PIPELINE, STATUS)
 deploy/systemd/ (homelab units)   requirements.txt
-test_*.py (offline checks)
+tests/ (test_*.py offline checks)
 local_config.json: my personal settings (sheet ID, resume path, homelab hostname/dir, Mark-done URL,
   Tailscale IP). Gitignored; local_config.example.json is the committed template. Keep personal
   values (names, emails, hosts, IPs, IDs) out of every committed file: the repo may go public.
@@ -181,7 +181,7 @@ python setup_sheet.py format     # restyle the sheet (formatting only, safe to r
 python jobs.py stats | pool | suggest 5
 
 TESTS
-`nuauto test` runs every test_*.py: offline, no sheet, no browser, no network. Run it before
+`nuauto test` runs every tests/test_*.py: offline, no sheet, no browser, no network. Run it before
 pushing. test_sync.py fails if a new module or prompt isn't in sync.CODE (so it would never
 reach the homelab). test_web.py covers the public Mark-done links (signatures; GET never
 changes the sheet). test_browser.py covers the domain lock. test_assist.py covers the company-site agent's guard.
