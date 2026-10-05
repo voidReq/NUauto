@@ -16,7 +16,7 @@ RSYNC = ["rsync", "-a", "-e", " ".join(SSH)]
 REMOTE = f"{config.SERVER}:{config.SERVER_DIR}"
 # Pushed with rsync -R, so paths keep their folders (docs/...). The docs go too, so agents there read current ones.
 CODE = ["config.py", "sheet.py", "jobs.py", "daily.py", "browser.py", "apply.py", "answers.py", "inspect_form.py",
-        "sync.py", "web.py", "doctor.py", "nuauto", "TRIAGE_PROMPT.md", "SCORE_PROMPT.md", "CATEGORY_PROMPT.md",
+        "sync.py", "web.py", "doctor.py", "assist.py", "nuauto", "TRIAGE_PROMPT.md", "SCORE_PROMPT.md", "CATEGORY_PROMPT.md", "ASSIST_PROMPT.md",
         "requirements.txt", "local_config.example.json", "CLAUDE.md", "docs/DEPLOY.md", "docs/PIPELINE.md"]
 
 

@@ -9,6 +9,7 @@
   nuauto login        log in to NUworks by hand (and copies the session to the homelab, if any)
   nuauto login google    fresh Google Sheets login (needed every 7 days; Discord reminds you)
   nuauto test         run all offline tests (no network, no sheet, no browser)
+  nuauto assist       company-site applications: list rows / `<row>` starts the agent; you press Submit
   nuauto doctor       health check of this machine (and the homelab + Mark-done page, if any; read-only)
 """
 import os
@@ -27,8 +28,8 @@ import config  # noqa: E402
 def main():
     cmd, rest = (sys.argv[1], sys.argv[2:]) if len(sys.argv) > 1 else ("", [])
     laptop = config.HAS_SERVER and not config.IS_SERVER  # a laptop that syncs with a homelab
-    if cmd not in ("approve", "rate", "apply", "status", "update", "login", "test", "doctor") or \
-            (rest and cmd != "apply" and not (cmd == "login" and rest == ["google"])):
+    if cmd not in ("approve", "rate", "apply", "status", "update", "login", "test", "doctor", "assist") or \
+            (rest and cmd not in ("apply", "assist") and not (cmd == "login" and rest == ["google"])):
         sys.exit(__doc__)
     if cmd == "test":
         import glob
@@ -67,6 +68,11 @@ def main():
         elif cmd == "update":  # on the homelab itself, or no homelab at all
             import daily
             sys.exit(daily.main())
+        elif cmd == "assist":
+            if config.IS_SERVER:
+                sys.exit("nuauto assist runs on the laptop (visible browser, you at the terminal).")
+            import assist
+            assist.main(rest)
         elif cmd == "login" and rest == ["google"]:
             import sheet
             sheet.google_login()

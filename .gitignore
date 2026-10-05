@@ -13,6 +13,7 @@ profile.json
 google_login.txt
 resume.pdf
 browser_profile/
+assist_profile/
 # Generated
 data/
 work/
@@ -20,3 +21,5 @@ logs/
 .venv/
 __pycache__/
 .playwright-mcp/
+workday_profile/
+workday_cookies.json
