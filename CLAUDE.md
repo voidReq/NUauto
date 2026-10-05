@@ -108,7 +108,9 @@ COMPANY-SITE AGENT (assist.py + ASSIST_PROMPT.md, `nuauto assist <row>`; added 2
   (sign-in pages are mine); never a Submit-named button (SUBMIT_RE), Enter, type(submit), checkboxes,
   password fields; element refs only from the latest full snapshot; typed text / chosen options
   must be what the answer bank issued this run for that field (`assist.py answer|save|once|alias|
-  blank`, one short line each, no essays); Bash only the answer-bank command.
+  blank`, one line up to 300 chars, no essays); Bash only the answer-bank command; unnamed fields take
+  the label line right above them in the snapshot. Read/Glob/Grep only inside my resume and
+  local_config.json "assist_read_paths" (my writeups), to SUGGEST answers I approve.
 - Mine: sign-in, uploads (resume), essays, checkboxes, Submit. After I /exit, the launcher asks
   "did you submit?"; y = Applied (dated today, counts toward the weekly limit). The agent never
   touches the sheet. Log per run: logs/<stamp>_assist_row<N>/ (actions.log = every guard decision).

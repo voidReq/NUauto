@@ -131,6 +131,44 @@ assert s2["refs"]
 w = assist.update_after(s2, B + "browser_click", "### Page\n- Page URL: https://accounts.google.com/x\n")
 assert w and "not the posting" in w and s2["current_url"].startswith("https://accounts.google.com")
 
+# unnamed fields take the question text right above them (from the page, never from the agent)
+Q = """              - group [ref=f13e993]:
+                - paragraph [ref=f13e997]: What are your top 3 skills? (30 word limit)*
+                - textbox [ref=f13e1000]
+              - group [ref=f13e1002]:
+                - paragraph [ref=f13e1006]: How did you hear about this co-op opportunity? (30 word limit)*
+                - textbox [ref=f13e1009]
+                - textbox [ref=f13e1010]
+          - button "Back" [ref=f13e744] [cursor=pointer]"""
+r = assist.parse_refs(Q)
+assert r["f13e1000"]["name"] == "What are your top 3 skills? (30 word limit)*"
+assert r["f13e1009"]["name"] == "How did you hear about this co-op opportunity? (30 word limit)*"
+assert r["f13e1010"]["name"] == "" and r["f13e744"]["name"] == "Back"
+q = {**fresh(), "refs": r}
+assist.issue(q, "How did you hear about this co-op opportunity? (30 word limit)*", "From NUworks")
+ok(q, B + "browser_type", {"target": "f13e1009", "text": "From NUworks"})
+blocked(q, B + "browser_type", {"target": "f13e1000", "text": "From NUworks"}, "no answer-bank value")
+blocked(q, B + "browser_type", {"target": "f13e1010", "text": "From NUworks"}, "no answer-bank value")
+
+# files: only the resume and notes, never the project folder (secrets)
+notes = tempfile.mkdtemp()
+open(os.path.join(notes, "writeup.md"), "w").write("x")
+resume = os.path.join(tmp, "resume.pdf")
+open(resume, "w").write("x")
+os.symlink(config.PROJECT_DIR, os.path.join(notes, "sneaky"))
+r = {**fresh(), "read_roots": [os.path.realpath(notes), os.path.realpath(resume)]}
+ok(r, "Read", {"file_path": os.path.join(notes, "writeup.md")})
+ok(r, "Read", {"file_path": resume})
+ok(r, "Grep", {"pattern": "XSS", "path": notes})
+ok(r, "Glob", {"pattern": "**/*.md", "path": notes})
+blocked(r, "Read", {"file_path": os.path.join(config.PROJECT_DIR, "token.json")}, "blocked")
+blocked(r, "Read", {"file_path": os.path.join(notes, "sneaky", "token.json")}, "blocked")      # symlink out
+blocked(r, "Read", {"file_path": os.path.join(notes, "..", "x")}, "blocked")
+blocked(r, "Grep", {"pattern": "x"}, "path")                                               # default = project folder
+blocked(r, "Glob", {"pattern": "/home/**/token.json", "path": notes}, "inside")
+blocked(r, "Glob", {"pattern": "../**", "path": notes}, "inside")
+blocked(r, "Read", {"file_path": tmp + "/answers.json"}, "blocked")
+
 # links in Notes
 assert assist.link_from_notes(f"External application: {H} -> https://{H}/careers/job/X_1") == f"https://{H}/careers/job/X_1"
 safe = "https://eur01.safelinks.protection.outlook.com/?url=https%3A%2F%2Fcareer.example%2Fjob%3Fid%3D1&data=x"
@@ -146,7 +184,7 @@ assert assist.lookup(E, "City*", [], "My Information")["status"] == "unknown"
 assert assist.lookup(E, "Work Authorization*", ["Yes", "No"], "")["status"] == "ask_every_time"
 assert assist.lookup(E, "Email*", [], "Voluntary Disclosures")["status"] == "ask_every_time"
 assert assist.lookup(E, "Email*", ["a@b.c"], "")["status"] == "not_an_option"
-assert assist.valid_answer("x" * 201, []) and assist.valid_answer("two\nlines", []) and assist.valid_answer(" ", [])
+assert assist.valid_answer("x" * 301, []) and assist.valid_answer("two\nlines", []) and assist.valid_answer(" ", [])
 assert assist.valid_answer("No", ["Yes", "No"]) is None and assist.valid_answer("Nope", ["Yes", "No"])
 
 # answer-bank commands through a run folder (what the agent runs)

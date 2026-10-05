@@ -10,6 +10,7 @@ session, the terminal asks whether you submitted; y marks the row Applied (dated
 The agent only reads pages, clicks and types. Code decides the rest. Every browser and Bash call goes
 through `assist.py hook pre|post` (Claude Code hooks):
 - browser tools: only TOOLS. No page scripts, uploads, drags. Bash: only `assist.py <answer-bank command>`.
+- files: Read / Glob / Grep only inside the resume and local_config "assist_read_paths" (notes, writeups).
 - sites: navigation only to allowed hosts (the posting's, plus --allow); no click or typing while the
   page is on any other host (sign-in pages are yours).
 - never: buttons/links named Submit (SUBMIT_RE), the Enter key, type(submit=true), checkboxes/switches,
@@ -46,8 +47,11 @@ GUARDED_ROLES = {"radio", "option", "menuitemradio", "menuitemcheckbox", "menuit
 USER_ROLES = {"checkbox", "switch"}
 ENTER_KEYS = {"enter", "numpadenter", "return"}
 BASH_COMMANDS = {"answer", "save", "once", "alias", "blank"}
-MAX_ANSWER = 200
-REF_LINE = re.compile(r'-\s+(?P<role>[a-z]+)(?:\s+"(?P<name>(?:[^"\\]|\\.)*)")?[^\n]*?\[ref=(?P<ref>[^\]\s]+)\]')
+MAX_ANSWER = 300  # one line; enough for a "30 word limit" answer, not an essay
+REF_LINE = re.compile(r'^(?P<indent>\s*)-\s+(?P<role>[a-z]+)(?:\s+"(?P<name>(?:[^"\\]|\\.)*)")?(?P<attrs>[^\n]*?)\[ref=(?P<ref>[^\]\s]+)\](?P<tail>[^\n]*)$')
+TEXT_LINE = re.compile(r'^(?P<indent>\s*)-\s+text:\s*(?P<text>.+)$')
+LABEL_ROLES = {"paragraph", "generic", "text", "heading", "label", "strong", "emphasis", "legend"}
+FIELD_ROLES = {"textbox", "combobox", "searchbox", "spinbutton"}
 
 
 # ---------- pure helpers (offline-tested) ----------
@@ -77,11 +81,31 @@ def page_always_asks(page):
 
 
 def parse_refs(text):
-    """{ref: {"role", "name"}} from a Playwright MCP snapshot."""
-    out = {}
-    for m in REF_LINE.finditer(text):
-        name = (m.group("name") or "").replace('\\"', '"')
-        out[m.group("ref")] = {"role": m.group("role"), "name": name}
+    """{ref: {"role", "name"}} from a Playwright MCP snapshot. A field with no accessible name gets the text
+    of the label-like line right above it at the same depth (e.g. a question paragraph, then its textbox):
+    read from the page, never from the agent."""
+    out, above = {}, {}  # above: indent -> text of the latest label-like sibling line
+    for line in text.splitlines():
+        m = REF_LINE.match(line)
+        t = None if m else TEXT_LINE.match(line)
+        if not m and not t:
+            continue
+        indent = len((m or t).group("indent"))
+        for k in [k for k in above if k > indent]:
+            del above[k]
+        if t:
+            above[indent] = t.group("text").strip()
+            continue
+        role, name = m.group("role"), (m.group("name") or "").replace('\\"', '"')
+        tail = m.group("tail").strip()
+        inline = tail[1:].strip() if tail.startswith(":") else ""
+        if not name and role in FIELD_ROLES and indent in above:
+            name = above.pop(indent)
+        out[m.group("ref")] = {"role": role, "name": name}
+        if role in LABEL_ROLES and inline:
+            above[indent] = inline
+        elif role not in LABEL_ROLES:
+            above.pop(indent, None)
     return out
 
 
@@ -119,10 +143,34 @@ def update_after(state, tool, text):
     return None
 
 
+def under(path, roots):
+    """True if path (symlinks resolved) is one of the file roots or inside one of the folder roots."""
+    if not path:
+        return False
+    real = os.path.realpath(os.path.expanduser(path))
+    return any(real == r or (os.path.isdir(r) and real.startswith(r.rstrip(os.sep) + os.sep)) for r in roots)
+
+
+def check_read(state, tool, inp):
+    roots = state.get("read_roots", [])
+    if tool == "Read":
+        p = inp.get("file_path", "")
+        return None if under(p, roots) else f"Reading {p!r} is blocked: only the resume and notes ({roots})."
+    p = inp.get("path", "")
+    if not under(p, roots):
+        return f"{tool} needs a path inside the resume / notes ({roots}), not {p or 'the project folder'!r}."
+    pattern = inp.get("pattern", "") if tool == "Glob" else inp.get("glob", "") or ""
+    if pattern.startswith(("/", "~")) or ".." in pattern:
+        return f"{tool} pattern must stay inside the notes folder."
+    return None
+
+
 def decide(state, tool, inp):
     """None = allow, else the reason to block. Pure: the PreToolUse hook's whole logic."""
     if tool == "Bash":
         return check_bash(state, inp.get("command", ""))
+    if tool in ("Read", "Glob", "Grep"):
+        return check_read(state, tool, inp)
     prefix = f"mcp__{SERVER}__"
     if not tool.startswith(prefix):
         return f"{tool} is not allowed in this session."
@@ -392,8 +440,9 @@ def run(number, url_override, allow):
     d = log_.dir
     me = os.path.abspath(__file__)
     answer_cmd = [sys.executable, me]
+    read_roots = [os.path.realpath(r) for r in [*config.ASSIST_READ_PATHS, config.LAPTOP_RESUME] if os.path.exists(r)]
     state = {"allowed": sorted({host(url), *[h.lower() for h in allow]}), "current_url": url, "refs": {},
-             "issued": {}, "issued_values": [], "answer_cmd": answer_cmd}
+             "issued": {}, "issued_values": [], "answer_cmd": answer_cmd, "read_roots": read_roots}
     with open(os.path.join(d, "state.json"), "w") as f:
         json.dump(state, f)
     os.makedirs(config.ASSIST_PROFILE_DIR, mode=0o700, exist_ok=True)
@@ -401,7 +450,7 @@ def run(number, url_override, allow):
         MCP_PACKAGE, "--user-data-dir", config.ASSIST_PROFILE_DIR, "--output-dir", d]}}}
     hook_cmd = f"{shlex.quote(sys.executable)} {shlex.quote(me)} hook"
     settings = {"hooks": {
-        "PreToolUse": [{"matcher": f"mcp__{SERVER}__.*|Bash", "hooks": [{"type": "command", "command": f"{hook_cmd} pre"}]}],
+        "PreToolUse": [{"matcher": f"mcp__{SERVER}__.*|Bash|Read|Glob|Grep", "hooks": [{"type": "command", "command": f"{hook_cmd} pre"}]}],
         "PostToolUse": [{"matcher": f"mcp__{SERVER}__.*", "hooks": [{"type": "command", "command": f"{hook_cmd} post"}]}]}}
     for name, obj in (("mcp.json", mcp), ("settings.json", settings)):
         with open(os.path.join(d, name), "w") as f:
@@ -411,14 +460,17 @@ def run(number, url_override, allow):
     context = (f"\n\nTHIS RUN\nRow {row.number}: {row.company} | {row.title}\nPosting: {url}\n"
                f"Allowed sites: {', '.join(state['allowed'])}\n"
                "Start when the user says go (the browser tools may still be connecting before that): open the "
-               "posting and fill the application.\nAnswer bank command: "
+               "posting and fill the application.\n"
+               f"Resume and notes you may read (Read / Glob / Grep, nothing else): {', '.join(read_roots) or 'none'}\n"
+               "Answer bank command: "
                f"{' '.join(shlex.quote(a) for a in answer_cmd)} <answer|save|once|alias|blank> ...")
     log_.write(f"Row {row.number}: {row.company} | {row.title} -> {', '.join(state['allowed'])}")
     log_.write("Starting the agent. Sign in / upload / Submit are yours.")
     print("\n>>> When the session opens, type: go     (type /exit when you're done)\n")
     cmd = [claude_bin(), "--model", "sonnet", "--strict-mcp-config", "--mcp-config", os.path.join(d, "mcp.json"),
-           "--settings", os.path.join(d, "settings.json"), "--tools", "Bash",
-           "--allowedTools", f"mcp__{SERVER}", f"Bash({sys.executable} {me}:*)",
+           "--settings", os.path.join(d, "settings.json"), "--tools", "Bash", "Read", "Glob", "Grep",
+           *[a for r in read_roots for a in ("--add-dir", r if os.path.isdir(r) else os.path.dirname(r))],
+           "--allowedTools", f"mcp__{SERVER}", f"Bash({sys.executable} {me}:*)", "Read", "Glob", "Grep",
            "--append-system-prompt", rules + context]
     try:
         subprocess.run(cmd, env={**os.environ, STATE_ENV: d}, cwd=config.PROJECT_DIR)
