@@ -17,7 +17,7 @@ longer answers for your approval and always asks you before it submits anything.
 
 ## Setup
 
-Needs Linux (tested on Fedora and Ubuntu; macOS untested), Python 3.12, a NUworks account, a Google
+Needs Linux (tested on Fedora and Ubuntu; macOS untested), Python 3.12 or newer, a NUworks account, a Google
 account, and [Claude Code](https://claude.com/claude-code) (a Claude subscription or API key; scoring
 uses Sonnet). `nuauto assist` also needs Node.js (`npx`) and Google Chrome.
 
