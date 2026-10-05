@@ -250,4 +250,16 @@ class IO:
 assert answers.choose_answer("x", "select", ["A", "University / College recruiting"], IO("University / College recruiting")) == "University / College recruiting"
 assert answers.choose_answer("x", "select", ["A", "B"], IO("2")) == "B"
 
+# NUworks-side retry: refused once Submit was clicked there (mark is written before the click), or when done
+from nuauto.apply import NUWORKS_CLICK_MARK
+blocked = assist.nuworks_side_blocked
+assert blocked("") is None
+assert blocked("Applied on the company site.") is None
+assert blocked("NUworks side NOT submitted: Resume missing.") is None
+assert "already submitted" in blocked("x NUworks side submitted too (confirmed by NUworks page).")
+assert "check NUworks" in blocked(f"x {NUWORKS_CLICK_MARK}")
+assert "check NUworks" in blocked("NUworks side: Submit clicked but no confirmation seen; check NUworks.")
+assert "check NUworks" in blocked("NUworks side: stopped by Ctrl+C after Submit was clicked; check NUworks.")
+assert blocked("NUworks side: stopped by Ctrl+C before Submit; not submitted.") is None
+
 print("All assist (agent guard) checks passed.")

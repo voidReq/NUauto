@@ -59,6 +59,7 @@ COMPANY-SITE AGENT (assist.py, prompts/ASSIST_PROMPT.md)
 - Rows the agent may take: Needs Human + "External application"; never NUworks (even with --url) | assist.assist_target | test_assist
 - Sheet touched only by the launcher, after you answer y; agent has no sheet access | assist.run (mark_applied_by_hand), tools limited to the list above | test_assist (target rules only; the y/n flow is not tested)
 - NUworks side after a company-site submit reuses apply code, outcome appended to Notes | apply.submit_nuworks_side, sheet.append_note | no test
+- NUworks side never sent twice: apply.NUWORKS_CLICK_MARK goes in Notes before the click; a retry refuses once it (or "submitted") is there | assist.nuworks_side_blocked | test_assist
 - Every guard decision logged | assist.hook -> actions.log | no test
 - Playwright MCP pinned to one version (guard tested against its tool inputs) | assist.MCP_PACKAGE | no test
 
@@ -76,7 +77,6 @@ GAPS (policy or prompt only, or weaker than the rules read)
 - Assist: Submit detection is by exact button name (SUBMIT_RE). An icon-only or differently worded final button ("Place order", "Done") is not caught. Pressing Space on a focused button is not asked about (only Enter is).
 - Assist: no domain lock. The agent may visit any http(s) site and tick any box; only the Submit review stands between it and a submission.
 - Assist: the cap is checked once at start (sheet.check_limits); marking a row Applied by hand has no cap check (the application has already gone out).
-- apply.submit_nuworks_side has no mark_submit_started step and no limit check. A crash after its Submit click and a retry of `nuauto assist nuworks <row>` could submit twice; only the "NUworks side submitted" note stops a retry.
 - Single use of browser_profile/ is not enforced by our code, only by Firefox locking the profile.
 - local/ being mode 700 is not enforced in code (only the profile dir and the two secret files get chmod).
 - "Check NUworks' terms of use before running against the real site" is a human to-do (docs/STATUS.md OPEN), not enforced.

@@ -501,6 +501,17 @@ def run(number, url_override):
     nuworks_side(ws, row.number)
 
 
+def nuworks_side_blocked(notes):
+    """Why the NUworks side must not be (re)submitted, from the row's Notes; None = go ahead. Once Submit was
+    clicked there, only the user can tell whether it went through (the older notes are matched too)."""
+    if "NUworks side submitted" in notes:
+        return "the NUworks side is already submitted."
+    if any(m in notes for m in ("NUworks side: Submit clicked", "after Submit was clicked")):
+        return ("Submit was already clicked on NUworks once; check NUworks by hand. If it did not go through, "
+                "delete that note in the sheet and run this again.")
+    return None
+
+
 def nuworks_side(ws, number):
     """Company site done -> submit the same job on NUworks too (apply.submit_nuworks_side: tested NUworks
     code, not the agent)."""
@@ -509,8 +520,9 @@ def nuworks_side(ws, number):
     row = next((r for r in sheet.read_rows(ws) if r.number == number), None)
     if row is None or row.status != "Applied":
         sys.exit(f"Row {number} is not Applied; the NUworks side runs only after the company site is done.")
-    if "NUworks side submitted" in row.notes:
-        sys.exit(f"Row {number}: the NUworks side is already submitted.")
+    blocked = nuworks_side_blocked(row.notes)
+    if blocked:
+        sys.exit(f"Row {number}: {blocked}")
     print(f"\nNow submitting row {number} on NUworks too (Ctrl+C stops)...")
     print(apply.submit_nuworks_side(row, ws))
 
