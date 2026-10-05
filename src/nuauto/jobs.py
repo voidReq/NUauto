@@ -1,19 +1,19 @@
 """Build a clean pool of Spring 2027 co-ops that match your resume, then suggest from it.
 
 Pipeline (run in order; each step only does new work):
-  python jobs.py list              # 1. job list via NUworks search, server-side filters (script)
-  python jobs.py triage-export     # 2. batches for a Claude subagent: drop clearly unrelated titles
-  python jobs.py triage-import
-  python jobs.py details           # 3. full details for kept jobs + hard rules (script)
-  python jobs.py score-export      # 4. batches for a Claude subagent: match % vs your resume
-  python jobs.py score-import
-  python jobs.py cat-export        # 4b. batches for a Claude subagent: role category (CATEGORY_PROMPT.md)
-  python jobs.py cat-import
-  python jobs.py pool              # 5. thresholds + bonuses -> the pool
-  python jobs.py rate              # your y/n on pool jobs (teaches the ranking model)
+  nuauto jobs list              # 1. job list via NUworks search, server-side filters (script)
+  nuauto jobs triage-export     # 2. batches for a Claude subagent: drop clearly unrelated titles
+  nuauto jobs triage-import
+  nuauto jobs details           # 3. full details for kept jobs + hard rules (script)
+  nuauto jobs score-export      # 4. batches for a Claude subagent: match % vs your resume
+  nuauto jobs score-import
+  nuauto jobs cat-export        # 4b. batches for a Claude subagent: role category (CATEGORY_PROMPT.md)
+  nuauto jobs cat-import
+  nuauto jobs pool              # 5. thresholds + bonuses -> the pool
+  nuauto jobs rate              # your y/n on pool jobs (teaches the ranking model)
   nuauto approve                  # viewer on the best unrated jobs: y = Approved in the sheet, n = no
-  python jobs.py suggest [N]       # top N of the pool -> sheet as Proposed, after you say y
-  python jobs.py stats
+  nuauto jobs suggest [N]       # top N of the pool -> sheet as Proposed, after you say y
+  nuauto jobs stats
 
 Rules live in RULES below. Nothing here clicks Apply or changes NUworks.
 """
@@ -28,8 +28,8 @@ import sys
 from datetime import date
 from urllib.parse import urlparse
 
-import config
-import sheet
+from nuauto import config
+from nuauto import sheet
 
 HOST = "https://northeastern-csm.symplicity.com"
 SPRING_2027 = "d13c36bce4531e63c56c9b58b90dbb71"  # el_work_term id for "2027 - Spring"
@@ -185,7 +185,7 @@ def labels(value):
 # ---------------------------------------------------------------- browser helpers
 
 def open_browser(p, label):
-    import browser
+    from nuauto import browser
     log = browser.RunLog(label)
     blocked = []
     context = browser.launch(p)
@@ -212,7 +212,7 @@ def search_pages(browser, page, context, log, query):
         got.clear()
         url = f"{HOST}/students/app/jobs/search?{query}&perPage=100&page={n}"
         if not browser.goto_logged_in(page, context, url, log):
-            raise SystemExit("Not logged in. Run: python browser.py login")
+            raise SystemExit("Not logged in. Run: nuauto login")
         for _ in range(30):
             hit = [v for u, v in got.items() if f"page={n}&" in u and "perPage=100" in u]
             if hit:
@@ -432,7 +432,7 @@ def cmd_details():
             browser, log, context, page, blocked = open_browser(p, "jobs_details")
             try:
                 if not browser.goto_logged_in(page, context, config.NUWORKS_START_URL, log):
-                    sys.exit("Not logged in. Run: python browser.py login")
+                    sys.exit("Not logged in. Run: nuauto login")
                 for n, i in enumerate(todo, 1):
                     raw = None
                     for attempt in (1, 2):
@@ -447,7 +447,7 @@ def cmd_details():
                         if attempt == 1 and not browser.goto_logged_in(page, context, config.NUWORKS_START_URL, log):
                             break
                     if raw is None:
-                        log.write(f"Could not read job {i}; stopping. Run `python browser.py login`, then rerun.")
+                        log.write(f"Could not read job {i}; stopping. Run `nuauto login`, then rerun.")
                         break
                     with open(path("details", f"{i}.json"), "w") as f:
                         json.dump(slim(raw), f, indent=1)

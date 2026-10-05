@@ -18,11 +18,11 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlencode, urlparse
 
-import config
+from nuauto import config
 
 BASE_URL = config.LOCAL["web_base_url"]
 LISTEN = (config.LOCAL["web_listen_host"], 8765)  # homelab's Tailscale IP: not reachable from the LAN or the internet directly
-SECRET_PATH = os.path.join(config.PROJECT_DIR, "web_secret.txt")
+SECRET_PATH = config.WEB_SECRET_PATH
 ACTIONS = {"site": "Mark the company-site application as done", "applied": "Mark as Applied (you applied yourself)"}
 
 
@@ -84,8 +84,8 @@ class Handler(BaseHTTPRequestHandler):
         return a, int(r), j
 
     def _row(self, r, j):
-        import jobs
-        import sheet
+        from nuauto import jobs
+        from nuauto import sheet
         ws = sheet.open_worksheet()
         row = next((x for x in sheet.read_rows(ws) if x.number == r), None)
         if row is None or row.url != jobs.job_url(j):
@@ -114,7 +114,7 @@ class Handler(BaseHTTPRequestHandler):
         if p is None:
             return self._send(404, "<p>Not found.</p>")
         a, r, j = p
-        import sheet
+        from nuauto import sheet
         try:
             ws, row = self._row(r, j)
             if row is None:

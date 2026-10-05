@@ -1,13 +1,14 @@
-# Secrets (never commit; see CLAUDE.md "Secrets")
+# Everything personal or secret lives in local/ (settings, logins, answers, browser profiles). Never commit it.
+local/
+docs/STATUS.md
+# The same names anywhere else, in case one ends up outside local/ by mistake
 token.json
 session_cookies.json
 client_secret.json
 client_secret_*.json
 discord_webhook.txt
 web_secret.txt
-# Personal data / per-machine state
 local_config.json
-docs/STATUS.md
 answers.json
 profile.json
 google_login.txt
@@ -20,4 +21,6 @@ work/
 logs/
 .venv/
 __pycache__/
+*.egg-info/
+build/
 .playwright-mcp/

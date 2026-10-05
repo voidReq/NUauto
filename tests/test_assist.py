@@ -8,13 +8,13 @@ import os
 import sys
 import tempfile
 
-import config
+from nuauto import config
 
 tmp = tempfile.mkdtemp()
 config.ANSWERS_PATH = os.path.join(tmp, "answers.json")
 
-import answers  # noqa: E402
-import assist  # noqa: E402
+from nuauto import answers  # noqa: E402
+from nuauto import assist  # noqa: E402
 
 H = "acme.wd5.myworkdayjobs.com"
 SNAP = f"""### Page state

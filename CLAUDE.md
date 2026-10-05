@@ -21,8 +21,7 @@ GIT
   2026-10-04). main only receives merges: work on a branch, merge when I OK it, push when I OK it.
   Before any push: no personal info in tracked files or commit messages (names, emails, hosts,
   IPs, IDs, companies I applied to); those go in local_config.json or docs/STATUS.md.
-- Gitignored: secrets, local_config.json, answers.json, profile.json, google_login.txt, data/, work/, logs/,
-  browser_profile/, assist_profile/, .venv/.
+- Gitignored: local/ (all personal files and secrets), docs/STATUS.md, data/, work/, logs/, .venv/.
 - Whatever is checked out on the laptop is what the next `nuauto` command pushes to the homelab.
 
 HARD LIMITS
@@ -87,15 +86,15 @@ BROWSER (Playwright, Firefox)
 - Deterministic script, not an AI clicking around freely. Slow, human-like pacing.
   (Exception: company sites, with me watching: `nuauto assist`, below; it may also upload the resume
   and type longer answers I approved, never submit without my review.)
-- Persistent browser profile in browser_profile/; I log in by hand (`nuauto login`) and the
+- Persistent browser profile in local/browser_profile/; I log in by hand (`nuauto login`) and the
   session is reused. Never handle my password in code or prompts.
 - Domain lock: only northeastern-csm.symplicity.com (config.ALLOWED_HOSTS). Jobs whose Apply
   popup links to an external site (Workday, iCIMS, Greenhouse...) are marked Needs Human; I
   apply there. Exception: during the one-click re-login only, SSO_HOSTS are allowed (never
   typing credentials).
 - Firefox drops session cookies on close, so browser.py saves cookies to
-  session_cookies.json (chmod 600, never print it) and reloads them.
-- Only ONE Playwright session may use browser_profile/ at a time (Firefox locks it): not
+  local/session_cookies.json (chmod 600, never print it) and reloads them.
+- Only ONE Playwright session may use local/browser_profile/ at a time (Firefox locks it): not
   while apply.py, jobs.py or browser.py are running. Use a separate profile dir if in doubt.
   The homelab has its own copy and uses it during its update runs (08:00/18:00 New York).
 
@@ -147,25 +146,28 @@ NUWORKS PROFILE (e.g. when another session edits it with Playwright)
   ignores the profile value either way. Profile changes can change NUworks' own "Jobs I
   qualify for" screening; the job pool doesn't depend on it.
 
-FILES
-nuauto (the CLI; ~/.local/bin/nuauto links here)   config.py (paths, hosts; reads local_config.json)
-sheet.py (rows, limits, status updates, Google login)   apply.py (the runner)
-browser.py (login/open, domain lock, cookies)   answers.py (answer bank)   jobs.py (pool + viewers)
-daily.py (homelab update + Discord)   web.py (Mark-done page, homelab)   sync.py (laptop<->homelab)
-doctor.py (health check)   inspect_form.py (read-only form lister)   assist.py (company-site agent)
-setup_sheet.py (sheet setup / `format` restyle)
+FILES (layout since 2026-10-05: an installable package, `pip install -e .`)
+pyproject.toml (package + dependencies; defines the `nuauto` command: .venv/bin/nuauto, ~/.local/bin/nuauto links there)
+src/nuauto/: cli.py (the nuauto command)   config.py (all paths, hosts; reads local/local_config.json)
+  sheet.py (rows, limits, status updates, Google login)   apply.py (the NUworks runner)
+  browser.py (login/open, domain lock, cookies)   answers.py (answer bank)   jobs.py (pool + viewers)
+  daily.py (homelab update + Discord)   web.py (Mark-done page, homelab)   sync.py (laptop<->homelab)
+  doctor.py (health check)   inspect_form.py (read-only form lister)   assist.py (company-site agent)
+  setup_sheet.py (sheet setup / `format` restyle)
+  Imports are always absolute: `from nuauto import sheet` (test_sync enforces it).
 prompts/ (TRIAGE_, SCORE_, CATEGORY_PROMPT.md: Claude batch prompts; ASSIST_PROMPT.md: agent rules)
-README.md (public, new-user setup; keep it short)   docs/ (DEPLOY, PIPELINE, STATUS)
-deploy/systemd/ (homelab units)   requirements.txt
-tests/ (test_*.py offline checks)
-local_config.json: my personal settings (sheet ID, resume path, homelab hostname/dir, Mark-done URL,
-  Tailscale IP). Gitignored; local_config.example.json is the committed template. Keep personal
-  values (names, emails, hosts, IPs, IDs) out of every committed file: the repo may go public.
-Local only: profile.json (resume_label), answers.json, data/, work/, logs/, browser_profile/
-SECRETS, never print, log or copy their contents: token.json, session_cookies.json,
+tests/ (test_*.py offline checks)   docs/ (DEPLOY, PIPELINE, STATUS)   deploy/systemd/ (homelab units)
+README.md (public, new-user setup; keep it short)   LICENSE   local_config.example.json (template)
+local/ (gitignored, mode 700): everything personal or secret, on both machines:
+  local_config.json (sheet ID, resume path, homelab hostname/dir, Mark-done URL, Tailscale IP),
+  profile.json (resume_label), answers.json, google_login.txt, browser_profile/, assist_profile/,
+  resume.pdf (homelab copy), and the SECRETS below. Keep personal values (names, emails, hosts, IPs,
+  IDs, companies) out of every committed file: the repo is public.
+Generated (gitignored, repo root): data/, logs/, work/
+SECRETS (in local/), never print, log or copy their contents: token.json, session_cookies.json,
 client_secret.json, discord_webhook.txt, web_secret.txt
 
-COMMANDS (nuauto needs no venv activation; for `python ...` run `source .venv/bin/activate` first)
+COMMANDS (installed in .venv; no activation needed)
 nuauto approve         # viewer on best unrated jobs: y = Approved in the sheet, n = no, s skip
 nuauto apply [-n 3]    # submit every Approved row (30-60s between); real terminal only
 nuauto rate            # taste training viewer (keys in docs/PIPELINE.md)
@@ -176,19 +178,22 @@ nuauto login google    # Google Sheets login, every 7 days (Discord warns the da
 nuauto test            # all offline tests
 nuauto doctor          # health check: laptop, homelab, Mark-done page (read-only)
 nuauto assist [<row>]  # company-site agent for a Needs Human row; asks me before any Submit
-python answers.py list           # answer bank; edit with: nvim answers.json
-python setup_sheet.py format     # restyle the sheet (formatting only, safe to re-run)
-python jobs.py stats | pool | suggest 5
+nuauto answers list    # answer bank; edit with: nvim local/answers.json
+nuauto setup-sheet format          # restyle the sheet (formatting only, safe to re-run)
+nuauto jobs stats | pool | suggest 5
+nuauto daily [weekly] / nuauto web # what the homelab's timers / Mark-done service run
+python -m nuauto.<module> ...      # any module's own command line (same as the nuauto tools)
 
 TESTS
 `nuauto test` runs every tests/test_*.py: offline, no sheet, no browser, no network. Run it before
-pushing. test_sync.py fails if a new module or prompt isn't in sync.CODE (so it would never
+pushing. tests/test_sync.py fails if a new module or prompt isn't in sync.CODE (so it would never
 reach the homelab). test_web.py covers the public Mark-done links (signatures; GET never
 changes the sheet). test_browser.py covers the domain lock. test_assist.py covers the company-site agent's guard.
 
 ENVIRONMENT / STYLE
-- Python venv in .venv; requirements.txt: playwright (Firefox), gspread, scikit-learn (ranking
-  model), pypdf (resume text). Fedora laptop, editor nvim.
+- Python 3.12 venv in .venv with the package installed editable (`.venv/bin/pip install -e .`); dependencies
+  in pyproject.toml: playwright (Firefox), gspread, scikit-learn (ranking model), pypdf (resume text).
+  Fedora laptop, editor nvim.
 - Use Sonnet by default; Opus only for hard bugs.
 - Keep explanations short and simple. Give me commands I can run.
 - Use nvim in any command that opens a file for editing.

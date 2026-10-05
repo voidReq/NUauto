@@ -1,6 +1,6 @@
 """Sheet module: read Approved rows, update Status/Notes/Date, enforce limits.
 
-Run `python sheet.py status` to see the Approved rows and the weekly count.
+Run `nuauto sheet status` to see the Approved rows and the weekly count.
 """
 import os
 import sys
@@ -10,7 +10,7 @@ from datetime import date, datetime, timedelta
 import gspread
 from google.auth.exceptions import RefreshError
 
-import config
+from nuauto import config
 
 HEADERS = ["URL", "Company", "Title", "Status", "Notes", "Date"]
 STATUSES = ["Proposed", "Approved", "Applied", "Failed", "Needs Human"]
@@ -240,7 +240,7 @@ def add_proposed(ws, items, status="Proposed"):
 
 def main():
     if sys.argv[1:] != ["status"]:
-        sys.exit("Usage: python sheet.py status")
+        sys.exit("Usage: nuauto sheet status")
     rows = read_rows(open_worksheet())
     week, total = check_limits_safe(rows)
     print(f"Applied in last 7 days: {week}/{MAX_PER_WEEK}. Total applied: {total}/{MAX_TOTAL}.")

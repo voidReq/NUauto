@@ -5,9 +5,9 @@ import tempfile
 
 from playwright.sync_api import sync_playwright
 
-import answers
-import apply
-import config
+from nuauto import answers
+from nuauto import apply
+from nuauto import config
 
 config.ANSWERS_PATH = os.path.join(tempfile.mkdtemp(), "answers.json")
 

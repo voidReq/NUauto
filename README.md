@@ -21,25 +21,27 @@ Needs Linux or macOS, Python 3.12, a NUworks account, a Google account, and
 ```sh
 git clone https://github.com/voidReq/NUauto.git && cd NUauto
 python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -e .                       # installs the `nuauto` command into .venv
 .venv/bin/python -m playwright install firefox
-ln -s "$PWD/nuauto" ~/.local/bin/nuauto   # ~/.local/bin must be on your PATH
-cp local_config.example.json local_config.json
+ln -s "$PWD/.venv/bin/nuauto" ~/.local/bin/nuauto   # ~/.local/bin must be on your PATH
+mkdir -m 700 local && cp local_config.example.json local/local_config.json
 curl -fsSL https://claude.ai/install.sh | bash   # Claude Code, if you don't have it
 claude                                           # log in once, then /exit
 ```
 
+Your personal files all go in `local/` (gitignored).
+
 1. **Google:** in Google Cloud, enable the Sheets API and create an OAuth client ("Desktop app").
-   Save its JSON here as `client_secret.json`.
-2. **Sheet:** make a blank Google Sheet, put its ID (from the URL) in `local_config.json` as
-   `sheet_id`, then run `.venv/bin/python setup_sheet.py`.
-3. **Resume:** set `resume_path` in `local_config.json` to your resume PDF, and create
-   `profile.json` with `{"resume_label": "..."}`: the exact name of that resume in NUworks'
+   Save its JSON as `local/client_secret.json`.
+2. **Sheet:** make a blank Google Sheet, put its ID (from the URL) in `local/local_config.json` as
+   `sheet_id`, then run `nuauto setup-sheet`.
+3. **Resume:** set `resume_path` in `local/local_config.json` to your resume PDF, and create
+   `local/profile.json` with `{"resume_label": "..."}`: the exact name of that resume in NUworks'
    Apply popup.
 4. **NUworks:** `nuauto login`, log in in the window that opens, then close it.
 5. `nuauto doctor` to check everything, then `nuauto update`.
 
-Optional: a Discord webhook URL in `discord_webhook.txt` for notifications.
+Optional: a Discord webhook URL in `local/discord_webhook.txt` for notifications.
 
 ## Commands
 
@@ -57,11 +59,11 @@ nuauto test            offline tests
 
 ## Make it yours
 
-Your preferences live in `RULES` and the term ID in `jobs.py` (term, class level, thresholds,
+Your preferences live in `RULES` and the term ID in `src/nuauto/jobs.py` (term, class level, thresholds,
 bonuses) and in the Claude prompts in `prompts/`. See `docs/PIPELINE.md`.
 
 To run updates on a server twice a day instead, fill in the server fields in
-`local_config.json` and follow `docs/DEPLOY.md`. Leave them empty and everything runs locally.
+`local/local_config.json` and follow `docs/DEPLOY.md`. Leave them empty and everything runs locally.
 
 Check NUworks' terms of use before using this. Secret files (`token.json`, `client_secret.json`,
 `session_cookies.json`, ...) are gitignored; keep it that way.

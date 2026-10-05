@@ -6,6 +6,6 @@ Type=oneshot
 WorkingDirectory=%h/projects/auto
 Environment=TZ=America/New_York
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=%h/projects/auto/.venv/bin/python %h/projects/auto/daily.py
+ExecStart=%h/projects/auto/.venv/bin/nuauto daily
 TimeoutStartSec=2h
 Nice=10

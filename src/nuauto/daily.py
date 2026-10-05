@@ -1,8 +1,8 @@
 """Pool update: list -> Claude triage -> details -> Claude score -> pool -> notifications (Discord + desktop).
 
 Runs on the homelab (systemd user timer nuauto-daily.timer, 08:00 and 18:00 New York time).
-  python daily.py          # the update; the morning run also sends deadline reminders
-  python daily.py weekly   # Sunday summary (nuauto-weekly.timer)
+  nuauto daily          # the update; the morning run also sends deadline reminders
+  nuauto daily weekly   # Sunday summary (nuauto-weekly.timer)
 From the laptop: `nuauto update` starts the homelab run and then syncs.
 Uses the hidden (headless) browser; never applies to anything and only reads the sheet.
 Claude runs as `claude -p` (Sonnet) with only Read/Write tools, one call per batch.
@@ -18,8 +18,8 @@ from datetime import datetime, timedelta
 
 os.environ["AUTO_HEADLESS"] = "1"
 
-import config  # noqa: E402
-import jobs  # noqa: E402
+from nuauto import config  # noqa: E402
+from nuauto import jobs  # noqa: E402
 
 # ~/.local/bin first: systemd units run with a short PATH
 CLAUDE = shutil.which("claude", path=os.path.expanduser("~/.local/bin") + os.pathsep + os.environ.get("PATH", "")) or "claude"
@@ -174,7 +174,7 @@ def reminders(before, ok):
 
 def google_notice():
     """Heads-up the day before the 7-day Google login runs out."""
-    import sheet
+    from nuauto import sheet
     age = sheet.google_login_age()
     if age is not None and age >= config.GOOGLE_LOGIN_DAYS - 1:
         left = config.GOOGLE_LOGIN_DAYS - age
@@ -185,7 +185,7 @@ def google_notice():
 def record_hand_applications(before, rows):
     """Jobs that left the NUworks list (it hides jobs you applied to) and that NUworks says you applied to:
     mark their sheet row Applied, or add one. Returns fresh rows if anything changed."""
-    import sheet
+    from nuauto import sheet
     listed = set(jobs.load("list.json", {}))
     by_id = {jobs.job_id(r.url): r for r in rows}
     applied = {i for i, r in by_id.items() if r.status == "Applied"}
@@ -226,8 +226,8 @@ def scan_summary(scans, now, hours=24):
 def todo_notice(rows, summary):
     """Morning message, always sent: scan counts, then things only you can do: company-site applications
     still owed, and external jobs (Needs Human)."""
-    import sheet
-    import web
+    from nuauto import sheet
+    from nuauto import web
     site = [r for r in rows if r.status == "Applied" and r.notes.startswith(sheet.SITE_MARK)] if rows else []
     ext = [r for r in rows if r.status == "Needs Human" and r.notes.startswith("External application")] if rows else []
     if not site and not ext:
@@ -247,7 +247,7 @@ def todo_notice(rows, summary):
 def sheet_rows():
     """Sheet rows, or None if the sheet can't be read (e.g. the Google token expired)."""
     try:
-        import sheet
+        from nuauto import sheet
         return sheet.read_rows(sheet.open_worksheet())
     except BaseException as e:  # gspread's login flow can sys.exit
         log(f"could not read the sheet ({type(e).__name__})")
@@ -291,7 +291,7 @@ def urgent_notice(pool, rows, days=3):
 
 def weekly():
     """Sunday summary: this week's applications, Approved rows waiting, jobs to look at."""
-    import sheet
+    from nuauto import sheet
     rows = sheet_rows()
     if rows is None:
         return 1

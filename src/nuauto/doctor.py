@@ -14,8 +14,8 @@ import urllib.error
 import urllib.request
 from datetime import date
 
-import config
-import sync
+from nuauto import config
+from nuauto import sync
 
 UNITS = ["nuauto-daily.timer", "nuauto-weekly.timer", "nuauto-web.service"]
 fails = []
@@ -33,11 +33,11 @@ def sh(cmd, **kw):
 
 def check_files(names):
     for name in names:
-        path = os.path.join(config.PROJECT_DIR, name)
+        path = os.path.join(config.LOCAL_DIR, name)
         if not os.path.exists(path):
-            say("FAIL", f"{name} missing (see docs/DEPLOY.md, SECRETS)")
+            say("FAIL", f"local/{name} missing (see docs/DEPLOY.md, SECRETS)")
         elif os.path.isfile(path) and os.stat(path).st_mode & 0o077:
-            say("WARN", f"{name} is readable by others: chmod 600 {name}")
+            say("WARN", f"local/{name} is readable by others: chmod 600 local/{name}")
 
 
 def check_claude():
@@ -116,7 +116,7 @@ def laptop():
 
 def check_public_page():
     """The Mark-done page through the tunnel. "/" is a 404 page with our title when all is up."""
-    import web
+    from nuauto import web
     if not web.BASE_URL:
         return say("ok", "no Mark-done page configured (web_base_url empty)")
     req = urllib.request.Request(web.BASE_URL + "/", headers={"User-Agent": "nuauto-doctor"})
@@ -139,7 +139,7 @@ def server():
     check_files(["token.json", "client_secret.json", "session_cookies.json", "browser_profile",
                  "discord_webhook.txt", "web_secret.txt"])
     if not os.path.exists(config.RESUME_PATH):
-        say("FAIL", "resume.pdf missing (the laptop pushes it: `nuauto status`)")
+        say("FAIL", "local/resume.pdf missing (the laptop pushes it: `nuauto status`)")
     check_google_login()
     for unit in UNITS:
         enabled = sh(["systemctl", "--user", "is-enabled", unit]).stdout.strip()
@@ -176,7 +176,7 @@ def check_web_fresh():
         return
     started = time.time() - int(up)
     newer = [n for n in ("web.py", "config.py", "sheet.py", "jobs.py")
-             if os.path.getctime(os.path.join(config.PROJECT_DIR, n)) > started]
+             if os.path.getctime(os.path.join(config.SRC_DIR, n)) > started]
     if newer:
         say("WARN", f"{', '.join(newer)} changed after nuauto-web started: systemctl --user restart nuauto-web")
 

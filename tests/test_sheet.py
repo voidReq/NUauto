@@ -1,8 +1,8 @@
 """Offline checks for sheet.py. Run: python test_sheet.py"""
 from datetime import date
 
-import sheet
-from sheet import HEADERS, LimitReached, SheetError, parse_rows, check_limits
+from nuauto import sheet
+from nuauto.sheet import HEADERS, LimitReached, SheetError, parse_rows, check_limits
 
 TODAY = date(2026, 10, 1)
 

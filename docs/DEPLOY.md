@@ -1,9 +1,11 @@
 DEPLOYMENT: laptop, optional homelab, optional public Mark-done page
 (Keep this current when you change hosts, units, secrets or sync.)
+File names below are in local/ (gitignored, mode 700) unless a folder is given: local_config.json
+means local/local_config.json. The code is the nuauto package (src/nuauto/), installed editable in .venv.
 
 MODES
 - Local mode (default): server_hostname "" in local_config.json (config.HAS_SERVER False).
-  Everything runs on one machine: `nuauto update` runs daily.py here, nothing syncs, no Mark links.
+  Everything runs on one machine: `nuauto update` runs the update here, nothing syncs, no Mark links.
 - Homelab mode: an always-on Linux box runs the update twice a day and sends Discord messages;
   the laptop syncs with it. Set in local_config.json:
     server_hostname  the homelab's hostname (that is how config.IS_SERVER knows it is the homelab)
@@ -21,7 +23,7 @@ MACHINES (homelab mode)
   (Python 3.12), claude CLI logged in (~/.local/bin/claude, or on PATH), user lingering on
   (user timers run without anyone logged in). Owns data/ (the job pool). NOT a git checkout:
   code is copied there by sync.py. Never edit code on the homelab; the next push overwrites it.
-- Mark-done page (optional). web.py listens on web_listen_host:8765 (use the homelab's
+- Mark-done page (optional). `nuauto web` (web.py) listens on web_listen_host:8765 (use the homelab's
   Tailscale IP so it is not reachable from the LAN). To click Mark links from your phone,
   publish it at web_base_url with any tunnel or reverse proxy. Example: cloudflared on another
   box, ingress rule in /etc/cloudflared/config.yml, then sudo systemctl restart cloudflared:
@@ -30,7 +32,7 @@ MACHINES (homelab mode)
 
 WHAT RUNS ON THE HOMELAB
 Unit files live in this repo (deploy/systemd/) and are installed in ~/.config/systemd/user/.
-- nuauto-daily.timer -> nuauto-daily.service: `daily.py` at 08:00 and 18:00 New York time
+- nuauto-daily.timer -> nuauto-daily.service: `nuauto daily` at 08:00 and 18:00 New York time
   (+0-15 min random, Persistent=true so a missed run happens at boot). Steps: list -> Claude
   triage -> details -> Claude score -> Claude category -> pool -> notifications (see
   docs/PIPELINE.md). Also: marks jobs applied to by hand as Applied, warns the day before
@@ -42,9 +44,9 @@ Unit files live in this repo (deploy/systemd/) and are installed in ~/.config/sy
   reminders still go out, from the sheet and the last saved pool.
   Claude runs as `claude -p --model sonnet` with Read/Write only, one call per batch file in work/.
   Headless browser; never applies to anything.
-- nuauto-weekly.timer -> nuauto-weekly.service: `daily.py weekly`, Sunday 19:00 New York time
+- nuauto-weekly.timer -> nuauto-weekly.service: `nuauto daily weekly`, Sunday 19:00 New York time
   (Discord check-in).
-- nuauto-web.service: `web.py`, always on (Restart=on-failure). Listens on web_listen_host:8765
+- nuauto-web.service: `nuauto web`, always on (Restart=on-failure). Listens on web_listen_host:8765
   only (web.LISTEN). Serves the signed Discord links: GET = confirm page only, POST (button)
   changes the sheet. Every link is HMAC-signed with web_secret.txt for one action on one
   row + job. Log: logs/web.log.
@@ -58,13 +60,13 @@ SECRETS AND STATE (never print or log any of these; all mode 600)
   session_cookies.json  yes     yes      `nuauto login` on the laptop (sync.push_session)
   browser_profile/      yes     yes      same as session_cookies.json
   discord_webhook.txt   yes     yes      copied by hand
-  web_secret.txt        no      yes      created by web.py on first start. Replacing it breaks
+  web_secret.txt        no      yes      created by `nuauto web` on first start. Replacing it breaks
                                          every Mark link already sent.
   assist_profile/       yes     no       company-site logins of `nuauto assist`; never synced
   answers.json, profile.json  laptop only in practice (apply runs on the laptop); not synced
 Not secret, gitignored, pushed by sync.push: local_config.json (personal settings),
 docs/STATUS.md (your local log), google_login.txt (date of the last Google login), the resume
-(as resume.pdf on the homelab).
+(as local/resume.pdf on the homelab).
 
 GOOGLE SHEETS LOGIN (gspread + OAuth)
 - OAuth only: gspread.oauth(...), token in token.json (chmod 600). No service accounts (many
@@ -80,7 +82,7 @@ GOOGLE SHEETS LOGIN (gspread + OAuth)
 SYNC (sync.py; runs automatically inside `nuauto` on the laptop, homelab mode only)
 - Before approve / rate / apply / status: pull homelab data/ -> laptop (except ratings.json).
 - After approve / rate / status / login google: push to the homelab: local_config.json, the
-  code (files listed in sync.CODE, rsync -c), docs/STATUS.md, data/ratings.json, the resume,
+  code (files listed in sync.CODE: pyproject.toml, src/nuauto/, prompts/, docs; rsync -c), docs/STATUS.md, data/ratings.json, the resume,
   token.json (if newer), google_login.txt.
 - `nuauto update`: push, start nuauto-daily.service on the homelab, show its log tail, pull.
 - `nuauto login`: copy browser_profile/ + session_cookies.json to the homelab (refuses while
@@ -89,9 +91,11 @@ SYNC (sync.py; runs automatically inside `nuauto` on the laptop, homelab mode on
 
 DEPLOYING A CHANGE
 1. Change code on the laptop (on a branch; merge to main when approved).
-2. Push it: any `nuauto status` (or approve/rate), or `.venv/bin/python -c "import sync; sync.push()"`.
+2. Push it: any `nuauto status` (or approve/rate), or `.venv/bin/python -c "from nuauto import sync; sync.push()"`.
    Whatever is checked out on the laptop is what gets pushed.
-3. New .py file or prompt file? Add it to sync.CODE (test_sync.py fails if you forget).
+3. New module (src/nuauto/) or prompt file (prompts/)? Add it to sync.PACKAGE / sync.CODE (tests/test_sync.py
+   fails if you forget). New dependency in pyproject.toml? Reinstall on the homelab:
+   ssh homelab 'cd ~/projects/auto && uv pip install --python .venv/bin/python -e .'
 4. Changed web.py or a module it uses (config, sheet, jobs)? Restart it:
    ssh homelab systemctl --user restart nuauto-web
    (daily/weekly runs start fresh each time; no restart needed.)
@@ -114,15 +118,15 @@ SET UP (OR REBUILD) A HOMELAB
    Fill in the server fields of local_config.json (see MODES). If the hostname, path or IP
    changes later, update them there (and your tunnel's ingress rule).
 2. Laptop: ssh homelab mkdir -p projects/auto/data
-           .venv/bin/python -c "import sync; sync.push()"     # code, config, resume, token, ratings
+           .venv/bin/python -c "from nuauto import sync; sync.push()"   # code, config, resume, token, ratings
            rsync -a data/ homelab:projects/auto/data/            # keep the pool (else Claude re-scores everything)
 3. Homelab, in ~/projects/auto:
            uv venv --python 3.12 .venv
-           uv pip install --python .venv/bin/python -r requirements.txt
+           uv pip install --python .venv/bin/python -e .          # installs .venv/bin/nuauto
            .venv/bin/python -m playwright install firefox
            (if Firefox won't start: sudo .venv/bin/python -m playwright install-deps firefox)
    Install the claude CLI (curl -fsSL https://claude.ai/install.sh | bash) and log in once (run `claude`).
-4. Copy by hand, mode 600: client_secret.json, discord_webhook.txt (and web_secret.txt from the
+4. Copy by hand into local/, mode 600: client_secret.json, discord_webhook.txt (and web_secret.txt from the
    old machine if you want old Mark links to keep working).
 5. Laptop: `nuauto login` (copies the NUworks session).
 6. Units: scp deploy/systemd/* homelab:.config/systemd/user/
