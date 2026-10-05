@@ -307,6 +307,11 @@ def submit_flow(page, dialog, ws, row, resume_label, log, state):
         state["unresolved"] = True
 
 
+# Written to Notes BEFORE the NUworks-side Submit click, so a crash or kill after the click still leaves it and
+# `nuauto assist nuworks <row>` refuses to submit a second time (assist.nuworks_side_blocked).
+NUWORKS_CLICK_MARK = "NUworks side: Submit clicked, result unknown; check NUworks."
+
+
 def submit_nuworks_side(row, ws):
     """The company-site application is submitted and the row is Applied (nuauto assist): submit the same
     job on NUworks too, with the same checks as apply_one. The outcome goes into Notes; the row stays
@@ -328,6 +333,7 @@ def submit_nuworks_side(row, ws):
                 raise NeedsHuman("Submit button is disabled: the popup still wants something (see filled_popup.png).")
             if shown_resume(dialog) != resume_label:
                 raise NeedsHuman("Resume selection changed before submit.")
+            sheet.append_note(ws, row.number, row.url, NUWORKS_CLICK_MARK)
             log.write("Clicking Submit (NUworks side).")
             clicked = True
             submit_btn.click(timeout=10000)
