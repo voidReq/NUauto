@@ -75,11 +75,13 @@ def star(label):
     return re.sub(r"\s*\*$", " *", label.strip()).lower()
 
 
-def check_popup(popup_text, links, fields, resume_label):
+def check_popup(popup_text, links, fields, resume_label, company_site_done=False):
     """Raise NeedsHuman if the popup links off-site, has no usable Resume dropdown, or requires something
-    that is not a form field we can fill (e.g. Cover Letter / Transcript pickers: "Add a new cover letter")."""
+    that is not a form field we can fill (e.g. Cover Letter / Transcript pickers: "Add a new cover letter").
+    company_site_done: the company-site application is already submitted (nuauto assist), so an off-site
+    link in the popup is no reason to stop; every other check still applies."""
     links = [unwrap(u) for u in links]
-    if links or "how to apply" in popup_text.lower():
+    if not company_site_done and (links or "how to apply" in popup_text.lower()):
         hosts = sorted({re.sub(r"^https?://([^/]+).*", r"\1", u) for u in links}) or ["(no link)"]
         raise NeedsHuman(f"External application: {', '.join(hosts)}" + (f" -> {links[0]}" if links else ""))
     resume = [f for f in fields if is_resume(f)]
@@ -208,7 +210,7 @@ def ask(prompt, allowed):
     return answer if answer in allowed else allowed[0]
 
 
-def fill_popup(page, context, row, resume_label, entries, io, log, blocked):
+def fill_popup(page, context, row, resume_label, entries, io, log, blocked, company_site_done=False):
     """Open the Apply popup and select the resume. Returns the dialog locator."""
     if not browser.host_allowed(row.url) or "/jobs/detail/" not in row.url:
         raise NeedsHuman("URL is not a NUworks job page on an allowed host.")
@@ -240,7 +242,7 @@ def fill_popup(page, context, row, resume_label, entries, io, log, blocked):
     fields = dialog.evaluate(FIELDS_JS)
     for f in fields:
         log.write(f"  field {f['label']!r} [{f['tag']}/{f['type']}] options={f['options']}")
-    check_popup(popup_text, links, fields, resume_label)
+    check_popup(popup_text, links, fields, resume_label, company_site_done)
 
     log.write(f"Selecting resume {resume_label!r}")
     resume_locator(dialog).select_option(label=resume_label)
@@ -303,6 +305,53 @@ def submit_flow(page, dialog, ws, row, resume_label, log, state):
     else:
         log.write(f"Row {row.number} left as Needs Human ({sheet.SUBMIT_MARK}).")
         state["unresolved"] = True
+
+
+def submit_nuworks_side(row, ws):
+    """The company-site application is submitted and the row is Applied (nuauto assist): submit the same
+    job on NUworks too, with the same checks as apply_one. The outcome goes into Notes; the row stays
+    Applied (same job, so the weekly count does not change). Returns the note."""
+    log = browser.RunLog(f"row{row.number}_nuworks_side")
+    resume_label = load_resume_label()
+    entries, io = answers.load(), (answers.TerminalIO() if sys.stdin.isatty() else answers.NoTerminalIO())
+    blocked, clicked, note = [], False, None
+    with sync_playwright() as p:
+        context = browser.launch(p)
+        try:
+            browser.install_domain_lock(context, log, blocked)
+            page = context.pages[0] if context.pages else context.new_page()
+            dialog = fill_popup(page, context, row, resume_label, entries, io, log, blocked, company_site_done=True)
+            submit_btn = dialog.get_by_role("button", name="Submit", exact=True)
+            if submit_btn.count() != 1:
+                raise NeedsHuman(f"Expected one Submit button, found {submit_btn.count()}.")
+            if not submit_btn.is_enabled():
+                raise NeedsHuman("Submit button is disabled: the popup still wants something (see filled_popup.png).")
+            if shown_resume(dialog) != resume_label:
+                raise NeedsHuman("Resume selection changed before submit.")
+            log.write("Clicking Submit (NUworks side).")
+            clicked = True
+            submit_btn.click(timeout=10000)
+            browser.pause(page, 3, 5)
+            log.screenshot(page, "after_submit")
+            try:
+                page.get_by_text("Your application has been submitted").first.wait_for(timeout=20000)
+                note = "NUworks side submitted too (confirmed by NUworks page)."
+            except PlaywrightTimeout:
+                note = "NUworks side: Submit clicked but no confirmation seen; check NUworks."
+        except (NeedsHuman, SessionExpired) as e:
+            note = f"NUworks side NOT submitted: {e}"
+        except KeyboardInterrupt:
+            note = "NUworks side: stopped by Ctrl+C " + ("after Submit was clicked; check NUworks." if clicked else "before Submit; not submitted.")
+        except Exception as e:
+            note = f"NUworks side: unexpected {type(e).__name__} " + ("after Submit was clicked; check NUworks." if clicked else "before Submit; not submitted.")
+        finally:
+            try:
+                context.close()
+            except Exception:
+                pass
+    log.write(note)
+    sheet.append_note(ws, row.number, row.url, note)
+    return note
 
 
 def apply_one(row, ws, args, resume_label, entries, io):

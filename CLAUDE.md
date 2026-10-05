@@ -112,8 +112,10 @@ COMPANY-SITE AGENT (assist.py + ASSIST_PROMPT.md, `nuauto assist <row>`; added 2
   the label line right above them in the snapshot. Read/Glob/Grep only inside my resume and
   local_config.json "assist_read_paths" (my writeups), to SUGGEST answers I approve.
 - Mine: sign-in, uploads (resume), essays, checkboxes, Submit. After I /exit, the launcher asks
-  "did you submit?"; y = Applied (dated today, counts toward the weekly limit). The agent never
-  touches the sheet. Log per run: logs/<stamp>_assist_row<N>/ (actions.log = every guard decision).
+  "did you submit?"; y = Applied (dated today, counts toward the weekly limit), then the same job is
+  submitted on NUworks too by apply.submit_nuworks_side (the tested NUworks code with every popup check
+  except the off-site-link stop; outcome appended to Notes; retry: `nuauto assist nuworks <row>`).
+  Decided 2026-10-05: company site done -> always submit on NUworks too. The agent never touches the sheet. Log per run: logs/<stamp>_assist_row<N>/ (actions.log = every guard decision).
 - Proven so far (2026-10-05, headless smoke tests): site lock, Bash lock, ref/snapshot rule, typing
   blocked without an answer-bank value. Not yet: a full application with me.
 

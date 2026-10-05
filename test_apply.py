@@ -37,6 +37,14 @@ check_popup("Apply to X\nResume *\nWork authorization *\nSubmit", [], [RESUME, q
 SAFE = "https://eur01.safelinks.protection.outlook.com/?url=https%3A%2F%2Fcareer55.sapsf.eu%2Fsfcareer%2Fjob%3Fid%3D1&data=x&reserved=0"
 expect_stop("How to Apply", [SAFE], [RESUME], "External application: career55.sapsf.eu -> https://career55.sapsf.eu/sfcareer/job?id=1")
 
+# company site already done (nuauto assist): an off-site link is no reason to stop, every other check stays
+check_popup("How to Apply", ["https://x.icims.com/j"], [RESUME], LABEL, company_site_done=True)
+try:
+    check_popup(POPUP, ["https://x.icims.com/j"], [RESUME], LABEL, company_site_done=True)
+    raise AssertionError("expected NeedsHuman")
+except NeedsHuman as e:
+    assert "Cover Letter" in str(e)
+
 # missing resume option stops
 expect_stop("Apply to X", [], [{**RESUME, "options": ["Select a resume", "Other resume"]}], "not in the dropdown")
 

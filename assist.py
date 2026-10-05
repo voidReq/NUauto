@@ -3,9 +3,11 @@
   nuauto assist                                    list Needs Human rows with a company-site link
   nuauto assist <row> [--url U] [--allow HOST]...  start a Claude session (Sonnet) that fills that row's
                                                    application in a visible browser
+  nuauto assist nuworks <row>                      submit an Applied row's job on NUworks too (retry)
 
 You sign in, upload, write essays, tick checkboxes and press Submit yourself. When you /exit the
-session, the terminal asks whether you submitted; y marks the row Applied (dated today).
+session, the terminal asks whether you submitted; y marks the row Applied (dated today), then the same
+job is submitted on NUworks too (apply.submit_nuworks_side, the tested NUworks code; outcome in Notes).
 
 The agent only reads pages, clicks and types. Code decides the rest. Every browser and Bash call goes
 through `assist.py hook pre|post` (Claude Code hooks):
@@ -490,6 +492,21 @@ def run(number, url_override, allow):
     ws = sheet.open_worksheet()
     sheet.mark_applied_by_hand(ws, row.number, row.url, how="on the company site (nuauto assist; you pressed Submit)")
     log_.write(f"Row {row.number} marked Applied (dated today).")
+    nuworks_side(ws, row.number)
+
+
+def nuworks_side(ws, number):
+    """Company site done -> submit the same job on NUworks too (apply.submit_nuworks_side: tested NUworks
+    code, not the agent)."""
+    import apply
+    import sheet
+    row = next((r for r in sheet.read_rows(ws) if r.number == number), None)
+    if row is None or row.status != "Applied":
+        sys.exit(f"Row {number} is not Applied; the NUworks side runs only after the company site is done.")
+    if "NUworks side submitted" in row.notes:
+        sys.exit(f"Row {number}: the NUworks side is already submitted.")
+    print(f"\nNow submitting row {number} on NUworks too (Ctrl+C stops)...")
+    print(apply.submit_nuworks_side(row, ws))
 
 
 def list_rows():
@@ -517,6 +534,9 @@ def main(argv):
         del args[i:i + 2]
     if not args:
         return list_rows()
+    if len(args) == 2 and args[0] == "nuworks" and args[1].isdigit():  # retry / catch up the NUworks side
+        import sheet
+        return nuworks_side(sheet.open_worksheet(), int(args[1]))
     if len(args) == 1 and args[0].isdigit():
         import sheet
         try:
