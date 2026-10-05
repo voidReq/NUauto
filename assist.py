@@ -77,6 +77,24 @@ def link_from_notes(notes):
     return apply.unwrap(m.group(1)) if m else None
 
 
+def assist_target(notes, url_override=None):
+    """(url, None) if this Needs Human row is a company-site application the agent may work on, else
+    (None, reason). NUworks itself is never driven by the agent (apply.py does NUworks); rows stopped for
+    something on NUworks (cover letter, transcript...) are yours."""
+    external = (notes or "").startswith("External application")
+    if not external:
+        return None, f"not a company-site application ({(notes or 'no notes')[:70]}): yours on NUworks"
+    url = url_override or link_from_notes(notes)
+    if not url:
+        return None, "the notes name the site but not the link: add --url <posting link>"
+    h = host(url)
+    if urlparse(url).scheme != "https" or not h:
+        return None, f"not an https link: {url!r}"
+    if h in config.ALLOWED_HOSTS or h in config.SSO_HOSTS or h.endswith("symplicity.com"):
+        return None, "that is NUworks itself: the agent never drives NUworks"
+    return url, None
+
+
 def page_always_asks(page):
     p = (page or "").lower()
     return any(w in p for w in ("voluntary", "self identify", "self-identify", "disclosure", "eeo", "demographic"))
@@ -421,9 +439,9 @@ def find_row(number, url_override):
     row = next((r for r in rows if r.number == number), None)
     if row is None or row.status != "Needs Human":
         sys.exit(f"Row {number} is not a Needs Human row.")
-    url = url_override or link_from_notes(row.notes)
-    if not url or urlparse(url).scheme != "https":
-        sys.exit(f"Row {number} has no https company-site link in Notes. Add one: nuauto assist {number} --url <link>")
+    url, why = assist_target(row.notes, url_override)
+    if why:
+        sys.exit(f"Row {number} ({row.company}): {why}.")
     return rows, row, url
 
 
@@ -512,12 +530,16 @@ def nuworks_side(ws, number):
 def list_rows():
     import sheet
     rows = [r for r in sheet.read_rows(sheet.open_worksheet()) if r.status == "Needs Human"]
-    if not rows:
-        return print("No Needs Human rows.")
-    for r in rows:
-        url = link_from_notes(r.notes)
-        print(f"  row {r.number:<3} {r.company[:25]:25} {r.title[:38]:38} {host(url) if url else '(no link: use --url)'}")
-    print("Run: nuauto assist <row>")
+    targets = [(r, *assist_target(r.notes)) for r in rows]
+    agent = [(r, u) for r, u, why in targets if u]
+    other = [(r, why) for r, u, why in targets if not u]
+    print("Company-site applications (nuauto assist <row>):" if agent else "No company-site applications waiting.")
+    for r, u in agent:
+        print(f"  row {r.number:<3} {r.company[:25]:25} {r.title[:38]:38} {host(u)}")
+    if other:
+        print("Not for the agent:")
+        for r, why in other:
+            print(f"  row {r.number:<3} {r.company[:25]:25} {why}")
 
 
 def main(argv):

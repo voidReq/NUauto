@@ -99,7 +99,9 @@ BROWSER (Playwright, Firefox)
   The homelab has its own copy and uses it during its update runs (08:00/18:00 New York).
 
 COMPANY-SITE AGENT (assist.py + ASSIST_PROMPT.md, `nuauto assist <row>`; added 2026-10-05)
-- For Needs Human rows with a company-site link (Workday, Oracle, iCIMS, SuccessFactors...).
+- Only for Needs Human rows stopped at an external application (Notes start "External application";
+  Workday, Oracle, iCIMS, SuccessFactors...). Never NUworks itself (refused even with --url), never rows
+  stopped for something on NUworks (cover letter, transcript...): those are mine (assist.assist_target).
   Laptop, real terminal, me watching. Starts `claude --model sonnet` with only the Playwright MCP
   browser (profile assist_profile/: it holds my company-site logins, treat it as secret) and Bash.
 - Code guards every call (Claude Code hooks -> `assist.py hook pre|post`; logic in assist.decide /

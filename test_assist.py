@@ -169,6 +169,20 @@ blocked(r, "Glob", {"pattern": "/home/**/token.json", "path": notes}, "inside")
 blocked(r, "Glob", {"pattern": "../**", "path": notes}, "inside")
 blocked(r, "Read", {"file_path": tmp + "/answers.json"}, "blocked")
 
+# which rows the agent may take: company sites only, never NUworks, never NUworks-side blockers
+u, why = assist.assist_target(f"External application: {H} -> https://{H}/careers/job/X_1")
+assert u == f"https://{H}/careers/job/X_1" and why is None
+u, why = assist.assist_target("Popup requires Cover Letter, Transcript: attach by hand on NUworks.")
+assert u is None and "yours on NUworks" in why
+u, why = assist.assist_target("Popup requires Cover Letter", url_override=f"https://{H}/x")  # --url can't turn it into one
+assert u is None
+u, why = assist.assist_target(f"External application: {H}")
+assert u is None and "--url" in why
+assert assist.assist_target(f"External application: {H}", f"https://{H}/careers/job/X_1")[0]
+nu = "https://northeastern-csm.symplicity.com/students/app/jobs/detail/abc"
+assert "NUworks itself" in assist.assist_target(f"External application: {H}", nu)[1]
+assert "NUworks itself" in assist.assist_target(f"External application: x -> {nu}")[1]
+
 # links in Notes
 assert assist.link_from_notes(f"External application: {H} -> https://{H}/careers/job/X_1") == f"https://{H}/careers/job/X_1"
 safe = "https://eur01.safelinks.protection.outlook.com/?url=https%3A%2F%2Fcareer.example%2Fjob%3Fid%3D1&data=x"
