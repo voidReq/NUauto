@@ -50,7 +50,7 @@ nuauto rate            y/n on jobs to teach the ranking your taste
 nuauto apply [-n 3]    submit Approved jobs (run in a real terminal)
 nuauto status          sheet counts and this week's limit
 nuauto login [google]  NUworks login / Google login (Google's lasts 7 days)
-nuauto assist <row>    an agent fills a company-site application; you sign in and press Submit
+nuauto assist <row>    an agent fills a company-site application; it asks you before submitting
 nuauto doctor          health check
 nuauto test            offline tests
 ```

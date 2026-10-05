@@ -85,7 +85,8 @@ Google access is OAuth only, never service accounts (docs/DEPLOY.md, GOOGLE SHEE
 
 BROWSER (Playwright, Firefox)
 - Deterministic script, not an AI clicking around freely. Slow, human-like pacing.
-  (Exception: company sites, with me watching: `nuauto assist`, below.)
+  (Exception: company sites, with me watching: `nuauto assist`, below; it may also upload the resume
+  and type longer answers I approved, never submit without my review.)
 - Persistent browser profile in browser_profile/; I log in by hand (`nuauto login`) and the
   session is reused. Never handle my password in code or prompts.
 - Domain lock: only northeastern-csm.symplicity.com (config.ALLOWED_HOSTS). Jobs whose Apply
@@ -102,24 +103,24 @@ COMPANY-SITE AGENT (assist.py + ASSIST_PROMPT.md, `nuauto assist <row>`; added 2
 - Only for Needs Human rows stopped at an external application (Notes start "External application";
   Workday, Oracle, iCIMS, SuccessFactors...). Never NUworks itself (refused even with --url), never rows
   stopped for something on NUworks (cover letter, transcript...): those are mine (assist.assist_target).
-  Laptop, real terminal, me watching. Starts `claude --model sonnet` with only the Playwright MCP
-  browser (profile assist_profile/: it holds my company-site logins, treat it as secret) and Bash.
-- Code guards every call (Claude Code hooks -> `assist.py hook pre|post`; logic in assist.decide /
-  update_after, tested in test_assist.py): allowed browser tools only (no page scripts, uploads,
-  drags); navigation only to the posting's host (+ --allow HOST); no click/typing on any other host
-  (sign-in pages are mine); never a Submit-named button (SUBMIT_RE), Enter, type(submit), checkboxes,
-  password fields; element refs only from the latest full snapshot; typed text / chosen options
-  must be what the answer bank issued this run for that field (`assist.py answer|save|once|alias|
-  blank`, one line up to 300 chars, no essays); Bash only the answer-bank command; unnamed fields take
-  the label line right above them in the snapshot. Read/Glob/Grep only inside my resume and
-  local_config.json "assist_read_paths" (my writeups), to SUGGEST answers I approve.
-- Mine: sign-in, uploads (resume), essays, checkboxes, Submit. After I /exit, the launcher asks
-  "did you submit?"; y = Applied (dated today, counts toward the weekly limit), then the same job is
-  submitted on NUworks too by apply.submit_nuworks_side (the tested NUworks code with every popup check
-  except the off-site-link stop; outcome appended to Notes; retry: `nuauto assist nuworks <row>`).
-  Decided 2026-10-05: company site done -> always submit on NUworks too. The agent never touches the sheet. Log per run: logs/<stamp>_assist_row<N>/ (actions.log = every guard decision).
-- Proven so far (2026-10-05, headless smoke tests): site lock, Bash lock, ref/snapshot rule, typing
-  blocked without an answer-bank value. Not yet: a full application with me.
+- Laptop, real terminal, me watching. Starts `claude --model sonnet` with the Playwright MCP browser
+  (profile assist_profile/: it holds my company-site logins, treat it as secret), Bash and Read/Glob/Grep.
+- Relaxed 2026-10-05 (my call): the agent may visit any site, fill anything, tick boxes, upload the
+  resume, and draft longer answers that I approve before it types them. The one hard rule: NOTHING is
+  submitted without my review. Enforced by code (Claude Code hooks -> `assist.py hook pre|post`, logic
+  in assist.decide / update_after, tested in test_assist.py): every Submit-type click (SUBMIT_RE, incl.
+  "Apply"), Enter and type(submit) make the terminal ask me first ("ask"); element names come from the
+  latest full snapshot only (refs cleared by anything that changes the page), never from the agent's
+  description. Never: password fields, page scripts (could submit behind the review), uploads other than
+  the resume, non-web links; Bash only the answer-bank command (answer|save|once|alias|blank|wait);
+  Read/Glob/Grep only inside my resume and local_config.json "assist_read_paths" (my writeups).
+- Mine: sign-in, captchas, approving Submit. After I /exit, the launcher asks "did you submit?"; y =
+  Applied (dated today, counts toward the weekly limit), then the same job is submitted on NUworks too by
+  apply.submit_nuworks_side (the tested NUworks code; every popup check except the off-site-link stop;
+  outcome appended to Notes; retry: `nuauto assist nuworks <row>`). The agent never touches the sheet.
+  Log per run: logs/<stamp>_assist_row<N>/ (actions.log = every guard decision).
+- Proven: a first application end to end (2026-10-05, stricter version). The "ask before Submit" hook
+  prompt is proven in an interactive session; a full run with the relaxed rules is not yet.
 
 NUWORKS LOGIN / AUTH FLOW (read this before touching the browser)
 - NUworks sessions expire after a few hours. Expired = any page shows the "Sign In / Please
@@ -174,7 +175,7 @@ nuauto login           # manual SSO login; close the window when done
 nuauto login google    # Google Sheets login, every 7 days (Discord warns the day before)
 nuauto test            # all offline tests
 nuauto doctor          # health check: laptop, homelab, Mark-done page (read-only)
-nuauto assist [<row>]  # company-site agent for a Needs Human row; I sign in, upload, Submit
+nuauto assist [<row>]  # company-site agent for a Needs Human row; asks me before any Submit
 python answers.py list           # answer bank; edit with: nvim answers.json
 python setup_sheet.py format     # restyle the sheet (formatting only, safe to re-run)
 python jobs.py stats | pool | suggest 5

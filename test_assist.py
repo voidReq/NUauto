@@ -36,80 +36,84 @@ SNAP = f"""### Page state
 - button "Submit Application" [ref=e90]
 ```"""
 B = "mcp__browser__"
+RESUME = os.path.join(tmp, "Resume.pdf")
+open(RESUME, "w").write("x")
 ANSWER_CMD = ["/venv/python", "/proj/assist.py"]
 
 
 def fresh():
-    s = {"allowed": [H], "current_url": f"https://{H}/careers/job/X_1", "refs": {}, "issued": {},
-         "issued_values": [], "answer_cmd": ANSWER_CMD}
+    s = {"current_url": f"https://{H}/careers/job/X_1", "refs": {}, "issued": {}, "issued_values": [],
+         "answer_cmd": ANSWER_CMD, "resume": os.path.realpath(RESUME)}
     s["refs"].update(assist.parse_refs(SNAP))
     s["current_url"] = assist.page_url(SNAP)
     return s
 
 
 def blocked(state, tool, inp, needle=""):
-    why = assist.decide(state, tool, inp)
-    assert why and needle.lower() in why.lower(), (tool, inp, why)
+    verdict, why = assist.decide(state, tool, inp)
+    assert verdict == "deny" and needle.lower() in why.lower(), (tool, inp, verdict, why)
+
+
+def asks(state, tool, inp, needle=""):
+    verdict, why = assist.decide(state, tool, inp)
+    assert verdict == "ask" and why.startswith("NUAUTO") and needle.lower() in why.lower(), (tool, inp, verdict, why)
 
 
 def ok(state, tool, inp):
-    why = assist.decide(state, tool, inp)
-    assert why is None, (tool, inp, why)
+    verdict, why = assist.decide(state, tool, inp)
+    assert verdict == "allow", (tool, inp, verdict, why)
 
 
 s = fresh()
 assert s["refs"]["e12"] == {"role": "textbox", "name": "First Name*"} and s["refs"]["e60"]["name"] == "Submit"
 assert s["current_url"] == f"https://{H}/careers/job/X_1/apply"
 
-# tools: only the listed browser tools; no scripts / uploads / other tools
-for t in ("browser_evaluate", "browser_run_code_unsafe", "browser_run_code", "browser_file_upload", "browser_drag", "browser_install"):
+# tools: browser tools only; never page scripts (they could submit behind the review)
+for t in ("browser_evaluate", "browser_run_code_unsafe", "browser_run_code", "browser_drag", "browser_install"):
     blocked(s, B + t, {}, "not allowed")
 blocked(s, "mcp__other__x", {}, "not allowed")
 blocked(s, "Write", {}, "not allowed")
 ok(s, B + "browser_snapshot", {})
 
-# sites
+# any web site is fine; non-web links are not
 ok(s, B + "browser_navigate", {"url": f"https://{H}/careers/job/X_1"})
-blocked(s, B + "browser_navigate", {"url": "https://evil.example/"}, "blocked")
-blocked(s, B + "browser_tabs", {"action": "new", "url": "https://evil.example/"}, "blocked")
-off = {**fresh(), "current_url": "https://accounts.google.com/signin"}
-blocked(off, B + "browser_click", {"ref": "e61"}, "not the posting")
-ok(off, B + "browser_snapshot", {})  # looking is fine
+ok(s, B + "browser_navigate", {"url": "https://campus.icims.example/jobs/1/login"})
+ok(s, B + "browser_tabs", {"action": "new", "url": "https://other.example/"})
+blocked(s, B + "browser_navigate", {"url": "file:///home/x/token.json"}, "web pages")
+blocked(s, B + "browser_navigate", {"url": "javascript:alert(1)"}, "web pages")
+other = {**fresh(), "current_url": "https://accounts.example/signin"}
+ok(other, B + "browser_click", {"ref": "e61"})  # clicking on another site is fine now
 
-# never Submit, Enter, checkboxes, passwords
-blocked(s, B + "browser_click", {"ref": "e60", "element": "Next button"}, "submit")  # the ref decides, not the description
-blocked(s, B + "browser_click", {"ref": "e90"}, "submit")
+# submitting: always asks the user first; the ref decides, not the agent's description
+asks(s, B + "browser_click", {"ref": "e60", "element": "Next button"}, "submit")
+asks(s, B + "browser_click", {"target": "e90"}, "submit")
+apply_snap = SNAP.replace('button "Next" [ref=e61]', 'button "Apply" [ref=e61]')
+a = {**fresh(), "refs": assist.parse_refs(apply_snap)}
+asks(a, B + "browser_click", {"ref": "e61"}, "apply")             # some sites' final button is "Apply"
+asks(s, B + "browser_press_key", {"key": "Enter"}, "enter")
+asks(s, B + "browser_type", {"ref": "e12", "text": "Jane", "submit": True}, "submit")
 ok(s, B + "browser_click", {"ref": "e61"})       # Next
 ok(s, B + "browser_click", {"ref": "e20"})       # open a dropdown
-ok(s, B + "browser_click", {"ref": "e80"})       # a link (sign-in pages on other hosts are then locked)
-blocked(s, B + "browser_press_key", {"key": "Enter"}, "enter")
+ok(s, B + "browser_click", {"ref": "e50"})       # checkboxes are fine now
+ok(s, B + "browser_click", {"ref": "e31"})       # options are fine now
 ok(s, B + "browser_press_key", {"key": "Tab"})
-blocked(s, B + "browser_click", {"ref": "e50"}, "checkbox")
-blocked(s, B + "browser_type", {"ref": "e70", "text": "x"}, "password")
-blocked(s, B + "browser_click", {"ref": "e99"}, "snapshot")  # unknown ref
-ok(s, B + "browser_click", {"target": "e61", "element": "Next"})               # newer MCP: "target"
-blocked(s, B + "browser_click", {"target": "e60"}, "submit")
-blocked(s, B + "browser_type", {"target": "First Name", "text": "Jane"}, "unknown element")  # a description is not a ref
+ok(s, B + "browser_type", {"ref": "e12", "text": "anything"})   # typing is not tied to the answer bank any more
+ok(s, B + "browser_fill_form", {"fields": [{"ref": "e12", "type": "textbox", "value": "Jane"},
+                                           {"ref": "e50", "type": "checkbox", "value": "true"}]})
+ok(s, B + "browser_select_option", {"ref": "e20", "values": ["Maine"]})
+blocked(s, B + "browser_click", {"ref": "e99"}, "snapshot")      # unknown ref: the submit check needs its name
+blocked(s, B + "browser_click", {"target": "Submit button"}, "unknown element")  # a description is not a ref
 
-# typing and choosing: only what the answer bank issued, for that field
-blocked(s, B + "browser_type", {"ref": "e12", "text": "Jane"}, "answer")
-assist.issue(s, "First Name*", "Jane")
-ok(s, B + "browser_type", {"ref": "e12", "text": "Jane"})
-blocked(s, B + "browser_type", {"ref": "e12", "text": "Janet"}, "exactly")
-blocked(s, B + "browser_type", {"ref": "e13", "text": "Jane"}, "no answer-bank value")  # issued for another field
-blocked(s, B + "browser_type", {"ref": "e12", "text": "Jane", "submit": True}, "submit")
-blocked(s, B + "browser_fill_form", {"fields": [{"ref": "e12", "type": "textbox", "value": "Jane"},
-                                                 {"ref": "e50", "type": "checkbox", "value": "true"}]}, "checkbox")
-ok(s, B + "browser_fill_form", {"fields": [{"ref": "e12", "type": "textbox", "value": "Jane"}]})
-blocked(s, B + "browser_click", {"ref": "e31"}, "answer bank")   # option not issued
-blocked(s, B + "browser_click", {"ref": "e40"}, "answer bank")   # radio not issued
-assist.issue(s, "State*", "Massachusetts")
-assist.issue(s, "Over 18?*", "Yes")
-ok(s, B + "browser_click", {"ref": "e31"})
-blocked(s, B + "browser_click", {"ref": "e32"}, "answer bank")   # Maine was never issued
-ok(s, B + "browser_click", {"ref": "e40"})
-blocked(s, B + "browser_select_option", {"ref": "e20", "values": ["Maine"]}, "not given out")
-ok(s, B + "browser_select_option", {"ref": "e20", "values": ["Massachusetts"]})
+# never passwords
+blocked(s, B + "browser_type", {"ref": "e70", "text": "x"}, "password")
+blocked(s, B + "browser_fill_form", {"fields": [{"ref": "e70", "type": "textbox", "value": "x"}]}, "password")
+
+# uploads: only the resume
+ok(s, B + "browser_file_upload", {"paths": [RESUME]})
+ok(s, B + "browser_file_upload", {"paths": []})   # cancel the file chooser
+blocked(s, B + "browser_file_upload", {"paths": [os.path.join(config.PROJECT_DIR, "token.json")]}, "only the resume")
+blocked(s, B + "browser_file_upload", {"paths": [RESUME, "/etc/passwd"]}, "only the resume")
+blocked({**s, "resume": None}, B + "browser_file_upload", {"paths": [RESUME]}, "only the resume")
 
 # Bash: only the answer-bank command, no shell tricks
 ok(s, "Bash", {"command": '/venv/python /proj/assist.py answer "City*" --option "A (+1)"'})
@@ -121,16 +125,16 @@ for bad in ['rm -rf /', '/venv/python /proj/assist.py answer "x"; rm -rf /', '/v
 
 # refs: only from the latest snapshot; page-changing actions without one clear them (stale refs can't be trusted)
 s = fresh()
-assert assist.update_after(s, B + "browser_click", "### Page\n- Page URL: https://" + H + "/next\n") is None
+assist.update_after(s, B + "browser_click", "### Page\n- Page URL: https://" + H + "/next\n")
 assert s["refs"] == {}, "a click without a snapshot must clear refs"
 blocked(s, B + "browser_click", {"ref": "e61"}, "snapshot")
 assist.update_after(s, B + "browser_snapshot", SNAP.replace('button "Next" [ref=e61]', 'button "Submit" [ref=e61]'))
-blocked(s, B + "browser_click", {"ref": "e61"}, "submit")  # same ref, now Submit: blocked
+asks(s, B + "browser_click", {"ref": "e61"}, "submit")  # same ref, now Submit: the user is asked
 s2 = fresh()
 assist.update_after(s2, B + "browser_wait_for", "waited")  # not page-changing: refs kept
 assert s2["refs"]
-w = assist.update_after(s2, B + "browser_click", "### Page\n- Page URL: https://accounts.google.com/x\n")
-assert w and "not the posting" in w and s2["current_url"].startswith("https://accounts.google.com")
+assist.update_after(s2, B + "browser_click", "### Page\n- Page URL: https://accounts.example/x\n")
+assert s2["current_url"] == "https://accounts.example/x" and s2["refs"] == {}
 
 # unnamed fields take the question text right above them (from the page, never from the agent)
 Q = """              - group [ref=f13e993]:
@@ -145,11 +149,6 @@ r = assist.parse_refs(Q)
 assert r["f13e1000"]["name"] == "What are your top 3 skills? (30 word limit)*"
 assert r["f13e1009"]["name"] == "How did you hear about this co-op opportunity? (30 word limit)*"
 assert r["f13e1010"]["name"] == "" and r["f13e744"]["name"] == "Back"
-q = {**fresh(), "refs": r}
-assist.issue(q, "How did you hear about this co-op opportunity? (30 word limit)*", "From NUworks")
-ok(q, B + "browser_type", {"target": "f13e1009", "text": "From NUworks"})
-blocked(q, B + "browser_type", {"target": "f13e1000", "text": "From NUworks"}, "no answer-bank value")
-blocked(q, B + "browser_type", {"target": "f13e1010", "text": "From NUworks"}, "no answer-bank value")
 
 # files: only the resume and notes, never the project folder (secrets)
 notes = tempfile.mkdtemp()
@@ -157,7 +156,7 @@ open(os.path.join(notes, "writeup.md"), "w").write("x")
 resume = os.path.join(tmp, "resume.pdf")
 open(resume, "w").write("x")
 os.symlink(config.PROJECT_DIR, os.path.join(notes, "sneaky"))
-r = {**fresh(), "read_roots": [os.path.realpath(notes), os.path.realpath(resume)]}
+r = {**fresh(), "read_roots": [os.path.realpath(notes), os.path.realpath(resume)]}  # noqa
 ok(r, "Read", {"file_path": os.path.join(notes, "writeup.md")})
 ok(r, "Read", {"file_path": resume})
 ok(r, "Grep", {"pattern": "XSS", "path": notes})

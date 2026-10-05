@@ -1,25 +1,21 @@
 """Agent helper for company application sites (Workday, Oracle, iCIMS, SuccessFactors...).
 
-  nuauto assist                                    list Needs Human rows with a company-site link
-  nuauto assist <row> [--url U] [--allow HOST]...  start a Claude session (Sonnet) that fills that row's
-                                                   application in a visible browser
-  nuauto assist nuworks <row>                      submit an Applied row's job on NUworks too (retry)
+  nuauto assist                       list Needs Human rows stopped at a company site
+  nuauto assist <row> [--url U]       start a Claude session (Sonnet) that fills that row's application in a
+                                      visible browser
+  nuauto assist nuworks <row>         submit an Applied row's job on NUworks too (retry)
 
-You sign in, upload, write essays, tick checkboxes and press Submit yourself. When you /exit the
-session, the terminal asks whether you submitted; y marks the row Applied (dated today), then the same
-job is submitted on NUworks too (apply.submit_nuworks_side, the tested NUworks code; outcome in Notes).
+The agent may browse any site the application needs, fill fields, tick boxes and upload the resume. It
+NEVER submits without you: every Submit-type click (SUBMIT_RE, incl. "Apply") and the Enter key make
+Claude Code ask you in the terminal first (hook "ask"); you review the application, then approve.
+When you /exit, the terminal asks whether you submitted; y marks the row Applied (dated today), then the
+same job is submitted on NUworks too (apply.submit_nuworks_side, the tested NUworks code).
 
-The agent only reads pages, clicks and types. Code decides the rest. Every browser and Bash call goes
-through `assist.py hook pre|post` (Claude Code hooks):
-- browser tools: only TOOLS. No page scripts, uploads, drags. Bash: only `assist.py <answer-bank command>`.
-- files: Read / Glob / Grep only inside the resume and local_config "assist_read_paths" (notes, writeups).
-- sites: navigation only to allowed hosts (the posting's, plus --allow); no click or typing while the
-  page is on any other host (sign-in pages are yours).
-- never: buttons/links named Submit (SUBMIT_RE), the Enter key, type(submit=true), checkboxes/switches,
-  password fields.
-- text typed into a field must equal what the answer bank issued this run for that field's name; radio
-  buttons / options / selects must be a value the answer bank issued. Answers are one short line.
-The answer bank commands (answer / save / once / alias / blank) are what the agent runs through Bash.
+Code checks every call (Claude Code hooks -> `assist.py hook pre|post`, logic in decide / update_after):
+- ask first: Submit-type clicks, Enter, type(submit=true). Element names come from the latest snapshot,
+  never from the agent's description (refs are cleared by anything that changes the page).
+- never: password fields, page scripts (they could submit behind the review), uploads other than the
+  resume, non-web links; Bash other than the answer-bank command; files outside the resume and notes.
 """
 import fcntl
 import json
@@ -41,12 +37,13 @@ MCP_PACKAGE = "@playwright/mcp@0.0.82"  # pinned: the guard is tested against th
 TOOLS = {"browser_snapshot", "browser_click", "browser_type", "browser_fill_form", "browser_select_option",
          "browser_hover", "browser_press_key", "browser_navigate", "browser_navigate_back", "browser_wait_for",
          "browser_take_screenshot", "browser_tabs", "browser_handle_dialog", "browser_find",
-         "browser_console_messages", "browser_resize", "browser_close"}
+         "browser_console_messages", "browser_resize", "browser_close", "browser_file_upload"}
 INTERACT = {"browser_click", "browser_type", "browser_fill_form", "browser_select_option", "browser_hover",
             "browser_press_key", "browser_handle_dialog"}
-SUBMIT_RE = re.compile(r"^\s*(submit|submit (my |your )?application|send( my)? application|finish|complete application)\s*$", re.I)
-GUARDED_ROLES = {"radio", "option", "menuitemradio", "menuitemcheckbox", "menuitem"}  # clicking one = choosing an answer
-USER_ROLES = {"checkbox", "switch"}
+# Buttons/links that may submit an application: the user is asked first. "Apply" too: some sites
+# (SuccessFactors) name their final button that; on a posting it only opens the form.
+SUBMIT_RE = re.compile(r"^\s*(submit|submit (my |your |the )?application|send( my)? application|apply|apply now|"
+                       r"finish|complete( my)? application|confirm( and submit)?)\s*$", re.I)
 ENTER_KEYS = {"enter", "numpadenter", "return"}
 BASH_COMMANDS = {"answer", "save", "once", "alias", "blank", "wait"}
 MAX_ANSWER = 300  # one line; enough for a "30 word limit" answer, not an essay
@@ -147,20 +144,17 @@ def strings(obj):
 
 def update_after(state, tool, text):
     """PostToolUse logic (pure). Element refs are only trusted from the latest full snapshot: any action that
-    can change the page clears them unless its reply carries a new snapshot. Returns a warning or None."""
+    can change the page clears them unless its reply carries a new snapshot (so a click's target name, which
+    the submit check reads, is always current)."""
     name = tool.split("__")[-1]
     url = page_url(text)
     if url:
         state["current_url"] = url
     if "### Snapshot" in text or "Page Snapshot" in text:
         state["refs"] = parse_refs(text)
-    elif name in INTERACT or name in ("browser_navigate", "browser_navigate_back", "browser_tabs", "browser_close"):
+    elif name in INTERACT or name in ("browser_navigate", "browser_navigate_back", "browser_tabs", "browser_close",
+                                      "browser_file_upload"):
         state["refs"] = {}
-    h = host(state.get("current_url", ""))
-    if h not in state["allowed"]:
-        return (f"The browser is now on {h or 'an unknown site'}, not the posting's site. Do not click or type there; "
-                "tell the user (sign-in is theirs; another site needs `--allow`).")
-    return None
 
 
 def under(path, roots):
@@ -185,83 +179,73 @@ def check_read(state, tool, inp):
     return None
 
 
+ALLOW = ("allow", None)
+
+
+def deny(reason):
+    return ("deny", reason)
+
+
+def ask(reason):
+    return ("ask", "NUAUTO: " + reason)
+
+
 def decide(state, tool, inp):
-    """None = allow, else the reason to block. Pure: the PreToolUse hook's whole logic."""
+    """("allow" | "deny" | "ask", reason). Pure: the PreToolUse hook's whole logic. "ask" = Claude Code asks the
+    user in the terminal before the action runs (that is the review before anything is submitted)."""
     if tool == "Bash":
-        return check_bash(state, inp.get("command", ""))
+        why = check_bash(state, inp.get("command", ""))
+        return deny(why) if why else ALLOW
     if tool in ("Read", "Glob", "Grep"):
-        return check_read(state, tool, inp)
+        why = check_read(state, tool, inp)
+        return deny(why) if why else ALLOW
     prefix = f"mcp__{SERVER}__"
     if not tool.startswith(prefix):
-        return f"{tool} is not allowed in this session."
+        return deny(f"{tool} is not allowed in this session.")
     name = tool[len(prefix):]
     if name not in TOOLS:
-        return f"{name} is not allowed here (no page scripts, uploads or drags)."
-    allowed = set(state["allowed"])
-    if name == "browser_navigate":
-        h = host(inp.get("url", ""))
-        return None if h in allowed else f"Navigation to {h or '?'} is blocked: only {sorted(allowed)}."
-    if name == "browser_tabs" and inp.get("url") and host(inp["url"]) not in allowed:
-        return f"Opening {host(inp['url'])} is blocked: only {sorted(allowed)}."
-    if name not in INTERACT:
-        return None
-    here = host(state.get("current_url", ""))
-    if here not in allowed:
-        return f"The page is on {here or 'an unknown site'}, not the posting's site: the user handles it (sign-in?)."
+        return deny(f"{name} is not allowed (no page scripts: they could submit behind the review).")
+    if name in ("browser_navigate", "browser_tabs") and inp.get("url"):
+        scheme = urlparse(inp["url"]).scheme
+        return ALLOW if scheme in ("http", "https") else deny(f"Only web pages, not {scheme}: links.")
+    if name == "browser_file_upload":
+        paths = inp.get("paths") or []
+        resume = state.get("resume")
+        if all(resume and os.path.realpath(os.path.expanduser(p)) == resume for p in paths):
+            return ALLOW
+        return deny(f"Only the resume can be uploaded: {resume}")
     if name == "browser_press_key":
-        return "The Enter key is blocked (it can submit a form)." if inp.get("key", "").lower() in ENTER_KEYS else None
-    if name == "browser_handle_dialog":
-        return None
+        if inp.get("key", "").lower() in ENTER_KEYS:
+            return ask("pressing Enter can submit a form. Approve only if the user has reviewed everything.")
+        return ALLOW
+    if name == "browser_type":
+        target = state["refs"].get(ref_of(inp) or "")
+        if target and "password" in target["name"].lower():
+            return deny("Password fields are the user's.")
+        if inp.get("submit"):
+            return ask("typing with submit=true presses Enter, which can submit the form.")
+        return ALLOW
     if name == "browser_fill_form":
         for f in inp.get("fields", []):
-            why = check_target(state, ref_of(f), "type", str(f.get("value", "")), f.get("type"))
-            if why:
-                return why
-        return None
-    if name == "browser_type":
-        if inp.get("submit"):
-            return "type with submit=true is blocked (it presses Enter)."
-        return check_target(state, ref_of(inp), "type", inp.get("text", ""))
-    if name == "browser_select_option":
-        why = check_target(state, ref_of(inp), "select", "")
-        if why:
-            return why
-        bad = [v for v in inp.get("values", []) if v not in state["issued_values"]]
-        return f"Option(s) {bad} were not given out by the answer bank." if bad else None
-    return check_target(state, ref_of(inp), "hover" if name == "browser_hover" else "click", "")
+            target = state["refs"].get(ref_of(f) or "")
+            if (target and "password" in target["name"].lower()) or "password" in str(f.get("name", "")).lower():
+                return deny("Password fields are the user's.")
+        return ALLOW
+    if name == "browser_click":
+        target = state["refs"].get(ref_of(inp) or "")
+        if not target:
+            return deny(f"Unknown element {ref_of(inp)!r}: use the element's ref (like e52) from your latest "
+                        "browser_snapshot; after any click or typing, take a new snapshot first.")
+        if SUBMIT_RE.match(target["name"]):
+            return ask(f"clicking {target['name']!r} may SUBMIT the application. Approve only after the user has "
+                       "reviewed every page (it is fine if this only opens the form).")
+        return ALLOW
+    return ALLOW
 
 
 def ref_of(inp):
     """The element an action targets: "ref" or (newer Playwright MCP) "target"."""
     return inp.get("ref") or inp.get("target")
-
-
-def check_target(state, ref, action, value, field_type=None):
-    target = state["refs"].get(ref or "")
-    if not target:
-        return (f"Unknown element {ref!r}: use the element's ref (like e52) from your latest browser_snapshot; "
-                "after any click or typing, take a new snapshot first.")
-    role, name = target["role"], target["name"]
-    if action == "hover":
-        return None
-    if "password" in name.lower():
-        return "Password fields are the user's."
-    if role in USER_ROLES or field_type == "checkbox":
-        return f"Checkboxes are the user's ({name!r}): ask them to tick it in the browser."
-    if action == "click":
-        if SUBMIT_RE.match(name):
-            return f"{name!r} is the user's: they review and press Submit themselves."
-        if role in GUARDED_ROLES and name not in state["issued_values"]:
-            return f"Choosing {name!r} needs the answer bank first (answer/save/once)."
-        return None
-    if action == "type":
-        if field_type in ("radio", "combobox", "slider"):
-            return None if value in state["issued_values"] else f"{value!r} was not given out by the answer bank."
-        want = state["issued"].get(label_key(name))
-        if want is None:
-            return f"No answer-bank value for the field named {name!r} this run: run answer \"{name}\" first."
-        return None if value == want else f"{name!r} must get exactly the answer-bank value, not {value!r}."
-    return None
 
 
 def check_bash(state, command):
@@ -409,19 +393,18 @@ def hook(kind):
     tool, inp = data.get("tool_name", ""), data.get("tool_input") or {}
     with state_file(os.path.join(d, "state.json")) as state:
         if kind == "pre":
-            why = decide(state, tool, inp)
-            log(d, f"{'BLOCK' if why else 'ok   '} {tool} {json.dumps(inp)[:300]}" + (f"  ({why})" if why else ""))
-            if why:
+            verdict, why = decide(state, tool, inp)
+            log(d, f"{verdict.upper():5} {tool} {json.dumps(inp)[:300]}" + (f"  ({why})" if why else ""))
+            if verdict == "deny":
                 print(why, file=sys.stderr)
                 sys.exit(2)
+            if verdict == "ask":  # Claude Code shows the user a yes/no confirmation in the terminal
+                print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
+                                                         "permissionDecisionReason": why}}))
             return
         with open(os.path.join(d, "last_response.json"), "w") as f:  # for debugging the guard (local log folder)
             json.dump(data.get("tool_response"), f)
-        warning = update_after(state, tool, "\n".join(strings(data.get("tool_response"))))
-        if warning:
-            log(d, f"off-site: {host(state['current_url'])}")
-            print(warning, file=sys.stderr)
-            sys.exit(2)
+        update_after(state, tool, "\n".join(strings(data.get("tool_response"))))
 
 
 def hook_main(kind):
@@ -453,7 +436,7 @@ def claude_bin():
     return shutil.which("claude", path=os.path.expanduser("~/.local/bin") + os.pathsep + os.environ.get("PATH", "")) or "claude"
 
 
-def run(number, url_override, allow):
+def run(number, url_override):
     import browser
     import sheet
     if not sys.stdin.isatty():
@@ -465,8 +448,9 @@ def run(number, url_override, allow):
     me = os.path.abspath(__file__)
     answer_cmd = [sys.executable, me]
     read_roots = [os.path.realpath(r) for r in [*config.ASSIST_READ_PATHS, config.LAPTOP_RESUME] if os.path.exists(r)]
-    state = {"allowed": sorted({host(url), *[h.lower() for h in allow]}), "current_url": url, "refs": {},
-             "issued": {}, "issued_values": [], "answer_cmd": answer_cmd, "read_roots": read_roots}
+    resume = os.path.realpath(config.LAPTOP_RESUME) if os.path.exists(config.LAPTOP_RESUME) else None
+    state = {"current_url": url, "refs": {}, "issued": {}, "issued_values": [], "answer_cmd": answer_cmd,
+             "read_roots": read_roots, "resume": resume}
     with open(os.path.join(d, "state.json"), "w") as f:
         json.dump(state, f)
     os.makedirs(config.ASSIST_PROFILE_DIR, mode=0o700, exist_ok=True)
@@ -482,13 +466,13 @@ def run(number, url_override, allow):
     with open(os.path.join(config.PROJECT_DIR, "ASSIST_PROMPT.md")) as f:
         rules = f.read().replace("ANSWER ", " ".join(shlex.quote(a) for a in answer_cmd) + " ")
     context = (f"\n\nTHIS RUN\nRow {row.number}: {row.company} | {row.title}\nPosting: {url}\n"
-               f"Allowed sites: {', '.join(state['allowed'])}\n"
+               f"Resume file (the only file you may upload): {resume or 'not found'}\n"
                "If you have no browser tools yet, they are still connecting: run the answer-bank command with "
                "just `wait` (it pauses 5 s), then look again (up to 6 times) before telling the user.\n"
                f"Resume and notes you may read (Read / Glob / Grep, nothing else): {', '.join(read_roots) or 'none'}\n"
                "Answer bank command: "
                f"{' '.join(shlex.quote(a) for a in answer_cmd)} <answer|save|once|alias|blank> ...")
-    log_.write(f"Row {row.number}: {row.company} | {row.title} -> {', '.join(state['allowed'])}")
+    log_.write(f"Row {row.number}: {row.company} | {row.title} -> {host(url)}")
     log_.write("Starting the agent. Sign in / upload / Submit are yours. Type /exit in the session when done.")
     cmd = [claude_bin(), "--model", "sonnet", "--strict-mcp-config", "--mcp-config", os.path.join(d, "mcp.json"),
            "--settings", os.path.join(d, "settings.json"), "--tools", "Bash", "Read", "Glob", "Grep",
@@ -547,16 +531,12 @@ def list_rows():
 
 
 def main(argv):
-    args, url, allow = list(argv), None, []
-    while "--url" in args or "--allow" in args:
-        flag = "--url" if "--url" in args else "--allow"
-        i = args.index(flag)
+    args, url = list(argv), None
+    if "--url" in args:
+        i = args.index("--url")
         if i + 1 >= len(args):
             sys.exit(__doc__)
-        if flag == "--url":
-            url = args[i + 1]
-        else:
-            allow.append(args[i + 1])
+        url = args[i + 1]
         del args[i:i + 2]
     if not args:
         return list_rows()
@@ -566,7 +546,7 @@ def main(argv):
     if len(args) == 1 and args[0].isdigit():
         import sheet
         try:
-            return run(int(args[0]), url, allow)
+            return run(int(args[0]), url)
         except sheet.LimitReached as e:
             sys.exit(str(e))
     sys.exit(__doc__)
