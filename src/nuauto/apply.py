@@ -24,12 +24,12 @@ from urllib.parse import parse_qs, urlparse
 from playwright.sync_api import TimeoutError as PlaywrightTimeout
 from playwright.sync_api import sync_playwright
 
-import answers
-import browser
-import config
-import jobs
-import sheet
-from inspect_form import FIELDS_JS
+from nuauto import answers
+from nuauto import browser
+from nuauto import config
+from nuauto import jobs
+from nuauto import sheet
+from nuauto.inspect_form import FIELDS_JS
 
 APPLY_NAME = re.compile(r"^\s*apply\s*$", re.IGNORECASE)
 

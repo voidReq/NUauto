@@ -6,15 +6,15 @@ import os
 import tempfile
 from datetime import datetime
 
-import config
+from nuauto import config
 
 tmp = tempfile.mkdtemp()
 config.DATA_DIR = os.path.join(tmp, "data")
 config.LOGS_DIR = os.path.join(tmp, "logs")
 
-import daily  # noqa: E402
-import sheet  # noqa: E402
-import web  # noqa: E402
+from nuauto import daily  # noqa: E402
+from nuauto import sheet  # noqa: E402
+from nuauto import web  # noqa: E402
 
 daily.LOG_PATH = os.path.join(config.LOGS_DIR, "test.txt")
 sent = []

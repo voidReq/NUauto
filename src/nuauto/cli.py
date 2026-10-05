@@ -1,0 +1,107 @@
+"""nuauto: the one command for this project (installed by `pip install -e .`; see pyproject.toml).
+
+  nuauto approve         browse the best jobs; y approves (goes in the sheet as Approved), n rejects
+  nuauto apply           apply to every Approved row, up to the weekly limit  (-n 3 = at most 3)
+  nuauto rate            teach the ranking your taste (y/n only, nothing goes in the sheet)
+  nuauto update          check NUworks for new jobs now (on the homelab if you have one, then syncs)
+  nuauto status          sheet counts, weekly limit, Approved rows
+  nuauto login           log in to NUworks by hand (and copies the session to the homelab, if any)
+  nuauto login google    fresh Google Sheets login (needed every 7 days; Discord reminds you)
+  nuauto assist          company-site applications: list rows / `<row>` starts the agent (asks before Submit)
+  nuauto test            run all offline tests (no network, no sheet, no browser)
+  nuauto doctor          health check of this machine (and the homelab + Mark-done page, if any; read-only)
+
+Tools (each module's own command line; `nuauto <tool>` with no arguments shows its help):
+  nuauto jobs ...        job pool steps (list, triage-export, details, pool, suggest N, stats...)
+  nuauto answers ...     answer bank (init, list)
+  nuauto sheet ...       sheet commands (status...)
+  nuauto setup-sheet     one-time sheet setup; `format` restyles it
+  nuauto inspect <url>   read-only look at a NUworks Apply form
+  nuauto daily [weekly]  the update itself / the Sunday check-in (what the homelab timers run)
+  nuauto web             the Mark-done page (what the homelab's nuauto-web service runs)
+"""
+import os
+import runpy
+import sys
+
+from nuauto import config
+
+TOOLS = {"jobs": "jobs", "answers": "answers", "sheet": "sheet", "setup-sheet": "setup_sheet",
+         "inspect": "inspect_form", "daily": "daily", "web": "web"}
+COMMANDS = ("approve", "rate", "apply", "status", "update", "login", "test", "doctor", "assist")
+
+
+def run_tool(name, rest):
+    """Run a module's own `if __name__ == "__main__":` block, as `python -m nuauto.<module> ...` would."""
+    sys.argv = [f"nuauto {name}"] + rest
+    runpy.run_module(f"nuauto.{TOOLS[name]}", run_name="__main__", alter_sys=True)
+
+
+def main():
+    os.chdir(config.PROJECT_DIR)  # relative paths (data/, logs/, rsync sources) are from the repo root
+    cmd, rest = (sys.argv[1], sys.argv[2:]) if len(sys.argv) > 1 else ("", [])
+    if cmd in TOOLS:
+        return run_tool(cmd, rest)
+    laptop = config.HAS_SERVER and not config.IS_SERVER  # a laptop that syncs with a homelab
+    if cmd not in COMMANDS or \
+            (rest and cmd not in ("apply", "assist") and not (cmd == "login" and rest == ["google"])):
+        sys.exit(__doc__)
+    if cmd == "test":
+        import glob
+        import subprocess
+        failed = [t for t in sorted(glob.glob("tests/test_*.py")) if subprocess.run([sys.executable, t]).returncode]
+        sys.exit(f"FAILED: {', '.join(failed)}" if failed else 0)
+    if cmd == "doctor":
+        from nuauto import doctor
+        sys.exit(doctor.main())
+    if laptop:
+        from nuauto import sync
+        if cmd == "update":
+            sync.push()
+            print("Running the update on the homelab (a few minutes; Ctrl+C stops watching, not the run)...")
+            sync.ssh("systemctl --user start nuauto-daily.service; "
+                     f"tail -n 4 \"$(ls -t {config.SERVER_DIR}/logs/daily-*.txt | head -1)\"")
+            sync.pull()
+            return
+        if cmd != "login":
+            sync.pull()
+
+    try:
+        if cmd == "approve":
+            from nuauto import jobs
+            jobs.cmd_approve()
+        elif cmd == "rate":
+            from nuauto import jobs
+            jobs.cmd_rate()
+        elif cmd == "apply":
+            from nuauto import apply
+            apply.main(rest)
+        elif cmd == "status":
+            from nuauto import sheet
+            sys.argv = ["nuauto status", "status"]
+            sheet.main()
+        elif cmd == "update":  # on the homelab itself, or no homelab at all
+            from nuauto import daily
+            sys.exit(daily.main())
+        elif cmd == "assist":
+            if config.IS_SERVER:
+                sys.exit("nuauto assist runs on the laptop (visible browser, you at the terminal).")
+            from nuauto import assist
+            assist.main(rest)
+        elif cmd == "login" and rest == ["google"]:
+            from nuauto import sheet
+            sheet.google_login()
+            if laptop:
+                sync.push()
+        elif cmd == "login":
+            from nuauto import browser
+            browser.cmd_login()
+            if laptop:
+                sync.push_session()
+    finally:
+        if laptop and cmd in ("approve", "rate", "status"):
+            sync.push()  # ratings (and a fresh Google token after a re-login) go to the homelab
+
+
+if __name__ == "__main__":
+    main()

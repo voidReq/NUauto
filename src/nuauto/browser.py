@@ -1,7 +1,7 @@
 """Playwright (Firefox) with a persistent profile.
 
-  python browser.py login          # you log in by hand (SSO); session is saved
-  python browser.py open <job-url> # open one job page, screenshot, stop
+  nuauto login          # you log in by hand (SSO); session is saved
+  python -m nuauto.browser open <job-url> # open one job page, screenshot, stop
 """
 import contextlib
 import json
@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeout, sync_playwright
 
-import config
+from nuauto import config
 
 
 def pause(page, low=1.5, high=4.0):
@@ -99,7 +99,7 @@ def relogin(page, context, log):
             page.wait_for_timeout(1000)
             try:
                 if page.locator("input[type=password]").count():
-                    log.write("Auto re-login: SSO is asking for a password. Run `python browser.py login`.")
+                    log.write("Auto re-login: SSO is asking for a password. Run `nuauto login`.")
                     return False
                 if urlparse(page.url).hostname in config.ALLOWED_HOSTS and not on_login_page(page):
                     save_cookies(context.cookies())

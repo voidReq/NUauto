@@ -1,7 +1,7 @@
 """Answer bank (answers.json): exact-match answers for form fields.
 
-  python answers.py init    # create answers.json with the starter questions (never overwrites)
-  python answers.py list    # show questions and whether each has an answer
+  nuauto answers init    # create answers.json with the starter questions (never overwrites)
+  nuauto answers list    # show questions and whether each has an answer
 
 Edit by hand with: nvim answers.json
 
@@ -14,7 +14,7 @@ import os
 import sys
 from datetime import date
 
-import config
+from nuauto import config
 
 # (question, always_ask)
 STARTERS = [

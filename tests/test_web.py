@@ -10,10 +10,10 @@ import threading
 from http.server import ThreadingHTTPServer
 from urllib.parse import parse_qs, urlencode, urlparse
 
-import config
-import jobs
-import sheet
-import web
+from nuauto import config
+from nuauto import jobs
+from nuauto import sheet
+from nuauto import web
 
 TMP = tempfile.mkdtemp()
 web.SECRET_PATH = os.path.join(TMP, "web_secret.txt")  # never touch the real one

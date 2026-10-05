@@ -1,9 +1,9 @@
 """Offline checks for jobs.py (hard rules, pool, model) and sheet.add_proposed. Run: python test_jobs.py"""
 from datetime import date
 
-import jobs
-import sheet
-from sheet import HEADERS
+from nuauto import jobs
+from nuauto import sheet
+from nuauto.sheet import HEADERS
 
 TODAY = date(2026, 10, 2)
 

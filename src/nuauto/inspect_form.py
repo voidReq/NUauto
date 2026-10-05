@@ -1,6 +1,6 @@
 """Read-only look at an application form. Fills nothing, submits nothing.
 
-  python inspect_form.py <job-url>
+  nuauto inspect <job-url>
 
 Clicks the job page's single "Apply" button, then lists the form fields
 (label, type, required, options) and saves a screenshot under logs/.
@@ -12,8 +12,8 @@ import sys
 
 from playwright.sync_api import sync_playwright
 
-import browser
-import config
+from nuauto import browser
+from nuauto import config
 
 # Collects visible form controls. Reports whether a field already has a value, never the value.
 FIELDS_JS = """
@@ -62,7 +62,7 @@ def main():
             page = context.pages[0] if context.pages else context.new_page()
             log.write(f"Opening {url}")
             if not browser.goto_logged_in(page, context, url, log):
-                log.write("STOP: not logged in. Run: python browser.py login")
+                log.write("STOP: not logged in. Run: nuauto login")
                 return
 
             # the page's text is lowercase "apply" (capitalized by CSS), so ignore case

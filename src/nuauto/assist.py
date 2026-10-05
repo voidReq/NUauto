@@ -28,8 +28,8 @@ import sys
 from contextlib import contextmanager
 from urllib.parse import urlparse
 
-import answers
-import config
+from nuauto import answers
+from nuauto import config
 
 STATE_ENV = "NUAUTO_ASSIST_DIR"
 SERVER = "browser"  # MCP server name -> tools are mcp__browser__browser_*
@@ -69,7 +69,7 @@ def label_key(label):
 
 def link_from_notes(notes):
     """The company-site link in a Needs Human row's Notes ("External application: host -> url"), or None."""
-    import apply  # unwrap (Outlook safelinks)
+    from nuauto import apply  # unwrap (Outlook safelinks)
     m = re.search(r"External application: \S+ -> (https://\S+)", notes or "")
     return apply.unwrap(m.group(1)) if m else None
 
@@ -420,7 +420,7 @@ def hook_main(kind):
 # ---------- launcher (nuauto assist) ----------
 
 def find_row(number, url_override):
-    import sheet
+    from nuauto import sheet
     ws = sheet.open_worksheet()
     rows = sheet.read_rows(ws)
     row = next((r for r in rows if r.number == number), None)
@@ -437,8 +437,8 @@ def claude_bin():
 
 
 def run(number, url_override):
-    import browser
-    import sheet
+    from nuauto import browser
+    from nuauto import sheet
     if not sys.stdin.isatty():
         sys.exit("nuauto assist needs a real terminal (you talk to the agent and confirm Submit).")
     rows, row, url = find_row(number, url_override)
@@ -504,8 +504,8 @@ def run(number, url_override):
 def nuworks_side(ws, number):
     """Company site done -> submit the same job on NUworks too (apply.submit_nuworks_side: tested NUworks
     code, not the agent)."""
-    import apply
-    import sheet
+    from nuauto import apply
+    from nuauto import sheet
     row = next((r for r in sheet.read_rows(ws) if r.number == number), None)
     if row is None or row.status != "Applied":
         sys.exit(f"Row {number} is not Applied; the NUworks side runs only after the company site is done.")
@@ -516,7 +516,7 @@ def nuworks_side(ws, number):
 
 
 def list_rows():
-    import sheet
+    from nuauto import sheet
     rows = [r for r in sheet.read_rows(sheet.open_worksheet()) if r.status == "Needs Human"]
     targets = [(r, *assist_target(r.notes)) for r in rows]
     agent = [(r, u) for r, u, why in targets if u]
@@ -541,10 +541,10 @@ def main(argv):
     if not args:
         return list_rows()
     if len(args) == 2 and args[0] == "nuworks" and args[1].isdigit():  # retry / catch up the NUworks side
-        import sheet
+        from nuauto import sheet
         return nuworks_side(sheet.open_worksheet(), int(args[1]))
     if len(args) == 1 and args[0].isdigit():
-        import sheet
+        from nuauto import sheet
         try:
             return run(int(args[0]), url)
         except sheet.LimitReached as e:

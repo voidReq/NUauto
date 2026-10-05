@@ -1,5 +1,5 @@
 """Offline checks for apply.check_popup. Run: python test_apply.py"""
-from apply import NeedsHuman, check_popup
+from nuauto.apply import NeedsHuman, check_popup
 
 LABEL = "Doe, Jane | Spring 2027"
 RESUME = {"tag": "select", "type": "select-one", "label": "Resume *",

@@ -1,6 +1,6 @@
 """Offline checks for the domain lock in browser.py (no browser is launched). Run: python test_browser.py"""
-import browser
-import config
+from nuauto import browser
+from nuauto import config
 
 NUW = "https://northeastern-csm.symplicity.com"
 

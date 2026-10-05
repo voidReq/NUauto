@@ -1,8 +1,8 @@
 """Sheet setup.
 
-  python setup_sheet.py          one-time: headers, Status dropdown, frozen row 1, then the styling below.
+  nuauto setup-sheet          one-time: headers, Status dropdown, frozen row 1, then the styling below.
                                  Refuses to touch the sheet if any cell already has a value.
-  python setup_sheet.py format   (re)apply the styling only: header, column widths, Status colors,
+  nuauto setup-sheet format   (re)apply the styling only: header, column widths, Status colors,
                                  alternating rows. Never changes a value; safe to re-run. Replaces this
                                  tab's conditional formats and alternating colors with ours.
 """
@@ -10,7 +10,7 @@ import sys
 
 import gspread
 
-import config
+from nuauto import config
 
 HEADERS = ["URL", "Company", "Title", "Status", "Notes", "Date"]
 STATUSES = ["Proposed", "Approved", "Applied", "Failed", "Needs Human"]
@@ -36,7 +36,7 @@ WIDTHS = {"URL": 110, "Company": 215, "Title": 370, "Status": 115, "Notes": 380,
 
 def format_sheet(sh, ws):
     """Styling only (see the module docstring)."""
-    import sheet  # SITE_MARK
+    from nuauto import sheet  # SITE_MARK
     meta = sh.fetch_sheet_metadata()
     tab = next(t for t in meta["sheets"] if t["properties"]["sheetId"] == ws.id)
     col = {name: i for i, name in enumerate(HEADERS)}
@@ -102,7 +102,7 @@ def main():
     if sys.argv[1:]:
         sys.exit(__doc__)
     if any(cell.strip() for row in ws.get_all_values() for cell in row):
-        sys.exit("Sheet already has data. Nothing was changed. To restyle it: python setup_sheet.py format")
+        sys.exit("Sheet already has data. Nothing was changed. To restyle it: nuauto setup-sheet format")
 
     ws.update(range_name="A1:F1", values=[HEADERS])
     ws.freeze(rows=1)

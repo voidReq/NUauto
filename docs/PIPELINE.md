@@ -1,7 +1,7 @@
-JOB POOL (jobs.py, rebuilt 2026-10-02; the rules in code = RULES in jobs.py)
-Runs automatically on the homelab twice a day (daily.py, see docs/DEPLOY.md). Each step does
-only new work. By hand (see the jobs.py docstring for every step):
-  python jobs.py stats     python jobs.py pool     python jobs.py suggest 5
+JOB POOL (jobs.py, rebuilt 2026-10-02; the rules in code = RULES in src/nuauto/jobs.py)
+Runs automatically on the homelab twice a day (`nuauto daily`, see docs/DEPLOY.md). Each step does
+only new work. By hand (see the src/nuauto/jobs.py docstring for every step):
+  nuauto jobs stats     nuauto jobs pool     nuauto jobs suggest 5
 
 PIPELINE
 Data comes from NUworks' own search/job data, not page text.

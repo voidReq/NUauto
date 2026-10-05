@@ -5,7 +5,7 @@ After=network-online.target
 [Service]
 WorkingDirectory=%h/projects/auto
 Environment=TZ=America/New_York
-ExecStart=%h/projects/auto/.venv/bin/python %h/projects/auto/web.py
+ExecStart=%h/projects/auto/.venv/bin/nuauto web
 Restart=on-failure
 RestartSec=10
 

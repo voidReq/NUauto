@@ -1,109 +1,91 @@
-"""Offline checks that sync.CODE (the files pushed to the homelab) is complete. Run: python test_sync.py
+"""Offline checks that sync.CODE (the files pushed to the homelab) is complete. Run: python tests/test_sync.py
 
-Nothing is imported or executed: modules are read with ast. A module imported by pushed code but missing
-from CODE would crash the homelab's twice-daily update (ImportError), so this guards the push list.
+Nothing is imported or executed from the pushed files: they are read with ast. A module imported by pushed
+code but missing from CODE would crash the homelab's twice-daily update (ImportError), so this guards the list.
 """
 import ast
-import fnmatch
 import glob
 import os
 import re
 
-import config
-import sync
+from nuauto import config, sync
 
 ROOT = config.PROJECT_DIR
-NOT_PUSHED = ["test_*.py", "tests/*", "setup_sheet.py"]  # tests (tests/) and the one-off setup script stay on the laptop
-SCRIPT = "nuauto"  # Python script without the .py extension
+PKG = "src/nuauto"
 
 
-def pushed_exempt(name):
-    return any(fnmatch.fnmatch(name, pat) for pat in NOT_PUSHED)
+def parse(path):
+    with open(os.path.join(ROOT, path)) as f:
+        return ast.parse(f.read(), filename=path)
 
 
-def local_modules():
-    """Top-level project .py files that must reach the homelab."""
-    names = sorted(os.path.basename(p) for p in glob.glob(os.path.join(ROOT, "*.py")))
-    return [n for n in names if not pushed_exempt(n)]
-
-
-def parse(name):
-    with open(os.path.join(ROOT, name)) as f:
-        return ast.parse(f.read(), filename=name)
-
-
-def imported_local_files(name):
-    """Local .py files that `name` imports (anywhere in the file, including inside functions)."""
+def imported_modules(path):
+    """nuauto modules a file imports (anywhere, including inside functions), as src/nuauto/<name>.py paths."""
     found = set()
-    for node in ast.walk(parse(name)):
-        mods = []
-        if isinstance(node, ast.Import):
-            mods = [a.name.split(".")[0] for a in node.names]
-        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-            mods = [node.module.split(".")[0]]
-        elif isinstance(node, ast.ImportFrom) and node.level > 0:
-            raise AssertionError(f"{name}: relative import (use plain top-level imports)")
-        for m in mods:
-            if os.path.exists(os.path.join(ROOT, m + ".py")):
-                found.add(m + ".py")
+    for node in ast.walk(parse(path)):
+        names = []
+        if isinstance(node, ast.ImportFrom) and node.level > 0:
+            raise AssertionError(f"{path}: relative import (use `from nuauto import x`)")
+        if isinstance(node, ast.ImportFrom) and node.module == "nuauto":
+            names = [a.name for a in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("nuauto."):
+            names = [node.module.split(".")[1]]
+        elif isinstance(node, ast.Import):
+            names = [a.name.split(".")[1] for a in node.names if a.name.startswith("nuauto.")]
+        for n in names:
+            found.add(f"{PKG}/{n}.py")
     return found
 
 
-def string_constants(name):
-    return {n.value for n in ast.walk(parse(name)) if isinstance(n, ast.Constant) and isinstance(n.value, str)}
+def strings(path):
+    return {n.value for n in ast.walk(parse(path)) if isinstance(n, ast.Constant) and isinstance(n.value, str)}
 
 
 def main():
     code = sync.CODE
-    code_py = [c for c in code if c.endswith(".py") or c == SCRIPT]
+    code_py = [c for c in code if c.endswith(".py")]
 
     # CODE itself: no duplicates, relative paths inside the project dir (pushed with rsync -R), every file exists
     assert len(code) == len(set(code)), f"duplicates in CODE: {sorted(c for c in set(code) if code.count(c) > 1)}"
     for c in code:
         assert not os.path.isabs(c) and ".." not in c.split("/"), f"CODE entry {c!r} must be a path inside the project dir"
         assert os.path.isfile(os.path.join(ROOT, c)), f"CODE lists {c!r} but it does not exist"
-    assert SCRIPT in code and "sync.py" in code and "config.py" in code
+    for must in ("pyproject.toml", f"{PKG}/__init__.py", f"{PKG}/cli.py", f"{PKG}/sync.py", f"{PKG}/config.py"):
+        assert must in code, f"{must} is not in sync.CODE"
     for c in code_py:
         parse(c)  # every pushed Python file at least parses
 
-    # tests and one-offs are never pushed
-    assert not [c for c in code if pushed_exempt(c)], [c for c in code if pushed_exempt(c)]
+    # tests are never pushed; no Python code is left outside the package
+    assert not [c for c in code if c.startswith("tests/")], "tests are not pushed"
+    assert not glob.glob(os.path.join(ROOT, "*.py")), "Python code belongs in src/nuauto/ (or tests/)"
 
-    # every local module imported by pushed code (and by the nuauto script) is itself pushed
+    # every package module is pushed, and everything pushed code imports is pushed too
+    for m in sorted(glob.glob(os.path.join(ROOT, PKG, "*.py"))):
+        rel = os.path.relpath(m, ROOT)
+        assert rel in code, f"{rel} is a package module but is not in sync.CODE"
     for c in code_py:
-        missing = imported_local_files(c) - set(code)
+        missing = imported_modules(c) - set(code)
         assert not missing, f"{c} imports {sorted(missing)} which are not in sync.CODE"
 
-    # a pushed file must not import a file that is deliberately not pushed either
-    for c in code_py:
-        bad = [m for m in imported_local_files(c) if pushed_exempt(m)]
-        assert not bad, f"{c} imports {bad}, which are never pushed"
-
-    # files started by name (e.g. subprocess "apply.py") are pushed too
-    local_py = {os.path.basename(p) for p in glob.glob(os.path.join(ROOT, "*.py"))}
-    for c in code_py:
-        named = {s for s in string_constants(c) if s in local_py} - {c}
-        missing = named - set(code)
-        assert not missing, f"{c} refers to {sorted(missing)} by name, not in sync.CODE"
-
-    # every *_PROMPT.md referenced in jobs.py / daily.py (or any pushed file) exists and is pushed
+    # every *_PROMPT.md named in pushed code exists in prompts/ and is pushed; no prompt is left unpushed
     prompt = re.compile(r"\b[A-Z][A-Z_]*_PROMPT\.md\b")
     referenced = set()
     for c in code_py:
-        for s in string_constants(c):
+        for s in strings(c):
             referenced.update(prompt.findall(s))
-    assert {"TRIAGE_PROMPT.md", "SCORE_PROMPT.md", "CATEGORY_PROMPT.md"} <= referenced, referenced
+    assert {"TRIAGE_PROMPT.md", "SCORE_PROMPT.md", "CATEGORY_PROMPT.md", "ASSIST_PROMPT.md"} <= referenced, referenced
     for p in sorted(referenced):
         assert os.path.isfile(os.path.join(ROOT, "prompts", p)), f"prompts/{p} is referenced but missing"
         assert "prompts/" + p in code, f"prompts/{p} is referenced but not in sync.CODE"
-    # and a prompt file on disk that nothing pushes is a forgotten file too
     assert not glob.glob(os.path.join(ROOT, "*_PROMPT.md")), "prompt files belong in prompts/"
     for p in sorted(glob.glob(os.path.join(ROOT, "prompts", "*.md"))):
         assert "prompts/" + os.path.basename(p) in code, f"prompts/{os.path.basename(p)} exists but is not in sync.CODE"
 
-    # reverse: every top-level project module (not a test / one-off) is in CODE, so a new one can't be forgotten
-    for m in local_modules():
-        assert m in code, f"{m} is a project module but is not in sync.CODE"
+    # the homelab's units run the installed command, never a file path that no longer exists
+    for unit in glob.glob(os.path.join(ROOT, "deploy", "systemd", "*.service")):
+        for line in open(unit):
+            if line.startswith("ExecStart="):
+                assert "/.venv/bin/nuauto " in line and ".py" not in line, f"{os.path.basename(unit)}: {line.strip()}"
 
     print("All sync checks passed.")
 
