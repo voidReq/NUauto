@@ -113,6 +113,7 @@ ok(s, B + "browser_select_option", {"ref": "e20", "values": ["Massachusetts"]})
 
 # Bash: only the answer-bank command, no shell tricks
 ok(s, "Bash", {"command": '/venv/python /proj/assist.py answer "City*" --option "A (+1)"'})
+ok(s, "Bash", {"command": "/venv/python /proj/assist.py wait"})
 for bad in ['rm -rf /', '/venv/python /proj/assist.py answer "x"; rm -rf /', '/venv/python /proj/assist.py answer "$(id)"',
             '/venv/python /proj/assist.py hook pre', '/venv/python /other.py answer x', 'cat answers.json',
             '/venv/python /proj/assist.py answer x | sh']:

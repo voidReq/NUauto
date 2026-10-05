@@ -48,7 +48,7 @@ SUBMIT_RE = re.compile(r"^\s*(submit|submit (my |your )?application|send( my)? a
 GUARDED_ROLES = {"radio", "option", "menuitemradio", "menuitemcheckbox", "menuitem"}  # clicking one = choosing an answer
 USER_ROLES = {"checkbox", "switch"}
 ENTER_KEYS = {"enter", "numpadenter", "return"}
-BASH_COMMANDS = {"answer", "save", "once", "alias", "blank"}
+BASH_COMMANDS = {"answer", "save", "once", "alias", "blank", "wait"}
 MAX_ANSWER = 300  # one line; enough for a "30 word limit" answer, not an essay
 REF_LINE = re.compile(r'^(?P<indent>\s*)-\s+(?P<role>[a-z]+)(?:\s+"(?P<name>(?:[^"\\]|\\.)*)")?(?P<attrs>[^\n]*?)\[ref=(?P<ref>[^\]\s]+)\](?P<tail>[^\n]*)$')
 TEXT_LINE = re.compile(r'^(?P<indent>\s*)-\s+text:\s*(?P<text>.+)$')
@@ -337,6 +337,10 @@ def log(d, msg):
 # ---------- answer-bank commands (run by the agent through Bash) ----------
 
 def bank(argv):
+    if argv[:1] == ["wait"]:  # the browser tools may still be connecting when the session starts
+        import time
+        time.sleep(5)
+        return print(json.dumps({"status": "waited 5s: check whether the browser tools are there now"}))
     import argparse
     ap = argparse.ArgumentParser(prog="assist.py")
     ap.add_argument("cmd", choices=sorted(BASH_COMMANDS))
@@ -479,19 +483,19 @@ def run(number, url_override, allow):
         rules = f.read().replace("ANSWER ", " ".join(shlex.quote(a) for a in answer_cmd) + " ")
     context = (f"\n\nTHIS RUN\nRow {row.number}: {row.company} | {row.title}\nPosting: {url}\n"
                f"Allowed sites: {', '.join(state['allowed'])}\n"
-               "Start when the user says go (the browser tools may still be connecting before that): open the "
-               "posting and fill the application.\n"
+               "If you have no browser tools yet, they are still connecting: run the answer-bank command with "
+               "just `wait` (it pauses 5 s), then look again (up to 6 times) before telling the user.\n"
                f"Resume and notes you may read (Read / Glob / Grep, nothing else): {', '.join(read_roots) or 'none'}\n"
                "Answer bank command: "
                f"{' '.join(shlex.quote(a) for a in answer_cmd)} <answer|save|once|alias|blank> ...")
     log_.write(f"Row {row.number}: {row.company} | {row.title} -> {', '.join(state['allowed'])}")
-    log_.write("Starting the agent. Sign in / upload / Submit are yours.")
-    print("\n>>> When the session opens, type: go     (type /exit when you're done)\n")
+    log_.write("Starting the agent. Sign in / upload / Submit are yours. Type /exit in the session when done.")
     cmd = [claude_bin(), "--model", "sonnet", "--strict-mcp-config", "--mcp-config", os.path.join(d, "mcp.json"),
            "--settings", os.path.join(d, "settings.json"), "--tools", "Bash", "Read", "Glob", "Grep",
            *[a for r in read_roots for a in ("--add-dir", r if os.path.isdir(r) else os.path.dirname(r))],
            "--allowedTools", f"mcp__{SERVER}", f"Bash({sys.executable} {me}:*)", "Read", "Glob", "Grep",
-           "--append-system-prompt", rules + context]
+           "--append-system-prompt", rules + context,
+           f"Go: open the posting and fill the application for row {row.number}, following the rules."]
     try:
         subprocess.run(cmd, env={**os.environ, STATE_ENV: d}, cwd=config.PROJECT_DIR)
     except KeyboardInterrupt:
