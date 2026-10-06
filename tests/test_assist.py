@@ -236,7 +236,7 @@ assert bank("answer", "Phone Extension")["status"] == "leave_blank"
 assert bank("alias", "E-mail Address*", "email")["value"] == "me@example.com"
 
 # NUworks prompt: typing the option's exact text works too (was: number only)
-class IO:
+class IO(answers.TerminalIO):  # the terminal wording, canned replies
     def __init__(self, reply):
         self.reply = reply
 

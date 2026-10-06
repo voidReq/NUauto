@@ -201,13 +201,7 @@ def pick_row(rows, row_number):
     return candidates[0]
 
 
-def ask(prompt, allowed):
-    """Terminal question. Anything not in `allowed` (including EOF) counts as the first, safest answer."""
-    try:
-        answer = input(prompt).strip().lower()
-    except EOFError:
-        answer = ""
-    return answer if answer in allowed else allowed[0]
+SUBMIT_RESULT = [("u", "Not sure"), ("y", "Yes, NUworks confirmed it"), ("n", "No, it failed")]  # first = safest
 
 
 def fill_popup(page, context, row, resume_label, entries, io, log, blocked, company_site_done=False):
@@ -257,7 +251,7 @@ def fill_popup(page, context, row, resume_label, entries, io, log, blocked, comp
     return dialog
 
 
-def submit_flow(page, dialog, ws, row, resume_label, log, state):
+def submit_flow(page, dialog, ws, row, resume_label, log, state, io):
     """Click Submit (the Approved status is the go-ahead), then confirm the result."""
     log.write(f"Screenshot: {log.dir}/filled_popup.png")
     submit_btn = dialog.get_by_role("button", name="Submit", exact=True)
@@ -288,7 +282,7 @@ def submit_flow(page, dialog, ws, row, resume_label, log, state):
     if confirmed:
         result = "y"
     else:
-        result = ask("Did NUworks confirm the submission? [y = yes / n = it failed / u = unsure]: ", ["u", "y", "n"])
+        result = io.menu("Did NUworks confirm the submission? [y = yes / n = it failed / u = unsure]: ", SUBMIT_RESULT, "u")
     if result == "y":
         hint = jobs.external_hint(row_details(row))
         note = "Submitted via apply.py" + (" (confirmed by NUworks page)" if confirmed else " (confirmed by you)")
@@ -312,13 +306,14 @@ def submit_flow(page, dialog, ws, row, resume_label, log, state):
 NUWORKS_CLICK_MARK = "NUworks side: Submit clicked, result unknown; check NUworks."
 
 
-def submit_nuworks_side(row, ws):
+def submit_nuworks_side(row, ws, io=None):
     """The company-site application is submitted and the row is Applied (nuauto assist): submit the same
     job on NUworks too, with the same checks as apply_one. The outcome goes into Notes; the row stays
     Applied (same job, so the weekly count does not change). Returns the note."""
     log = browser.RunLog(f"row{row.number}_nuworks_side")
     resume_label = load_resume_label()
-    entries, io = answers.load(), (answers.TerminalIO() if sys.stdin.isatty() else answers.NoTerminalIO())
+    entries = answers.load()
+    io = io or (answers.TerminalIO() if sys.stdin.isatty() else answers.NoTerminalIO())
     blocked, clicked, note = [], False, None
     with sync_playwright() as p:
         context = browser.launch(p)
@@ -374,7 +369,7 @@ def apply_one(row, ws, args, resume_label, entries, io):
             page = context.pages[0] if context.pages else context.new_page()
             dialog = fill_popup(page, context, row, resume_label, entries, io, log, blocked)
             if args.submit:
-                submit_flow(page, dialog, ws, row, resume_label, log, state)
+                submit_flow(page, dialog, ws, row, resume_label, log, state, io)
                 if state.get("unresolved"):
                     outcome = "stop"
             else:
@@ -409,19 +404,36 @@ def apply_one(row, ws, args, resume_label, entries, io):
     return outcome
 
 
+def refuse_unattended(ui):
+    """Real submits need you there: a terminal you are at, or `nuauto gui` (it started this process). Never an
+    agent: Claude Code sets CLAUDECODE in every shell it runs. Demo mode submits nothing real."""
+    if config.DEMO:
+        return
+    if os.environ.get("CLAUDECODE"):
+        sys.exit("This submits real applications, so it never runs inside a Claude Code session. "
+                 "Run it yourself (a terminal or `nuauto gui`); agents use `nuauto gui --demo`.")
+    if ui == "json":
+        if not answers.json_ui_allowed():
+            sys.exit("--ui json is only for nuauto gui.")
+    elif not sys.stdin.isatty():
+        sys.exit("apply submits real applications; run it yourself in a terminal.")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("-n", type=int, metavar="N", help="apply to at most N jobs this run")
     ap.add_argument("--row", type=int, help=argparse.SUPPRESS)
     ap.add_argument("--dry-run", action="store_true", help=argparse.SUPPRESS)
+    ap.add_argument("--ui", choices=["json"], help=argparse.SUPPRESS)  # questions as JSON lines, for nuauto gui
     args = ap.parse_args(argv)
     args.submit = not args.dry_run
-    if args.submit and not sys.stdin.isatty():
-        sys.exit("apply submits real applications; run it yourself in a terminal.")
+    if args.submit:
+        refuse_unattended(args.ui)
 
     resume_label = load_resume_label()
     entries = answers.load()
-    io = answers.TerminalIO() if sys.stdin.isatty() else answers.NoTerminalIO()
+    io = answers.JsonIO() if args.ui == "json" else answers.TerminalIO() if sys.stdin.isatty() else answers.NoTerminalIO()
+    browser.RunLog.events = io.event
     ws = sheet.open_worksheet()
     seen = set()  # rows already handled in this run (a row you answered "n" to stays Approved)
     first = True
@@ -448,15 +460,20 @@ def main(argv=None):
         day = row_closes(row)
         if day is not None and day < date.today():
             print(f"--- Row {row.number}: {row.company} | {row.title}: deadline passed ({day}). Needs Human.")
+            io.event("row_done", row=row.number, outcome="deadline")
             sheet.set_status(ws, row.number, "Needs Human", notes=f"deadline passed ({day}); not attempted")
             if args.row is not None:
                 break
             continue
         print(f"--- Row {row.number}: {row.company} | {row.title} | closes {jobs.closes_text(day)}")
+        io.event("row", row=row.number, company=row.company, title=row.title)
         outcome = apply_one(row, ws, args, resume_label, entries, io)
+        io.event("row_done", row=row.number, outcome=outcome)
         if outcome == "stop" or args.row is not None or (args.n and len(seen) >= args.n):
             break
-        time.sleep(random.uniform(30, 60))  # slow, human-like pacing between applications
+        wait = random.uniform(30, 60) * config.DEMO_PACE  # DEMO_PACE is 1 outside demo mode
+        io.event("wait", seconds=round(wait))
+        time.sleep(wait)  # slow, human-like pacing between applications
 
 
 if __name__ == "__main__":

@@ -3,7 +3,8 @@
   nuauto assist                       list Needs Human rows stopped at a company site
   nuauto assist <row> [--url U]       start a Claude session (Sonnet) that fills that row's application in a
                                       visible browser
-  nuauto assist nuworks <row>         submit an Applied row's job on NUworks too (retry)
+  nuauto assist nuworks <row>         submit an Applied row's job on NUworks too (retry; you at a terminal,
+                                      or `--ui json` from nuauto gui)
 
 The agent may browse any site the application needs, fill fields, tick boxes and upload the resume. It
 NEVER submits without you: every Submit-type click (SUBMIT_RE, incl. "Apply") and the Enter key make
@@ -22,7 +23,6 @@ import json
 import os
 import re
 import shlex
-import shutil
 import subprocess
 import sys
 from contextlib import contextmanager
@@ -433,7 +433,7 @@ def find_row(number, url_override):
 
 
 def claude_bin():
-    return shutil.which("claude", path=os.path.expanduser("~/.local/bin") + os.pathsep + os.environ.get("PATH", "")) or "claude"
+    return config.tool_path("claude") or "claude"
 
 
 def run(number, url_override):
@@ -512,9 +512,9 @@ def nuworks_side_blocked(notes):
     return None
 
 
-def nuworks_side(ws, number):
+def nuworks_side(ws, number, io=None):
     """Company site done -> submit the same job on NUworks too (apply.submit_nuworks_side: tested NUworks
-    code, not the agent)."""
+    code, not the agent). io: answers.JsonIO when the GUI runs it."""
     from nuauto import apply
     from nuauto import sheet
     row = next((r for r in sheet.read_rows(ws) if r.number == number), None)
@@ -524,7 +524,7 @@ def nuworks_side(ws, number):
     if blocked:
         sys.exit(f"Row {number}: {blocked}")
     print(f"\nNow submitting row {number} on NUworks too (Ctrl+C stops)...")
-    print(apply.submit_nuworks_side(row, ws))
+    print(apply.submit_nuworks_side(row, ws, io))
 
 
 def list_rows():
@@ -543,18 +543,26 @@ def list_rows():
 
 
 def main(argv):
-    args, url = list(argv), None
-    if "--url" in args:
-        i = args.index("--url")
-        if i + 1 >= len(args):
-            sys.exit(__doc__)
-        url = args[i + 1]
-        del args[i:i + 2]
+    args, url, ui = list(argv), None, None
+    for flag in ("--url", "--ui"):
+        if flag in args:
+            i = args.index(flag)
+            if i + 1 >= len(args):
+                sys.exit(__doc__)
+            if flag == "--url":
+                url = args[i + 1]
+            else:
+                ui = args[i + 1]
+            del args[i:i + 2]
+    if ui not in (None, "json"):
+        sys.exit(__doc__)
     if not args:
         return list_rows()
     if len(args) == 2 and args[0] == "nuworks" and args[1].isdigit():  # retry / catch up the NUworks side
+        from nuauto import apply
         from nuauto import sheet
-        return nuworks_side(sheet.open_worksheet(), int(args[1]))
+        apply.refuse_unattended(ui)  # a real NUworks submit: you at a terminal or the GUI, never an agent
+        return nuworks_side(sheet.open_worksheet(), int(args[1]), answers.JsonIO() if ui == "json" else None)
     if len(args) == 1 and args[0].isdigit():
         from nuauto import sheet
         try:

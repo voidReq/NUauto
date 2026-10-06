@@ -28,6 +28,9 @@ class FakeRoute:
     def continue_(self):
         self.did.append("continue")
 
+    def fallback(self):  # let it through (to the network, or to the next handler)
+        self.did.append("continue")
+
 
 class FakeContext:
     def route(self, pattern, handler):
@@ -190,3 +193,71 @@ except browser.PlaywrightTimeout:
     pass
 assert p.calls == 2
 
+
+# profile lock: one process at a time on local/browser_profile/, released on close (or a failed launch)
+import os  # noqa: E402
+import subprocess  # noqa: E402
+import sys  # noqa: E402
+import tempfile  # noqa: E402
+
+tmp = tempfile.mkdtemp()
+config.LOCAL_DIR, config.PROFILE_DIR = tmp, os.path.join(tmp, "browser_profile")
+config.PROFILE_LOCK_PATH, config.COOKIES_PATH = os.path.join(tmp, "browser_profile.lock"), os.path.join(tmp, "none.json")
+OTHER = """import sys
+from nuauto import browser, config
+config.LOCAL_DIR, config.PROFILE_LOCK_PATH = sys.argv[1], sys.argv[2]
+try:
+    browser.lock_profile("other")
+    print("got it")
+except browser.ProfileBusy as e:
+    print("busy:", e)"""
+
+
+def other_process():
+    return subprocess.run([sys.executable, "-c", OTHER, tmp, config.PROFILE_LOCK_PATH], capture_output=True, text=True).stdout
+
+
+assert browser.profile_holder() is None
+browser.lock_profile("nuauto apply")
+holder = browser.profile_holder()
+assert holder["pid"] == os.getpid() and holder["what"] == "nuauto apply", holder
+out = other_process()
+assert out.startswith("busy:") and "nuauto apply" in out, out
+browser.unlock_profile()
+assert browser.profile_holder() is None and other_process().startswith("got it")
+
+
+class FakeContext2:
+    closed = False
+
+    def close(self):
+        FakeContext2.closed = True
+
+
+class FakeFirefox:
+    def __init__(self, fail=False):
+        self.fail = fail
+
+    def launch_persistent_context(self, profile_dir, headless=False, **kw):
+        assert browser.profile_holder()["pid"] == os.getpid()  # locked before Firefox starts
+        if self.fail:
+            raise RuntimeError("Firefox did not start")
+        return FakeContext2()
+
+
+class FakePlaywright:
+    def __init__(self, fail=False):
+        self.firefox = FakeFirefox(fail)
+
+
+ctx = browser.launch(FakePlaywright())
+assert browser.profile_holder()["pid"] == os.getpid()
+ctx.close()
+assert FakeContext2.closed and browser.profile_holder() is None  # close() releases the lock
+try:
+    browser.launch(FakePlaywright(fail=True))
+    raise AssertionError("expected the launch error")
+except RuntimeError:
+    pass
+assert browser.profile_holder() is None  # a failed launch releases it too
+print("All browser profile-lock checks passed.")

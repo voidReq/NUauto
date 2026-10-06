@@ -2,15 +2,25 @@ import glob
 import json
 from datetime import date as _date
 import os
+import shutil
 import socket
 import sys
 
 # The repo root (this file is src/nuauto/config.py). Code lives in src/nuauto/, prompts in prompts/.
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SRC_DIR = os.path.dirname(os.path.abspath(__file__))
+# Where local/, data/, logs/ and work/ live: the repo root, unless NUAUTO_STATE_DIR names another folder
+# (demo mode and tests: a temp folder, so they never touch your real files).
+STATE_DIR = os.environ.get("NUAUTO_STATE_DIR") or PROJECT_DIR
+# Demo mode (`nuauto gui --demo`, set by gui.py): fake sheet, fake NUworks pages, fake Claude (demo.py).
+DEMO = os.environ.get("NUAUTO_DEMO") == "1"
+if DEMO and os.path.realpath(STATE_DIR) == os.path.realpath(PROJECT_DIR):
+    sys.exit("Demo mode needs its own NUAUTO_STATE_DIR; it never uses the real local/ and data/.")
+# Demo runs wait this fraction of the usual pauses (NUAUTO_DEMO_PACE). Real runs always wait the full time.
+DEMO_PACE = float(os.environ.get("NUAUTO_DEMO_PACE", "0.05")) if DEMO else 1.0
 # local/ (gitignored): everything personal or secret: settings, Google/NUworks logins, answers, browser
 # profiles, the homelab's resume copy and Mark-link secret. Generated state stays in data/, logs/, work/.
-LOCAL_DIR = os.path.join(PROJECT_DIR, "local")
+LOCAL_DIR = os.path.join(STATE_DIR, "local")
 # Personal settings (sheet, resume, homelab, public URL): local/local_config.json.
 # Start from local_config.example.json. Without it the example's placeholders are used (enough for the offline tests).
 LOCAL_CONFIG_PATH = os.path.join(LOCAL_DIR, "local_config.json")
@@ -34,15 +44,19 @@ ALLOWED_HOSTS = {"northeastern-csm.symplicity.com"}
 # Laptop: the resume at local_config resume_path. Homelab: a copy the laptop pushes to local/resume.pdf.
 LAPTOP_RESUME = os.path.expanduser(LOCAL["resume_path"])
 RESUME_PATH = LAPTOP_RESUME if os.path.exists(LAPTOP_RESUME) else os.path.join(LOCAL_DIR, "resume.pdf")
-DATA_DIR = os.path.join(PROJECT_DIR, "data")   # list, triage, details, scores, ratings, pool
-WORK_DIR = os.path.join(PROJECT_DIR, "work")   # batch files exchanged with the Claude subagents
+DATA_DIR = os.path.join(STATE_DIR, "data")   # list, triage, details, scores, ratings, pool
+WORK_DIR = os.path.join(STATE_DIR, "work")   # batch files exchanged with the Claude subagents
 ANSWERS_PATH = os.path.join(LOCAL_DIR, "answers.json")
 PROFILE_PATH = os.path.join(LOCAL_DIR, "profile.json")
 # Extra hosts allowed ONLY while apply.py clicks the one-click re-login (see browser.relogin).
 SSO_HOSTS = {"shibboleth-northeastern-csm.symplicity.com", "neuidmsso.neu.edu"}
 COOKIES_PATH = os.path.join(LOCAL_DIR, "session_cookies.json")
 PROFILE_DIR = os.path.join(LOCAL_DIR, "browser_profile")
-LOGS_DIR = os.path.join(PROJECT_DIR, "logs")
+# Held (flock) by the one process using PROFILE_DIR; next to the profile, not in it (sync copies the profile).
+PROFILE_LOCK_PATH = os.path.join(LOCAL_DIR, "browser_profile.lock")
+# The running `nuauto gui`: its pid (so `nuauto apply --ui json` can check the GUI started it) and port.
+GUI_LOCK_PATH = os.path.join(LOCAL_DIR, "gui.lock")
+LOGS_DIR = os.path.join(STATE_DIR, "logs")
 # nuauto assist (assist.py): the agent's browser profile, never the NUworks one. Holds company-site logins.
 ASSIST_PROFILE_DIR = os.path.join(LOCAL_DIR, "assist_profile")
 # Folders/files the agent may read (notes, writeups) to suggest answers; the resume is always added.
@@ -78,3 +92,20 @@ def find_client_json():
 def lock_token():
     if os.path.exists(TOKEN_PATH):
         os.chmod(TOKEN_PATH, 0o600)
+
+
+# Where command-line tools usually get installed. Apps started from the desktop (macOS especially) and systemd
+# units get a short PATH, so these are searched too. ~/.local/bin comes first, as it always has.
+TOOL_DIRS = ["~/.local/bin", "~/.claude/local", "/opt/homebrew/bin", "/usr/local/bin", "~/.npm-global/bin",
+             "~/.volta/bin", "~/.bun/bin"]
+
+
+def tool_path(name):
+    """Full path of a tool such as claude or npx, or None. A path saved in local_config.json "tools" wins."""
+    saved = os.path.expanduser((LOCAL.get("tools") or {}).get(name) or "")
+    if saved and os.access(saved, os.X_OK):
+        return saved
+    dirs = [os.path.expanduser(TOOL_DIRS[0]), os.environ.get("PATH", "")]
+    dirs += [os.path.expanduser(d) for d in TOOL_DIRS[1:]]
+    dirs += sorted(glob.glob(os.path.expanduser("~/.nvm/versions/node/*/bin")), reverse=True)
+    return shutil.which(name, path=os.pathsep.join(d for d in dirs if d))

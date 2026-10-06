@@ -123,6 +123,12 @@ def load_details():
     return out
 
 
+def open_url(url):
+    """Open a page in your default browser, quietly (no output into the terminal viewer)."""
+    cmd = ["open", url] if sys.platform == "darwin" else ["xdg-open", url]
+    subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
 def job_url(job_id):
     return f"{HOST}/students/app/jobs/detail/{job_id}"
 
@@ -937,7 +943,7 @@ def rate_viewer(todo, details, ratings, approved=None, urgent=()):
             elif c == ord("u"):  # back one job; y/n there replaces the earlier answer
                 i, top = max(0, i - 1), 0
             elif c == ord("o"):
-                subprocess.Popen(["xdg-open", job_url(r["id"])], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                open_url(job_url(r["id"]))
             elif c == ord("q"):
                 return
 
@@ -947,12 +953,64 @@ def rate_viewer(todo, details, ratings, approved=None, urgent=()):
         pass  # every answer is already saved
 
 
+def review_queue(mode, details, ratings, rows, today=None):
+    """What Review shows, as (todo, urgent); used by `nuauto approve` / `nuauto rate` and the GUI.
+    approve: pool jobs not in the sheet and not rated no; closing within URGENT_DAYS first (soonest first), then
+             the usual ranking.
+    rate:    unrated pool jobs not in the sheet, in rating_order (urgent is empty)."""
+    in_sheet = {job_id(r.url) for r in rows}
+    pool, _ = ranked_pool(details, ratings, rows)
+    if mode == "rate":
+        return rating_order([r for r in pool if r["id"] not in ratings and r["id"] not in in_sheet]), []
+    todo = [r for r in pool if r["id"] not in in_sheet and ratings.get(r["id"], {}).get("label") != 0]
+    today = today or date.today()
+    left = {r["id"]: (closes(details[r["id"]]) - today).days if closes(details[r["id"]]) else None for r in todo}
+    urgent = sorted((r for r in todo if left[r["id"]] is not None and 0 <= left[r["id"]] <= URGENT_DAYS),
+                    key=lambda r: left[r["id"]])
+    return urgent + [r for r in todo if r not in urgent], urgent
+
+
+def text_blocks(text):
+    """Description text as [{"kind": "header" | "bullet" | "text", "text": ...}], by the same rules as job_lines."""
+    out = []
+    for raw in str(text or "").split("\n"):
+        s = raw.strip()
+        if not s:
+            continue
+        m = BULLET.match(s)
+        if is_header(s):
+            out.append({"kind": "header", "text": s.rstrip(":")})
+        elif m:
+            out.append({"kind": "bullet", "text": s[m.end():]})
+        else:
+            out.append({"kind": "text", "text": s})
+    return out
+
+
+def job_view(r, d, today=None):
+    """One pool job for the GUI's Review card: what job_lines shows in the terminal, as data."""
+    day = closes(d)
+    return {"id": r["id"], "url": job_url(r["id"]), "title": r["title"], "company": r["company"],
+            "location": d["location"], "category": r["category"], "tag": r.get("tag"), "match": r["match"],
+            "threshold": r["threshold"], "bonus": r["bonus"], "taste": r.get("taste"), "pay": d["pay"],
+            "closes": day.isoformat() if day else None, "closes_text": closes_text(day, today),
+            "soon": day is not None and (day - (today or date.today())).days <= URGENT_DAYS,
+            "external": external_hint(d), "flags": [f for f in r["flags"] if f != "apply on company site too?"],
+            "why": r["why"], "skills": d["skills"], "description": text_blocks(d["description"]),
+            "qualifications": text_blocks(d["qualifications"])}
+
+
+def sheet_item(r):
+    """A pool job as a new sheet row (add_proposed)."""
+    return {"url": job_url(r["id"]), "company": r["company"], "title": r["title"],
+            "notes": f"match {r['match']}%" + (f" +{r['bonus']} Boston" if r["bonus"] else "")
+                     + (f"; {', '.join(r['flags'])}" if r["flags"] else "")}
+
+
 def cmd_rate():
     details, ratings = load_details(), load("ratings.json", {})
     rows = sheet.read_rows(sheet.open_worksheet())
-    in_sheet = {job_id(r.url) for r in rows}
-    pool, _ = ranked_pool(details, ratings, rows)
-    todo = rating_order([r for r in pool if r["id"] not in ratings and r["id"] not in in_sheet])
+    todo, _ = review_queue("rate", details, ratings, rows)
     if sys.stdin.isatty() and sys.stdout.isatty():
         rate_viewer(todo, details, ratings)
         yes = sum(v["label"] for v in ratings.values())
@@ -967,7 +1025,7 @@ def cmd_rate():
             except (EOFError, KeyboardInterrupt):
                 a = "q"
             if a == "o":
-                subprocess.Popen(["xdg-open", job_url(r["id"])], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                open_url(job_url(r["id"]))
                 continue
             break
         if a == "q":
@@ -1000,10 +1058,7 @@ def cmd_suggest(n):
     if not ok:
         print("Nothing added.")
         return
-    items = [{"url": job_url(r["id"]), "company": r["company"], "title": r["title"],
-              "notes": f"match {r['match']}%" + (f" +{r['bonus']} Boston" if r["bonus"] else "")
-                       + (f"; {', '.join(r['flags'])}" if r["flags"] else "")} for r in top]
-    print(f"Added {sheet.add_proposed(ws, items)} rows as Proposed.")
+    print(f"Added {sheet.add_proposed(ws, [sheet_item(r) for r in top])} rows as Proposed.")
 
 
 def cmd_approve():
@@ -1013,18 +1068,10 @@ def cmd_approve():
     details, ratings = load_details(), load("ratings.json", {})
     ws = sheet.open_worksheet()
     rows = sheet.read_rows(ws)
-    in_sheet = {job_id(r.url) for r in rows}
-    pool, _ = ranked_pool(details, ratings, rows)
-    # everything not in the sheet that you haven't rated no; jobs you rated yes are the best candidates
-    todo = [r for r in pool if r["id"] not in in_sheet and ratings.get(r["id"], {}).get("label") != 0]
+    # everything not in the sheet that you haven't rated no, closing soon first; jobs you rated yes rank best
+    todo, urgent = review_queue("approve", details, ratings, rows)
     if not todo:
         sys.exit("Nothing new in the pool to approve.")
-    # jobs closing soon come first (soonest first), then the usual ranking
-    today = date.today()
-    left = {r["id"]: (closes(details[r["id"]]) - today).days if closes(details[r["id"]]) else None for r in todo}
-    urgent = sorted((r for r in todo if left[r["id"]] is not None and 0 <= left[r["id"]] <= URGENT_DAYS),
-                    key=lambda r: left[r["id"]])
-    todo = urgent + [r for r in todo if r not in urgent]
     if urgent:
         print(f"{len(urgent)} job{'s' if len(urgent) > 1 else ''} closing within {URGENT_DAYS} days shown first.")
     try:
@@ -1037,9 +1084,7 @@ def cmd_approve():
         rate_viewer(todo, details, ratings, approved, urgent)
     finally:  # runs on q, Ctrl+C or a crash: whatever you approved gets written
         if approved:
-            items = [{"url": job_url(r["id"]), "company": r["company"], "title": r["title"],
-                      "notes": f"match {r['match']}%" + (f" +{r['bonus']} Boston" if r["bonus"] else "")
-                               + (f"; {', '.join(r['flags'])}" if r["flags"] else "")} for r in approved]
+            items = [sheet_item(r) for r in approved]
             print(f"Added {sheet.add_proposed(ws, items, status='Approved')} rows as Approved.")
         else:
             print("Nothing approved.")
