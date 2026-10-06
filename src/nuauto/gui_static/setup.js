@@ -169,6 +169,18 @@
         el("td", {}, (bonus[c] = el("input", { type: "number", value: p.category_bonus[c] ?? "", placeholder: "0", "aria-label": `${c} bonus` }))),
         el("td", {}, (bar[c] = el("input", { type: "number", value: p.category_threshold[c] ?? "", placeholder: "usual", "aria-label": `${c} lower bar` }))),
         el("td", {}, (last[c] = el("input", { type: "checkbox", checked: p.rank_last.includes(c), "aria-label": `${c} rank last` })))));
+      const tagRows = [];
+      const tagBody = el("tbody", { testid: "pref-tags" });
+      const addTag = (t = { name: "", bonus: "", phrases: [] }) => {
+        const row = { name: el("input", { type: "text", value: t.name, placeholder: "name", "aria-label": "Tag name" }),
+          bonus: el("input", { type: "number", value: t.bonus, placeholder: "0", "aria-label": "Tag bonus" }),
+          phrases: el("textarea", { rows: "3", placeholder: "automotive, EV", "aria-label": "Tag phrases" }, t.phrases.join(", ")) };
+        const tr = el("tr", {}, el("td", { class: "tagname" }, row.name), el("td", { class: "wide" }, row.phrases), el("td", {}, row.bonus),
+          el("td", { class: "narrow" }, el("button", { class: "btn small", text: "Remove", onclick: () => { tagRows.splice(tagRows.indexOf(row), 1); tr.remove(); } })));
+        tagRows.push(row);
+        tagBody.append(tr);
+      };
+      (p.tags || []).forEach((t) => addTag(t));
       const save = async () => {
         const prefs = { term: f.term.value, term_id: f.term_id.value, class_year: year.value, threshold: f.threshold.value,
           threshold_above: f.threshold_above.value, grad_year: f.grad_year.value, major_words: f.major_words.value,
@@ -176,7 +188,8 @@
           student: f.student.value, keep_roles: f.keep_roles.value, drop_roles: f.drop_roles.value,
           category_bonus: Object.fromEntries(cats.filter((c) => bonus[c].value !== "").map((c) => [c, bonus[c].value])),
           category_threshold: Object.fromEntries(cats.filter((c) => bar[c].value !== "").map((c) => [c, bar[c].value])),
-          rank_last: cats.filter((c) => last[c].checked), tag_bonus: p.tag_bonus };
+          rank_last: cats.filter((c) => last[c].checked),
+          tags: tagRows.map((r) => ({ name: r.name.value, bonus: r.bonus.value, phrases: r.phrases.value })) };
         if (await post({ action: "prefs_save", prefs }, "Preferences saved.")) redraw();
       };
       const field = (label, help, node) => el("label", { class: "field" }, label, help ? el("span", { class: "muted small", text: help }) : null, node);
@@ -199,11 +212,15 @@
             field("Roles that clearly don't", "Claude drops only these.", area("drop_roles")))),
         el("div", { class: "row" }, field("Match needed", "% for jobs open to your year", input("threshold", { type: "number" })),
           field("…for the year above yours", "% (two years up: dropped)", input("threshold_above", { type: "number" }))),
-        el("details", {}, el("summary", { text: "Fine-tuning: home state, priorities" }),
+        el("details", {}, el("summary", { text: "Fine-tuning: home state, priorities, tags" }),
           el("div", { class: "row" }, field("Home state", "2 letters", input("home_state")), field("Its name", "shown in notes", input("home_label")),
             field("Ranking bonus", "points", input("home_bonus", { type: "number" }))),
           el("table", { class: "grid" }, el("thead", {}, el("tr", {}, ...["Category", "Ranking bonus", "Lower match bar", "Always last"].map((h) => el("th", { text: h })))),
-            el("tbody", {}, ...catRows))),
+            el("tbody", {}, ...catRows)),
+          el("p", { class: "small muted", text: "Tags: extra ranking points when any of a tag's phrases is in the job (whole words, any case). A job gets only the first tag that matches, from the top." }),
+          el("table", { class: "grid" }, el("thead", {}, el("tr", {}, ...["Tag", "Phrases (comma-separated)", "Ranking bonus", ""].map((h) => el("th", { text: h })))),
+            tagBody),
+          el("div", { class: "row" }, el("button", { class: "btn small", text: "Add a tag", testid: "pref-tag-add", onclick: () => addTag() }))),
         el("div", { class: "row" }, el("button", { class: "btn primary", text: "Save preferences", testid: "pref-save", onclick: save })),
       ];
     },

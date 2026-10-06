@@ -178,6 +178,9 @@ table.grid th { text-align: left; font-size: 12px; color: var(--muted); font-wei
 table.grid td { padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
 table.grid input[type=text], table.grid select { width: 100%; }
 table.grid td.narrow { width: 1%; white-space: nowrap; }
+table.grid td.wide { width: 50%; }
+table.grid td.tagname { width: 20%; }
+table.grid td.wide textarea { width: 100%; }
 table.grid td.narrow select { min-width: 104px; }
 table.grid label.row { flex-wrap: nowrap; white-space: nowrap; gap: 6px; padding-top: 7px; }
 

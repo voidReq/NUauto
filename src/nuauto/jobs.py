@@ -46,7 +46,13 @@ DEFAULTS = {
     "major_words": ["college of engineering", "electrical"],  # a targeted major without these words: flagged
     "home_state": "MA", "home_label": "Boston", "home_bonus": 10,  # ranking only (not for getting into the pool)
     "category_bonus": {"security": 20, "embedded": 15, "hardware": 10, "systems": 10, "robotics_test": 10},  # ranking
-    "tag_bonus": {"AR/XR": 5, "wearables": 3},  # ranking only; phrases anywhere in the job (xr_tag); not added up
+    # ranking only: a tag is given when any of its phrases is anywhere in the job (job_tag); the first tag that matches
+    # wins (one per job, not added up)
+    "tags": [{"name": "AR/XR", "bonus": 5, "phrases": [
+                 "augmented reality", "virtual reality", "mixed reality", "extended reality", "AR/VR", "VR/AR", "XR",
+                 "smart glasses", "smartglasses", "head mounted", "HMD", "spatial computing", "hololens", "vision pro",
+                 "meta quest"]},
+             {"name": "wearables", "bonus": 3, "phrases": ["wearable", "wearables"]}],
     "rank_last": ["fullstack_web"],             # categories that stay in the pool but always rank last
     "grad_year": 2029,                          # flags postings that mention graduating in the 4 years before
     # for Claude's triage (prompts/TRIAGE_PROMPT.md): who you are, the roles that fit, the ones that clearly don't
@@ -78,7 +84,7 @@ RULES = {
 }
 def set_prefs(prefs):
     """Use new preferences in this process (the GUI, after the wizard saves them). Child processes read the file."""
-    global PREFS, MY_YEAR, NEXT_YEAR, TERM_TEXT, OTHER_TERM, GRAD_YEARS
+    global PREFS, MY_YEAR, NEXT_YEAR, TERM_TEXT, OTHER_TERM, GRAD_YEARS, TAGS
     PREFS = {**DEFAULTS, **(prefs or {})}
     MY_YEAR = YEARS.index(PREFS["class_year"])
     NEXT_YEAR = (YEARS + ["grad"])[MY_YEAR + 1]
@@ -86,6 +92,7 @@ def set_prefs(prefs):
     RULES["term"] = PREFS["term"]
     TERM_TEXT, OTHER_TERM = term_patterns(PREFS["term"])
     GRAD_YEARS = grad_pattern()
+    TAGS = tag_patterns(PREFS["tags"])
 
 
 SEASONS = ["spring", "summer", "fall", "autumn", "winter"]
@@ -105,16 +112,35 @@ def term_patterns(label):
     if season in OTHER_MONTHS:
         pattern += rf"|\b{OTHER_MONTHS[season]}\b"
     return f"{season} {year}", re.compile(pattern, re.IGNORECASE)
-AR_XR = re.compile(r"augmented reality|virtual reality|mixed reality|extended reality|\bAR/VR\b|\bVR/AR\b|\bXR\b|"
-                   r"smart ?glasses|head[- ]mounted|\bHMD\b|spatial computing|hololens|vision pro|\bmeta quest\b",
-                   re.IGNORECASE)
-WEARABLE = re.compile(r"\bwearables?\b", re.IGNORECASE)
 
 
-def xr_tag(d):
-    """'AR/XR', 'wearables' or None, from the job's text."""
+def phrase_pattern(phrase):
+    """A tag phrase as a regex: any case, whole words, a space or hyphen matching either ("head mounted" also finds
+    "head-mounted")."""
+    parts = [re.escape(w) for w in re.split(r"[\s-]+", phrase.strip()) if w]
+    body = r"[\s-]+".join(parts)
+    start = r"\b" if re.match(r"\w", phrase.strip()) else ""
+    end = r"\b" if re.search(r"\w$", phrase.strip()) else ""
+    return start + body + end
+
+
+def tag_patterns(tags):
+    return [(t["name"], re.compile("|".join(phrase_pattern(x) for x in t["phrases"]), re.IGNORECASE)) for t in tags]
+
+
+TAGS = tag_patterns(PREFS["tags"])
+
+
+def job_tag(d):
+    """The name of the first tag (PREFS "tags") whose phrases appear in the job's text, or None."""
     text = " ".join([d["title"], d["description"], d["qualifications"], " ".join(d["skills"])])
-    return "AR/XR" if AR_XR.search(text) else "wearables" if WEARABLE.search(text) else None
+    return next((name for name, pattern in TAGS if pattern.search(text)), None)
+
+
+def tag_bonus(tag):
+    return next((t["bonus"] for t in PREFS["tags"] if t["name"] == tag), 0)
+
+
 CATEGORIES = {"security", "embedded", "hardware", "systems", "robotics_test", "fullstack_web",
               "software", "data_ml", "it", "other"}
 CAT_BATCH = 120
@@ -719,11 +745,10 @@ def build_pool():
             flags = flags + ["kept: rated yes"]
             threshold = match
         if match >= threshold:  # entry on the real resume match; the home-state bonus only affects ranking
-            tag = xr_tag(d)
-            tag_bonus = PREFS["tag_bonus"].get(tag, 0) if tag else 0
+            tag = job_tag(d)
             pool.append({"id": i, "title": d["title"], "company": d["company"], "location": d["location"],
                          "category": cat, "match": match, "bonus": bonus, "effective": match + bonus,
-                         "rank": match + bonus + category_bonus(cat) + tag_bonus, "tag": tag,
+                         "rank": match + bonus + category_bonus(cat) + tag_bonus(tag), "tag": tag,
                          "threshold": threshold, "closes": (closes(d) or "") and closes(d).isoformat(),
                          "flags": flags + (["uncategorized"] if cat == "uncategorized" else [])
                                   + (["apply on company site too?"] if external_hint(d) else []),

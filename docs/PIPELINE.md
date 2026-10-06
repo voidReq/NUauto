@@ -44,6 +44,11 @@ RANKING
 - Extra boosts (past job experience): AR/XR/smart glasses +5, wearables (incl. medical) +3
   (not stacked with AR), embedded +5 more (so +15 total). Scaled down 2026-10-02 so real fit
   matters more (I need to pass technical interviews).
+- Tags (since 2026-10-06 preferences "tags", editable in the GUI's setup): a name, phrases and
+  points. A phrase matches whole words, any case, a space or hyphen matching either
+  (jobs.phrase_pattern). The first tag that matches wins (one per job). AR/XR and wearables are
+  the defaults; their phrases give the same tags as the old fixed patterns, except "vision pro"
+  no longer matches inside "Computer Vision Prototyping".
 - `nuauto approve` shows jobs closing within 7 days first. `nuauto apply` goes closing
   within 7 days first, then best match. Past-deadline rows -> Needs Human. The daily run
   notifies about pool jobs closing within 3 days that aren't in the sheet.

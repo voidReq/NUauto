@@ -85,10 +85,17 @@ P = [{"id": "s1", "category": "security"}, {"id": "s2", "category": "security"},
 assert [r["id"] for r in jobs.rating_order(P)] == ["s1", "e1", "h1", "w1", "s2", "s3"]
 T = [dict(r, taste=t) for r, t in zip(P[:3], (0.9, 0.8, 0.52))]
 assert [r["id"] for r in jobs.rating_order(T)] == ["s1", "s3", "s2"]  # best, then least sure
-# AR/XR (+10) vs wearables (+5) tag: clear phrases only
-assert jobs.xr_tag(d(description="firmware for our smart glasses and AR/VR headsets")) == "AR/XR"
-assert jobs.xr_tag(d(title="Wearable Devices Co-op")) == "wearables"
-assert jobs.xr_tag(d(description="process AR invoices; AR aging reports")) is None
+# tags (PREFS "tags"): whole phrases only, the first tag that matches wins
+assert jobs.job_tag(d(description="firmware for our smart glasses and AR/VR headsets")) == "AR/XR"
+assert jobs.job_tag(d(title="Wearable Devices Co-op")) == "wearables"
+assert jobs.job_tag(d(description="process AR invoices; AR aging reports")) is None
+assert jobs.job_tag(d(description="Computer Vision Prototyping")) is None  # not "vision pro"
+assert jobs.job_tag(d(description="a Head-Mounted display and wearables")) == "AR/XR"
+assert jobs.tag_bonus("AR/XR") == 5 and jobs.tag_bonus("wearables") == 3 and jobs.tag_bonus(None) == 0
+jobs.set_prefs({"tags": [{"name": "cars", "bonus": 7, "phrases": ["automotive", "EV"]}]})
+assert jobs.job_tag(d(description="EV battery firmware")) == "cars" and jobs.tag_bonus("cars") == 7
+assert jobs.job_tag(d(description="every device; smart glasses")) is None
+jobs.set_prefs(None)
 assert jobs.category_bonus("embedded") == 15 and jobs.category_bonus("hardware") == 10
 # description headers and bullets
 assert jobs.is_header("Responsibilities:") and jobs.is_header("WHAT YOU'LL DO") and jobs.is_header("What You'll Bring")
