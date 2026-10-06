@@ -32,27 +32,79 @@ from nuauto import config
 from nuauto import sheet
 
 HOST = "https://northeastern-csm.symplicity.com"
-SPRING_2027 = "d13c36bce4531e63c56c9b58b90dbb71"  # el_work_term id for "2027 - Spring"
+
+# Your preferences: local_config.json "preferences" (the GUI's setup wizard writes them). A missing key uses the
+# default below. The defaults are this project's original settings (decided 2026-10-02), so a setup without
+# preferences works exactly as before.
+DEFAULTS = {
+    "term": "2027 - Spring",                        # your co-op term, as NUworks names it
+    "term_id": "d13c36bce4531e63c56c9b58b90dbb71",  # its el_work_term id (from /api/v2/jobs/filters/students)
+    "class_year": "sophomore",                      # yours: freshman, sophomore, junior or senior
+    "threshold": 65,           # match % needed when the job is open to your year (or names no year)
+    "threshold_above": 90,     # ...when its lowest year is the one after yours (two or more years up: dropped)
+    "category_threshold": {"security": 60},  # a lower bar for roles you care most about (not for "above your year")
+    "major_words": ["college of engineering", "electrical"],  # a targeted major without these words: flagged
+    "home_state": "MA", "home_label": "Boston", "home_bonus": 10,  # ranking only (not for getting into the pool)
+    "category_bonus": {"security": 20, "embedded": 15, "hardware": 10, "systems": 10, "robotics_test": 10},  # ranking
+    "tag_bonus": {"AR/XR": 5, "wearables": 3},  # ranking only; phrases anywhere in the job (xr_tag); not added up
+    "rank_last": ["fullstack_web"],             # categories that stay in the pool but always rank last
+    "grad_year": 2029,                          # flags postings that mention graduating in the 4 years before
+    # for Claude's triage (prompts/TRIAGE_PROMPT.md): who you are, the roles that fit, the ones that clearly don't
+    "student": "2nd-year Electrical & Computer Engineering (math minor). Interests sit at\n"
+               "intersections of embedded systems, hardware, software, security/pentesting,\n"
+               "networking/Linux, robotics/controls, AR/VR, computer architecture.",
+    "keep_roles": "software, firmware/embedded, electrical/computer/hardware engineering,\n"
+                  "  test/validation, security/IT/networking, robotics/controls, data/ML, R&D,\n"
+                  "  technical product or technical operations, lab/automation engineering, etc.",
+    "drop_roles": "accounting, finance,\n"
+                  "  marketing, sales, HR, nursing/clinical, pharmacy, law, purely biology/chemistry lab\n"
+                  "  work, pure mechanical/civil design with no electrical/software side, teaching,\n"
+                  "  hospitality.",
+}
+PREFS = {**DEFAULTS, **(config.LOCAL.get("preferences") or {})}
+YEARS = ["freshman", "sophomore", "junior", "senior"]
+YEAR_WORDS = ["freshm", "sophomore", "junior", "senior"]  # as they appear in NUworks' class level labels
+MY_YEAR = YEARS.index(PREFS["class_year"])
+NEXT_YEAR = (YEARS + ["grad"])[MY_YEAR + 1]  # for the flag: "junior+" when you are a sophomore
+CLASS_REQ_YEAR = {"none": -1, "junior_plus": 2, "senior_plus": 3, "grad": 4}  # the scorer's class_req, as a year
 
 RULES = {
     # server-side search filters (ids from /api/v2/jobs/filters/students)
-    "query_spring": f"job_type=5&el_work_term={SPRING_2027}&internal_status=1&job_length_ms=4,3&exclude_applied_jobs=1",
+    "query_term": f"job_type=5&el_work_term={PREFS['term_id']}&internal_status=1&job_length_ms=4,3&exclude_applied_jobs=1",
     "query_no_term": "job_type=5&internal_status=1&job_length_ms=4,3&exclude_applied_jobs=1",  # minus the above = term unclear
-    "position_types": {"Co-op", "Internship"},  # Internship only if explicitly Spring 2027
-    "term": "2027 - Spring",
+    "position_types": {"Co-op", "Internship"},  # Internship only if explicitly your term
+    "term": PREFS["term"],
     "lengths": {"4 Month", "6 Month"},
-    "threshold_sophomore": 65,   # job lists Sophomore (or no class level at all)
-    "threshold_junior": 90,      # lowest listed class level is Junior
-    "boston_bonus": 10,          # any location in Massachusetts; ranking only (not for getting into the pool)
-    "my_major_words": ("college of engineering", "electrical"),
-    # priorities (decided 2026-10-02)
-    "threshold_security": 60,    # security roles: a little more lenient than 65 (was 50; raised for interview readiness)
-    "bonus_security": 20,        # ranking only
-    "bonus_low_level": 10,       # ranking only; categories in LOW_LEVEL
-    "bonus_ar": 5,               # ranking only; AR/XR/smart-glasses phrases anywhere in the job
-    "bonus_wearables": 3,        # ranking only; wearables incl. medical (past job experience); not added on top of AR
-    "bonus_embedded_extra": 5,   # ranking only; embedded on top of the low-level bonus (past job experience)
 }
+def set_prefs(prefs):
+    """Use new preferences in this process (the GUI, after the wizard saves them). Child processes read the file."""
+    global PREFS, MY_YEAR, NEXT_YEAR, TERM_TEXT, OTHER_TERM, GRAD_YEARS
+    PREFS = {**DEFAULTS, **(prefs or {})}
+    MY_YEAR = YEARS.index(PREFS["class_year"])
+    NEXT_YEAR = (YEARS + ["grad"])[MY_YEAR + 1]
+    RULES["query_term"] = f"job_type=5&el_work_term={PREFS['term_id']}&internal_status=1&job_length_ms=4,3&exclude_applied_jobs=1"
+    RULES["term"] = PREFS["term"]
+    TERM_TEXT, OTHER_TERM = term_patterns(PREFS["term"])
+    GRAD_YEARS = grad_pattern()
+
+
+SEASONS = ["spring", "summer", "fall", "autumn", "winter"]
+# month ranges that mean the other main term, e.g. "SEP-DEC" in a title tagged Spring
+OTHER_MONTHS = {"spring": r"(sep|sept|jul|july|aug)\s*[-–]\s*dec", "fall": r"(jan|january|feb)\s*[-–]\s*(jun|june|may)"}
+
+
+def term_patterns(label):
+    """(the text that names your term, a regex for a title naming another term). "2027 - Spring" -> "spring 2027"."""
+    m = re.match(r"^\s*(\d{4})\s*-\s*([A-Za-z]+)", label)
+    if not m:
+        return label.lower(), re.compile(r"(?!x)x")  # can't tell: never flags
+    year, season = int(m.group(1)), m.group(2).lower()
+    same = {"fall", "autumn"} if season in ("fall", "autumn") else {season}
+    years = f"{(year - 1) % 100:02d}|{year % 100:02d}"
+    pattern = rf"\b({'|'.join(x for x in SEASONS if x not in same)})\s*'?(20)?({years})\b"
+    if season in OTHER_MONTHS:
+        pattern += rf"|\b{OTHER_MONTHS[season]}\b"
+    return f"{season} {year}", re.compile(pattern, re.IGNORECASE)
 AR_XR = re.compile(r"augmented reality|virtual reality|mixed reality|extended reality|\bAR/VR\b|\bVR/AR\b|\bXR\b|"
                    r"smart ?glasses|head[- ]mounted|\bHMD\b|spatial computing|hololens|vision pro|\bmeta quest\b",
                    re.IGNORECASE)
@@ -65,23 +117,30 @@ def xr_tag(d):
     return "AR/XR" if AR_XR.search(text) else "wearables" if WEARABLE.search(text) else None
 CATEGORIES = {"security", "embedded", "hardware", "systems", "robotics_test", "fullstack_web",
               "software", "data_ml", "it", "other"}
-LOW_LEVEL = {"embedded", "hardware", "systems", "robotics_test"}
 CAT_BATCH = 120
 
-# a title naming another term even though NUworks tags the job Spring 2027
-OTHER_TERM = re.compile(r"\b(summer|fall|autumn|winter)\s*'?(20)?2[67]\b|\b(sep|sept|jul|july|aug)\s*[-–]\s*dec\b", re.IGNORECASE)
+# a title naming another term even though NUworks tags the job with yours
+TERM_TEXT, OTHER_TERM = term_patterns(PREFS["term"])
 
 # "graduating in 2027", "Class of 2028", "graduation date between Dec 2027 and Jun 2028"...
 FIRST_COOP = re.compile(r"(not|no)\b[^.\n]{0,40}first[- ]time co-?op|previous co-?op (is )?required|must have completed (at least )?(one|1|a) (prior |previous )?co-?op", re.IGNORECASE)
 GRAD_WORD = re.compile(r"graduat\w*|class of", re.IGNORECASE)
 
 
+def grad_pattern():
+    return re.compile(r"\b(" + "|".join(str(PREFS["grad_year"] - k) for k in range(4, 0, -1)) + r")\b")
+
+
+GRAD_YEARS = grad_pattern()
+
+
 def grad_years(text):
-    """Years 2025-2028 within the same clause (50 chars, up to . ; or newline) after 'graduat...'/'class of'."""
+    """The 4 years before your graduation year (2025-2028 for 2029) within the same clause (50 chars, up to . ; or
+    newline) after 'graduat...'/'class of'."""
     years = set()
     for m in GRAD_WORD.finditer(text):
         clause = re.split(r"[.;\n]", text[m.end():m.end() + 50])[0]
-        years.update(re.findall(r"\b(202[5-8])\b", clause))
+        years.update(GRAD_YEARS.findall(clause))
     return sorted(years)
 CLASS_REQS = {"none", "junior_plus", "senior_plus", "grad"}  # from the description, set by the scorer
 
@@ -121,6 +180,12 @@ def load_details():
             d = json.load(f)
         out[d["id"]] = d
     return out
+
+
+def open_url(url):
+    """Open a page in your default browser, quietly (no output into the terminal viewer)."""
+    cmd = ["open", url] if sys.platform == "darwin" else ["xdg-open", url]
+    subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def job_url(job_id):
@@ -241,7 +306,7 @@ def cmd_list():
     with sync_playwright() as p:
         browser, log, context, page, blocked = open_browser(p, "jobs_list")
         try:
-            spring = search_pages(browser, page, context, log, RULES["query_spring"])
+            spring = search_pages(browser, page, context, log, RULES["query_term"])
             browser.pause(page, 2, 4)
             any_term = search_pages(browser, page, context, log, RULES["query_no_term"])
         except KeyboardInterrupt:
@@ -263,7 +328,7 @@ def cmd_list():
             "source": source,
         }
     save("list.json", jobs)
-    print(f"Saved {len(jobs)} jobs: {len(spring_ids)} Spring 2027, {len(jobs) - len(spring_ids)} with no/other term.")
+    print(f"Saved {len(jobs)} jobs: {len(spring_ids)} {PREFS['term']}, {len(jobs) - len(spring_ids)} with no/other term.")
 
 
 # ---------------------------------------------------------------- batch exchange with subagents
@@ -316,6 +381,23 @@ def resume_text():
     with open(os.path.join(config.WORK_DIR, "resume.txt"), "w") as f:
         f.write(text)
     return text
+
+
+PROMPT_FIELDS = ("student", "keep_roles", "drop_roles")  # {{name}} in prompts/*.md, filled from PREFS
+
+
+def render_prompt(name):
+    """prompts/<name> with your preferences filled in, written to work/<name> for Claude to read. Returns its path.
+    With the default preferences the text is exactly the original prompt."""
+    with open(os.path.join(config.PROJECT_DIR, "prompts", name)) as f:
+        text = f.read()
+    for key in PROMPT_FIELDS:
+        text = text.replace("{{" + key + "}}", str(PREFS[key]))
+    os.makedirs(config.WORK_DIR, exist_ok=True)
+    out = os.path.join(config.WORK_DIR, name)
+    with open(out, "w") as f:
+        f.write(text)
+    return out
 
 
 # ---------------------------------------------------------------- 2. triage
@@ -386,10 +468,10 @@ def hard_rules(d, today=None):
         if when and str(when)[:10] < today:
             return False, None, flags, f"closed {str(when)[:10]}"
     types = set(d["position_types"])
-    spring = RULES["term"] in d["term"] or (not d["term"] and "spring 2027" in (d["title"] + " " + d["description"]).lower())
-    if "Co-op" not in types and not ("Internship" in types and spring):
+    mine = RULES["term"] in d["term"] or (not d["term"] and TERM_TEXT in (d["title"] + " " + d["description"]).lower())
+    if "Co-op" not in types and not ("Internship" in types and mine):
         return False, None, flags, f"position type {sorted(types) or 'none'}"
-    if not spring:
+    if not mine:
         if d["term"]:
             return False, None, flags, f"term {d['term']}"
         flags.append("term unclear")
@@ -402,22 +484,24 @@ def hard_rules(d, today=None):
     if d["degree_levels"] and not any("undergraduate" in x.lower() for x in d["degree_levels"]):
         return False, None, flags, f"degree {d['degree_levels']}"
     levels = " ".join(d["class_levels"]).lower()
-    if not levels or "sophomore" in levels or "freshm" in levels:
-        threshold = RULES["threshold_sophomore"]
-    elif "junior" in levels:
-        threshold = RULES["threshold_junior"]
-        flags.append("junior+")
+    listed = [i for i, w in enumerate(YEAR_WORDS) if w in levels]
+    if not levels or any(i <= MY_YEAR for i in listed):  # open to your year (or names none)
+        threshold = PREFS["threshold"]
+    elif MY_YEAR + 1 in listed:  # its lowest year is the one after yours
+        threshold = PREFS["threshold_above"]
+        flags.append(f"{NEXT_YEAR}+")
     else:
         return False, None, flags, f"class level {d['class_levels']}"
-    if d["majors"] and not any(w in m.lower() for m in d["majors"] for w in RULES["my_major_words"]):
+    if d["majors"] and not any(w in m.lower() for m in d["majors"] for w in PREFS["major_words"]):
         names = list(dict.fromkeys(m.split("/")[-1].strip() for m in d["majors"]))  # "College/Major" -> "Major"
         more = f" +{len(names) - 3} more" if len(names) > 3 else ""
         flags.append(f"not your major (targets {', '.join(names[:3])}{more})")
     return True, threshold, flags, ""
 
 
-def boston(d):
-    return "US-MA" in d["states"] or ", MA" in d["location"]
+def in_home_state(d):
+    st = PREFS["home_state"]
+    return bool(st) and (f"US-{st}" in d["states"] or f", {st}" in d["location"])
 
 
 def cmd_details():
@@ -584,15 +668,15 @@ def pool_entry_rules(d, score, category=None):
     if not keep:
         return False, None, flags
     flags = list(flags)
-    if category == "security" and threshold == RULES["threshold_sophomore"]:
-        threshold = RULES["threshold_security"]  # junior-only security roles still need 90
-    req = score.get("class_req", "none")
-    if req in ("senior_plus", "grad"):
+    if category in PREFS["category_threshold"] and threshold == PREFS["threshold"]:
+        threshold = PREFS["category_threshold"][category]  # "above your year" still needs threshold_above
+    req = CLASS_REQ_YEAR.get(score.get("class_req", "none"), -1)
+    if req >= MY_YEAR + 2:
         return False, None, flags
-    if req == "junior_plus":
-        threshold = max(threshold, RULES["threshold_junior"])
-        if "junior+" not in flags:
-            flags.append("junior+ (in text)")
+    if req == MY_YEAR + 1:
+        threshold = max(threshold, PREFS["threshold_above"])
+        if f"{NEXT_YEAR}+" not in flags:
+            flags.append(f"{NEXT_YEAR}+ (in text)")
     if any("required" in e.lower() for e in d["experience"]):
         flags.append("prior experience required")
     if FIRST_COOP.search(score_text(d)):
@@ -606,18 +690,15 @@ def pool_entry_rules(d, score, category=None):
 
 
 def category_bonus(cat):
-    if cat == "security":
-        return RULES["bonus_security"]
-    if cat in LOW_LEVEL:
-        return RULES["bonus_low_level"] + (RULES["bonus_embedded_extra"] if cat == "embedded" else 0)
-    return 0
+    return PREFS["category_bonus"].get(cat, 0)
 
 
 def pool_sort_key(r):
-    """Full-stack/web always last; otherwise by rank (match + Boston + category bonus), or blended with taste."""
+    """rank_last categories (full-stack/web) always last; otherwise by rank (match + home state + category bonus),
+    or blended with taste."""
     base = r["rank"] / 100
     value = 0.5 * base + 0.5 * r["taste"] if "taste" in r else base
-    return (r["category"] == "fullstack_web", -value)
+    return (r["category"] in PREFS["rank_last"], -value)
 
 
 def build_pool():
@@ -633,13 +714,13 @@ def build_pool():
         if not keep:
             continue
         match = scores[i]["match"]
-        bonus = RULES["boston_bonus"] if boston(d) else 0
+        bonus = PREFS["home_bonus"] if in_home_state(d) else 0
         if i in liked and match < threshold:  # a job I rated yes stays even if a rescore dipped it below the bar
             flags = flags + ["kept: rated yes"]
             threshold = match
-        if match >= threshold:  # entry on the real resume match; Boston only affects ranking
+        if match >= threshold:  # entry on the real resume match; the home-state bonus only affects ranking
             tag = xr_tag(d)
-            tag_bonus = RULES["bonus_ar"] if tag == "AR/XR" else RULES["bonus_wearables"] if tag else 0
+            tag_bonus = PREFS["tag_bonus"].get(tag, 0) if tag else 0
             pool.append({"id": i, "title": d["title"], "company": d["company"], "location": d["location"],
                          "category": cat, "match": match, "bonus": bonus, "effective": match + bonus,
                          "rank": match + bonus + category_bonus(cat) + tag_bonus, "tag": tag,
@@ -713,7 +794,7 @@ def ranked_pool(details, ratings, rows):
 def show(r, d):
     print("\n" + "=" * 72)
     print(f"{r['title']}  |  {r['company']}  |  {d['location']}  [{r['category']}]")
-    print(f"  match {r['match']}%{' +' + str(r['bonus']) + ' Boston' if r['bonus'] else ''} (needs {r['threshold']})"
+    print(f"  match {r['match']}%{' +' + str(r['bonus']) + ' ' + PREFS['home_label'] if r['bonus'] else ''} (needs {r['threshold']})"
           f"{'  [' + ', '.join(r['flags']) + ']' if r['flags'] else ''}  pay: {d['pay'] or '?'}")
     print(f"  why: {r['why']}")
     if d["skills"]:
@@ -803,7 +884,7 @@ def job_lines(r, d, width):
     out.append([(f"{'Type':<10}", "label")] + tags)
     margin = r["match"] - r["threshold"]
     out.append([(f"{'Match':<10}", "label"), (f"{r['match']}%", "good" if margin >= 15 else "ok"),
-                (f"   needs {r['threshold']}%", "dim"), (f"   (+{r['bonus']} Boston for ranking)" if r["bonus"] else "", "dim"),
+                (f"   needs {r['threshold']}%", "dim"), (f"   (+{r['bonus']} {PREFS['home_label']} for ranking)" if r["bonus"] else "", "dim"),
                 ("      Pay  ", "label"), (d["pay"] or "?", "text")])
     day = closes(d)
     soon = day is not None and (day - date.today()).days <= URGENT_DAYS
@@ -937,7 +1018,7 @@ def rate_viewer(todo, details, ratings, approved=None, urgent=()):
             elif c == ord("u"):  # back one job; y/n there replaces the earlier answer
                 i, top = max(0, i - 1), 0
             elif c == ord("o"):
-                subprocess.Popen(["xdg-open", job_url(r["id"])], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                open_url(job_url(r["id"]))
             elif c == ord("q"):
                 return
 
@@ -947,12 +1028,65 @@ def rate_viewer(todo, details, ratings, approved=None, urgent=()):
         pass  # every answer is already saved
 
 
+def review_queue(mode, details, ratings, rows, today=None):
+    """What Review shows, as (todo, urgent); used by `nuauto approve` / `nuauto rate` and the GUI.
+    approve: pool jobs not in the sheet and not rated no; closing within URGENT_DAYS first (soonest first), then
+             the usual ranking.
+    rate:    unrated pool jobs not in the sheet, in rating_order (urgent is empty)."""
+    in_sheet = {job_id(r.url) for r in rows}
+    pool, _ = ranked_pool(details, ratings, rows)
+    if mode == "rate":
+        return rating_order([r for r in pool if r["id"] not in ratings and r["id"] not in in_sheet]), []
+    todo = [r for r in pool if r["id"] not in in_sheet and ratings.get(r["id"], {}).get("label") != 0]
+    today = today or date.today()
+    left = {r["id"]: (closes(details[r["id"]]) - today).days if closes(details[r["id"]]) else None for r in todo}
+    urgent = sorted((r for r in todo if left[r["id"]] is not None and 0 <= left[r["id"]] <= URGENT_DAYS),
+                    key=lambda r: left[r["id"]])
+    return urgent + [r for r in todo if r not in urgent], urgent
+
+
+def text_blocks(text):
+    """Description text as [{"kind": "header" | "bullet" | "text", "text": ...}], by the same rules as job_lines."""
+    out = []
+    for raw in str(text or "").split("\n"):
+        s = raw.strip()
+        if not s:
+            continue
+        m = BULLET.match(s)
+        if is_header(s):
+            out.append({"kind": "header", "text": s.rstrip(":")})
+        elif m:
+            out.append({"kind": "bullet", "text": s[m.end():]})
+        else:
+            out.append({"kind": "text", "text": s})
+    return out
+
+
+def job_view(r, d, today=None):
+    """One pool job for the GUI's Review card: what job_lines shows in the terminal, as data."""
+    day = closes(d)
+    return {"id": r["id"], "url": job_url(r["id"]), "title": r["title"], "company": r["company"],
+            "location": d["location"], "category": r["category"], "tag": r.get("tag"), "match": r["match"],
+            "threshold": r["threshold"], "bonus": r["bonus"], "bonus_label": PREFS["home_label"], "taste": r.get("taste"),
+            "pay": d["pay"],
+            "closes": day.isoformat() if day else None, "closes_text": closes_text(day, today),
+            "soon": day is not None and (day - (today or date.today())).days <= URGENT_DAYS,
+            "external": external_hint(d), "flags": [f for f in r["flags"] if f != "apply on company site too?"],
+            "why": r["why"], "skills": d["skills"], "description": text_blocks(d["description"]),
+            "qualifications": text_blocks(d["qualifications"])}
+
+
+def sheet_item(r):
+    """A pool job as a new sheet row (add_proposed)."""
+    return {"url": job_url(r["id"]), "company": r["company"], "title": r["title"],
+            "notes": f"match {r['match']}%" + (f" +{r['bonus']} {PREFS['home_label']}" if r["bonus"] else "")
+                     + (f"; {', '.join(r['flags'])}" if r["flags"] else "")}
+
+
 def cmd_rate():
     details, ratings = load_details(), load("ratings.json", {})
     rows = sheet.read_rows(sheet.open_worksheet())
-    in_sheet = {job_id(r.url) for r in rows}
-    pool, _ = ranked_pool(details, ratings, rows)
-    todo = rating_order([r for r in pool if r["id"] not in ratings and r["id"] not in in_sheet])
+    todo, _ = review_queue("rate", details, ratings, rows)
     if sys.stdin.isatty() and sys.stdout.isatty():
         rate_viewer(todo, details, ratings)
         yes = sum(v["label"] for v in ratings.values())
@@ -967,7 +1101,7 @@ def cmd_rate():
             except (EOFError, KeyboardInterrupt):
                 a = "q"
             if a == "o":
-                subprocess.Popen(["xdg-open", job_url(r["id"])], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                open_url(job_url(r["id"]))
                 continue
             break
         if a == "q":
@@ -1000,10 +1134,7 @@ def cmd_suggest(n):
     if not ok:
         print("Nothing added.")
         return
-    items = [{"url": job_url(r["id"]), "company": r["company"], "title": r["title"],
-              "notes": f"match {r['match']}%" + (f" +{r['bonus']} Boston" if r["bonus"] else "")
-                       + (f"; {', '.join(r['flags'])}" if r["flags"] else "")} for r in top]
-    print(f"Added {sheet.add_proposed(ws, items)} rows as Proposed.")
+    print(f"Added {sheet.add_proposed(ws, [sheet_item(r) for r in top])} rows as Proposed.")
 
 
 def cmd_approve():
@@ -1013,18 +1144,10 @@ def cmd_approve():
     details, ratings = load_details(), load("ratings.json", {})
     ws = sheet.open_worksheet()
     rows = sheet.read_rows(ws)
-    in_sheet = {job_id(r.url) for r in rows}
-    pool, _ = ranked_pool(details, ratings, rows)
-    # everything not in the sheet that you haven't rated no; jobs you rated yes are the best candidates
-    todo = [r for r in pool if r["id"] not in in_sheet and ratings.get(r["id"], {}).get("label") != 0]
+    # everything not in the sheet that you haven't rated no, closing soon first; jobs you rated yes rank best
+    todo, urgent = review_queue("approve", details, ratings, rows)
     if not todo:
         sys.exit("Nothing new in the pool to approve.")
-    # jobs closing soon come first (soonest first), then the usual ranking
-    today = date.today()
-    left = {r["id"]: (closes(details[r["id"]]) - today).days if closes(details[r["id"]]) else None for r in todo}
-    urgent = sorted((r for r in todo if left[r["id"]] is not None and 0 <= left[r["id"]] <= URGENT_DAYS),
-                    key=lambda r: left[r["id"]])
-    todo = urgent + [r for r in todo if r not in urgent]
     if urgent:
         print(f"{len(urgent)} job{'s' if len(urgent) > 1 else ''} closing within {URGENT_DAYS} days shown first.")
     try:
@@ -1037,9 +1160,7 @@ def cmd_approve():
         rate_viewer(todo, details, ratings, approved, urgent)
     finally:  # runs on q, Ctrl+C or a crash: whatever you approved gets written
         if approved:
-            items = [{"url": job_url(r["id"]), "company": r["company"], "title": r["title"],
-                      "notes": f"match {r['match']}%" + (f" +{r['bonus']} Boston" if r["bonus"] else "")
-                               + (f"; {', '.join(r['flags'])}" if r["flags"] else "")} for r in approved]
+            items = [sheet_item(r) for r in approved]
             print(f"Added {sheet.add_proposed(ws, items, status='Approved')} rows as Approved.")
         else:
             print("Nothing approved.")

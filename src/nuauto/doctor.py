@@ -2,9 +2,11 @@
 
 Read-only: never changes the sheet, NUworks, the homelab or any file. Secret files are only
 checked for existence and mode 600, never opened.
-On the laptop it checks this machine, then pipes this same file to python on the homelab
-(`--server`), so the homelab checks work even before the code there is up to date.
+On the laptop it checks this machine (health.py's checks), then pipes this same file to python on the homelab
+(`--server`), so the homelab checks work even before the code there is up to date (they use only config and sync).
+`--json`: one JSON object instead of the text, {"ok": bool, "checks": [{"where", "level", "msg"}, ...]}.
 """
+import json
 import os
 import shutil
 import subprocess
@@ -18,11 +20,22 @@ from nuauto import config
 from nuauto import sync
 
 UNITS = ["nuauto-daily.timer", "nuauto-weekly.timer", "nuauto-web.service"]
+JSON = "--json" in sys.argv
 fails = []
+results = []  # every say(), for --json
+where = ["laptop"]  # the section being checked
+
+
+def section(name):
+    where[0] = name
+    if not JSON:
+        print(name)
 
 
 def say(level, msg):
-    print(f"  {level:4}  {msg}")
+    results.append({"where": where[0], "level": level, "msg": msg})
+    if not JSON:
+        print(f"  {level:4}  {msg}")
     if level == "FAIL":
         fails.append(msg)
 
@@ -41,9 +54,21 @@ def check_files(names):
 
 
 def check_claude():
-    """The claude CLI that `nuauto update` runs (same lookup as daily.CLAUDE)."""
-    if not shutil.which("claude", path=os.path.expanduser("~/.local/bin") + os.pathsep + os.environ.get("PATH", "")):
-        say("FAIL", "claude CLI not found (Claude triage/scoring can't run): see README.md, Setup")
+    """The claude CLI that `nuauto update` runs (same lookup as daily.CLAUDE), and whether it is logged in."""
+    if hasattr(config, "tool_path"):
+        path = config.tool_path("claude")
+    else:  # older code on the homelab (before the next push)
+        path = shutil.which("claude", path=os.path.expanduser("~/.local/bin") + os.pathsep + os.environ.get("PATH", ""))
+    if not path:
+        return say("FAIL", "claude CLI not found (Claude triage/scoring can't run): see README.md, Setup")
+    try:
+        logged_in = json.loads(sh([path, "auth", "status", "--json"]).stdout).get("loggedIn")
+    except (OSError, ValueError, AttributeError, subprocess.TimeoutExpired):
+        return say("WARN", "claude CLI found, but `claude auth status` gave no answer")
+    if logged_in:
+        say("ok", "Claude Code logged in")
+    else:
+        say("FAIL", "Claude Code is logged out, so scoring can't run: run `claude auth login` on this machine")
 
 
 def check_google_login():
@@ -69,34 +94,42 @@ def changed_files(src, dest, relative=False):
     return [line.split(" ", 1)[1] for line in r.stdout.splitlines() if line.startswith("<f")]
 
 
+LEVEL = {"ok": "ok", "warn": "WARN", "fail": "FAIL", "busy": "WARN", "off": "ok", "unknown": "ok"}
+
+
 def laptop():
-    print("laptop")
-    check_files(["token.json", "client_secret.json", "session_cookies.json", "browser_profile", "profile.json"]
-                + (["answers.json"] if os.path.exists(config.ANSWERS_PATH) else []))  # created on the first answer
-    check_google_login()
-    if not os.path.exists(config.LOCAL_CONFIG_PATH):
-        say("FAIL", "local_config.json missing: copy local_config.example.json and fill it in")
-    if not os.path.exists(config.LAPTOP_RESUME):
-        say("FAIL", f"resume missing: {config.LAPTOP_RESUME}")
+    from nuauto import health
+    section("laptop")
+    for c in health.merge(health.run(["files", "resume", "google", "nuworks_saved"])):
+        say(LEVEL[c.status], f"{c.title}: {c.detail}")
+    if not os.path.isdir(config.PROFILE_DIR):
+        say("FAIL", "local/browser_profile missing: run `nuauto login`")
+    check_claude()  # the update runs here in local mode; `nuauto assist` needs it either way
     if not config.HAS_SERVER:
-        check_claude()  # local mode: the update runs here
         return say("ok", "no homelab configured (local mode)")
     if shutil.which("systemctl") and \
             sh(["systemctl", "--user", "is-enabled", "nuauto-daily.timer"]).stdout.strip() == "enabled":  # no systemd on macOS
         say("WARN", "the old laptop timer is enabled; the homelab runs the update now: "
                     "systemctl --user disable --now nuauto-daily.timer")
 
-    print("homelab")
-    if sh(sync.SSH + [config.SERVER, "true"]).returncode != 0:
-        return say("FAIL", "can't reach the homelab over ssh (Tailscale up?)")
-    sys.stdout.flush()  # our lines first, then the homelab's
-    with open(os.path.abspath(__file__)) as f:  # run this file there, output straight to this terminal
-        r = subprocess.run(sync.SSH + [config.SERVER, f"cd {config.SERVER_DIR} && .venv/bin/python - --server"],
-                           stdin=f, timeout=120)
-    if r.returncode != 0:
-        fails.append("homelab")
+    section("homelab")
+    if JSON:
+        found = server_results()
+        if found is None:
+            return say("FAIL", "can't reach the homelab over ssh (Tailscale up?)")
+        for r in found:
+            say(r["level"], r["msg"])
+    else:
+        if sh(sync.SSH + [config.SERVER, "true"]).returncode != 0:
+            return say("FAIL", "can't reach the homelab over ssh (Tailscale up?)")
+        sys.stdout.flush()  # our lines first, then the homelab's
+        with open(os.path.abspath(__file__)) as f:  # run this file there, output straight to this terminal
+            r = subprocess.run(sync.SSH + [config.SERVER, f"cd {config.SERVER_DIR} && .venv/bin/python - --server"],
+                               stdin=f, timeout=120)
+        if r.returncode != 0:
+            fails.append("homelab")
 
-    print("laptop vs homelab")
+    section("laptop vs homelab")
     diff = changed_files(sync.CODE, f"{sync.REMOTE}/", relative=True)
     if diff is None:
         say("WARN", "could not compare code with the homelab")
@@ -113,6 +146,20 @@ def laptop():
     else:
         say("ok", "homelab unit files match deploy/systemd/")
     check_public_page()
+
+
+def server_results():
+    """The homelab's own checks (this file run there with --server --json): [{"where", "level", "msg"}], or None
+    if ssh can't reach it. Used by --json and by the GUI (health.homelab)."""
+    if sh(sync.SSH + [config.SERVER, "true"]).returncode != 0:
+        return None
+    with open(os.path.abspath(__file__)) as f:
+        r = subprocess.run(sync.SSH + [config.SERVER, f"cd {config.SERVER_DIR} && .venv/bin/python - --server --json"],
+                           stdin=f, capture_output=True, text=True, timeout=120)
+    try:
+        return json.loads(r.stdout)["checks"]
+    except (ValueError, KeyError, TypeError):
+        return [{"where": "homelab", "level": "FAIL", "msg": f"the homelab's checks gave no result (exit {r.returncode})"}]
 
 
 def check_public_page():
@@ -185,12 +232,15 @@ def check_web_fresh():
 def main():
     piped = "--server" in sys.argv  # run by the laptop's doctor, which prints the header and summary
     if config.IS_SERVER:
-        if not piped:
+        where[0] = "homelab"
+        if not piped and not JSON:
             print("homelab")
         server()
     else:
         laptop()
-    if not piped:
+    if JSON:
+        print(json.dumps({"ok": not fails, "checks": results}))
+    elif not piped:
         print("All good." if not fails else "Problems found: see the FAIL lines above.")
     return 1 if fails else 0
 

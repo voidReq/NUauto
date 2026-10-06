@@ -7,6 +7,7 @@ mass-apply bot.
 This file has the rules. Also read (imported here; update them when you change things):
 - @docs/DEPLOY.md (modes, machines, the homelab = prod, Mark-done page, sync, secrets, Google login, health checks, rebuild steps)
 - @docs/PIPELINE.md (how the job pool is built, my bounds, ranking, ratings)
+- @docs/GUI.md (the window `nuauto gui`: screens, setup wizard, health checks, safety model, demo mode, API)
 - @docs/STATUS.md (what is done, what is not yet proven for real, dated decisions; my local log,
   gitignored: keep job/company names and other personal history there, never in tracked files)
 
@@ -48,10 +49,12 @@ SAFETY RULES (most important)
    DECISION: NUworks has no upload; its Apply popup picks from resumes already in my
    profile. The script selects only the exact "resume_label" saved in profile.json and
    never uploads anything.
-7. (Changed 2026-10-03.) `nuauto apply` submits every Approved row, one at a time, with no
-   per-job prompt: Approved in the sheet IS my approval. It must run in a real terminal
-   (never from a background agent). A dry run (fill, screenshot, stop) exists only as the
-   hidden --dry-run dev flag.
+7. (Changed 2026-10-03; GUI added 2026-10-05.) `nuauto apply` submits every Approved row, one at a
+   time, with no per-job prompt: Approved in the sheet IS my approval. It runs only with me there:
+   in a real terminal, or from the GUI (`nuauto gui`: I click Start, the browser is visible, Stop =
+   Ctrl+C). Never from an agent: code refuses real submits inside a Claude Code shell (CLAUDECODE),
+   and `--ui json` works only as a child of the running GUI. A dry run (fill, screenshot, stop)
+   exists only as the hidden --dry-run dev flag.
 8. (Changed 2026-10-03.) No y/n before submit. Every filled form is still screenshotted to
    logs/ before Submit, and after-submit confirmation is checked.
 9. Log every action and save every screenshot to a logs/ folder, per application.
@@ -96,9 +99,31 @@ BROWSER (Playwright, Firefox)
   typing credentials).
 - Firefox drops session cookies on close, so browser.py saves cookies to
   local/session_cookies.json (chmod 600, never print it) and reloads them.
-- Only ONE Playwright session may use local/browser_profile/ at a time (Firefox locks it): not
-  while apply.py, jobs.py or browser.py are running. Use a separate profile dir if in doubt.
+- Only ONE Playwright session may use local/browser_profile/ at a time (Firefox locks it, and since
+  2026-10-05 browser.lock_profile refuses a second one): not while apply.py, jobs.py or browser.py are
+  running. Use a separate profile dir if in doubt.
   The homelab has its own copy and uses it during its update runs (08:00/18:00 New York).
+
+GUI (`nuauto gui`, gui.py + gui_static/ + onboard.py + health.py + demo.py; added 2026-10-05; docs/GUI.md)
+- A local web app on the laptop: 127.0.0.1 only, a secret per start (cookie), Host/Origin/X-NUauto checks;
+  secrets never reach the page. Long or browser work runs as the same `nuauto ...` commands in child
+  processes, one at a time; their questions come over answers.JsonIO as dialogs (same rules as typing).
+- Agents: only `nuauto gui --demo` (fake sheet, fake NUworks pages, fake Claude, temp folder; nothing real
+  can be read or sent). Never start the real GUI or click Start in one; the real GUI refuses to start
+  inside a Claude Code shell anyway. Screens for review: `nuauto gui --demo --screenshots DIR`.
+- Setup wizard (onboard.py): each step checks itself; preferences go in local_config.json "preferences"
+  (jobs.DEFAULTS = my original settings). Health checks (health.py) never open a login page.
+- Its own window (window.py): macOS pywebview; Linux the system python3's GTK + WebKitGTK (window_gtk.py); else a
+  Chrome app window or a tab. Closing it quits NUauto. `nuauto _window` says which.
+- Packaged app (packaging/, added 2026-10-05 on my request: "for the users local, preferably executable"): AppImage
+  (Linux) and DMG (macOS) from PyInstaller, built + smoke-tested by .github/workflows/release.yml on every PR,
+  published on v* tags. Same code
+  (config.FROZEN): files in the app-data folder, local mode only, runs itself via config.self_cmd / self_exe (never
+  `python -m` or file paths in code that may run packaged). Build locally: sh packaging/build.sh; check: packaging/smoke.py;
+  other distros: sh packaging/distros.sh <AppImage> (podman).
+- Not yet proven for real: a GUI apply with me watching, the logins through the GUI, the NUworks reads
+  (resume labels, term list), a Mac app opened by a person (CI builds both Mac apps and runs the tests and their
+  self-test there, in demo mode).
 
 COMPANY-SITE AGENT (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`; added 2026-10-05)
 - Only for Needs Human rows stopped at an external application (Notes start "External application";
@@ -155,30 +180,37 @@ src/nuauto/: cli.py (the nuauto command)   config.py (all paths, hosts; reads lo
   browser.py (login/open, domain lock, cookies)   answers.py (answer bank)   jobs.py (pool + viewers)
   daily.py (homelab update + Discord)   web.py (Mark-done page, homelab)   sync.py (laptop<->homelab)
   doctor.py (health check)   inspect_form.py (read-only form lister)   assist.py (company-site agent)
-  setup_sheet.py (sheet setup / `format` restyle)
+  setup_sheet.py (sheet setup / `format` restyle)   gui.py (the window's server)   gui_static/ (its page)
+  health.py (the checks behind doctor and the GUI)   onboard.py (setup wizard)   demo.py (demo mode fakes)
+  window.py (which window) + window_gtk.py (the Linux window, run by the system python3)
   Imports are always absolute: `from nuauto import sheet` (test_sync enforces it).
 prompts/ (TRIAGE_, SCORE_, CATEGORY_PROMPT.md: Claude batch prompts; ASSIST_PROMPT.md: agent rules)
-tests/ (test_*.py offline checks)   docs/ (DEPLOY, PIPELINE, STATUS)   deploy/systemd/ (homelab units)
+tests/ (test_*.py offline checks)   docs/ (DEPLOY, PIPELINE, GUI, ARCHITECTURE, SAFETY, STATUS)
+deploy/systemd/ (homelab units)   install.sh (installer from source)   packaging/ (the packaged app: spec, build.sh, smoke.py)
+.github/workflows/ (tests.yml: tests on Ubuntu + macOS; release.yml: AppImages + DMGs, built on PRs, released on v* tags)
 README.md (public, new-user setup; keep it short)   LICENSE   local_config.example.json (template)
 local/ (gitignored, mode 700): everything personal or secret, on both machines:
   local_config.json (sheet ID, resume path, homelab hostname/dir, Mark-done URL, Tailscale IP),
   profile.json (resume_label), answers.json, google_login.txt, browser_profile/, assist_profile/,
-  resume.pdf (homelab copy), and the SECRETS below. Keep personal values (names, emails, hosts, IPs,
-  IDs, companies) out of every committed file: the repo is public.
+  resume.pdf (homelab copy), gui.lock, browser_profile.lock, onboard.json, and the SECRETS below.
+  Keep personal values (names, emails, hosts, IPs, IDs, companies) out of every committed file: the
+  repo is public.
 Generated (gitignored, repo root): data/, logs/, work/
 SECRETS (in local/), never print, log or copy their contents: token.json, session_cookies.json,
 client_secret.json, discord_webhook.txt, web_secret.txt
 
 COMMANDS (installed in .venv; no activation needed)
+nuauto gui             # the window (setup, review, apply, health); --demo: everything fake (agents: only this)
 nuauto approve         # viewer on best unrated jobs: y = Approved in the sheet, n = no, s skip
-nuauto apply [-n 3]    # submit every Approved row (30-60s between); real terminal only
+nuauto apply [-n 3]    # submit every Approved row (30-60s between); real terminal (or the GUI) only
 nuauto rate            # taste training viewer (keys in docs/PIPELINE.md)
 nuauto update          # check NUworks for new jobs now (runs on the homelab, then syncs)
 nuauto status          # Approved rows + weekly count (also pushes code to the homelab)
 nuauto login           # manual SSO login; close the window when done
 nuauto login google    # Google Sheets login, every 7 days (Discord warns the day before)
 nuauto test            # all offline tests
-nuauto doctor          # health check: laptop, homelab, Mark-done page (read-only)
+nuauto doctor [--json] # health check: laptop, homelab, Mark-done page (read-only)
+nuauto selftest        # is this install OK? demo mode end to end in a hidden browser (nothing real touched)
 nuauto assist [<row>]  # company-site agent for a Needs Human row; asks me before any Submit
 nuauto answers list    # answer bank; edit with: nvim local/answers.json
 nuauto setup-sheet format          # restyle the sheet (formatting only, safe to re-run)
@@ -187,10 +219,14 @@ nuauto daily [weekly] / nuauto web # what the homelab's timers / Mark-done servi
 python -m nuauto.<module> ...      # any module's own command line (same as the nuauto tools)
 
 TESTS
-`nuauto test` runs every tests/test_*.py: offline, no sheet, no browser, no network. Run it before
-pushing. tests/test_sync.py fails if a new module or prompt isn't in sync.CODE (so it would never
+`nuauto test` runs every tests/test_*.py (4 at a time): offline, no sheet, no real NUworks, no network
+(browser tests use headless Firefox on local pages or demo mode). Run it before pushing; CI runs it on
+Ubuntu and macOS. tests/test_sync.py fails if a new module or prompt isn't in sync.CODE (so it would never
 reach the homelab). test_web.py covers the public Mark-done links (signatures; GET never
-changes the sheet). test_browser.py covers the domain lock. test_assist.py covers the company-site agent's guard.
+changes the sheet). test_browser.py covers the domain lock and the profile lock. test_assist.py covers the
+company-site agent's guard. test_demo.py runs the real apply.py on demo mode's fake pages (stops, cap, re-login).
+test_gui.py covers the GUI server's security and flows; test_setup.py the wizard; test_health.py the checks;
+test_window.py the packaged-app plumbing (self_cmd, the assistant's command, the window choice, clean env).
 
 ENVIRONMENT / STYLE
 - Python 3.12 venv in .venv with the package installed editable (`.venv/bin/pip install -e .`); dependencies

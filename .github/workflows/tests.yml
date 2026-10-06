@@ -1,0 +1,25 @@
+# `nuauto test` on Linux and macOS for every push and pull request. Everything is offline (demo mode for the GUI):
+# no Google, no NUworks, no Claude, no secrets.
+name: tests
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Install NUauto
+        run: |
+          uv venv --python 3.12 .venv
+          uv pip install --python .venv/bin/python -e .
+      - name: Install Playwright's Firefox
+        run: .venv/bin/python -m playwright install --with-deps firefox
+      - name: Tests
+        run: .venv/bin/nuauto test

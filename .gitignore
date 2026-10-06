@@ -23,4 +23,5 @@ logs/
 __pycache__/
 *.egg-info/
 build/
+dist/
 .playwright-mcp/

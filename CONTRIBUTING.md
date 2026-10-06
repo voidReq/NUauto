@@ -27,9 +27,16 @@ nuauto test        # runs every tests/test_*.py
 - **New `nuauto` command:** a user-facing command goes in `COMMANDS` in `src/nuauto/cli.py`, with a branch
   in `main()` and a line in the docstring. A tool that is just a module's own command line goes in
   `TOOLS` instead (it runs that module's `if __name__ == "__main__":` block).
-- **Tests are offline only:** no Google Sheet, no browser, no network. Each `tests/test_*.py` is a
+- **Tests are offline only:** no Google Sheet, no real NUworks, no network. Each `tests/test_*.py` is a
   plain script that asserts and exits non-zero on failure. Run one with
-  `.venv/bin/python tests/test_sheet.py`.
+  `.venv/bin/python tests/test_sheet.py`. Browser tests use headless Firefox on local pages or demo mode.
+- **The GUI:** try changes with `nuauto gui --demo` (fake sheet, fake NUworks, fake Claude); see every screen with
+  `nuauto gui --demo --screenshots DIR`. Text from the server goes into the page with textContent only. How it
+  fits together: `docs/GUI.md`. Agents never start the real GUI.
+- **The packaged app:** `sh packaging/build.sh`, then `packaging/build/venv/bin/python packaging/smoke.py <app>`;
+  on other distributions: `sh packaging/distros.sh <AppImage>` (podman or docker).
+  Code that starts NUauto itself uses `config.self_cmd` / `config.self_exe` (never `python -m` or a file path), and
+  programs that are not NUauto get `window.system_env()`.
 - **Config and paths** live in `src/nuauto/config.py`. Personal settings come from
   `local/local_config.json`. When you add a setting, also add it to `local_config.example.json`.
 
@@ -44,6 +51,8 @@ Details and the reasons are in `docs/SAFETY.md`.
 - The answer bank matches question text exactly. No fuzzy matching. Unknown fields stop and ask.
 - `nuauto apply` never writes free text (essays, cover letters).
 - No code reads, stores or asks for a password.
+- The GUI's server stays on 127.0.0.1 with its secret, Host, Origin and X-NUauto checks (`tests/test_gui.py`),
+  and never sends a secret to the page.
 - `nuauto assist` submits nothing without the human's review. The guard is the hook logic in
   `src/nuauto/assist.py`, tested by `tests/test_assist.py`. Change both together.
 - Every action is logged and every filled form is screenshotted to `logs/` before Submit.
@@ -63,3 +72,4 @@ Update the doc that matches your change:
 - `docs/PIPELINE.md`: how the job pool is built, bounds, ranking.
 - `docs/ARCHITECTURE.md`: how the modules fit together.
 - `docs/SAFETY.md`: the safety rules and how code enforces them.
+- `docs/GUI.md`: the window, its API, demo mode, the setup wizard.

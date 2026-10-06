@@ -5,18 +5,18 @@ Paths below are in src/nuauto/ unless a folder is given.
 
 APPLYING (apply.py, sheet.py)
 - Only Approved rows are acted on | apply.pick_row, sheet.approved; set_status refuses a row that is not Approved | test_sheet (approved filter, refusals)
-- Weekly cap (fixed weeks from local_config week_start, else the last 7 days) | sheet.MAX_PER_WEEK = 11, sheet.week_window, sheet.check_limits; apply.main checks before every row | test_sheet (7-day edge, limit refuses)
+- Weekly cap (fixed weeks from local_config week_start, else the last 7 days) | sheet.MAX_PER_WEEK = 11, sheet.week_window, sheet.check_limits; apply.main checks before every row | test_sheet (7-day edge, limit refuses), test_demo (a run refuses up front)
 - Total cap | sheet.MAX_TOTAL = 99, same check_limits | test_sheet (counts only; the total refusal itself is not tested)
 - Applied row with no/odd date is an error, never guessed | sheet.applied_dates | test_sheet
 - One application at a time, 30-60 s apart | apply.main loop, time.sleep(random.uniform(30, 60)) | no test
-- apply must run in a real terminal | apply.main (isatty check, exits otherwise); assist.run likewise | no test
+- apply submits only with you there: a real terminal, or the GUI (`--ui json` only as a child of the running GUI, its pid in local/gui.lock); never inside a Claude Code shell (CLAUDECODE); the same for `assist nuworks <row>`; assist.run needs a terminal | apply.refuse_unattended (isatty / answers.json_ui_allowed / CLAUDECODE), apply.main, assist.main | test_demo (CLAUDECODE and --ui json refusals), test_answers (json_ui_allowed)
 - Row can never be sent twice | sheet.mark_submit_started (row becomes Needs Human BEFORE the Submit click); sheet.resolve_submit only accepts a marked row | test_sheet (submit-safety checks)
 - Screenshot before Submit, and after | browser.RunLog.screenshot ("filled_popup", "after_submit") in apply.fill_popup / submit_flow | no test
 - Every action logged per application under logs/ | browser.RunLog | no test
-- After-submit confirmation checked | apply.submit_flow waits for "Your application has been submitted"; no text = asks you (y/n/u) | no test
+- After-submit confirmation checked | apply.submit_flow waits for "Your application has been submitted"; no text = asks you (y/n/u; anything else = u, the row stays Needs Human) | test_demo / test_gui (the confirmed path on the fake pages); the unconfirmed path: no test
 - Popup links off-site, "How to Apply", missing Cover Letter/Transcript = stop as Needs Human | apply.check_popup | test_apply
 - Unexpected error never carries on to the next job | apply.apply_one (outcome "stop") | no test
-- Ctrl+C stops cleanly; row stays Approved, or Needs Human if Submit was already clicked | apply.apply_one (KeyboardInterrupt branch) | no test
+- Ctrl+C (or the GUI's Stop: SIGINT to the run) stops cleanly; row stays Approved, or Needs Human if Submit was already clicked. The GUI going away (the run's stdin closes) stops it the same way | apply.apply_one (KeyboardInterrupt branch), answers.JsonIO, gui.Task.stop | test_demo (stop mid-question, GUI gone), test_answers (exactly one interrupt)
 - Deadline passed = Needs Human, not attempted | apply.main | no test
 - Dry run exists only as hidden --dry-run | apply.main | no test
 
@@ -28,6 +28,7 @@ FORM FILLING (apply.py, answers.py)
 - Value read back after filling must equal what was typed | apply.fill_extra_fields | test_answers (real local form)
 - Free text (textarea), unlabeled fields, unseen field types stop | apply.fill_extra_fields (NeedsHuman) | test_answers
 - No terminal = no asking: unknown field stops the run | answers.NoTerminalIO | test_answers (unknown question, nobody to ask)
+- GUI answers get the same checks as typed ones: an option must be one of the form's choices, an alias index must exist, blank = stop, always-ask never saved | answers.JsonIO, resolve_answer | test_answers (JsonIO section)
 - Resume: only the exact resume_label from profile.json; missing label stops | apply.check_popup, apply.load_resume_label, shown_resume re-checked right before Submit | test_apply (missing option, no dropdown)
 - Never uploads in apply.py (no file-input call exists in it) | absence in apply.py | no test
 
@@ -40,7 +41,7 @@ BROWSER (browser.py, config.py)
 - Page-load timeout gets one retry, then gives up | browser.goto | test_browser
 - Cookie file mode 600, profile dir mode 700 | browser.save_cookies, browser.launch | no test
 - Refuses to open a URL off the allowed host | browser.cmd_open | no test
-- Only one Playwright session on browser_profile/ | Firefox's own profile lock only; nothing in our code | no test (see GAPS)
+- Only one process on browser_profile/ (apply, the update, login, the GUI's NUworks check) | browser.lock_profile (flock on local/browser_profile.lock, from launch to close; a failed launch releases it); the GUI's background check gives way to your runs | test_browser (profile lock)
 
 COMPANY-SITE AGENT (assist.py, prompts/ASSIST_PROMPT.md)
 - Submit-type click asks the user in the terminal first | assist.decide (SUBMIT_RE on the element name) -> hook "ask" | test_assist
@@ -72,12 +73,39 @@ MARK-DONE PAGE (web.py)
 - No access log (query strings hold signatures) | web.Handler.log_message | no test
 - Listens only on web_listen_host (homelab Tailscale IP) | web.LISTEN | no test
 
+THE WINDOW (gui.py, gui_static/)
+- Only this machine, only you: 127.0.0.1, random port; a secret per start, swapped for an HttpOnly SameSite=Strict cookie; Host must name this server (DNS rebinding); every POST needs X-NUauto: 1, a JSON body and a matching Origin | gui.Handler (_host_ok, _authed, do_POST) | test_gui (security section)
+- Only the page's own files run (CSP), no framing; static files by name only; /api/file serves only .png/.log/.txt under logs/ (real paths) | gui.Handler._send/_static, gui.log_file | test_gui (path tricks)
+- Secrets never reach the page (token, cookies, webhook, client secret: "set / not set" only) | gui.settings_get, health checks | test_gui (token not in settings)
+- The real window never starts inside a Claude Code shell; agents use --demo | gui.main | test_gui
+- One window server at a time (a second start opens a window on the first, with a secret that can do nothing else) | gui.running_instance, /api/window | test_gui (second start)
+- Runs you watch get a visible browser (AUTO_HEADLESS cleared for apply, logins, the NUworks side) | gui.VISIBLE | no test
+- Undo of an approval only moves a still-Approved row with the same job back to Proposed; nothing is deleted | sheet.unapprove | test_demo, test_gui
+- Answer-bank edits: refused while a run uses the bank, refused if a run saved an answer since you opened it, duplicate questions/aliases refused | gui.answers_put | test_gui
+- Checks never open a login page or show a secret | sheet.open_worksheet(interactive=False), health.* | test_health (interactive False; webhook not shown)
+- Demo mode never touches real files or the network: it needs its own NUAUTO_STATE_DIR, its browser has a proxy that does not exist and aborts every non-NUworks request, the sheet and claude are fakes | config.py (DEMO check), browser.launch, demo.serve_nuworks | test_demo (refuses without its own folder)
+
+THE PACKAGED APP (packaging/, config.FROZEN)
+- The same rules and code as a source install; your files never go in the bundle (app-data folder, mode 700 local/) | config.py (FROZEN paths) | packaging/smoke.py (demo end to end in the built app)
+- Always local mode: no homelab sync from a packaged app | config.SERVER_HOSTNAME = "" when frozen | no test
+- The assistant's hook / answer-bank command stays exactly two words (`<app> _assist`) and check_bash still refuses anything else | assist.answer_prefix, check_bash | test_window
+- Programs it starts that are not its own children (system python3, browsers, a terminal) get none of its PyInstaller / AppImage / Python variables | window.system_env | test_window
+- Closing NUauto's own window quits it; a run in progress stops the way Ctrl+C stops it | window.open_gtk / run_mac -> App.quit | packaging/smoke.py (process group gone after SIGTERM); the window close itself: no test
+- The update check sends nothing about you (GET of the latest public release) | health.app_update | test_health (source install: no call)
+- A hidden browser only in demo mode (NUAUTO_DEMO_HEADLESS or no screen); a real apply always opens a visible one | browser.launch (config.DEMO check), gui.VISIBLE | test_selftest / test_demo (no screen); the real side: no test
+
+SETUP WIZARD (onboard.py)
+- Only a Desktop-app Google client file is accepted; saved mode 600 | onboard.check_client, save_client | test_setup
+- A sheet with other data is never written to (an empty one is set up; NUauto's own columns = fine) | onboard.open_and_prepare, setup_sheet.setup (HasData) | test_setup
+- Discord webhook checked with a GET (posts nothing until you press Test), saved mode 600, never shown again | onboard.save_webhook | test_setup
+- The NUworks reads (resume labels, terms) are read-only: hidden browser, domain lock on, nothing filled, never Submit (the resume read presses Cancel) | onboard.read_resume_labels, read_terms | test_setup (on the fake pages)
+- Preferences are validated before they shape the pool or Claude's prompt (no "{{" in text, known categories, ranges) | onboard.check_prefs | test_setup
+
 GAPS (policy or prompt only, or weaker than the rules read)
 - Assist: typed text is not checked against the answer bank. assist.issue records what the bank handed out (state issued / issued_values) but decide never compares it with browser_type / browser_fill_form text. "Never guess" and "essays only after I approve" are prompt-only.
 - Assist: Submit detection is by exact button name (SUBMIT_RE). An icon-only or differently worded final button ("Place order", "Done") is not caught. Pressing Space on a focused button is not asked about (only Enter is).
 - Assist: no domain lock. The agent may visit any http(s) site and tick any box; only the Submit review stands between it and a submission.
 - Assist: the cap is checked once at start (sheet.check_limits); marking a row Applied by hand has no cap check (the application has already gone out).
-- Single use of browser_profile/ is not enforced by our code, only by Firefox locking the profile.
 - local/ being mode 700 is not enforced in code (only the profile dir and the two secret files get chmod).
 - "Check NUworks' terms of use before running against the real site" is a human to-do (docs/STATUS.md OPEN), not enforced.
 - Reading answers.json / profile.json / token files is protected only by file permissions and by the assist read-limits; nothing scrubs logs/ (screenshots can show personal data; logs/ is gitignored).

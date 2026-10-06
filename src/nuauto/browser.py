@@ -4,6 +4,7 @@
   python -m nuauto.browser open <job-url> # open one job page, screenshot, stop
 """
 import contextlib
+import fcntl
 import json
 import os
 import random
@@ -20,7 +21,7 @@ from nuauto import config
 
 def pause(page, low=1.5, high=4.0):
     # wait_for_timeout (not time.sleep) so Playwright keeps handling events
-    page.wait_for_timeout(random.uniform(low, high) * 1000)
+    page.wait_for_timeout(random.uniform(low, high) * 1000 * config.DEMO_PACE)
 
 
 _extra_hosts = set()  # only filled inside sso_hosts_allowed()
@@ -44,6 +45,7 @@ def sso_hosts_allowed():
 
 class RunLog:
     """One folder per run under logs/, with actions.log and screenshots."""
+    events = None  # set to answers.JsonIO.event under `--ui json`: the GUI hears about each screenshot
 
     def __init__(self, label):
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -61,6 +63,8 @@ class RunLog:
         path = os.path.join(self.dir, f"{name}.png")
         page.screenshot(path=path, full_page=True)
         self.write(f"screenshot saved: {path}")
+        if RunLog.events:
+            RunLog.events("screenshot", path=path)
 
 
 def save_cookies(cookies):
@@ -71,11 +75,88 @@ def save_cookies(cookies):
     os.chmod(config.COOKIES_PATH, 0o600)
 
 
+class ProfileBusy(Exception):
+    """Another nuauto process is using the NUworks browser profile."""
+
+
+_profile_lock = None  # fd holding the flock on config.PROFILE_LOCK_PATH, while this process uses the profile
+
+
+def lock_profile(what):
+    """Only one process may use local/browser_profile/ at a time (apply, the update, login, the GUI's NUworks
+    check). Raises ProfileBusy, naming who has it. Released by unlock_profile() or when the process ends."""
+    global _profile_lock
+    if _profile_lock is not None:
+        return
+    os.makedirs(config.LOCAL_DIR, mode=0o700, exist_ok=True)
+    fd = os.open(config.PROFILE_LOCK_PATH, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(fd)
+        holder = profile_holder() or {}
+        raise ProfileBusy(f"The NUworks browser is in use ({holder.get('what', 'another nuauto run')}, "
+                          f"pid {holder.get('pid', '?')}). Try again when it is done.")
+    os.ftruncate(fd, 0)
+    os.write(fd, json.dumps({"pid": os.getpid(), "what": what, "since": datetime.now().isoformat(timespec="seconds")}).encode())
+    _profile_lock = fd
+
+
+def unlock_profile():
+    global _profile_lock
+    if _profile_lock is None:
+        return
+    fd, _profile_lock = _profile_lock, None
+    try:
+        os.ftruncate(fd, 0)
+    finally:
+        os.close(fd)  # closing the fd releases the flock
+
+
+def profile_holder():
+    """{"pid", "what", "since"} of the process using the profile, or None if it is free. Never takes the lock
+    (so it can't make a starting run fail): the holder writes this, and a dead pid counts as free."""
+    try:
+        with open(config.PROFILE_LOCK_PATH) as f:
+            holder = json.loads(f.read() or "null")
+        os.kill(holder["pid"], 0)
+    except (OSError, ValueError, TypeError, KeyError):
+        return None  # no file, empty (unlocked), or the process is gone
+    return holder
+
+
+def has_display():
+    """A screen to show a browser on: always on macOS; on Linux, an X11 or Wayland session."""
+    return sys.platform == "darwin" or bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
 def launch(p):
-    os.makedirs(config.PROFILE_DIR, mode=0o700, exist_ok=True)
-    os.chmod(config.PROFILE_DIR, 0o700)
-    headless = os.environ.get("AUTO_HEADLESS") == "1"  # set by daily.py only
-    context = p.firefox.launch_persistent_context(config.PROFILE_DIR, headless=headless)
+    lock_profile(" ".join([os.path.basename(sys.argv[0])] + sys.argv[1:2]))
+    try:
+        os.makedirs(config.PROFILE_DIR, mode=0o700, exist_ok=True)
+        os.chmod(config.PROFILE_DIR, 0o700)
+        headless = os.environ.get("AUTO_HEADLESS") == "1"  # set by daily.py and the GUI's NUworks check
+        if config.DEMO and (os.environ.get("NUAUTO_DEMO_HEADLESS") == "1" or not has_display()):
+            headless = True  # demo runs nobody watches (tests, the self-test, no screen); real runs stay visible
+        # Demo: a proxy that does not exist, so a request no fake page answers can never reach the network
+        extra = {"proxy": {"server": "http://127.0.0.1:9"}} if config.DEMO else {}
+        context = p.firefox.launch_persistent_context(config.PROFILE_DIR, headless=headless, **extra)
+    except BaseException:
+        unlock_profile()
+        raise
+    close = context.close
+
+    def close_and_unlock(*args, **kwargs):
+        try:
+            return close(*args, **kwargs)
+        finally:
+            unlock_profile()
+    context.close = close_and_unlock  # every caller closes the context in a finally block
+    if config.DEMO:
+        # Registered first, so it runs last: the domain lock decides first, as in real runs, and whatever it lets
+        # through gets a fake NUworks page instead of the network (demo.py). Anything else is aborted.
+        from nuauto import demo
+        demo.serve_nuworks(context)
     if os.path.exists(config.COOKIES_PATH):
         with open(config.COOKIES_PATH) as f:
             context.add_cookies(json.load(f))
@@ -161,7 +242,7 @@ def install_domain_lock(context, log, blocked):
                 # e.g. an embedded YouTube video in a job description: blocked, but the page stays on NUworks
                 log.write(f"blocked embedded frame from {urlparse(req.url).hostname}")
         else:
-            route.continue_()
+            route.fallback()  # on to the network (or, in demo mode, to the fake NUworks pages registered at launch)
     context.route("**/*", handler)
 
 

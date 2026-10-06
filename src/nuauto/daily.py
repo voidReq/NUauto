@@ -9,7 +9,6 @@ Claude runs as `claude -p` (Sonnet) with only Read/Write tools, one call per bat
 """
 import json
 import os
-import shutil
 import subprocess
 import sys
 import traceback
@@ -21,8 +20,8 @@ os.environ["AUTO_HEADLESS"] = "1"
 from nuauto import config  # noqa: E402
 from nuauto import jobs  # noqa: E402
 
-# ~/.local/bin first: systemd units run with a short PATH
-CLAUDE = shutil.which("claude", path=os.path.expanduser("~/.local/bin") + os.pathsep + os.environ.get("PATH", "")) or "claude"
+# config.tool_path searches ~/.local/bin and the usual install folders: systemd units run with a short PATH
+CLAUDE = config.tool_path("claude") or "claude"
 SCANS = "scans.json"  # per-run counts for the morning summary (data/)
 LOG_PATH = os.path.join(config.LOGS_DIR, f"daily-{datetime.now():%Y%m%d-%H%M}.txt")
 
@@ -36,12 +35,9 @@ def log(msg):
 
 
 def notify(title, body=""):
+    from nuauto import health
     log(f"NOTIFY: {title} | {body}")
-    if shutil.which("notify-send"):  # Linux desktop
-        subprocess.run(["notify-send", "-a", "NUauto", title, body], check=False)
-    elif sys.platform == "darwin" and shutil.which("osascript"):  # macOS (local mode)
-        script = f"display notification {json.dumps(body[:200], ensure_ascii=False)} with title {json.dumps(title, ensure_ascii=False)}"
-        subprocess.run(["osascript", "-e", script], check=False)
+    health.desktop_notify(title, body)  # Linux desktop / macOS (local mode); nothing on a headless homelab
     discord(f"**{title}**\n{body}" if body else f"**{title}**")
 
 
@@ -62,10 +58,10 @@ def discord(text):
 
 def run_claude(prompt_file, batch_file):
     name = os.path.basename(batch_file)
-    d = config.PROJECT_DIR
-    prompt = (f"Follow {d}/prompts/{prompt_file} exactly: read it first, then "
-              f"{d}/work/resume.txt. Process only {d}/work/{name} and "
-              f"write {d}/work/{name.replace('_in_', '_out_')} with exactly one entry per "
+    w = config.WORK_DIR
+    prompt = (f"Follow {jobs.render_prompt(prompt_file)} exactly: read it first, then "
+              f"{w}/resume.txt. Process only {w}/{name} and "
+              f"write {w}/{name.replace('_in_', '_out_')} with exactly one entry per "
               "input job, keyed by the job id. Read every job fully and judge each one individually. "
               "Write only that one output file.")
     log(f"claude: {name}")
@@ -75,8 +71,23 @@ def run_claude(prompt_file, batch_file):
          "--allowedTools", "Read", "Write",
          "--disallowedTools", "Bash", "WebFetch", "WebSearch", "Edit",
          "--permission-mode", "acceptEdits"],
-        cwd=config.PROJECT_DIR, capture_output=True, text=True, timeout=1800)
+        cwd=config.STATE_DIR, capture_output=True, text=True, timeout=1800)  # work/ is under it: Claude may write there
     log(f"claude: {name} exit {r.returncode} {r.stdout.strip()[-200:]!r}")
+
+
+def claude_ready():
+    """Before the first Claude batch: is Claude Code there and logged in? Otherwise every batch would fail one by
+    one. An unclear answer from `claude auth status` does not block the run."""
+    from nuauto import health
+    where = "the homelab" if config.IS_SERVER else "this machine"
+    status = health.claude_status()
+    if status is None:
+        notify("NUauto: Claude Code not found", f"Scoring can't run. Install Claude Code on {where} (README.md, Setup).")
+        return False
+    if status and not status.get("loggedIn"):
+        notify("NUauto: Claude Code is logged out", f"Scoring can't run. On {where} run: claude auth login")
+        return False
+    return True
 
 
 def step(fn, *args):
@@ -111,7 +122,16 @@ def scan(before):
         notify("NUauto: update stopped", f"{msg}. Run `nuauto login` on your laptop (it copies the session to the homelab).")
         return 1
 
+    checked = []
+
+    def ready():  # claude_ready(), asked once per run, only when there is something for Claude to do
+        if not checked:
+            checked.append(claude_ready())
+        return checked[0]
+
     batches = jobs.cmd_triage_export()
+    if batches and not ready():
+        return 1
     for b in batches:
         run_claude("TRIAGE_PROMPT.md", b)
     if batches:
@@ -127,6 +147,8 @@ def scan(before):
         return 1
 
     batches = jobs.cmd_score_export()
+    if batches and not ready():
+        return 1
     for b in batches:
         run_claude("SCORE_PROMPT.md", b)
     if batches:
@@ -136,6 +158,8 @@ def scan(before):
             return 1
 
     batches = jobs.cmd_cat_export()
+    if batches and not ready():
+        return 1
     for b in batches:
         run_claude("CATEGORY_PROMPT.md", b)
     if batches:

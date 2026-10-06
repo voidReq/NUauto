@@ -1,0 +1,51 @@
+# The packaged NUauto: an AppImage per Linux architecture and a DMG per Mac architecture. Built and smoke-tested on
+# every pull request (the files are kept as build artifacts of the run: nothing is published) and on every push of a
+# version tag (git tag v0.3.0 && git push origin v0.3.0), which also attaches them to a GitHub Release.
+# Also runnable by hand from the default branch (Actions > release > Run workflow).
+name: release
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-22.04-arm, macos-15, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Build
+        run: sh packaging/build.sh
+      - name: Libraries Firefox needs (for the smoke test)
+        if: runner.os == 'Linux'
+        run: sudo packaging/build/venv/bin/python -m playwright install-deps firefox
+      - name: Smoke test
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then APP="$(ls dist/*.AppImage)"; else APP=packaging/build/dist/NUauto.app/Contents/MacOS/NUauto; fi
+          packaging/build/venv/bin/python packaging/smoke.py "$APP"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nuauto-${{ matrix.os }}
+          path: dist/*
+          if-no-files-found: error
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "NUauto $GITHUB_REF_NAME" --notes-file packaging/RELEASE_NOTES.md

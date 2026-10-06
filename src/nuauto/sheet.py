@@ -101,10 +101,26 @@ def approved(rows):
     return [r for r in rows if r.status == "Approved"]
 
 
-def open_worksheet():
-    if config.IS_SERVER and not os.path.exists(config.TOKEN_PATH):
-        # no browser on the homelab: never start Google's login flow there (it would wait forever)
-        raise SheetError("No Google token on the homelab. Log in on the laptop; the next nuauto command syncs it.")
+class NotLoggedIn(SheetError):
+    """No Google login, or it expired, and we may not open Google's login page here."""
+
+
+def client(interactive=True):
+    """A gspread client. interactive=False (health checks, the GUI, the homelab): never opens Google's login page;
+    raises NotLoggedIn instead. Demo mode: a fake sheet in the demo folder (demo.py)."""
+    if config.DEMO:
+        from nuauto import demo
+        return demo.FakeClient(interactive)
+    if not os.path.exists(config.TOKEN_PATH):
+        if config.IS_SERVER:
+            # no browser on the homelab: never start Google's login flow there (it would wait forever)
+            raise NotLoggedIn("No Google token on the homelab. Log in on the laptop; the next nuauto command syncs it.")
+        if not interactive:
+            raise NotLoggedIn("Not logged in to Google yet.")
+    if not interactive:
+        from google.oauth2.credentials import Credentials
+        config.lock_token()
+        return gspread.Client(auth=Credentials.from_authorized_user_file(config.TOKEN_PATH))
     fresh = not os.path.exists(config.TOKEN_PATH)  # gspread will open the browser for a Google login
     gc = gspread.oauth(
         scopes=config.WRITE_SCOPES,
@@ -115,14 +131,31 @@ def open_worksheet():
     if fresh:
         with open(config.GOOGLE_LOGIN_PATH, "w") as f:
             f.write(date.today().isoformat() + "\n")
+    return gc
+
+
+def open_worksheet(interactive=True):
     try:
-        return gc.open_by_key(config.SHEET_ID).sheet1
+        return client(interactive and not config.IS_SERVER).open_by_key(config.SHEET_ID).sheet1
     except RefreshError:
         if config.IS_SERVER:
-            raise SheetError("Google login expired. On the laptop run: nuauto login google")
+            raise NotLoggedIn("Google login expired. On the laptop run: nuauto login google")
+        if not interactive:
+            raise NotLoggedIn(f"Google login expired (it lasts {config.GOOGLE_LOGIN_DAYS} days).")
         print(f"Google login expired (it lasts {config.GOOGLE_LOGIN_DAYS} days). Opening the browser to log in again...")
         os.remove(config.TOKEN_PATH)
         return open_worksheet()
+
+
+SHEETS_API = "https://sheets.googleapis.com/v4/spreadsheets"
+
+
+def create_sheet(title="NUauto jobs"):
+    """A new, empty spreadsheet in your Google Drive; returns its ID. Uses the Sheets API itself (gspread's create()
+    needs the Drive API, which this project never enables)."""
+    gc = client(interactive=False)
+    r = gc.http_client.request("post", SHEETS_API, json={"properties": {"title": title}})
+    return r.json()["spreadsheetId"]
 
 
 def google_login_age():
@@ -135,10 +168,13 @@ def google_login_age():
 
 
 def google_login():
-    """Fresh Google login now (resets the 7-day clock)."""
+    """Fresh Google login now (resets the 7-day clock). Before a sheet is chosen (first setup) it only logs in."""
     if os.path.exists(config.TOKEN_PATH):
         os.remove(config.TOKEN_PATH)
-    open_worksheet()
+    if config.SHEET_ID in ("", "YOUR_GOOGLE_SHEET_ID"):
+        client()
+    else:
+        open_worksheet()
     print("Google login done.")
 
 
@@ -234,6 +270,15 @@ def mark_applied_by_hand(ws, row_number, url, how="by hand"):
     ws.update(range_name=f"D{row_number}:F{row_number}",
               values=[["Applied", f"Applied {how}. {current.notes}".strip(), date.today().strftime(DATE_FMT)]],
               value_input_option="RAW")
+
+
+def unapprove(ws, row_number, url):
+    """Undo an approval (the GUI's Undo): the row goes back to Proposed. Only while it is still Approved and still
+    holds this job; nothing is deleted."""
+    current = _row_for(ws, row_number, url)
+    if current.status != "Approved":
+        raise SheetError(f"Row {row_number} is not Approved (it is {current.status or 'empty'}). Refusing to change it.")
+    ws.update(range_name=f"D{row_number}", values=[["Proposed"]], value_input_option="RAW")
 
 
 def add_proposed(ws, items, status="Proposed"):
