@@ -19,7 +19,7 @@ REMOTE = f"{config.SERVER}:{config.SERVER_DIR}"
 # there read current ones. The homelab installs the package once (uv pip install -e .); code changes need no reinstall.
 PACKAGE = ["__init__.py", "__main__.py", "cli.py", "config.py", "sheet.py", "jobs.py", "daily.py", "browser.py",
            "apply.py", "answers.py", "inspect_form.py", "setup_sheet.py", "sync.py", "web.py", "doctor.py", "assist.py",
-           "health.py", "demo.py", "gui.py", "onboard.py"]
+           "health.py", "demo.py", "gui.py", "onboard.py", "window.py", "window_gtk.py"]
 CODE = (["pyproject.toml", "README.md", "local_config.example.json", "CLAUDE.md", "CONTRIBUTING.md",
          "docs/DEPLOY.md", "docs/PIPELINE.md", "docs/ARCHITECTURE.md", "docs/SAFETY.md", "docs/GUI.md"]
         + [f"src/nuauto/{f}" for f in PACKAGE]

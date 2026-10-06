@@ -187,4 +187,8 @@ assert out[0].status == "warn" and "ZeroDivisionError" in out[0].detail and out[
 assert json.loads(json.dumps([c.to_dict() for c in out]))[1]["status"] == "off"
 assert time.time() - out[0].at < 60
 
+# the version check: only the packaged app asks GitHub; versions compare as numbers
+assert health.newer("0.10.0", "0.9.1") and not health.newer("0.3.0", "0.3.0") and not health.newer("v1", "0.3.0")
+assert one(health.app_update).status == "off"  # a source install: no network call
+
 print("All health checks passed.")

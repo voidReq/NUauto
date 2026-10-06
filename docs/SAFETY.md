@@ -85,6 +85,14 @@ THE WINDOW (gui.py, gui_static/)
 - Checks never open a login page or show a secret | sheet.open_worksheet(interactive=False), health.* | test_health (interactive False; webhook not shown)
 - Demo mode never touches real files or the network: it needs its own NUAUTO_STATE_DIR, its browser has a proxy that does not exist and aborts every non-NUworks request, the sheet and claude are fakes | config.py (DEMO check), browser.launch, demo.serve_nuworks | test_demo (refuses without its own folder)
 
+THE PACKAGED APP (packaging/, config.FROZEN)
+- The same rules and code as a source install; your files never go in the bundle (app-data folder, mode 700 local/) | config.py (FROZEN paths) | packaging/smoke.py (demo end to end in the built app)
+- Always local mode: no homelab sync from a packaged app | config.SERVER_HOSTNAME = "" when frozen | no test
+- The assistant's hook / answer-bank command stays exactly two words (`<app> _assist`) and check_bash still refuses anything else | assist.answer_prefix, check_bash | test_window
+- Programs it starts that are not its own children (system python3, browsers, a terminal) get none of its PyInstaller / AppImage / Python variables | window.system_env | test_window
+- Closing NUauto's own window quits it; a run in progress stops the way Ctrl+C stops it | window.open_gtk / run_mac -> App.quit | packaging/smoke.py (process group gone after SIGTERM); the window close itself: no test
+- The update check sends nothing about you (GET of the latest public release) | health.app_update | test_health (source install: no call)
+
 SETUP WIZARD (onboard.py)
 - Only a Desktop-app Google client file is accepted; saved mode 600 | onboard.check_client, save_client | test_setup
 - A sheet with other data is never written to (an empty one is set up; NUauto's own columns = fine) | onboard.open_and_prepare, setup_sheet.setup (HasData) | test_setup

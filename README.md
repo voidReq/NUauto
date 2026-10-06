@@ -17,23 +17,37 @@ before it submits anything.
 
 ## Install
 
-Linux or macOS, a NUworks account, a Google account, and [Claude Code](https://claude.com/claude-code) (a Claude
-subscription or API key; scoring uses Sonnet). `nuauto assist` also needs Node.js (`npx`) and Google Chrome.
-Used for real on Fedora and Ubuntu; macOS passes the automated tests (demo mode) but hasn't been used for real yet.
+You need a NUworks account, a Google account, and [Claude Code](https://claude.com/claude-code) (a Claude
+subscription or API key; scoring uses Sonnet). NUauto's setup screen installs Claude Code for you if it's missing.
+
+**Download the app** from [Releases](https://github.com/voidReq/NUauto/releases/latest): nothing else to install.
+
+- **Linux** (most distributions from 2022 on): `NUauto-…-linux-x86_64.AppImage` (or `-aarch64`). Make it executable
+  (right-click > Properties > "Allow executing as program", or `chmod +x NUauto-*.AppImage`) and double-click it.
+- **macOS** (12 or newer): `NUauto-…-macos-arm64.dmg` (Apple silicon) or `-x86_64` (Intel). Drag NUauto to
+  Applications. It isn't signed by Apple, so the first time: open it, then System Settings > Privacy & Security >
+  **Open Anyway**.
+
+NUauto opens in its own window on its **setup** screen, which walks you through the rest, checking each step:
+Claude Code, your own free Google sign-in client, your sheet (it can create one), your resume, the NUworks login and
+what you are looking for. Your files stay on your computer, in `~/.local/share/NUauto` (Linux) or
+`~/Library/Application Support/NUauto` (macOS), readable only by you. To update, download the new version.
+
+Used for real on Fedora and Ubuntu; the macOS app is built and tested automatically (in demo mode) but hasn't been
+used for real yet.
+
+### From the source code (to change it)
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/voidReq/NUauto/main/install.sh | sh
 ```
 
 It installs everything in your home folder (no sudo): the code in `~/NUauto`, Python 3.12 through
-[uv](https://docs.astral.sh/uv/) (your system's Python version doesn't matter), Playwright's Firefox, the `nuauto`
-command and an app icon. Then the NUauto window opens on its **setup** screen, which walks you through the rest,
-checking each step: Claude Code, your own free Google sign-in client, your sheet (it can create one), your
-resume, the NUworks login and what you are looking for. Run the installer again any time to update.
+[uv](https://docs.astral.sh/uv/), Playwright's Firefox, the `nuauto` command and an app icon, then opens the same
+setup screen. Your files go in `~/NUauto/local/`. `nuauto assist` also needs Node.js (`npx`) and Google Chrome.
+To build the packaged app yourself: `sh packaging/build.sh` (see `packaging/`).
 
-Your personal files all go in `~/NUauto/local/` (gitignored, readable only by you).
-
-### Without the window (command line only)
+### Command line only
 
 ```sh
 git clone https://github.com/voidReq/NUauto.git && cd NUauto

@@ -387,7 +387,7 @@ LAUNCH_AGENTS = os.path.expanduser("~/Library/LaunchAgents")
 
 
 def nuauto_bin():
-    return os.path.join(os.path.dirname(sys.executable), "nuauto")
+    return config.self_exe()
 
 
 def scheduler_kind():
@@ -456,7 +456,7 @@ def scheduler_enable():
     paths = scheduler_paths()
     os.makedirs(os.path.dirname(paths[0]), exist_ok=True)
     if kind == "launchd" and not config.DEMO:
-        plist = {"Label": LABEL, "ProgramArguments": [nuauto_bin(), "daily"], "WorkingDirectory": config.PROJECT_DIR,
+        plist = {"Label": LABEL, "ProgramArguments": [nuauto_bin(), "daily"], "WorkingDirectory": config.STATE_DIR,
                  "StartCalendarInterval": [{"Hour": 8, "Minute": 0}, {"Hour": 18, "Minute": 0}],
                  "EnvironmentVariables": {"PATH": tool_path_env()},
                  "StandardOutPath": os.path.join(config.LOGS_DIR, "launchd-daily.log"),
@@ -471,7 +471,7 @@ def scheduler_enable():
     with open(paths[0], "w") as f:
         f.write(TIMER)
     with open(paths[1], "w") as f:
-        f.write(SERVICE.format(dir=config.PROJECT_DIR, path=tool_path_env(), nuauto=nuauto_bin()))
+        f.write(SERVICE.format(dir=config.STATE_DIR, path=tool_path_env(), nuauto=nuauto_bin()))
     if not config.DEMO:
         r = subprocess.run(["bash", "-c", "systemctl --user daemon-reload && systemctl --user enable --now nuauto-daily.timer"],
                            capture_output=True, text=True)
@@ -495,9 +495,19 @@ def scheduler_disable():
 
 # ---------------------------------------------------------------- app launcher (apps menu / Applications folder)
 
+def mac_app():
+    """The packaged NUauto.app this runs from (macOS), or None."""
+    if not (config.FROZEN and sys.platform == "darwin"):
+        return None
+    path = os.path.abspath(sys.executable)  # .../NUauto.app/Contents/MacOS/NUauto
+    return path.split("/Contents/MacOS/")[0] if "/Contents/MacOS/" in path else None
+
+
 def launcher_paths():
     if config.DEMO:
         return [os.path.join(config.STATE_DIR, "launcher", "nuauto.desktop")]
+    if mac_app():
+        return [mac_app()]  # the app is its own icon
     if sys.platform == "darwin":
         return [os.path.expanduser("~/Applications/NUauto.app")]
     return [os.path.expanduser("~/.local/share/applications/nuauto.desktop")]
@@ -520,6 +530,8 @@ def launcher_create():
     `nuauto gui` in the background). Everything in your home folder; run again any time."""
     icon_src = os.path.join(config.SRC_DIR, "gui_static", "icon.svg")
     target = launcher_paths()[0]
+    if mac_app():
+        return target  # NUauto.app: drag it to Applications; nothing to make
     if sys.platform == "darwin" and not config.DEMO:
         macos = os.path.join(target, "Contents", "MacOS")
         os.makedirs(macos, exist_ok=True)
@@ -604,7 +616,7 @@ def steps(checks):
     kind = scheduler_kind()
     add("extras", "Notifications, automatic updates, app icon", False, "Optional.", optional=True,
         discord=os.path.exists(config.DISCORD_WEBHOOK_PATH), scheduler=kind, scheduled=scheduler_enabled() if kind else False,
-        homelab=config.HAS_SERVER, launcher=launcher_exists(), mac=sys.platform == "darwin")
+        homelab=config.HAS_SERVER, launcher=launcher_exists(), mac=sys.platform == "darwin", mac_app=bool(mac_app()))
     return out
 
 

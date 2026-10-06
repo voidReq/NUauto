@@ -33,6 +33,9 @@ nuauto test        # runs every tests/test_*.py
 - **The GUI:** try changes with `nuauto gui --demo` (fake sheet, fake NUworks, fake Claude); see every screen with
   `nuauto gui --demo --screenshots DIR`. Text from the server goes into the page with textContent only. How it
   fits together: `docs/GUI.md`. Agents never start the real GUI.
+- **The packaged app:** `sh packaging/build.sh`, then `packaging/build/venv/bin/python packaging/smoke.py <app>`.
+  Code that starts NUauto itself uses `config.self_cmd` / `config.self_exe` (never `python -m` or a file path), and
+  programs that are not NUauto get `window.system_env()`.
 - **Config and paths** live in `src/nuauto/config.py`. Personal settings come from
   `local/local_config.json`. When you add a setting, also add it to `local_config.example.json`.
 

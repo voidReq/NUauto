@@ -105,6 +105,13 @@ function ago(iso) {
   return `${Math.round(h / 24)} days ago`;
 }
 
+function openExternal(url) {  // in NUauto's own window this opens your browser (window.open is not reliable there)
+  const a = el("a", { href: url, target: "_blank", rel: "noopener noreferrer" });
+  document.body.append(a);
+  a.click();
+  a.remove();
+}
+
 function linkOut(url, text) {
   return el("a", { href: url, target: "_blank", rel: "noopener noreferrer", text });
 }
@@ -209,8 +216,9 @@ const FIXES = {
     "Install", () => action("install_claude")),
   install_firefox: () => action("install_firefox"),
   fix_permissions: () => action("fix_permissions").then(() => toast("Permissions fixed.")),
-  open_sheet: () => { if (S.state && S.state.sheet_url) window.open(S.state.sheet_url, "_blank", "noopener"); },
+  open_sheet: () => { if (S.state && S.state.sheet_url) openExternal(S.state.sheet_url); },
   update: () => action("update"),
+  open_release: () => openExternal("https://github.com/voidReq/NUauto/releases/latest"),
 };
 
 function fixButton(c, cls = "btn small") {
@@ -537,7 +545,7 @@ screens.review = async (view) => {
     else if (k === "n") decide("no");
     else if (k === "s") decide("skip");
     else if (k === "u") decide("back");
-    else if (k === "o" && card) window.open(card.url, "_blank", "noopener");
+    else if (k === "o" && card) openExternal(card.url);
     else return;
     e.preventDefault();
   };

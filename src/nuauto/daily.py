@@ -71,7 +71,7 @@ def run_claude(prompt_file, batch_file):
          "--allowedTools", "Read", "Write",
          "--disallowedTools", "Bash", "WebFetch", "WebSearch", "Edit",
          "--permission-mode", "acceptEdits"],
-        cwd=config.PROJECT_DIR, capture_output=True, text=True, timeout=1800)
+        cwd=config.STATE_DIR, capture_output=True, text=True, timeout=1800)  # work/ is under it: Claude may write there
     log(f"claude: {name} exit {r.returncode} {r.stdout.strip()[-200:]!r}")
 
 

@@ -248,8 +248,9 @@ def firefox():
     try:
         from playwright.sync_api import sync_playwright
         with sync_playwright() as p:
-            if not os.path.exists(p.firefox.executable_path):
-                return [check("firefox", "Browser", FAIL, "Playwright's Firefox is not installed.",
+            exe = p.firefox.executable_path
+            if not os.path.exists(exe):
+                return [check("firefox", "Browser", FAIL, f"Playwright's Firefox is not installed (no {exe}).",
                               ("install_firefox", "Install the browser"))]
             p.firefox.launch(headless=True).close()
     except Exception as e:
@@ -296,6 +297,34 @@ def homelab():
     if warn:
         return [check("homelab", "Homelab", WARN, "; ".join(r["msg"] for r in warn)[:300])]
     return [check("homelab", "Homelab", OK, f"All {len(results)} homelab checks pass.")]
+
+
+def newer(a, b):
+    """Is version a (e.g. "0.4.0") newer than b? Anything unreadable: no."""
+    try:
+        return tuple(int(x) for x in a.split(".")) > tuple(int(x) for x in b.split("."))
+    except ValueError:
+        return False
+
+
+def app_update():
+    """The packaged app only (a source install updates with git): is there a newer release on GitHub? Asks GitHub's
+    public API for the latest release; nothing about you is sent."""
+    import nuauto
+    __version__ = nuauto.__version__
+    if not config.FROZEN:
+        return [check("app", "Version", OFF, f"{__version__} (a source install: update with git).")]
+    req = urllib.request.Request(f"https://api.github.com/repos/{config.REPO}/releases/latest",
+                                 headers={"User-Agent": "nuauto", "Accept": "application/vnd.github+json"})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            latest = str(json.load(r).get("tag_name", "")).lstrip("v")
+    except (OSError, ValueError):
+        return [check("app", "Version", UNKNOWN, f"{__version__}; could not check for a newer one.")]
+    if newer(latest, __version__):
+        return [check("app", "Version", WARN, f"NUauto {latest} is available (you have {__version__}).",
+                      ("open_release", "Download"))]
+    return [check("app", "Version", OK, f"{__version__}, the latest.")]
 
 
 # ---------------------------------------------------------------- heavy (hidden browser)
@@ -345,7 +374,8 @@ def nuworks():
 
 
 QUICK = {"files": files, "resume": resume, "google": google, "nuworks_saved": nuworks_saved, "updates": updates}
-LIGHT = {"sheet": sheet_live, "claude": claude, "firefox": firefox, "discord": discord, "homelab": homelab}
+LIGHT = {"sheet": sheet_live, "claude": claude, "firefox": firefox, "discord": discord, "homelab": homelab,
+         "app_update": app_update}
 HEAVY = {"nuworks": nuworks, "claude_live": claude_live}
 ALL = {**QUICK, **LIGHT, **HEAVY}
 

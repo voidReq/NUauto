@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=NUauto
+Comment=Find, review and apply to NUworks co-ops
+Exec=NUauto
+Icon=nuauto
+Terminal=false
+Categories=Office;Education;

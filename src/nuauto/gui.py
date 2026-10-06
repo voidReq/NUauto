@@ -30,7 +30,6 @@ import sys
 import tempfile
 import threading
 import time
-import webbrowser
 from datetime import date, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -40,10 +39,9 @@ from nuauto import config
 from nuauto import health
 from nuauto import jobs
 from nuauto import sheet
+from nuauto import window
 
 STATIC = os.path.join(config.SRC_DIR, "gui_static")
-PY = sys.executable
-NUAUTO = os.path.join(os.path.dirname(sys.executable), "nuauto")  # the installed command, for terminal windows
 IDLE_EXIT = 30 * 60   # no page has asked anything for this long and nothing runs: quit
 LOG_KEEP = 4000       # log lines kept per task
 HISTORY = 20          # finished tasks kept
@@ -70,7 +68,7 @@ class Task:
         self.on_done = on_done
         env = {**os.environ, **(env or {}), "PYTHONUNBUFFERED": "1"}
         self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                     text=True, bufsize=1, env=env, cwd=config.PROJECT_DIR, start_new_session=True)
+                                     text=True, bufsize=1, env=env, cwd=config.STATE_DIR, start_new_session=True)
         threading.Thread(target=self._read, daemon=True).start()
 
     def _read(self):
@@ -177,6 +175,7 @@ class App:
         self.queue = {}            # job id -> pool entry, from the last review queue
         self.last_request = now()
         self.stopping = False
+        self.window_kind = "none"  # "mac" / "gtk" (NUauto's own window), "app" / "tab" (a browser), "none"
 
     # ---- tasks
 
@@ -245,6 +244,7 @@ class App:
         "homelab": (["homelab"], 900, 3),
         "nuworks": (["nuworks"], 6 * 3600, 8),
         "claude_live": (["claude_live"], 86400, 45),
+        "app": (["app_update"], 86400, 30),
     }
 
     def run_group(self, group):
@@ -294,7 +294,7 @@ class App:
             if not keep_old and not task.stopping:
                 self._store("nuworks", checks)
         try:
-            task = self.start("nuworks_check", "Checking NUworks", [PY, "-m", "nuauto.health", "--json", "nuworks"],
+            task = self.start("nuworks_check", "Checking NUworks", config.self_cmd("health", "--json", "nuworks"),
                               background=True, on_done=done)
         except Busy:
             task = None
@@ -329,7 +329,7 @@ class App:
             else:
                 out.append(quick[0])
         order = ["files", "google", "sheet", "nuworks", "claude", "resume", "limits", "updates", "firefox",
-                 "discord", "homelab"]
+                 "discord", "homelab", "app"]
         return sorted(out, key=lambda c: order.index(c.id) if c.id in order else 99)
 
     def notify_changes(self):
@@ -371,6 +371,8 @@ class App:
                 threading.Thread(target=self.run_group, args=(g,), daemon=True).start()
 
     def quit(self):
+        if self.stopping:
+            return
         self.stopping = True
         for t in (self.task, self.background):
             if t and t.state == "running":
@@ -381,6 +383,10 @@ class App:
                     t.stop(force=True)
         remove_lock()
         threading.Thread(target=SERVER.shutdown, daemon=True).start()
+        try:
+            window.close_all()  # Quit from the page: NUauto's own windows close too
+        except Exception:
+            pass
 
 
 class Busy(Exception):
@@ -598,7 +604,7 @@ def apply_list():
 # ---------------------------------------------------------------- actions (buttons that start something)
 
 def demo_cmd(*args):
-    return [PY, "-m", "nuauto.demo", *args]
+    return config.self_cmd("demo", *args)
 
 
 VISIBLE = {"AUTO_HEADLESS": ""}  # runs you watch get a visible browser, whatever this process's environment says
@@ -612,31 +618,31 @@ def act(body):
         if why:
             raise Refused(why)
         n = args.get("n")
-        cmd = [PY, "-m", "nuauto", "apply", "--ui", "json"]
+        cmd = config.self_cmd("apply", "--ui", "json")
         if n not in (None, ""):
             if not str(n).isdigit() or int(n) < 1:
                 raise Refused("At most how many? A whole number, 1 or more.")
             cmd += ["-n", str(int(n))]
         task = APP.start("apply", "Applying", cmd, env=VISIBLE, on_done=lambda t: APP.run_now(["quick"]))
     elif kind == "update":
-        cmd = demo_cmd("update") if config.DEMO else [PY, "-m", "nuauto", "update"]
+        cmd = demo_cmd("update") if config.DEMO else config.self_cmd("update")
         task = APP.start("update", "Checking for new jobs", cmd, browser=not config.HAS_SERVER,
                          on_done=lambda t: APP.run_now(["quick"]))
     elif kind == "login_nuworks":
-        cmd = demo_cmd("login_nuworks") if config.DEMO else [PY, "-m", "nuauto", "login"]
+        cmd = demo_cmd("login_nuworks") if config.DEMO else config.self_cmd("login")
         task = APP.start("login_nuworks", "NUworks login", cmd, env=VISIBLE,
                          on_done=lambda t: APP.run_now(["quick", "nuworks"]))
     elif kind == "login_google":
-        task = APP.start("login_google", "Google login", [PY, "-m", "nuauto", "login", "google"], browser=False,
+        task = APP.start("login_google", "Google login", config.self_cmd("login", "google"), browser=False,
                          on_done=lambda t: APP.run_now(["quick", "sheet"]))
     elif kind == "check_nuworks":
         APP.run_now(["nuworks"])
         return {}
     elif kind == "install_firefox":
-        task = APP.start("install_firefox", "Installing the browser", [PY, "-m", "playwright", "install", "firefox"],
+        task = APP.start("install_firefox", "Installing the browser", config.self_cmd("_playwright", "install", "firefox"),
                          browser=False, on_done=lambda t: APP.run_now(["firefox"]))
     elif kind == "install_claude":
-        cmd = ([PY, "-c", "print('Demo: Claude Code would be installed here.')"] if config.DEMO
+        cmd = (demo_cmd("install_claude") if config.DEMO
                else ["bash", "-c", "curl -fsSL https://claude.ai/install.sh | bash"])
         task = APP.start("install_claude", "Installing Claude Code", cmd, browser=False,
                          on_done=lambda t: APP.run_now(["claude"]))
@@ -652,12 +658,12 @@ def act(body):
         if not str(row).isdigit():
             raise Refused("Which row?")
         task = APP.start("nuworks_side", f"NUworks side of row {row}",
-                         [PY, "-m", "nuauto", "assist", "nuworks", str(int(row)), "--ui", "json"], env=VISIBLE)
+                         config.self_cmd("assist", "nuworks", str(int(row)), "--ui", "json"), env=VISIBLE)
     elif kind == "assist":
         row = args.get("row")
         if not str(row).isdigit():
             raise Refused("Which row?")
-        return open_terminal(f"{shlex.quote(NUAUTO)} assist {int(row)}",
+        return open_terminal(f"{shlex.quote(config.self_exe())} assist {int(row)}",
                              "The assistant runs here. It asks you before anything is submitted.")
     elif kind == "fix_permissions":
         health.fix_permissions()
@@ -721,20 +727,20 @@ TERMINALS = [  # (command, how it takes a command to run)
 def open_terminal(command, intro):
     """Run a shell command in a new terminal window (you type there: the assistant's questions, Claude's login).
     Returns {"opened": bool, "command": what to paste if no terminal app was found}."""
-    script = (f"cd {shlex.quote(config.PROJECT_DIR)}; echo {shlex.quote(intro)}; echo; {command}; "
+    script = (f"cd {shlex.quote(config.STATE_DIR)}; echo {shlex.quote(intro)}; echo; {command}; "
               "echo; read -rp 'Done. Press Enter to close this window. ' _")
     if config.DEMO:
         return {"opened": False, "command": command, "demo": True}
     if sys.platform == "darwin":
         apple = f'tell application "Terminal" to do script {json.dumps("bash -lc " + shlex.quote(script))}'
         ok = subprocess.run(["osascript", "-e", apple, "-e", 'tell application "Terminal" to activate'],
-                            capture_output=True).returncode == 0
+                            capture_output=True, env=window.system_env()).returncode == 0
         return {"opened": ok, "command": command}
     candidates = ([(os.environ["TERMINAL"], ["-e"])] if os.environ.get("TERMINAL") else []) + TERMINALS
     for name, flag in candidates:
         path = shutil.which(name)
         if path:
-            subprocess.Popen([path, *flag, "bash", "-lc", script], start_new_session=True,
+            subprocess.Popen([path, *flag, "bash", "-lc", script], start_new_session=True, env=window.system_env(),
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return {"opened": True, "command": command}
     return {"opened": False, "command": command}
@@ -933,10 +939,10 @@ def setup_post(body):
             onboard.save_config({"resume_path": path})
             APP.run_now(["quick"])
         elif a == "labels_read":
-            task = APP.start("onboard_labels", "Reading your resumes on NUworks", [PY, "-m", "nuauto.onboard", "resume-labels"])
+            task = APP.start("onboard_labels", "Reading your resumes on NUworks", config.self_cmd("onboard", "resume-labels"))
             return {"task": task.view()}
         elif a == "terms_read":
-            task = APP.start("onboard_terms", "Reading the term list on NUworks", [PY, "-m", "nuauto.onboard", "terms"])
+            task = APP.start("onboard_terms", "Reading the term list on NUworks", config.self_cmd("onboard", "terms"))
             return {"task": task.view()}
         elif a == "label_set":
             label = str(body.get("label", "")).strip()
@@ -1083,7 +1089,7 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         if u.path == "/api/window":  # a second `nuauto gui` asks this one to open a window
             if hmac.compare_digest(self.headers.get("X-NUauto-Open", "").encode(), APP.open_secret.encode()):
-                open_window(start_url(), browser_tab="--browser" in sys.argv)
+                window.another(start_url(), APP.window_kind, APP.quit)
                 return self._send(200, {})
             return self._error(403, "forbidden")
         origin = self.headers.get("Origin")
@@ -1174,25 +1180,6 @@ def ask_instance_to_open(lock):
         return False
 
 
-CHROMES = ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "brave-browser", "microsoft-edge"]
-MAC_CHROMES = ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-               "/Applications/Chromium.app/Contents/MacOS/Chromium",
-               "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
-               "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"]
-
-
-def open_window(url, browser_tab=False):
-    """An app window (Chrome/Chromium --app: no tabs or address bar) when one is installed, else a browser tab."""
-    if not browser_tab:
-        found = [p for p in MAC_CHROMES if os.path.exists(p)] if sys.platform == "darwin" else \
-            [shutil.which(c) for c in CHROMES if shutil.which(c)]
-        if found:
-            subprocess.Popen([found[0], f"--app={url}", "--new-window"], start_new_session=True,
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            return
-    webbrowser.open(url)
-
-
 SCREENS = ["home", "review", "apply", "company", "answers", "settings", "setup", "logs"]
 
 
@@ -1238,10 +1225,10 @@ def start_demo(argv):
         del argv[i:i + 2]
     folder = tempfile.mkdtemp(prefix="nuauto-demo-")
     env = {**os.environ, "NUAUTO_STATE_DIR": folder, "NUAUTO_DEMO": "1"}
-    r = subprocess.run([PY, "-m", "nuauto.demo", "setup", states], env=env, capture_output=True, text=True)
+    r = subprocess.run(config.self_cmd("demo", "setup", states), env=env, capture_output=True, text=True)
     if r.returncode != 0:
         sys.exit(r.stderr.strip() or r.stdout.strip())
-    os.execve(PY, [PY, "-m", "nuauto", "gui", *[a for a in argv if a != "--demo"]], env)
+    os.execve(sys.executable, config.self_cmd("gui", *[a for a in argv if a != "--demo"]), env)
 
 
 def main(argv):
@@ -1283,8 +1270,8 @@ def main(argv):
         threading.Thread(target=pull_loop, daemon=True).start()
     url = start_url()
     print(json.dumps({"url": url, "port": APP.port, "demo": config.DEMO, "state_dir": config.STATE_DIR}), flush=True)
-    if not no_open:
-        open_window(url, browser_tab="--browser" in argv)
+    served = threading.Thread(target=SERVER.serve_forever, kwargs={"poll_interval": 0.5}, daemon=True)
+    served.start()  # the main thread is for the window (macOS needs it there)
     if shots:
         def shoot():
             try:
@@ -1296,10 +1283,20 @@ def main(argv):
     def bye(*_):
         threading.Thread(target=APP.quit, daemon=True).start()
     signal.signal(signal.SIGTERM, bye)
+    APP.window_kind = "none" if no_open else window.kind(browser_tab="--browser" in argv)
     try:
-        SERVER.serve_forever(poll_interval=0.5)
+        if APP.window_kind == "mac":
+            window.run_mac(url)  # until its window is closed: that quits NUauto
+            APP.quit()
+        elif APP.window_kind == "gtk":
+            window.open_gtk(url, on_last_close=APP.quit)
+        elif APP.window_kind in ("app", "tab"):
+            window.open_browser(url, browser_tab=APP.window_kind == "tab")
+        while served.is_alive():
+            served.join(timeout=0.5)
     except KeyboardInterrupt:
         APP.quit()
+        served.join(timeout=30)
     finally:
         remove_lock()
 

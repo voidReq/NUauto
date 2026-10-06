@@ -8,6 +8,7 @@ MODES
   Everything runs on one machine: `nuauto update` runs the update here, nothing syncs, no Mark links.
   Automatic updates: the GUI's setup (Notifications, automatic updates) installs a user timer at 08:00 and 18:00:
   systemd (~/.config/systemd/user/nuauto-daily.{timer,service}) or launchd (~/Library/LaunchAgents/com.nuauto.daily.plist).
+- The packaged app (AppImage / NUauto.app, docs/GUI.md) is always local mode; homelab mode needs a git checkout.
 - Homelab mode: an always-on Linux box runs the update twice a day and sends Discord messages;
   the laptop syncs with it. Set in local_config.json:
     server_hostname  the homelab's hostname (that is how config.IS_SERVER knows it is the homelab)

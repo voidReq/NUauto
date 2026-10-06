@@ -15,7 +15,7 @@ Forced problems (--demo-state, saved in local/demo_state.json so child processes
   nuworks-password    NUworks session expired and SSO asks for a password (you must log in)
   cap-reached         11 applications already this week
 
-  python -m nuauto.demo setup [state,...] | update | login_nuworks | login_claude | state <name> on|off
+  nuauto demo setup [state,...] | update | login_nuworks | login_claude | claude ... | state <name> on|off
 """
 import fcntl
 import json
@@ -362,7 +362,9 @@ def setup(state_names=()):
     jobs.save("categories.json", cats)
     jobs.save("pool.json", jobs.build_pool())
     jobs.save("ratings.json", {})
-    jobs.save("scans.json", [{"time": (today - timedelta(days=0)).isoformat() + "T08:04", "listed": 12, "pool": 3}])
+    from datetime import datetime
+    jobs.save("scans.json", [{"time": (datetime.now() - timedelta(hours=2)).isoformat(timespec="minutes"), "listed": 12,
+                              "pool": 3}])
 
     # the sheet
     from nuauto import sheet
@@ -427,38 +429,29 @@ def login_nuworks():
 
 # ---------------------------------------------------------------- fake claude
 
-FAKE_CLAUDE = r'''#!{python}
-"""Fake `claude` for NUauto's demo mode: answers auth status / auth login / -p, nothing else."""
-import json, os, sys
-STATE = {state!r}
-def states():
-    try:
-        return set(json.load(open(STATE)).get("states", []))
-    except (OSError, ValueError):
-        return set()
-def save(s):
-    with open(STATE, "w") as f:
-        json.dump({{"states": sorted(s)}}, f)
-a = sys.argv[1:]
-out = "claude-logged-out" not in states()
-if a[:2] == ["auth", "status"]:
-    print(json.dumps({{"loggedIn": out, "authMethod": "demo", "apiProvider": "demo", "subscriptionType": "demo"}}))
-elif a[:2] == ["auth", "login"]:
-    save(states() - {{"claude-logged-out"}})
-    print("Demo: logged in to Claude.")
-elif "-p" in a:
-    print(json.dumps({{"type": "result", "is_error": not out, "result": "OK" if out else "Not logged in"}}))
-    sys.exit(0 if out else 1)
-elif a == ["--version"]:
-    print("0.0.0 (demo Claude)")
-else:
-    print("Demo: the Claude session would start here (nothing happens in demo mode).")
-'''
+def fake_claude(argv):
+    """The fake `claude` (demo mode): answers auth status / auth login / -p, nothing else."""
+    logged_in = "claude-logged-out" not in states()
+    if argv[:2] == ["auth", "status"]:
+        print(json.dumps({"loggedIn": logged_in, "authMethod": "demo", "apiProvider": "demo", "subscriptionType": "demo"}))
+    elif argv[:2] == ["auth", "login"]:
+        set_state("claude-logged-out", False)
+        print("Demo: logged in to Claude.")
+    elif "-p" in argv:
+        print(json.dumps({"type": "result", "is_error": not logged_in, "result": "OK" if logged_in else "Not logged in"}))
+        sys.exit(0 if logged_in else 1)
+    elif argv == ["--version"]:
+        print("0.0.0 (demo Claude)")
+    else:
+        print("Demo: the Claude session would start here (nothing happens in demo mode).")
 
 
 def _write_fake_claude():
-    path = os.path.join(config.STATE_DIR, "bin", "claude")
-    _write(path, FAKE_CLAUDE.format(python=sys.executable, state=_path("demo_state.json")), mode=0o755)
+    """bin/claude in the demo folder: a two-line script that runs fake_claude (through this program, so it works
+    from a source install and from the packaged app alike)."""
+    import shlex
+    cmd = " ".join(shlex.quote(a) for a in config.self_cmd("demo", "claude"))
+    _write(os.path.join(config.STATE_DIR, "bin", "claude"), f'#!/bin/sh\nexec {cmd} "$@"\n', mode=0o755)
 
 
 # ---------------------------------------------------------------- fake NUworks (inside Playwright)
@@ -600,6 +593,10 @@ def main(argv):
     elif argv == ["login_claude"]:
         set_state("claude-logged-out", False)
         print("Demo: logged in to Claude.")
+    elif argv[:1] == ["claude"]:
+        fake_claude(argv[1:])
+    elif argv == ["install_claude"]:
+        print("Demo: Claude Code would be installed here.")
     elif len(argv) == 3 and argv[0] == "state" and argv[2] in ("on", "off"):
         set_state(argv[1], argv[2] == "on")
     else:

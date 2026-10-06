@@ -6,15 +6,37 @@ import shutil
 import socket
 import sys
 
-# The repo root (this file is src/nuauto/config.py). Code lives in src/nuauto/, prompts in prompts/.
-PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-SRC_DIR = os.path.dirname(os.path.abspath(__file__))
-# Where local/, data/, logs/ and work/ live: the repo root, unless NUAUTO_STATE_DIR names another folder
-# (demo mode and tests: a temp folder, so they never touch your real files).
-STATE_DIR = os.environ.get("NUAUTO_STATE_DIR") or PROJECT_DIR
+# The packaged app (PyInstaller: an AppImage on Linux, NUauto.app on macOS; see packaging/). Its code, prompts and
+# page are inside the bundle (read-only); your files go in the usual per-user app-data folder.
+FROZEN = bool(getattr(sys, "frozen", False))
+if FROZEN:
+    PROJECT_DIR = getattr(sys, "_MEIPASS")
+    SRC_DIR = os.path.join(PROJECT_DIR, "nuauto")
+    _USER_STATE = os.path.expanduser("~/Library/Application Support/NUauto") if sys.platform == "darwin" else \
+        os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "NUauto")
+    # Playwright looks for its browsers inside the bundle when frozen; the bundle is read-only (an AppImage's is a
+    # temporary mount), so they go in the usual per-user cache, where a source install would put them too.
+    os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", os.path.expanduser("~/Library/Caches/ms-playwright")
+                          if sys.platform == "darwin" else
+                          os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "ms-playwright"))
+    if sys.platform.startswith("linux"):
+        # PyInstaller's bootloader put the bundle on LD_LIBRARY_PATH (saving the old value). Programs started from
+        # here (the system's python3, claude, browsers, terminals) must not load the bundle's copies of libraries.
+        if "LD_LIBRARY_PATH_ORIG" in os.environ:
+            os.environ["LD_LIBRARY_PATH"] = os.environ.pop("LD_LIBRARY_PATH_ORIG")
+        else:
+            os.environ.pop("LD_LIBRARY_PATH", None)
+else:
+    # The repo root (this file is src/nuauto/config.py). Code lives in src/nuauto/, prompts in prompts/.
+    PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    SRC_DIR = os.path.dirname(os.path.abspath(__file__))
+    _USER_STATE = PROJECT_DIR
+# Where local/, data/, logs/ and work/ live: the repo root (the app-data folder when packaged), unless
+# NUAUTO_STATE_DIR names another folder (demo mode and tests: a temp folder, so they never touch your real files).
+STATE_DIR = os.environ.get("NUAUTO_STATE_DIR") or _USER_STATE
 # Demo mode (`nuauto gui --demo`, set by gui.py): fake sheet, fake NUworks pages, fake Claude (demo.py).
 DEMO = os.environ.get("NUAUTO_DEMO") == "1"
-if DEMO and os.path.realpath(STATE_DIR) == os.path.realpath(PROJECT_DIR):
+if DEMO and os.path.realpath(STATE_DIR) == os.path.realpath(_USER_STATE):
     sys.exit("Demo mode needs its own NUAUTO_STATE_DIR; it never uses the real local/ and data/.")
 # Demo runs wait this fraction of the usual pauses (NUAUTO_DEMO_PACE). Real runs always wait the full time.
 DEMO_PACE = float(os.environ.get("NUAUTO_DEMO_PACE", "0.05")) if DEMO else 1.0
@@ -36,6 +58,7 @@ TOKEN_PATH = os.path.join(LOCAL_DIR, "token.json")
 GOOGLE_LOGIN_PATH = os.path.join(LOCAL_DIR, "google_login.txt")
 GOOGLE_LOGIN_DAYS = 7
 
+REPO = "voidReq/NUauto"  # GitHub: where the packaged app's releases come from (health.app_update)
 NUWORKS_START_URL = "https://northeastern-csm.symplicity.com/students/app/jobs/discover"
 # Domain lock: automated browsing may only navigate to these hosts. The SSO login
 # host is deliberately NOT here; log in by hand with `nuauto login`.
@@ -65,7 +88,7 @@ ASSIST_READ_PATHS = [os.path.expanduser(p) for p in LOCAL.get("assist_read_paths
 # Homelab server (optional): runs the twice-daily update and the Discord reminders. The laptop syncs with it over
 # Tailscale (sync.py): it pulls job data and pushes ratings, the NUworks session and the resume.
 # server_hostname "" in local_config.json = no homelab: everything runs on this machine, no syncing.
-SERVER_HOSTNAME = LOCAL["server_hostname"]
+SERVER_HOSTNAME = "" if FROZEN else LOCAL["server_hostname"]  # the packaged app is always local mode (sync copies a checkout)
 SERVER = LOCAL.get("server_ssh") or SERVER_HOSTNAME  # how the laptop reaches it: ssh alias or host
 SERVER_DIR = LOCAL["server_dir"]
 HAS_SERVER = bool(SERVER_HOSTNAME)
@@ -92,6 +115,19 @@ def find_client_json():
 def lock_token():
     if os.path.exists(TOKEN_PATH):
         os.chmod(TOKEN_PATH, 0o600)
+
+
+def self_cmd(*args):
+    """The command line for `nuauto <args>` as a child of this process. The packaged app runs itself."""
+    return [sys.executable, *args] if FROZEN else [sys.executable, "-m", "nuauto", *args]
+
+
+def self_exe():
+    """This program, for something that outlives this process (a terminal window, a timer, an app icon): the
+    AppImage file or the app's binary when packaged, else the installed nuauto command."""
+    if FROZEN:
+        return os.environ.get("APPIMAGE") or sys.executable
+    return os.path.join(os.path.dirname(sys.executable), "nuauto")
 
 
 # Where command-line tools usually get installed. Apps started from the desktop (macOS especially) and systemd

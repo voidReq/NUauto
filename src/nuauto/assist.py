@@ -432,6 +432,14 @@ def find_row(number, url_override):
     return rows, row, url
 
 
+def answer_prefix():
+    """How the agent and Claude Code's hooks run this file: [python, assist.py] from a source install, [the app,
+    "_assist"] when packaged. Always two words (check_bash compares exactly these)."""
+    if config.FROZEN:
+        return [sys.executable, "_assist"]
+    return [sys.executable, os.path.abspath(__file__)]
+
+
 def claude_bin():
     return config.tool_path("claude") or "claude"
 
@@ -445,8 +453,7 @@ def run(number, url_override):
     sheet.check_limits(rows)
     log_ = browser.RunLog(f"assist_row{number}")
     d = log_.dir
-    me = os.path.abspath(__file__)
-    answer_cmd = [sys.executable, me]
+    answer_cmd = answer_prefix()
     read_roots = [os.path.realpath(r) for r in [*config.ASSIST_READ_PATHS, config.LAPTOP_RESUME] if os.path.exists(r)]
     resume = os.path.realpath(config.LAPTOP_RESUME) if os.path.exists(config.LAPTOP_RESUME) else None
     state = {"current_url": url, "refs": {}, "issued": {}, "issued_values": [], "answer_cmd": answer_cmd,
@@ -456,7 +463,7 @@ def run(number, url_override):
     os.makedirs(config.ASSIST_PROFILE_DIR, mode=0o700, exist_ok=True)
     mcp = {"mcpServers": {SERVER: {"command": "npx", "args": [
         MCP_PACKAGE, "--user-data-dir", config.ASSIST_PROFILE_DIR, "--output-dir", d]}}}
-    hook_cmd = f"{shlex.quote(sys.executable)} {shlex.quote(me)} hook"
+    hook_cmd = " ".join(shlex.quote(a) for a in answer_cmd) + " hook"
     settings = {"hooks": {
         "PreToolUse": [{"matcher": f"mcp__{SERVER}__.*|Bash|Read|Glob|Grep", "hooks": [{"type": "command", "command": f"{hook_cmd} pre"}]}],
         "PostToolUse": [{"matcher": f"mcp__{SERVER}__.*", "hooks": [{"type": "command", "command": f"{hook_cmd} post"}]}]}}
@@ -477,11 +484,11 @@ def run(number, url_override):
     cmd = [claude_bin(), "--model", "sonnet", "--strict-mcp-config", "--mcp-config", os.path.join(d, "mcp.json"),
            "--settings", os.path.join(d, "settings.json"), "--tools", "Bash", "Read", "Glob", "Grep",
            *[a for r in read_roots for a in ("--add-dir", r if os.path.isdir(r) else os.path.dirname(r))],
-           "--allowedTools", f"mcp__{SERVER}", f"Bash({sys.executable} {me}:*)", "Read", "Glob", "Grep",
+           "--allowedTools", f"mcp__{SERVER}", f"Bash({answer_cmd[0]} {answer_cmd[1]}:*)", "Read", "Glob", "Grep",
            "--append-system-prompt", rules + context,
            f"Go: open the posting and fill the application for row {row.number}, following the rules."]
     try:
-        subprocess.run(cmd, env={**os.environ, STATE_ENV: d}, cwd=config.PROJECT_DIR)
+        subprocess.run(cmd, env={**os.environ, STATE_ENV: d}, cwd=config.STATE_DIR)
     except KeyboardInterrupt:
         pass
     try:
@@ -572,10 +579,15 @@ def main(argv):
     sys.exit(__doc__)
 
 
-if __name__ == "__main__":
-    if sys.argv[1:2] == ["hook"] and sys.argv[2:3] in (["pre"], ["post"]):
-        hook_main(sys.argv[2])
-    elif sys.argv[1:2] and sys.argv[1] in BASH_COMMANDS:
-        bank(sys.argv[1:])
+def cli(argv):
+    """This file's command line: `hook pre|post` (Claude Code's hooks), the answer-bank commands, else main()."""
+    if argv[:1] == ["hook"] and argv[1:2] in (["pre"], ["post"]):
+        hook_main(argv[1])
+    elif argv[:1] and argv[0] in BASH_COMMANDS:
+        bank(argv)
     else:
-        main(sys.argv[1:])
+        main(argv)
+
+
+if __name__ == "__main__":
+    cli(sys.argv[1:])

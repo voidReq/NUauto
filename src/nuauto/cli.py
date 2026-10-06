@@ -20,6 +20,10 @@ Tools (each module's own command line; `nuauto <tool>` with no arguments shows i
   nuauto inspect <url>   read-only look at a NUworks Apply form
   nuauto daily [weekly]  the update itself / the Sunday check-in (what the homelab timers run)
   nuauto web             the Mark-done page (what the homelab's nuauto-web service runs)
+  nuauto health | demo | onboard ...   the GUI's helpers (health checks, demo mode, setup reads)
+
+The packaged app (AppImage / NUauto.app) is this same command: started with nothing (double-clicked) it opens the
+window; `NUauto-x86_64.AppImage apply` etc. work from a terminal too.
 """
 import os
 import runpy
@@ -28,7 +32,8 @@ import sys
 from nuauto import config
 
 TOOLS = {"jobs": "jobs", "answers": "answers", "sheet": "sheet", "setup-sheet": "setup_sheet",
-         "inspect": "inspect_form", "daily": "daily", "web": "web"}
+         "inspect": "inspect_form", "daily": "daily", "web": "web", "health": "health", "demo": "demo",
+         "onboard": "onboard"}
 COMMANDS = ("approve", "rate", "apply", "status", "update", "login", "test", "doctor", "assist", "gui")
 
 
@@ -38,9 +43,32 @@ def run_tool(name, rest):
     runpy.run_module(f"nuauto.{TOOLS[name]}", run_name="__main__", alter_sys=True)
 
 
+def playwright_cli(args):
+    """Playwright's own command line (`install firefox`) through the driver inside the package: the packaged app
+    has no `python -m playwright`."""
+    import subprocess
+    from playwright._impl._driver import compute_driver_executable, get_driver_env
+    return subprocess.run([*compute_driver_executable(), *args], env=get_driver_env()).returncode
+
+
 def main():
-    os.chdir(config.PROJECT_DIR)  # relative paths (data/, logs/, rsync sources) are from the repo root
-    cmd, rest = (sys.argv[1], sys.argv[2:]) if len(sys.argv) > 1 else ("", [])
+    argv = sys.argv[1:]
+    if config.FROZEN:
+        os.makedirs(config.STATE_DIR, exist_ok=True)
+        os.chdir(config.STATE_DIR)  # the bundle is read-only (and an AppImage's is a temporary mount)
+        if not argv or argv[0].startswith("-psn_"):  # double-clicked: the window (old macOS adds a -psn_ argument)
+            argv = ["gui"]
+    else:
+        os.chdir(config.PROJECT_DIR)  # relative paths (data/, logs/, rsync sources) are from the repo root
+    cmd, rest = (argv[0], argv[1:]) if argv else ("", [])
+    if cmd == "_assist":  # assist.py's own command line (the agent's hook and answer bank) when packaged
+        from nuauto import assist
+        return assist.cli(rest)
+    if cmd == "_playwright":
+        sys.exit(playwright_cli(rest))
+    if cmd == "_window":  # which window this system gets (mac / gtk / app / tab): for support and the build checks
+        from nuauto import window
+        return print(window.kind())
     if cmd in TOOLS:
         return run_tool(cmd, rest)
     laptop = config.HAS_SERVER and not config.IS_SERVER  # a laptop that syncs with a homelab

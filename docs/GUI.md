@@ -3,16 +3,41 @@ GUI: `nuauto gui` (the NUauto window)
 gui_static/, onboard.py, health.py, demo.py. Safety rules and their tests: docs/SAFETY.md.)
 
 WHAT IT IS
-- A small local web app on the laptop. `nuauto gui` starts a server on 127.0.0.1 (stdlib ThreadingHTTPServer, like
-  web.py) and opens one page: plain HTML/CSS/JS in src/nuauto/gui_static/ (no build step, nothing loaded from the
-  internet, light/dark from the system). With Chrome/Chromium/Brave/Edge installed it opens as an app window
-  (--app), else as a browser tab (--browser forces a tab). Starting it again opens another window on the running one.
+- A local app on your own computer; nothing is hosted anywhere. `nuauto gui` (or the packaged app) starts a server on
+  127.0.0.1 (stdlib ThreadingHTTPServer, like web.py) that only this computer can reach, and shows its one page: plain
+  HTML/CSS/JS in src/nuauto/gui_static/ (no build step, nothing loaded from the internet, light/dark from the system).
+- The window (window.py; `nuauto _window` says which one this system gets): its own window on macOS (pywebview: the
+  system's WebKit) and on Linux when the system's python3 has GTK + WebKitGTK (window_gtk.py, most GNOME desktops);
+  else Chrome/Chromium/Brave/Edge in app mode (--app), else a browser tab (--browser forces a tab). Closing its own
+  window quits NUauto (a run in progress stops like Ctrl+C). Starting it again opens another window on the running one.
 - The CLI stays. The GUI calls the same functions; long or browser work runs as the same `nuauto ...` commands in
   child processes, one at a time (gui.Task): apply, update, logins, the NUworks check, the NUworks side of a
   company-site application, the wizard's read-only NUworks reads.
 - It quits after 30 minutes with no window open and nothing running, or with Settings > Quit.
 - Linux and macOS. Install: install.sh (uv brings Python 3.12; Playwright's Firefox; the `nuauto` command in
   ~/.local/bin; an app icon). The homelab never runs it (it refuses there).
+
+PACKAGED APP (packaging/; built by .github/workflows/release.yml on every v* tag)
+- Linux: an AppImage per architecture (built on Ubuntu 22.04: runs on distributions from 2022 on). macOS: a DMG with
+  NUauto.app per architecture (wheels for macOS 12+). PyInstaller, one folder: its own Python 3.12 and libraries, the
+  code, prompts/, the page and window_gtk.py. Not signed by Apple: the first open needs Privacy & Security > Open
+  Anyway. About 115 MB (AppImage).
+- Same code as a source install, with config.FROZEN: code and prompts come from the bundle (read-only); your files go in
+  the app-data folder (~/.local/share/NUauto, ~/Library/Application Support/NUauto); always local mode (no homelab:
+  sync copies a checkout). Started with nothing it opens the window; from a terminal it is the whole `nuauto` command
+  (`NUauto-x86_64.AppImage apply`). It runs itself for its children (config.self_cmd) and, for a terminal window or a
+  timer, the AppImage file or the app binary (config.self_exe). Internal commands: `_assist` (the assistant's hook and
+  answer bank, two words as check_bash requires), `_playwright` (Playwright's CLI from the bundled driver: install
+  firefox), `_window`.
+- Playwright's Firefox is downloaded on first run into the usual cache (~/.cache/ms-playwright, ~/Library/Caches/
+  ms-playwright): PLAYWRIGHT_BROWSERS_PATH is set to it, because frozen Playwright would look inside the bundle.
+  Programs started from the app (the system's python3, browsers, a terminal) get an environment without the app's
+  PyInstaller / AppImage variables (window.system_env); LD_LIBRARY_PATH is restored at start.
+- Updates: once a day the app asks GitHub's public API for the latest release (Version in Settings; Download opens the
+  release page). Your files stay when you replace the app.
+- Build and check one yourself: `sh packaging/build.sh` (needs uv; Linux: curl for appimagetool), then
+  `packaging/build/venv/bin/python packaging/smoke.py <the AppImage, or NUauto.app/Contents/MacOS/NUauto>`: the app's
+  commands, the Firefox install through the app, and demo mode end to end (approve, apply with a question, the sheet).
 
 SCREENS
   Today          health problems with fix buttons, this week's count, next steps, what only you can do
@@ -129,4 +154,7 @@ FILES IT WRITES (all under local/, mode 700, except as noted)
 
 NOT YET PROVEN FOR REAL (only in demo mode so far)
 - A real GUI apply with you watching; the Google and NUworks logins through the GUI; the resume-label and term
-  reads against the real NUworks; a run on a real Mac (CI covers demo mode only); the systemd/launchd toggle.
+  reads against the real NUworks; the systemd/launchd toggle.
+- The packaged app: the AppImage was built and smoke-tested on Fedora 44 only, and its GTK window seen only off-screen
+  (GTK's Broadway backend). The macOS app and the release workflow have not run yet (they run on the first push of a
+  v* tag, or by hand from Actions).

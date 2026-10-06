@@ -5,10 +5,13 @@ Pool rules and ranking: docs/PIPELINE.md. Safety rules: docs/SAFETY.md.)
 MODULES (src/nuauto/)
   cli.py          the `nuauto` command. main() syncs, then dispatches. TOOLS run a module's own
                   __main__ via run_tool(); COMMANDS are approve/rate/apply/status/update/login/test/doctor/assist/gui.
-                  `nuauto test` runs the test files 4 at a time.
+                  `nuauto test` runs the test files 4 at a time. Internal commands for the packaged app: _assist,
+                  _playwright, _window. Frozen and started with nothing: gui.
   config.py       every path and host; reads local/local_config.json. ALLOWED_HOSTS, SSO_HOSTS,
                   HAS_SERVER, IS_SERVER, STATE_DIR / DEMO (NUAUTO_STATE_DIR, NUAUTO_DEMO), DEMO_PACE,
-                  find_client_json(), lock_token(), tool_path() (claude/npx, saved paths first). No logic beyond that.
+                  find_client_json(), lock_token(), tool_path() (claude/npx, saved paths first), FROZEN (the packaged
+                  app: bundle paths, app-data STATE_DIR, local mode, Playwright's browser cache), self_cmd() / self_exe()
+                  (how NUauto runs itself). No logic beyond that.
   sheet.py        the Google Sheet. client() / open_worksheet(interactive) (interactive=False never opens a
                   login page: NotLoggedIn), read_rows(), check_limits() (MAX_PER_WEEK/MAX_TOTAL), set_status(),
                   mark_submit_started()/resolve_submit(), mark_applied_by_hand(), mark_site_done(), append_note(),
@@ -44,7 +47,10 @@ MODULES (src/nuauto/)
   onboard.py      the setup wizard's steps (steps(), check_client, open_and_prepare, resume_preview, check_prefs,
                   save_webhook, scheduler_*, launcher_create) and the read-only NUworks reads (resume labels, terms).
   demo.py         demo mode: FakeClient/FakeWorksheet (sheet), serve_nuworks (fake NUworks pages in Playwright), the
-                  fake claude script, sample data, forced states; setup() / update().
+                  fake claude (fake_claude, run through a two-line script), sample data, forced states; setup() / update().
+  window.py       which window (kind(): mac / gtk / app / tab), run_mac() (pywebview, main thread), open_gtk() (the GTK
+                  helper, one process per window), open_browser(), system_env() (no app variables for outside programs).
+  window_gtk.py   the Linux window: run by the system's python3 (GTK + WebKitGTK), imports nothing from nuauto.
   setup_sheet.py  one-time sheet setup: setup() (refuses a sheet with data: HasData); format_sheet() restyles.
   __main__.py     python -m nuauto -> cli.main.
 
@@ -65,6 +71,7 @@ WHO CALLS WHAT (from the imports)
   gui         -> answers, config, health, jobs, sheet; apply, assist, onboard, sync, browser (inside functions).
   onboard     -> config, health, jobs; sheet, setup_sheet, apply, browser, demo (inside functions).
   demo        -> config; sheet, jobs, answers (inside functions). browser and sheet import it only in demo mode.
+  window      -> config (pywebview inside functions, macOS only). gui imports it.
   setup_sheet -> config; sheet (SITE_MARK).
   cli         -> config; everything else is imported lazily per command (sync, doctor, jobs, apply,
                  sheet, daily, assist, browser). Tools via runpy: jobs, answers, sheet, setup_sheet,

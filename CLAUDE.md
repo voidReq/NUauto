@@ -113,6 +113,12 @@ GUI (`nuauto gui`, gui.py + gui_static/ + onboard.py + health.py + demo.py; adde
   inside a Claude Code shell anyway. Screens for review: `nuauto gui --demo --screenshots DIR`.
 - Setup wizard (onboard.py): each step checks itself; preferences go in local_config.json "preferences"
   (jobs.DEFAULTS = my original settings). Health checks (health.py) never open a login page.
+- Its own window (window.py): macOS pywebview; Linux the system python3's GTK + WebKitGTK (window_gtk.py); else a
+  Chrome app window or a tab. Closing it quits NUauto. `nuauto _window` says which.
+- Packaged app (packaging/, added 2026-10-05 on my request: "for the users local, preferably executable"): AppImage
+  (Linux) and DMG (macOS) from PyInstaller, built + smoke-tested by .github/workflows/release.yml on v* tags. Same code
+  (config.FROZEN): files in the app-data folder, local mode only, runs itself via config.self_cmd / self_exe (never
+  `python -m` or file paths in code that may run packaged). Build locally: sh packaging/build.sh; check: packaging/smoke.py.
 - Not yet proven for real: a GUI apply with me watching, the logins through the GUI, the NUworks reads
   (resume labels, term list), macOS (CI runs the tests there in demo mode).
 
@@ -173,10 +179,12 @@ src/nuauto/: cli.py (the nuauto command)   config.py (all paths, hosts; reads lo
   doctor.py (health check)   inspect_form.py (read-only form lister)   assist.py (company-site agent)
   setup_sheet.py (sheet setup / `format` restyle)   gui.py (the window's server)   gui_static/ (its page)
   health.py (the checks behind doctor and the GUI)   onboard.py (setup wizard)   demo.py (demo mode fakes)
+  window.py (which window) + window_gtk.py (the Linux window, run by the system python3)
   Imports are always absolute: `from nuauto import sheet` (test_sync enforces it).
 prompts/ (TRIAGE_, SCORE_, CATEGORY_PROMPT.md: Claude batch prompts; ASSIST_PROMPT.md: agent rules)
 tests/ (test_*.py offline checks)   docs/ (DEPLOY, PIPELINE, GUI, ARCHITECTURE, SAFETY, STATUS)
-deploy/systemd/ (homelab units)   install.sh (installer for new users)   .github/workflows/ (CI: tests on Ubuntu + macOS)
+deploy/systemd/ (homelab units)   install.sh (installer from source)   packaging/ (the packaged app: spec, build.sh, smoke.py)
+.github/workflows/ (tests.yml: tests on Ubuntu + macOS; release.yml: AppImages + DMGs on v* tags)
 README.md (public, new-user setup; keep it short)   LICENSE   local_config.example.json (template)
 local/ (gitignored, mode 700): everything personal or secret, on both machines:
   local_config.json (sheet ID, resume path, homelab hostname/dir, Mark-done URL, Tailscale IP),
@@ -213,7 +221,8 @@ Ubuntu and macOS. tests/test_sync.py fails if a new module or prompt isn't in sy
 reach the homelab). test_web.py covers the public Mark-done links (signatures; GET never
 changes the sheet). test_browser.py covers the domain lock and the profile lock. test_assist.py covers the
 company-site agent's guard. test_demo.py runs the real apply.py on demo mode's fake pages (stops, cap, re-login).
-test_gui.py covers the GUI server's security and flows; test_setup.py the wizard; test_health.py the checks.
+test_gui.py covers the GUI server's security and flows; test_setup.py the wizard; test_health.py the checks;
+test_window.py the packaged-app plumbing (self_cmd, the assistant's command, the window choice, clean env).
 
 ENVIRONMENT / STYLE
 - Python 3.12 venv in .venv with the package installed editable (`.venv/bin/pip install -e .`); dependencies

@@ -15,6 +15,7 @@ dependencies = [
     "playwright==1.63.0",
     "pypdf==6.19.0",
     "scikit-learn==1.9.1",
+    "pywebview==6.2.1; sys_platform == 'darwin'",  # NUauto's own window on macOS (window.py); Linux uses the system's GTK
 ]
 
 [project.scripts]
