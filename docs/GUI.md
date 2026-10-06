@@ -45,6 +45,8 @@ SCREENS
   Today          health problems with fix buttons, this week's count, next steps, what only you can do
   Review         one pool job at a time. Approve mode: Approve (y) adds it to the sheet as Approved at once
                  (or, for one of your Proposed rows, which Review shows first, turns that row Approved);
+                 Keys as in the CLI viewer: y n s u o, plus j/k scroll, space/b page, g/G top/bottom. Decisions are
+                 sent behind the screen (the next job shows at once; a failed write brings you back to that job).
                  Undo puts the row back to Proposed; Not for me (n) rates it no; Skip (s); Back (u); Open (o).
                  Rate only mode: yes/no ratings for the taste model, nothing in the sheet.
   Apply          Approved rows in apply order, Start (optionally "at most N"), the live run: current row, latest
@@ -52,7 +54,7 @@ SCREENS
   Company sites  Needs Human rows for the assistant (opens `nuauto assist <row>` in a terminal window, or shows the
                  command), "I applied myself", company sites still owed (Mark done), the NUworks side to retry
   Answers        the answer bank as a table (exact-match rules unchanged); locked while a run uses it
-  Settings       every health check (run them now), logins, resume label, week start, setup, logs, quit
+  Settings       every health check (run them now), logins, resume label, applications per week (the weekly cap), week start, setup, logs, quit
   Setup          the wizard (below); opens by itself until setup is done
   Past runs      logs/ folders: actions.log and the screenshots before and after Submit
 

@@ -414,8 +414,8 @@ def week_info(rows):
     week, total = sheet.check_limits_safe(rows) if rows is not None else (0, 0)
     first, label = sheet.week_window()
     nxt = (first + timedelta(days=7)) if config.WEEK_START and date.today() >= config.WEEK_START else None
-    return {"applied": week, "max": sheet.MAX_PER_WEEK, "label": label, "total": total, "max_total": sheet.MAX_TOTAL,
-            "next": f"{nxt:%a %b} {nxt.day}" if nxt else None, "room": max(0, sheet.MAX_PER_WEEK - week)}
+    return {"applied": week, "max": sheet.max_per_week(), "label": label, "total": total, "max_total": sheet.MAX_TOTAL,
+            "next": f"{nxt:%a %b} {nxt.day}" if nxt else None, "room": max(0, sheet.max_per_week() - week)}
 
 
 def row_view(r, **extra):
@@ -827,13 +827,14 @@ def log_file(path):
 
 # ---------------------------------------------------------------- settings
 
-PUBLIC_SETTINGS = ["sheet_id", "resume_path", "week_start", "assist_read_paths", "server_hostname", "server_ssh",
+PUBLIC_SETTINGS = ["sheet_id", "resume_path", "week_start", "max_per_week", "assist_read_paths", "server_hostname", "server_ssh",
                    "server_dir", "web_base_url", "web_listen_host", "tos_ack"]
 
 
 def settings_get():
     cfg = read_local()
     return {"settings": {k: cfg.get(k, "" if k != "assist_read_paths" else []) for k in PUBLIC_SETTINGS},
+            "max_per_week": sheet.max_per_week(), "max_per_week_ceiling": sheet.MAX_PER_WEEK_CEILING,
             "resume_label": health.resume_label(), "discord": os.path.exists(config.DISCORD_WEBHOOK_PATH),
             "client_json": health.client_json_found(), "google_login": os.path.exists(config.TOKEN_PATH),
             "tools": {name: config.tool_path(name) for name in ("claude", "npx")},
@@ -848,7 +849,7 @@ def write_local(updates):
     with open(tmp, "w") as f:
         json.dump(cfg, f, indent=2)
     os.replace(tmp, config.LOCAL_CONFIG_PATH)
-    restart_needed = {"sheet_id", "resume_path", "week_start", "server_hostname", "server_ssh", "server_dir"} & set(updates)
+    restart_needed = {"sheet_id", "resume_path", "week_start", "max_per_week", "server_hostname", "server_ssh", "server_dir"} & set(updates)
     if restart_needed:  # config.py reads local_config.json once, at import
         apply_config(cfg)
     return cfg
@@ -874,6 +875,13 @@ def settings_put(body):
             except ValueError:
                 raise Refused("Week start must be a date like 2026-10-06, or empty.")
         updates["week_start"] = v
+    if "max_per_week" in body:
+        v = body["max_per_week"]
+        if isinstance(v, str) and v.strip().isdigit():
+            v = int(v)
+        if not isinstance(v, int) or isinstance(v, bool) or not 1 <= v <= sheet.MAX_PER_WEEK_CEILING:
+            raise Refused(f"The weekly limit must be a whole number from 1 to {sheet.MAX_PER_WEEK_CEILING}.")
+        updates["max_per_week"] = v
     if "resume_label" in body:
         label = str(body["resume_label"] or "").strip()
         if not label:

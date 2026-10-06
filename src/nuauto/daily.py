@@ -343,8 +343,8 @@ def weekly():
             and jobs.closes(d) <= today + timedelta(days=7)]
     in_sheet = {jobs.job_id(r.url) for r in rows}
     unseen = [r for r in jobs.load("pool.json", []) if r["id"] not in in_sheet and r["id"] not in ratings]
-    room = max(0, sheet.MAX_PER_WEEK - week)
-    lines = [f"Applied {sheet.week_window()[1]}: {week}/{sheet.MAX_PER_WEEK} (total {total}/{sheet.MAX_TOTAL}).",
+    room = max(0, sheet.max_per_week() - week)
+    lines = [f"Applied {sheet.week_window()[1]}: {week}/{sheet.max_per_week()} (total {total}/{sheet.MAX_TOTAL}).",
              f"Approved and waiting: {len(waiting)}" + (f" ({len(soon)} close within 7 days)" if soon else "") + ".",
              f"Pool jobs you haven't looked at: {len(unseen)}."]
     if waiting:
