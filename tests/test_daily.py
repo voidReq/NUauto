@@ -1,4 +1,4 @@
-"""Offline checks for daily.py's morning summary (scan counts + to-do). Run: python test_daily.py
+"""Offline checks for daily.py's morning summary (scan counts + to-do) and Claude errors. Run: python test_daily.py
 
 Uses a temp data dir, temp log file and a stubbed notify: no sheet, no Discord, no network.
 """
@@ -48,6 +48,30 @@ title, body = sent[-1]
 lines = body.split("\n")
 assert title == "NUauto morning" and lines[:2] == ["SUMMARY", "Only you can finish:"], sent[-1]
 assert "Co3" in lines[2] and "Co4" in lines[3] and "Mark" not in body, body
+
+# a Claude login error (auth status said logged in, the call itself failed) -> the "logged out" message, no import
+calls = []
+daily.run_claude = lambda prompt, b: calls.append(b) or "Failed to authenticate: OAuth session expired and could not be refreshed"
+def no_import():
+    raise AssertionError("must not import after a login error")
+sent.clear()
+assert daily.claude_step(lambda: True, "TRIAGE_PROMPT.md", ["a/triage_in_001.json", "a/triage_in_002.json"],
+                         no_import, "NUauto: triage results incomplete") is False
+assert calls == ["a/triage_in_001.json"], calls  # stops at the first batch
+assert len(sent) == 1 and sent[0][0] == "NUauto: Claude Code is logged out", sent
+assert "claude auth login" in sent[0][1] and "OAuth session expired" in sent[0][1], sent
+
+# another Claude error: the import's problems, with what Claude said in front
+daily.run_claude = lambda prompt, b: "API Error: 529 Overloaded"
+def missing():
+    raise SystemExit("Not imported:\n  missing triage_out_001.json")
+sent.clear()
+assert daily.claude_step(lambda: True, "TRIAGE_PROMPT.md", ["a/triage_in_001.json"], missing, "T") is False
+assert sent == [("T", "Claude failed on triage_in_001.json: API Error: 529 Overloaded\n"
+                      "Not imported:\n  missing triage_out_001.json")], sent
+
+# no batches: nothing to do, no login check
+assert daily.claude_step(lambda: 1 / 0, "TRIAGE_PROMPT.md", [], no_import, "T") is True
 
 # a failed scan (e.g. NUworks too slow) still sends the morning reminders, from the sheet + last saved pool
 class Morning(datetime):
