@@ -105,6 +105,7 @@ code, .mono { font-family: var(--mono); font-size: 12.5px; }
 
 .chip { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; padding: 2px 9px;
   border-radius: 999px; background: var(--surface-2); color: var(--muted); white-space: nowrap; }
+.chip.wrap { white-space: normal; overflow-wrap: anywhere; border-radius: 12px; padding: 4px 10px; }
 .chip.accent { background: var(--accent-soft); color: var(--accent); }
 .chip.ok { background: var(--ok-soft); color: var(--ok); }
 .chip.warn { background: var(--warn-soft); color: var(--warn); }
@@ -148,7 +149,7 @@ label.field span.muted { font-weight: 400; }
 .job .meta { color: var(--muted); margin-bottom: 12px; }
 .job .facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 12px 0; }
 .job .facts dt { color: var(--muted); font-weight: 500; }
-.job .facts dd { margin: 0; }
+.job .facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .job .why { border-left: 3px solid var(--accent); padding: 4px 0 4px 12px; margin: 12px 0; }
 .job .desc h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 18px 0 6px; }
 .job .desc ul { margin: 0 0 8px; padding-left: 20px; }

@@ -593,7 +593,7 @@ function jobCard(c, j, mine) {
         (c.taste !== null && c.taste !== undefined ? ` · your taste ${Math.round(c.taste * 100)}%` : "") }))],
     ["Closes", el("span", { class: c.soon ? "chip warn" : "", text: c.closes_text })],
     ["Pay", c.pay || "not listed"],
-    c.external ? ["Apply", el("span", { class: "chip warn", text: `Also on the company site? "${c.external}"` })] : null,
+    c.external ? ["Apply", el("span", { class: "chip warn wrap", text: `Also on the company site? "${c.external}"` })] : null,
     c.flags.length ? ["Flags", el("span", { class: "row" }, ...c.flags.map((f) => el("span", { class: "chip", text: f })))] : null,
     c.skills.length ? ["Skills", c.skills.join(", ")] : null,
   ].filter(Boolean);
