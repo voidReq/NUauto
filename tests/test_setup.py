@@ -133,8 +133,9 @@ os.remove(config.TOKEN_PATH)
 # ---------------------------------------------------------------- the whole wizard, in the browser
 
 ENV = {**os.environ, "PYTHONUNBUFFERED": "1"}
+GUI_ERR = os.path.join(STATE, "gui-stderr.log")  # a file, not a pipe nobody reads (a full pipe would freeze the server)
 gui = subprocess.Popen([PY, "-m", "nuauto", "gui", "--no-open"], env=ENV, cwd=ROOT, stdout=subprocess.PIPE,
-                       stderr=subprocess.PIPE, text=True)
+                       stderr=open(GUI_ERR, "w"), text=True)
 try:
     url = json.loads(gui.stdout.readline())["url"]
     client_file = os.path.join(SCRATCH, "client_secret_123.json")
@@ -142,7 +143,19 @@ try:
     errors = []
 
     def done(page, step, timeout=60000):
-        page.wait_for_selector(f"[data-testid=step-{step}].done", timeout=timeout)
+        try:
+            page.wait_for_selector(f"[data-testid=step-{step}].done", timeout=timeout)
+        except Exception:  # say why: the step as the server sees it, the messages on screen, the server's errors
+            try:
+                steps_now = page.evaluate("() => fetch('/api/setup', { signal: AbortSignal.timeout(10000) })"
+                                          ".then((r) => r.json())")["steps"]
+                now = next(s for s in steps_now if s["id"] == step)
+                seen = f"{now['status']}: {now['detail']}"
+            except Exception as e:
+                seen = f"no answer from the server ({type(e).__name__})"
+            raise AssertionError(f"step {step} not done after {timeout // 1000}s ({seen}); on screen: "
+                                 f"{page.locator('[data-testid=toast]').all_inner_texts()}; page errors: {errors}; "
+                                 f"server errors: {open(GUI_ERR).read()[-2000:] or 'none'}") from None
 
     with sync_playwright() as p:
         b = p.firefox.launch(headless=True)
@@ -166,7 +179,13 @@ try:
         page.click("[data-testid=setup-resume-pick]")
         done(page, "resume")
         page.click("[data-testid=setup-nuworks-login]")
-        page.wait_for_timeout(2500)
+        # Read my resumes the moment the login ends: the NUworks check the login starts is still running, gives the
+        # browser up to the read, and must run again after it (else the step stays "to do": seen in CI)
+        for _ in range(600):
+            task = page.evaluate("() => fetch('/api/task?after=0').then((r) => r.json())")["task"]
+            if task and task["kind"] == "login_nuworks" and task["state"] != "running":
+                break
+            page.wait_for_timeout(100)
         page.click("[data-testid=setup-labels-read]")
         page.wait_for_selector("input[type=radio][name=label]", timeout=60000)
         page.check("input[type=radio][name=label]")

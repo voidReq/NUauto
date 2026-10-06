@@ -239,14 +239,18 @@
   window.NUautoSetup = async function (view) {
     let data = null;
     let dirty = false;  // you changed a field and haven't saved: background refreshes must not redraw over it
+    let drawn = "";     // what the page shows (check times left out): a background refresh with nothing new keeps it
     view.addEventListener("input", () => { dirty = true; });
     view.addEventListener("change", () => { dirty = true; });
     async function load(force) {
       if (dirty && !force) return;
       const before = data ? Object.fromEntries(data.steps.map((s) => [s.id, s.status])) : {};
       let fresh;
-      try { fresh = await api.get("/api/setup"); } catch (e) { view.replaceChildren(el("div", { class: "note fail", text: e.message })); return; }
+      try { fresh = await api.get("/api/setup"); } catch (e) { drawn = ""; view.replaceChildren(el("div", { class: "note fail", text: e.message })); return; }
       if (dirty && !force) return;  // you started editing while it loaded: keep your changes
+      const shown = JSON.stringify(fresh, (k, v) => (k === "at" ? undefined : v));
+      if (!force && shown === drawn) return;  // nothing new: don't rebuild the page under your cursor
+      drawn = shown;
       data = fresh;
       const now = data.steps.find((s) => s.id === open);
       if (now && now.status === "done" && before[open] && before[open] !== "done") open = null;  // just finished: next step

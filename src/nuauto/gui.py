@@ -135,7 +135,7 @@ class Task:
                 os.killpg(self.proc.pid, signal.SIGKILL)
             else:
                 os.kill(self.proc.pid, signal.SIGINT)
-        except ProcessLookupError:
+        except (ProcessLookupError, PermissionError):  # it just ended (macOS: EPERM while it is not yet reaped)
             pass
 
     def total(self):
@@ -165,6 +165,7 @@ class App:
         self.lock = threading.RLock()
         self.task = None           # the running or most recent user task
         self.background = None     # the running background check (the NUworks browser check)
+        self.nuworks_owed = False  # that check gave the browser up, or could not start: run it once the browser is free
         self.history = []
         self.results = {}          # (check id, group) -> health.Check
         self.running_groups = set()
@@ -216,6 +217,9 @@ class App:
             if extra:
                 extra(task)
             if not task.background:
+                if self.nuworks_owed:  # the NUworks check waited for this run: the browser is free now
+                    self.nuworks_owed = False
+                    self.run_now(["nuworks"])
                 self.refresh_rows(force=True)
         return done
 
@@ -288,6 +292,8 @@ class App:
             keep_old = False
             with self.lock:
                 self.running_groups.discard("nuworks")
+                if task.stopping:  # it gave the browser up to something you started: again when that ends
+                    self.nuworks_owed = True
                 if checks and checks[0].status == health.BUSY:
                     self.next_run["nuworks"] = now() + 120  # try again soon
                     keep_old = ("nuworks", "nuworks") in self.results  # keep the last real answer
@@ -298,9 +304,10 @@ class App:
                               background=True, on_done=done)
         except Busy:
             task = None
-        if task is None:  # something else uses the browser: try again in a few minutes
+        if task is None:  # something else uses the browser: when your run ends, else (another nuauto) in a few minutes
             with self.lock:
                 self.running_groups.discard("nuworks")
+                self.nuworks_owed = True
                 self.next_run["nuworks"] = now() + 300
 
     def _store(self, group, checks):

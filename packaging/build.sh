@@ -15,13 +15,15 @@ mkdir -p "$BUILD" "$OUT"
 UV="$(command -v uv || echo "$HOME/.local/bin/uv")"
 "$UV" venv --python 3.12 "$BUILD/venv"
 PY="$BUILD/venv/bin/python"
+# cryptography (google-auth needs it) is never compiled here: Intel Macs have no ready-made one since 49, so uv takes the
+# newest that has one (48.0.1). A compiled one links Homebrew's OpenSSL, which clashes with the bundle's libssl.
 if [ "$(uname -s)" = Darwin ]; then
   # wheels that run on macOS 12 and newer, not only on this (newer) build machine
   export MACOSX_DEPLOYMENT_TARGET=12.0
   case "$(uname -m)" in arm64) TARGET=aarch64-apple-darwin ;; *) TARGET=x86_64-apple-darwin ;; esac
-  "$UV" pip install --python "$PY" --python-platform "$TARGET" "$ROOT" "pyinstaller==6.22.3"
+  "$UV" pip install --python "$PY" --python-platform "$TARGET" --only-binary cryptography "$ROOT" "pyinstaller==6.22.3"
 else
-  "$UV" pip install --python "$PY" "$ROOT" "pyinstaller==6.22.3"
+  "$UV" pip install --python "$PY" --only-binary cryptography "$ROOT" "pyinstaller==6.22.3"
 fi
 VERSION="$("$PY" -c 'import nuauto; print(nuauto.__version__)')"
 ARCH="$(uname -m)"

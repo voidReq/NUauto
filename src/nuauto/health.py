@@ -400,7 +400,10 @@ def merge(checks):
 
 
 def desktop_notify(title, body=""):
-    """A desktop notification: notify-send on Linux, osascript on macOS; nothing if neither is there."""
+    """A desktop notification: notify-send on Linux, osascript on macOS; nothing if neither is there, or in demo
+    mode (nothing real leaves a demo; tests flip checks bad on purpose)."""
+    if config.DEMO:
+        return
     if shutil.which("notify-send"):
         subprocess.run(["notify-send", "-a", "NUauto", title, body], check=False)
     elif sys.platform == "darwin" and shutil.which("osascript"):

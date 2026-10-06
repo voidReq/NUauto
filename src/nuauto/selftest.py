@@ -12,6 +12,7 @@ import os
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 
 from nuauto import config
@@ -36,18 +37,23 @@ def firefox():
 
 def stop(proc):
     """The demo server and everything it started (a packaged app's runtime does not pass signals on)."""
-    try:
-        os.killpg(proc.pid, signal.SIGTERM)
-    except ProcessLookupError:
-        return
-    proc.wait(timeout=60)
-    for _ in range(120):
+    def signal_group(sig):  # False once the group is gone (macOS: EPERM, not ESRCH, while a dead leader is unreaped)
         try:
-            os.killpg(proc.pid, 0)
-        except ProcessLookupError:
+            os.killpg(proc.pid, sig)
+            return True
+        except (ProcessLookupError, PermissionError):
+            return False
+    signal_group(signal.SIGTERM)
+    try:
+        proc.wait(timeout=60)
+    except subprocess.TimeoutExpired:
+        pass
+    signal_group(signal.SIGTERM)  # whatever is left, now that a leader that had already died is reaped
+    for _ in range(120):
+        if not signal_group(0):
             return
         time.sleep(0.5)
-    os.killpg(proc.pid, signal.SIGKILL)
+    signal_group(signal.SIGKILL)
 
 
 def drive(page, url):
@@ -77,12 +83,19 @@ def run_demo():
     from playwright.sync_api import sync_playwright
     env = {k: v for k, v in os.environ.items() if k not in ("NUAUTO_STATE_DIR", "NUAUTO_DEMO", "CLAUDECODE")}
     env.update(NUAUTO_DEMO_PACE="0.02", NUAUTO_DEMO_HEADLESS="1", PYTHONUNBUFFERED="1")
+    # the server's errors go to a file: a pipe nobody reads could fill up and freeze the server
+    fd, err_path = tempfile.mkstemp(prefix="nuauto-selftest-", suffix=".log")
     gui = subprocess.Popen(config.self_cmd("gui", "--demo", "--no-open"), env=env, stdout=subprocess.PIPE,
-                           stderr=subprocess.PIPE, text=True, start_new_session=True)
+                           stderr=fd, text=True, start_new_session=True)
+    os.close(fd)
+
+    def server_errors():
+        with open(err_path) as f:
+            return f.read()[-500:]
     try:
         line = gui.stdout.readline()
         if not line:
-            sys.exit(f"Self-test failed: the demo server did not start. {gui.stderr.read()[-500:]}")
+            sys.exit(f"Self-test failed: the demo server did not start. {server_errors()}")
         ready = json.loads(line)
         say("Demo server: started")
         errors = []
@@ -95,7 +108,8 @@ def run_demo():
             except Exception as e:
                 first = (str(e).strip().splitlines() or [type(e).__name__])[0][:200]
                 log = page.evaluate("() => fetch('/api/task?after=0').then(r => r.json()).then(j => j.task ? j.task.log : [])")
-                sys.exit(f"Self-test failed: {first}\nThe last run's log:\n  " + "\n  ".join((log or ["(none)"])[-15:]))
+                sys.exit(f"Self-test failed: {first}\nThe last run's log:\n  " + "\n  ".join((log or ["(none)"])[-15:])
+                         + (f"\nThe server's errors:\n{server_errors()}" if server_errors() else ""))
             b.close()
         if errors:
             sys.exit(f"Self-test failed: the page had errors: {errors[:3]}")
@@ -109,6 +123,7 @@ def run_demo():
         say("Sheet: the jobs are Applied, the external one Needs Human")
     finally:
         stop(gui)
+        os.remove(err_path)
 
 
 def main(argv):

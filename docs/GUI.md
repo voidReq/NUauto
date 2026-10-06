@@ -17,7 +17,8 @@ WHAT IT IS
 - Linux and macOS. Install: install.sh (uv brings Python 3.12; Playwright's Firefox; the `nuauto` command in
   ~/.local/bin; an app icon). The homelab never runs it (it refuses there).
 
-PACKAGED APP (packaging/; built by .github/workflows/release.yml on every v* tag)
+PACKAGED APP (packaging/; .github/workflows/release.yml builds and smoke-tests it on every pull request, and publishes
+it as a GitHub release on every v* tag)
 - Linux: an AppImage per architecture (built on Ubuntu 22.04: runs on distributions from 2022 on). macOS: a DMG with
   NUauto.app per architecture (wheels for macOS 12+). PyInstaller, one folder: its own Python 3.12 and libraries, the
   code, prompts/, the page and window_gtk.py. Not signed by Apple: the first open needs Privacy & Security > Open
@@ -77,7 +78,7 @@ HEALTH (health.py; the same checks `nuauto doctor` prints, `nuauto doctor --json
   google    days left from google_login.txt; a sheet read that fails on login  1 min / 15 min
   sheet     row 1 headers and statuses; limits = this week / total             15 min
   nuworks   hidden browser, domain lock on, one-click SSO re-login if needed   at start, every 6 h, Check now
-            (own process; it gives the browser up to anything you start)
+            (own process; it gives the browser up to anything you start, and runs again when that ends)
   claude    `claude auth status --json` loggedIn; once a day one tiny real      15 min / daily
             `claude -p` call (no tools, no MCP, not saved)
   firefox   Playwright's Firefox starts (a separate empty profile)             daily
@@ -85,7 +86,7 @@ HEALTH (health.py; the same checks `nuauto doctor` prints, `nuauto doctor --json
   homelab   doctor's homelab checks over ssh (homelab mode only)               15 min
   updates   age of the last scan (data/scans.json)                             every minute
 - Checks never open a login page, show a secret or change the sheet. A check turning bad (after the first
-  round) sends a desktop notification (notify-send / osascript).
+  round) sends a desktop notification (notify-send / osascript; none in demo mode).
 - When the GUI is closed, the scheduled update (homelab, or the laptop's timer) covers it: daily.py warns about the
   Google login and now also about Claude Code being logged out (claude_ready) before it scores anything.
 

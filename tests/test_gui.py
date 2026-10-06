@@ -21,7 +21,7 @@ PY = sys.executable
 
 subprocess.run([PY, "-m", "nuauto.demo", "setup"], env=ENV, check=True, cwd=ROOT)
 gui = subprocess.Popen([PY, "-m", "nuauto", "gui", "--no-open"], env=ENV, cwd=ROOT, stdout=subprocess.PIPE,
-                       stderr=subprocess.PIPE, text=True)
+                       stderr=open(os.path.join(STATE, "gui-stderr.log"), "w"), text=True)  # a file: a full pipe would freeze it
 ready = json.loads(gui.stdout.readline())
 URL, PORT = ready["url"], ready["port"]
 TOKEN = URL.split("?t=")[1]

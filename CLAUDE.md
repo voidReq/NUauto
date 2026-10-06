@@ -116,7 +116,8 @@ GUI (`nuauto gui`, gui.py + gui_static/ + onboard.py + health.py + demo.py; adde
 - Its own window (window.py): macOS pywebview; Linux the system python3's GTK + WebKitGTK (window_gtk.py); else a
   Chrome app window or a tab. Closing it quits NUauto. `nuauto _window` says which.
 - Packaged app (packaging/, added 2026-10-05 on my request: "for the users local, preferably executable"): AppImage
-  (Linux) and DMG (macOS) from PyInstaller, built + smoke-tested by .github/workflows/release.yml on v* tags. Same code
+  (Linux) and DMG (macOS) from PyInstaller, built + smoke-tested by .github/workflows/release.yml on every PR,
+  published on v* tags. Same code
   (config.FROZEN): files in the app-data folder, local mode only, runs itself via config.self_cmd / self_exe (never
   `python -m` or file paths in code that may run packaged). Build locally: sh packaging/build.sh; check: packaging/smoke.py;
   other distros: sh packaging/distros.sh <AppImage> (podman).
@@ -185,7 +186,7 @@ src/nuauto/: cli.py (the nuauto command)   config.py (all paths, hosts; reads lo
 prompts/ (TRIAGE_, SCORE_, CATEGORY_PROMPT.md: Claude batch prompts; ASSIST_PROMPT.md: agent rules)
 tests/ (test_*.py offline checks)   docs/ (DEPLOY, PIPELINE, GUI, ARCHITECTURE, SAFETY, STATUS)
 deploy/systemd/ (homelab units)   install.sh (installer from source)   packaging/ (the packaged app: spec, build.sh, smoke.py)
-.github/workflows/ (tests.yml: tests on Ubuntu + macOS; release.yml: AppImages + DMGs on v* tags)
+.github/workflows/ (tests.yml: tests on Ubuntu + macOS; release.yml: AppImages + DMGs, built on PRs, released on v* tags)
 README.md (public, new-user setup; keep it short)   LICENSE   local_config.example.json (template)
 local/ (gitignored, mode 700): everything personal or secret, on both machines:
   local_config.json (sheet ID, resume path, homelab hostname/dir, Mark-done URL, Tailscale IP),

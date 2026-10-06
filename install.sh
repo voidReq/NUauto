@@ -62,7 +62,8 @@ fi
 
 say "Installing NUauto's Python packages"
 [ -x .venv/bin/python ] || "$UV" venv --python 3.12 .venv
-"$UV" pip install --python .venv/bin/python -e .
+# never compile cryptography (Intel Macs: uv takes the newest ready-made one instead of needing Rust and OpenSSL)
+"$UV" pip install --python .venv/bin/python --only-binary cryptography -e .
 
 say "Installing Playwright's Firefox (the browser NUauto drives)"
 .venv/bin/python -m playwright install firefox
