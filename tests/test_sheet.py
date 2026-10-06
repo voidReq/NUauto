@@ -56,6 +56,18 @@ config.WEEK_START = None
 # hitting the weekly limit refuses
 expect(LimitReached, lambda: check_limits(rows_with([("Applied", "2026-09-30")] * sheet.MAX_PER_WEEK), TODAY))
 
+# the weekly cap is a setting: 1..ceiling; anything else in the file falls back to the default
+real = config.LOCAL
+for value, want in [(None, sheet.MAX_PER_WEEK), (5, 5), (sheet.MAX_PER_WEEK_CEILING, sheet.MAX_PER_WEEK_CEILING),
+                    (0, sheet.MAX_PER_WEEK), (-3, sheet.MAX_PER_WEEK), (sheet.MAX_PER_WEEK_CEILING + 1, sheet.MAX_PER_WEEK),
+                    ("20", sheet.MAX_PER_WEEK), (True, sheet.MAX_PER_WEEK), (7.5, sheet.MAX_PER_WEEK)]:
+    config.LOCAL = {**real, "max_per_week": value}
+    assert sheet.max_per_week() == want, (value, sheet.max_per_week())
+config.LOCAL = {**real, "max_per_week": 3}
+expect(LimitReached, lambda: check_limits(rows_with([("Applied", "2026-09-30")] * 3), TODAY))
+assert check_limits(rows_with([("Applied", "2026-09-30")] * 2), TODAY)[0] == 2
+config.LOCAL = real
+
 # Applied with no date refuses (no guessing)
 expect(SheetError, lambda: check_limits(rows_with([("Applied", "")]), TODAY))
 

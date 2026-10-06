@@ -112,6 +112,11 @@ try:
     saved = post("/api/answers", {"entries": edited, "version": bank["version"]})
     assert saved["entries"][0]["answer"] == "Demo S. Student"
     post("/api/settings", {"week_start": "next tuesday"}, expect=409)
+    for bad in (0, 31, "lots", 2.5, True, None):
+        post("/api/settings", {"max_per_week": bad}, expect=409)
+    assert post("/api/settings", {"max_per_week": "7"})["max_per_week"] == 7
+    assert get("/api/state")["week"]["max"] == 7
+    assert post("/api/settings", {"max_per_week": 11})["max_per_week"] == 11
     assert post("/api/settings", {"resume_label": "Demo Student | Resume"})["resume_label"] == "Demo Student | Resume"
     post("/api/action", {"kind": "rm -rf"}, expect=409)
     r = post("/api/action", {"kind": "assist", "args": {"row": 10}})
@@ -163,6 +168,11 @@ try:
         page.click("[data-testid=btn-approve]")
         page.wait_for_selector("[data-testid=toast]")
         page.wait_for_function(f"() => document.querySelector('[data-testid=job-title]').innerText !== {json.dumps(title)}")
+        page.keyboard.press("j")  # vim keys scroll the card without deciding anything
+        page.keyboard.press("G")
+        page.wait_for_function("() => window.scrollY > 0")
+        page.keyboard.press("g")
+        page.wait_for_function("() => window.scrollY === 0")
         page.keyboard.press("n")  # keyboard works too: the next job is rated no
         page.wait_for_timeout(500)
 

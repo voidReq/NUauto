@@ -5,7 +5,7 @@ Paths below are in src/nuauto/ unless a folder is given.
 
 APPLYING (apply.py, sheet.py)
 - Only Approved rows are acted on | apply.pick_row, sheet.approved; set_status refuses a row that is not Approved | test_sheet (approved filter, refusals)
-- Weekly cap (fixed weeks from local_config week_start, else the last 7 days) | sheet.MAX_PER_WEEK = 11, sheet.week_window, sheet.check_limits; apply.main checks before every row | test_sheet (7-day edge, limit refuses), test_demo (a run refuses up front)
+- Weekly cap (fixed weeks from local_config week_start, else the last 7 days) | sheet.max_per_week() (default MAX_PER_WEEK = 11; local_config "max_per_week" 1-30, anything else = 11; Settings in the GUI), sheet.week_window, sheet.check_limits; apply.main checks before every row | test_sheet (7-day edge, limit refuses, the setting's bounds), test_gui (settings refuse bad values), test_demo (a run refuses up front)
 - Total cap | sheet.MAX_TOTAL = 99, same check_limits | test_sheet (counts only; the total refusal itself is not tested)
 - Applied row with no/odd date is an error, never guessed | sheet.applied_dates | test_sheet
 - One application at a time, 30-60 s apart | apply.main loop, time.sleep(random.uniform(30, 60)) | no test

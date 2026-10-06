@@ -14,7 +14,8 @@ from nuauto import config
 
 HEADERS = ["URL", "Company", "Title", "Status", "Notes", "Date"]
 STATUSES = ["Proposed", "Approved", "Applied", "Failed", "Needs Human"]
-MAX_PER_WEEK = 11  # raised from 8 on 2026-10-03 (user's decision)
+MAX_PER_WEEK = 11  # the default weekly cap (raised from 8 on 2026-10-03); local_config "max_per_week" changes it
+MAX_PER_WEEK_CEILING = 30  # the most a setting may ask for
 MAX_TOTAL = 99     # CLAUDE.md says "under 100"
 DATE_FMT = "%Y-%m-%d"
 
@@ -69,6 +70,15 @@ def applied_dates(rows):
     return dates
 
 
+def max_per_week():
+    """The weekly cap: local_config "max_per_week" (a whole number from 1 to MAX_PER_WEEK_CEILING), else the
+    default. Anything else in the file (text, 0, 500) is ignored: the default applies."""
+    v = config.LOCAL.get("max_per_week")
+    if isinstance(v, int) and not isinstance(v, bool) and 1 <= v <= MAX_PER_WEEK_CEILING:
+        return v
+    return MAX_PER_WEEK
+
+
 def week_window(today=None):
     """(first day that counts for this week's cap, a label). With local_config week_start: fixed 7-day weeks
     from that day (week_start, +7, +14...). Before that day, or without it: the last 7 days."""
@@ -90,8 +100,9 @@ def check_limits(rows, today=None):
     today = today or date.today()
     dates = applied_dates(rows)
     week = week_count(dates, today)
-    if week >= MAX_PER_WEEK:
-        raise LimitReached(f"Weekly limit reached: {week} applied {week_window(today)[1]} (max {MAX_PER_WEEK}).")
+    cap = max_per_week()
+    if week >= cap:
+        raise LimitReached(f"Weekly limit reached: {week} applied {week_window(today)[1]} (max {cap}).")
     if len(dates) >= MAX_TOTAL:
         raise LimitReached(f"Total limit reached: {len(dates)} applied (max {MAX_TOTAL}).")
     return week, len(dates)
@@ -314,7 +325,7 @@ def main():
         sys.exit("Usage: nuauto sheet status")
     rows = read_rows(open_worksheet())
     week, total = check_limits_safe(rows)
-    print(f"Applied {week_window()[1]}: {week}/{MAX_PER_WEEK}. Total applied: {total}/{MAX_TOTAL}.")
+    print(f"Applied {week_window()[1]}: {week}/{max_per_week()}. Total applied: {total}/{MAX_TOTAL}.")
     for r in approved(rows):
         print(f"  row {r.number}: {r.company} | {r.title} | {r.url}")
     if not approved(rows):

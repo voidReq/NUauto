@@ -175,10 +175,10 @@ def sheet_and_limits():
     except Exception as e:  # network, Google API errors
         return [check("sheet", "Sheet", WARN, f"Could not reach Google Sheets ({type(e).__name__}).")], None
     out = [check("sheet", "Sheet", OK, f"{len(rows)} rows, columns as expected.")]
-    counts = f"{week}/{sheet.MAX_PER_WEEK} applied {sheet.week_window()[1]}; {total}/{sheet.MAX_TOTAL} in total."
+    counts = f"{week}/{sheet.max_per_week()} applied {sheet.week_window()[1]}; {total}/{sheet.MAX_TOTAL} in total."
     if total >= sheet.MAX_TOTAL:
         out.append(check("limits", "Limits", WARN, "Total limit reached: " + counts))
-    elif week >= sheet.MAX_PER_WEEK:
+    elif week >= sheet.max_per_week():
         out.append(check("limits", "Limits", WARN, "Weekly limit reached; Approved rows wait for next week. " + counts))
     else:
         out.append(check("limits", "Limits", OK, counts))

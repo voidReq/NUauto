@@ -8,6 +8,7 @@
   "web_listen_host": "",
   "assist_read_paths": [],
   "week_start": "",
+  "max_per_week": 11,
   "tos_ack": "",
   "tools": {},
   "preferences": {}

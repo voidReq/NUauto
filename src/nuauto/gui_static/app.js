@@ -441,7 +441,7 @@ function todoList(items) {
       el("div", { class: "row" }, linkOut(t.url, "Open job"), el("button", { class: "btn small", text: "Mark done",
         onclick: () => markRow("site", t) })));
     if (t.kind === "company") return el("li", { testid: `todo-company-${t.row}` },
-      el("div", { class: "what" }, el("b", { text: t.company }), " · company-site application ", el("span", { class: "muted", text: t.host })),
+      el("div", { class: "what" }, el("b", { text: t.company }), " · company-site application ", linkOut(t.target, t.host)),
       el("a", { class: "btn small", href: "#/company", text: "Open" }));
     return el("li", { testid: `todo-urgent-${t.id}` },
       el("div", { class: "what" }, el("span", { class: "chip warn", text: `closes ${t.closes}` }), " ", el("b", { text: t.title }), " · ", t.company,
@@ -494,7 +494,7 @@ screens.review = async (view) => {
   }
 
   async function show() {
-    $("#review-pos").textContent = jobs.length ? `Job ${Math.min(i + 1, jobs.length)} of ${jobs.length}` : "";
+    $("#review-pos").textContent = jobs.length ? `Job ${Math.min(i + 1, jobs.length)} of ${jobs.length} · j/k scroll` : "";
     if (i >= jobs.length) {
       fill(body, el("div", { class: "card", testid: "review-empty" }, el("h2", { text: jobs.length ? "That's all of them" : "Nothing new to review" }),
         el("p", { class: "muted", text: mode === "approve" ? "Approved jobs are in your sheet. Apply to them next." :
@@ -569,9 +569,28 @@ screens.review = async (view) => {
     show();
   }
 
+  // vim-style scrolling like the CLI viewer: j/k line, space/b page, g/G top/bottom. Held keys scroll without easing.
+  function scrollKey(e) {
+    const to = (top) => () => { document.activeElement && document.activeElement.blur && document.activeElement.blur();
+      window.scrollTo({ top, behavior: e.repeat ? "auto" : "smooth" }); };
+    const by = (dy) => () => { document.activeElement && document.activeElement.blur && document.activeElement.blur();
+      window.scrollBy({ top: dy, behavior: e.repeat ? "auto" : "smooth" }); };
+    const page = Math.max(120, window.innerHeight - 160);  // the button bar covers the bottom
+    if (e.key === "G") return to(document.documentElement.scrollHeight);
+    if (e.shiftKey && e.key !== " ") return null;
+    if (e.key === "j") return by(70);
+    if (e.key === "k") return by(-70);
+    if (e.key === " ") return by(e.shiftKey ? -page : page);
+    if (e.key === "b") return by(-page);
+    if (e.key === "g") return to(0);
+    return null;
+  }
+
   const keys = (e) => {
     if (e.target.closest("input, select, textarea") || $("#modal-root").children.length || e.ctrlKey || e.metaKey || e.altKey) return;
     const k = e.key.toLowerCase();
+    const scroll = scrollKey(e);
+    if (scroll) { scroll(); e.preventDefault(); return; }
     if (k === "y") decide(mode === "approve" ? "approve" : "yes");
     else if (k === "n") decide("no");
     else if (k === "s") decide("skip");
@@ -638,7 +657,7 @@ screens.apply = async (view) => {
     fill(head, el("div", { class: "card" },
       el("div", { class: "row between" }, el("div", {},
         el("h2", { text: w.room ? `You can apply to ${plural(w.room, "more job")} this week` : "Weekly limit reached" }),
-        el("p", { class: "small muted", text: `${w.applied} of ${w.max} ${w.label} · ${w.total} of ${w.max_total} in total` + (w.next ? ` · new week ${w.next}` : "") })),
+        el("p", { class: "small muted" }, `${w.applied} of ${w.max} ${w.label} · ${w.total} of ${w.max_total} in total` + (w.next ? ` · new week ${w.next}` : "") + " · ", el("a", { href: "#/settings", text: "change the limit" }))),
       running() ? null : el("div", { class: "row" },
         el("label", { class: "small muted" }, "At most ", el("input", { type: "number", min: "1", id: "apply-n", testid: "apply-n", style: null, "aria-label": "At most this many", placeholder: "all" })),
         el("button", { class: "btn primary big", testid: "btn-start-apply", disabled: !!data.why_not || !!(S.task && S.task.state === "running"),
@@ -801,6 +820,8 @@ screens.settings = async (view) => {
     const s = d.settings;
     const label = el("input", { type: "text", value: d.resume_label, "aria-label": "Resume label", testid: "set-resume-label" });
     const week = el("input", { type: "date", value: s.week_start || "", "aria-label": "Week start", testid: "set-week-start" });
+    const cap = el("input", { type: "number", min: "1", max: String(d.max_per_week_ceiling), step: "1", value: String(d.max_per_week),
+      "aria-label": "Applications per week", testid: "set-max-per-week" });
     fill(view, 
       el("div", { class: "card", testid: "all-checks" }, el("div", { class: "row between" }, el("h2", { text: "Health" }),
         el("button", { class: "btn small", text: "Run all checks now", testid: "btn-run-checks", onclick: async () => {
@@ -819,9 +840,10 @@ screens.settings = async (view) => {
           el("p", { class: "small muted", text: "Google logins last 7 days (Testing-mode apps); NUauto warns you a day before." })),
         el("div", { class: "card stack" }, el("h2", { text: "Applying" }),
           el("label", { class: "field" }, "NUworks resume label", el("span", { class: "muted small", text: "Exactly as in the Apply popup's Resume dropdown." }), label),
+          el("label", { class: "field" }, "Applications per week", el("span", { class: "muted small", text: `The most NUauto will submit in one week (1 to ${d.max_per_week_ceiling}). It stops at this number; Approved jobs wait for the next week.` }), cap),
           el("label", { class: "field" }, "Weekly limit counts from", el("span", { class: "muted small", text: "Fixed 7-day weeks from this day. Empty: any rolling 7 days." }), week),
           el("div", {}, el("button", { class: "btn primary", text: "Save", testid: "settings-save", onclick: async () => {
-            try { d = await api.post("/api/settings", { resume_label: label.value, week_start: week.value }); toast("Saved."); pollState(); draw(); } catch (e) { fail(e); } } })))),
+            try { d = await api.post("/api/settings", { resume_label: label.value, week_start: week.value, max_per_week: cap.value }); toast("Saved."); pollState(); draw(); } catch (e) { fail(e); } } })))),
       el("div", { class: "card stack" }, el("h2", { text: "Setup" }),
         el("p", { class: "small muted", text: "Google client, sheet, resume, NUworks, preferences, notifications: each step checked." }),
         el("div", { class: "row" }, el("a", { class: "btn", href: "#/setup", text: "Open setup" }),
