@@ -13,7 +13,7 @@ import tempfile
 from datetime import date
 
 STATE = tempfile.mkdtemp(prefix="nuauto-test-demo-")
-os.environ.update(NUAUTO_STATE_DIR=STATE, NUAUTO_DEMO="1", NUAUTO_DEMO_PACE="0.02")
+os.environ.update(NUAUTO_STATE_DIR=STATE, NUAUTO_DEMO="1", NUAUTO_DEMO_PACE="0.02", NUAUTO_DEMO_HEADLESS="1")
 
 from nuauto import answers  # noqa: E402
 from nuauto import config  # noqa: E402

@@ -50,10 +50,33 @@ def stop(proc):
     os.killpg(proc.pid, signal.SIGKILL)
 
 
+def drive(page, url):
+    """Use the demo the way a person would. Returns the company it approved."""
+    page.goto(url)
+    page.wait_for_selector("[data-testid=week]", timeout=30000)
+    page.click("[data-testid=nav-review]")
+    page.wait_for_selector("[data-testid=job-card]")
+    company = page.inner_text("[data-testid=job-card] .meta").split(" · ")[0]
+    page.click("[data-testid=btn-approve]")
+    page.wait_for_selector("[data-testid=toast]")
+    say(f"Review: approved {company}")
+    page.click("[data-testid=nav-apply]")
+    page.wait_for_selector("[data-testid=btn-start-apply]:not([disabled])")
+    page.click("[data-testid=btn-start-apply]")
+    page.wait_for_selector("[data-testid=question]", timeout=120000)
+    page.get_by_role("button", name="Yes", exact=True).click()
+    say("Apply: a question came up and was answered")
+    page.wait_for_function("() => document.body.innerText.includes('Last run: done') || "
+                           "document.querySelector('[data-testid=q-menu-u]')", timeout=180000)
+    if page.locator("[data-testid=q-menu-u]").count():
+        raise RuntimeError("NUworks' confirmation was not seen after Submit (the run asks whether it went through)")
+    return company
+
+
 def run_demo():
     from playwright.sync_api import sync_playwright
     env = {k: v for k, v in os.environ.items() if k not in ("NUAUTO_STATE_DIR", "NUAUTO_DEMO", "CLAUDECODE")}
-    env.update(NUAUTO_DEMO_PACE="0.02", PYTHONUNBUFFERED="1")
+    env.update(NUAUTO_DEMO_PACE="0.02", NUAUTO_DEMO_HEADLESS="1", PYTHONUNBUFFERED="1")
     gui = subprocess.Popen(config.self_cmd("gui", "--demo", "--no-open"), env=env, stdout=subprocess.PIPE,
                            stderr=subprocess.PIPE, text=True, start_new_session=True)
     try:
@@ -67,22 +90,12 @@ def run_demo():
             b = p.firefox.launch(headless=True)
             page = b.new_page(viewport={"width": 1200, "height": 900})
             page.on("pageerror", lambda e: errors.append(str(e)))
-            page.goto(ready["url"])
-            page.wait_for_selector("[data-testid=week]", timeout=30000)
-            page.click("[data-testid=nav-review]")
-            page.wait_for_selector("[data-testid=job-card]")
-            company = page.inner_text("[data-testid=job-card] .meta").split(" · ")[0]
-            page.click("[data-testid=btn-approve]")
-            page.wait_for_selector("[data-testid=toast]")
-            say(f"Review: approved {company}")
-            page.click("[data-testid=nav-apply]")
-            page.wait_for_selector("[data-testid=btn-start-apply]:not([disabled])")
-            page.click("[data-testid=btn-start-apply]")
-            page.wait_for_selector("[data-testid=question]", timeout=120000)
-            page.get_by_role("button", name="Yes", exact=True).click()
-            say("Apply: a question came up and was answered")
-            page.wait_for_function("() => document.body.innerText.includes('Last run: done') || "
-                                   "document.querySelector('[data-testid=q-menu-u]')", timeout=180000)
+            try:
+                company = drive(page, ready["url"])
+            except Exception as e:
+                first = (str(e).strip().splitlines() or [type(e).__name__])[0][:200]
+                log = page.evaluate("() => fetch('/api/task?after=0').then(r => r.json()).then(j => j.task ? j.task.log : [])")
+                sys.exit(f"Self-test failed: {first}\nThe last run's log:\n  " + "\n  ".join((log or ["(none)"])[-15:]))
             b.close()
         if errors:
             sys.exit(f"Self-test failed: the page had errors: {errors[:3]}")

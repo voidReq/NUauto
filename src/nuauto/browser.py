@@ -125,12 +125,19 @@ def profile_holder():
     return holder
 
 
+def has_display():
+    """A screen to show a browser on: always on macOS; on Linux, an X11 or Wayland session."""
+    return sys.platform == "darwin" or bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
 def launch(p):
     lock_profile(" ".join([os.path.basename(sys.argv[0])] + sys.argv[1:2]))
     try:
         os.makedirs(config.PROFILE_DIR, mode=0o700, exist_ok=True)
         os.chmod(config.PROFILE_DIR, 0o700)
         headless = os.environ.get("AUTO_HEADLESS") == "1"  # set by daily.py and the GUI's NUworks check
+        if config.DEMO and (os.environ.get("NUAUTO_DEMO_HEADLESS") == "1" or not has_display()):
+            headless = True  # demo runs nobody watches (tests, the self-test, no screen); real runs stay visible
         # Demo: a proxy that does not exist, so a request no fake page answers can never reach the network
         extra = {"proxy": {"server": "http://127.0.0.1:9"}} if config.DEMO else {}
         context = p.firefox.launch_persistent_context(config.PROFILE_DIR, headless=headless, **extra)

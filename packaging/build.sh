@@ -2,7 +2,8 @@
 # Build the packaged NUauto for this machine (CI does this for every release: .github/workflows/release.yml).
 #   Linux  dist/NUauto-<version>-linux-<arch>.AppImage   one file: make it executable, double-click it
 #   macOS  dist/NUauto-<version>-macos-<arch>.dmg        NUauto.app inside: drag it to Applications
-# Needs uv; on Linux also curl (to fetch appimagetool). Then check it: packaging/smoke.py (see its docstring).
+# Needs uv; on Linux also curl (to fetch appimagetool) and binutils (PyInstaller uses objdump).
+# Then check it: packaging/smoke.py (see its docstring).
 set -eu
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"

@@ -1,10 +1,12 @@
 # The packaged NUauto: an AppImage per Linux architecture and a DMG per Mac architecture. Built and smoke-tested on
-# every push of a version tag (git tag v0.3.0 && git push origin v0.3.0), then attached to a GitHub Release.
-# Also runnable by hand (Actions > release > Run workflow): then the files are only kept as build artifacts.
+# every pull request (the files are kept as build artifacts of the run: nothing is published) and on every push of a
+# version tag (git tag v0.3.0 && git push origin v0.3.0), which also attaches them to a GitHub Release.
+# Also runnable by hand from the default branch (Actions > release > Run workflow).
 name: release
 on:
   push:
     tags: ["v*"]
+  pull_request:
   workflow_dispatch:
 permissions:
   contents: write
