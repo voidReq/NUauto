@@ -93,9 +93,16 @@ assert clean == jobs.DEFAULTS, {k: (clean.get(k), v) for k, v in jobs.DEFAULTS.i
 for bad, needle in (({"threshold_above": 50}, "can't be lower"), ({"class_year": "middler"}, "Your year"),
                     ({"term_id": "x!"}, "Term ID"), ({"category_bonus": {"cooking": 5}}, "unknown category"),
                     ({"student": "{{student}}"}, "student"), ({"threshold": "lots"}, "whole number"),
-                    ({"home_state": "Mass"}, "two letters"), ({"rank_last": ["nope"]}, "Rank last")):
+                    ({"home_state": "Mass"}, "two letters"), ({"rank_last": ["nope"]}, "Rank last"),
+                    ({"tags": [{"name": "", "bonus": 5, "phrases": ["x"]}]}, "needs a name"),
+                    ({"tags": [{"name": "cars", "bonus": 5, "phrases": " , "}]}, "one or more phrases"),
+                    ({"tags": [{"name": "cars", "bonus": 99, "phrases": "EV"}]}, "between -50 and 50"),
+                    ({"tags": [{"name": "cars", "bonus": 1, "phrases": "EV"}] * 2}, "twice")):
     refused(lambda: onboard.check_prefs({**jobs.DEFAULTS, **bad}), needle)
 assert onboard.check_prefs({**jobs.DEFAULTS, "major_words": "Computer Science, , Khoury"})["major_words"] == ["computer science", "khoury"]
+assert onboard.check_prefs({**jobs.DEFAULTS, "tags": [{"name": " cars ", "bonus": "7", "phrases": "automotive, , EV"},
+                                                    {"name": "", "bonus": "", "phrases": ""}]})["tags"] == \
+    [{"name": "cars", "bonus": 7, "phrases": ["automotive", "EV"]}]
 onboard.save_config({"preferences": {**clean, "class_year": "junior", "term": "2027 - Fall"}})
 assert jobs.MY_YEAR == 2 and jobs.TERM_TEXT == "fall 2027" and json.load(open(config.LOCAL_CONFIG_PATH))["preferences"]["class_year"] == "junior"
 onboard.save_config({"preferences": None})
@@ -195,6 +202,14 @@ try:
         page.wait_for_selector("[data-testid=pref-term-select]", timeout=60000)
         page.select_option("[data-testid=pref-term-select]", label="2027 - Fall")
         page.select_option("[data-testid=pref-class_year]", "junior")
+        page.click("details summary")  # fine-tuning: a new tag, the wearables one removed
+        assert page.locator("[data-testid=pref-tags] tr").nth(1).locator("[aria-label='Tag name']").input_value() == "wearables"
+        page.locator("[data-testid=pref-tags] tr").nth(1).get_by_text("Remove").click()
+        page.click("[data-testid=pref-tag-add]")
+        row = page.locator("[data-testid=pref-tags] tr").last
+        row.locator("[aria-label='Tag name']").fill("cars")
+        row.locator("[aria-label='Tag phrases']").fill("automotive, EV")
+        row.locator("[aria-label='Tag bonus']").fill("7")
         page.click("[data-testid=pref-save]")
         done(page, "preferences")
         page.wait_for_selector("[data-testid=setup-finish]", timeout=30000)
@@ -207,6 +222,8 @@ try:
     assert cfg["tos_ack"] and cfg["sheet_id"].startswith("DEMO-") and cfg["resume_path"].endswith("Demo_Student_Resume.pdf")
     assert cfg["preferences"]["term"] == "2027 - Fall" and cfg["preferences"]["class_year"] == "junior"
     assert cfg["preferences"]["term_id"] == "demo00000000000000000000fall2027"
+    assert [t["name"] for t in cfg["preferences"]["tags"]] == ["AR/XR", "cars"]
+    assert cfg["preferences"]["tags"][1] == {"name": "cars", "bonus": 7, "phrases": ["automotive", "EV"]}
     assert json.load(open(config.PROFILE_PATH))["resume_label"] == demo.RESUME_LABEL
     assert mode(client_path) == 0o600 and mode(config.LOCAL_DIR) == 0o700
     values = sheet.client(False).open_by_key(cfg["sheet_id"]).sheet1.get_all_values()

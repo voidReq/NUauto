@@ -335,8 +335,31 @@ def check_prefs(p):
             if not lo <= v <= hi:
                 raise Refused(f"{c}: between {lo} and {hi}.")
             out[key][c] = v
-    tags = p.get("tag_bonus") or {}
-    out["tag_bonus"] = {t: max(0, min(50, int(v))) for t, v in tags.items() if t in ("AR/XR", "wearables") and str(v).strip()}
+    tags = p.get("tags") or []
+    if not isinstance(tags, list) or len(tags) > 20 or not all(isinstance(t, dict) for t in tags):
+        raise Refused("Tags: up to 20.")
+    out["tags"] = []
+    for t in tags:
+        name = str(t.get("name", "")).strip()
+        phrases = t.get("phrases") or []
+        if isinstance(phrases, str):
+            phrases = phrases.split(",")
+        phrases = [str(x).strip() for x in phrases if str(x).strip()]
+        if not phrases and not name:
+            continue  # an empty row
+        if not name or len(name) > 30:
+            raise Refused("Tags: each needs a name (up to 30 characters).")
+        if name in (x["name"] for x in out["tags"]):
+            raise Refused(f"Tags: {name} is there twice.")
+        if not phrases or len(phrases) > 50 or any(len(x) > 60 for x in phrases):
+            raise Refused(f"{name}: one or more phrases, comma-separated (up to 60 characters each).")
+        try:
+            bonus = int(t.get("bonus"))
+        except (TypeError, ValueError):
+            raise Refused(f"{name}: a whole number of points, please.")
+        if not -50 <= bonus <= 50:
+            raise Refused(f"{name}: between -50 and 50 points.")
+        out["tags"].append({"name": name, "bonus": bonus, "phrases": phrases})
     last = p.get("rank_last") or []
     if not isinstance(last, list) or any(c not in jobs.CATEGORIES for c in last):
         raise Refused("Rank last: unknown category.")

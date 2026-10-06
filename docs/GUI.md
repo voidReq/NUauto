@@ -66,7 +66,7 @@ SETUP WIZARD (onboard.py + gui_static/setup.js; each step checks itself)
   nuworks      login (Firefox window; you type nothing into NUauto), then the resume label read from one job's
                real Apply popup (read-only: opens it, reads the Resume dropdown, Cancel)
   preferences  term (NUworks' own list, read-only; onboard.find_terms looks for terms anywhere in that JSON),
-               year, graduation year, major words, Claude's description of you, thresholds, priorities
+               year, graduation year, major words, Claude's description of you, thresholds, priorities, tags
                -> local_config.json "preferences" (docs/PIPELINE.md)
   extras       Discord webhook (checked with a GET, posts nothing until you press Test), automatic updates
                (local mode: systemd user timer / launchd agent at 08:00 and 18:00), app icon
