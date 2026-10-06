@@ -154,4 +154,49 @@ n = sheet.add_proposed(ws, [{"url": "https://a", "company": "A", "title": "T", "
                             {"url": "https://b", "company": "B", "title": "U", "notes": "suggested"}])
 assert n == 1 and ws.values[2][:4] == ["https://b", "B", "U", "Proposed"], ws.values
 
+# approve_proposed: only a still-Proposed row that still holds this job
+class CellWS(FakeWS):
+    def update(self, range_name, values, value_input_option=None):  # a single Status cell, like "D2"
+        assert range_name[0] == "D" and range_name[1:].isdigit(), range_name
+        self.values[int(range_name[1:]) - 1][3] = values[0][0]
+
+
+ws = CellWS([HEADERS, ["https://x/jobs/1", "A", "T", "Proposed", "n", ""],
+             ["https://x/jobs/2", "B", "U", "Applied", "", "2026-10-01"]])
+sheet.approve_proposed(ws, 2, "https://x/jobs/1")
+assert ws.values[1][3] == "Approved" and ws.values[1][4] == "n", ws.values  # only the Status cell changed
+for row, url in ((2, "https://x/jobs/1"), (3, "https://x/jobs/2"), (3, "https://x/jobs/1")):  # Approved, Applied, wrong job
+    try:
+        sheet.approve_proposed(ws, row, url)
+    except sheet.SheetError:
+        continue
+    raise AssertionError("approve_proposed changed a row it should refuse")
+
+# the approve queue: your Proposed rows (with "row") come first, even below the pool bar; no details = listed apart
+HOST = "https://northeastern-csm.symplicity.com/students/app/jobs/detail/"
+details = {"900": d(id="900", posting_end="2030-01-01"), "901": d(id="901", posting_end="2030-01-01"),
+           "902": d(id="902", posting_end="2030-01-01")}
+score = {"match": 50, "class_req": "none", "met": ["a", "b"], "partial": ["c"], "missing": ["d"], "why": "w"}
+scores = {"900": score, "901": dict(score, match=80), "903": score}
+real_load, real_ranked = jobs.load, jobs.ranked_pool
+jobs.load = lambda name, default=None: {"scores.json": scores, "categories.json": {}}.get(name, default)
+jobs.ranked_pool = lambda details, ratings, rows: ([{"id": "902", "title": "Pool job", "company": "P", "match": 90, "flags": [],
+                                                      "category": "embedded", "bonus": 0, "threshold": 65}], None)
+rows = parse_rows = sheet.parse_rows([HEADERS,
+                                      [HOST + "900", "A", "Low", "Proposed", "", ""],
+                                      [HOST + "901", "B", "High", "Proposed", "", ""],
+                                      [HOST + "903", "C", "No details", "Proposed", "", ""],
+                                      [HOST + "904", "D", "Done", "Approved", "", ""]])
+entries, missing = jobs.proposed_entries(rows, details)
+assert [(e["id"], e["row"]) for e in entries] == [("900", 2), ("901", 3)] and [r.number for r in missing] == [4]
+assert any(f.startswith("below the pool bar") for f in entries[0]["flags"]) and "Proposed" in " ".join(entries[1]["flags"])
+assert not any(f.startswith("below the pool bar") for f in entries[1]["flags"])
+todo, urgent = jobs.review_queue("approve", details, {}, rows, TODAY)
+assert [r["id"] for r in todo] == ["900", "901", "902"] and not urgent and "row" not in todo[2]
+todo, _ = jobs.review_queue("approve", details, {"900": {"label": 0, "date": "2026-10-01"}}, rows, TODAY)
+assert [r["id"] for r in todo] == ["901", "902"]  # rated no: skipped, like any job
+rate, _ = jobs.review_queue("rate", details, {}, rows, TODAY)
+assert [r["id"] for r in rate] == ["902"]  # the rating viewer is unchanged
+jobs.load, jobs.ranked_pool = real_load, real_ranked
+
 print("All job-pool checks passed.")

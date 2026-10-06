@@ -272,6 +272,15 @@ def mark_applied_by_hand(ws, row_number, url, how="by hand"):
               value_input_option="RAW")
 
 
+def approve_proposed(ws, row_number, url):
+    """Approve a Proposed row (the approve viewer, the GUI's Review). Only while it is still Proposed and still holds
+    this job. The only way a Proposed row becomes Approved; nothing else in the row changes."""
+    current = _row_for(ws, row_number, url)
+    if current.status != "Proposed":
+        raise SheetError(f"Row {row_number} is not Proposed (it is {current.status or 'empty'}). Refusing to change it.")
+    ws.update(range_name=f"D{row_number}", values=[["Approved"]], value_input_option="RAW")
+
+
 def unapprove(ws, row_number, url):
     """Undo an approval (the GUI's Undo): the row goes back to Proposed. Only while it is still Approved and still
     holds this job; nothing is deleted."""
