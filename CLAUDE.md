@@ -201,7 +201,7 @@ client_secret.json, discord_webhook.txt, web_secret.txt
 
 COMMANDS (installed in .venv; no activation needed)
 nuauto gui             # the window (setup, review, apply, health); --demo: everything fake (agents: only this)
-nuauto approve         # viewer on best unrated jobs: y = Approved in the sheet, n = no, s skip
+nuauto approve         # viewer: my Proposed rows first, then best unrated jobs: y = Approved in the sheet, n = no, s skip
 nuauto apply [-n 3]    # submit every Approved row (30-60s between); real terminal (or the GUI) only
 nuauto rate            # taste training viewer (keys in docs/PIPELINE.md)
 nuauto update          # check NUworks for new jobs now (runs on the homelab, then syncs)

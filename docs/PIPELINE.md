@@ -49,8 +49,9 @@ RANKING
   (jobs.phrase_pattern). The first tag that matches wins (one per job). AR/XR and wearables are
   the defaults; their phrases give the same tags as the old fixed patterns, except "vision pro"
   no longer matches inside "Computer Vision Prototyping".
-- `nuauto approve` shows jobs closing within 7 days first. `nuauto apply` goes closing
-  within 7 days first, then best match. Past-deadline rows -> Needs Human. The daily run
+- `nuauto approve` shows my Proposed sheet rows first (even below the pool bar, flagged; ones with no stored
+  details are listed, not shown; y turns that row Approved, no new row), then pool jobs; closing within 7 days
+  first. `nuauto apply` goes closing within 7 days first, then best match. Past-deadline rows -> Needs Human. The daily run
   notifies about pool jobs closing within 3 days that aren't in the sheet.
 
 MY RATINGS (taste model)

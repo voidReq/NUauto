@@ -552,7 +552,12 @@ def decide(body):
     out = {"previous": previous}
     if decision == "approve":
         ws = worksheet()
-        if sheet.add_proposed(ws, [jobs.sheet_item(r)], status="Approved") != 1:
+        if r.get("row"):  # one of your Proposed rows: that row becomes Approved
+            try:
+                sheet.approve_proposed(ws, r["row"], jobs.job_url(job_id))
+            except sheet.SheetError as e:
+                raise Refused(str(e))
+        elif sheet.add_proposed(ws, [jobs.sheet_item(r)], status="Approved") != 1:
             raise Refused("That job is already in the sheet.")
         APP.refresh_rows(force=True)
         out["row"] = next((x.number for x in APP.rows or [] if x.url == jobs.job_url(job_id)), None)

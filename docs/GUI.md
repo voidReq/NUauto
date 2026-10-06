@@ -44,7 +44,8 @@ it as a GitHub release on every v* tag)
 SCREENS
   Today          health problems with fix buttons, this week's count, next steps, what only you can do
   Review         one pool job at a time. Approve mode: Approve (y) adds it to the sheet as Approved at once
-                 (Undo puts the row back to Proposed); Not for me (n) rates it no; Skip (s); Back (u); Open (o).
+                 (or, for one of your Proposed rows, which Review shows first, turns that row Approved);
+                 Undo puts the row back to Proposed; Not for me (n) rates it no; Skip (s); Back (u); Open (o).
                  Rate only mode: yes/no ratings for the taste model, nothing in the sheet.
   Apply          Approved rows in apply order, Start (optionally "at most N"), the live run: current row, latest
                  screenshot, log, next-job countdown, Stop / Force stop; question dialogs; recent runs

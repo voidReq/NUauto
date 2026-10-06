@@ -180,7 +180,11 @@ try:
         assert page.locator("[data-testid=apply-shot]").count() == 1
         rows = {r[1]: r[3] for r in json.load(open(os.path.join(STATE, "local", "demo_sheet_DEMO-SHEET.json")))["rows"][1:]}
         assert rows["Harbor Embedded"] == rows["Lumen Security"] == rows[approved_company] == "Applied", rows
-        assert rows["Cobalt Systems"] == "Proposed", rows  # approved, then undone (API part above)
+        # Cobalt was approved, then undone (API part above): it is a Proposed row again, so Review showed it first and
+        # this click approved that same row (no second row), and it was applied
+        assert approved_company == "Cobalt Systems" and rows["Cobalt Systems"] == "Applied", (approved_company, rows)
+        all_rows = json.load(open(os.path.join(STATE, "local", "demo_sheet_DEMO-SHEET.json")))["rows"][1:]
+        assert sum(r[1] == "Cobalt Systems" for r in all_rows) == 1, all_rows
         assert rows["Quarry Hardware"] == "Needs Human", rows
 
         # another site on this machine (another port: same site to the browser, so the cookie IS sent) tries to change

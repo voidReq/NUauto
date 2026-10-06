@@ -727,6 +727,20 @@ def pool_sort_key(r):
     return (r["category"] in PREFS["rank_last"], -value)
 
 
+def pool_entry(i, d, score, cat, threshold, flags):
+    """One job as a pool row (what pool.json holds and the viewers show)."""
+    bonus = PREFS["home_bonus"] if in_home_state(d) else 0
+    match = score["match"]
+    tag = job_tag(d)
+    return {"id": i, "title": d["title"], "company": d["company"], "location": d["location"],
+            "category": cat, "match": match, "bonus": bonus, "effective": match + bonus,
+            "rank": match + bonus + category_bonus(cat) + tag_bonus(tag), "tag": tag,
+            "threshold": threshold, "closes": (closes(d) or "") and closes(d).isoformat(),
+            "flags": flags + (["uncategorized"] if cat == "uncategorized" else [])
+                     + (["apply on company site too?"] if external_hint(d) else []),
+            "why": score.get("why", "")}
+
+
 def build_pool():
     details, scores, still_listed = load_details(), load("scores.json", {}), load("list.json", {})
     cats = load("categories.json", {})
@@ -740,21 +754,38 @@ def build_pool():
         if not keep:
             continue
         match = scores[i]["match"]
-        bonus = PREFS["home_bonus"] if in_home_state(d) else 0
         if i in liked and match < threshold:  # a job I rated yes stays even if a rescore dipped it below the bar
             flags = flags + ["kept: rated yes"]
             threshold = match
         if match >= threshold:  # entry on the real resume match; the home-state bonus only affects ranking
-            tag = job_tag(d)
-            pool.append({"id": i, "title": d["title"], "company": d["company"], "location": d["location"],
-                         "category": cat, "match": match, "bonus": bonus, "effective": match + bonus,
-                         "rank": match + bonus + category_bonus(cat) + tag_bonus(tag), "tag": tag,
-                         "threshold": threshold, "closes": (closes(d) or "") and closes(d).isoformat(),
-                         "flags": flags + (["uncategorized"] if cat == "uncategorized" else [])
-                                  + (["apply on company site too?"] if external_hint(d) else []),
-                         "why": scores[i].get("why", "")})
+            pool.append(pool_entry(i, d, scores[i], cat, threshold, flags))
     pool.sort(key=pool_sort_key)
     return pool
+
+
+def proposed_entries(rows, details):
+    """Proposed sheet rows as pool-shaped entries (with "row"), for the approve queue: you put them there on purpose,
+    so they show even below the pool bar (the flags say so). Returns (entries, rows_without_details_or_score)."""
+    scores, cats = load("scores.json", {}), load("categories.json", {})
+    entries, missing = [], []
+    for r in rows:
+        if r.status != "Proposed":
+            continue
+        i = job_id(r.url)
+        if i not in details or i not in scores:
+            missing.append(r)
+            continue
+        d, cat = details[i], cats.get(i, "uncategorized")
+        keep, threshold, flags = pool_entry_rules(d, scores[i], cat)
+        if not keep:
+            threshold = PREFS["threshold"]
+            flags = flags + ["outside your pool rules"]
+        if scores[i]["match"] < threshold:
+            flags = flags + [f"below the pool bar ({threshold}%)"]
+        entry = pool_entry(i, d, scores[i], cat, threshold, flags + [f"already Proposed (sheet row {r.number})"])
+        entry["row"] = r.number
+        entries.append(entry)
+    return entries, missing
 
 
 def cmd_pool():
@@ -1055,14 +1086,17 @@ def rate_viewer(todo, details, ratings, approved=None, urgent=()):
 
 def review_queue(mode, details, ratings, rows, today=None):
     """What Review shows, as (todo, urgent); used by `nuauto approve` / `nuauto rate` and the GUI.
-    approve: pool jobs not in the sheet and not rated no; closing within URGENT_DAYS first (soonest first), then
-             the usual ranking.
+    approve: your Proposed sheet rows (that have stored details; below the pool bar too), then pool jobs not in the
+             sheet, none rated no; closing within URGENT_DAYS first (soonest first), then the usual ranking.
+             A Proposed entry has "row" (y turns that row Approved instead of adding one).
     rate:    unrated pool jobs not in the sheet, in rating_order (urgent is empty)."""
     in_sheet = {job_id(r.url) for r in rows}
     pool, _ = ranked_pool(details, ratings, rows)
     if mode == "rate":
         return rating_order([r for r in pool if r["id"] not in ratings and r["id"] not in in_sheet]), []
     todo = [r for r in pool if r["id"] not in in_sheet and ratings.get(r["id"], {}).get("label") != 0]
+    proposed = [r for r in proposed_entries(rows, details)[0] if ratings.get(r["id"], {}).get("label") != 0]
+    todo = proposed + todo  # your own Proposed rows first (n skips one from now on, like any job)
     today = today or date.today()
     left = {r["id"]: (closes(details[r["id"]]) - today).days if closes(details[r["id"]]) else None for r in todo}
     urgent = sorted((r for r in todo if left[r["id"]] is not None and 0 <= left[r["id"]] <= URGENT_DAYS),
@@ -1163,14 +1197,18 @@ def cmd_suggest(n):
 
 
 def cmd_approve():
-    """Full-screen viewer over the best pool jobs not in the sheet (rated-no skipped): y approves (sheet row as Approved), n rejects."""
+    """Full-screen viewer over your Proposed rows and the best pool jobs not in the sheet (rated-no skipped): y approves (the row becomes Approved, or is added as Approved), n rejects."""
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         sys.exit("approve needs an interactive terminal.")
     details, ratings = load_details(), load("ratings.json", {})
     ws = sheet.open_worksheet()
     rows = sheet.read_rows(ws)
-    # everything not in the sheet that you haven't rated no, closing soon first; jobs you rated yes rank best
+    # your Proposed rows, then everything not in the sheet that you haven't rated no; closing soon first
     todo, urgent = review_queue("approve", details, ratings, rows)
+    left_out = proposed_entries(rows, details)[1]
+    if left_out:
+        print("Proposed rows with no stored details (not shown; open the link): "
+              + ", ".join(f"row {r.number} {r.company}" for r in left_out))
     if not todo:
         sys.exit("Nothing new in the pool to approve.")
     if urgent:
@@ -1185,8 +1223,15 @@ def cmd_approve():
         rate_viewer(todo, details, ratings, approved, urgent)
     finally:  # runs on q, Ctrl+C or a crash: whatever you approved gets written
         if approved:
-            items = [sheet_item(r) for r in approved]
-            print(f"Added {sheet.add_proposed(ws, items, status='Approved')} rows as Approved.")
+            for r in (r for r in approved if r.get("row")):
+                try:
+                    sheet.approve_proposed(ws, r["row"], job_url(r["id"]))
+                    print(f"Row {r['row']} ({r['company']}) is now Approved.")
+                except sheet.SheetError as e:
+                    print(f"Not approved: {e}")
+            items = [sheet_item(r) for r in approved if not r.get("row")]
+            if items:
+                print(f"Added {sheet.add_proposed(ws, items, status='Approved')} rows as Approved.")
         else:
             print("Nothing approved.")
     print("Next: nuauto apply")
