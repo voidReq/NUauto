@@ -104,8 +104,7 @@ code, .mono { font-family: var(--mono); font-size: 12.5px; }
 .bar.full > span { background: var(--warn); }
 
 .chip { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; padding: 2px 9px;
-  border-radius: 999px; background: var(--surface-2); color: var(--muted); white-space: nowrap; }
-.chip.wrap { white-space: normal; overflow-wrap: anywhere; border-radius: 12px; padding: 4px 10px; }
+  border-radius: 999px; background: var(--surface-2); color: var(--muted); max-width: 100%; overflow-wrap: anywhere; }
 .chip.accent { background: var(--accent-soft); color: var(--accent); }
 .chip.ok { background: var(--ok-soft); color: var(--ok); }
 .chip.warn { background: var(--warn-soft); color: var(--warn); }
