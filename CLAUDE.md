@@ -118,7 +118,8 @@ GUI (`nuauto gui`, gui.py + gui_static/ + onboard.py + health.py + demo.py; adde
 - Packaged app (packaging/, added 2026-10-05 on my request: "for the users local, preferably executable"): AppImage
   (Linux) and DMG (macOS) from PyInstaller, built + smoke-tested by .github/workflows/release.yml on v* tags. Same code
   (config.FROZEN): files in the app-data folder, local mode only, runs itself via config.self_cmd / self_exe (never
-  `python -m` or file paths in code that may run packaged). Build locally: sh packaging/build.sh; check: packaging/smoke.py.
+  `python -m` or file paths in code that may run packaged). Build locally: sh packaging/build.sh; check: packaging/smoke.py;
+  other distros: sh packaging/distros.sh <AppImage> (podman).
 - Not yet proven for real: a GUI apply with me watching, the logins through the GUI, the NUworks reads
   (resume labels, term list), macOS (CI runs the tests there in demo mode).
 
@@ -207,6 +208,7 @@ nuauto login           # manual SSO login; close the window when done
 nuauto login google    # Google Sheets login, every 7 days (Discord warns the day before)
 nuauto test            # all offline tests
 nuauto doctor [--json] # health check: laptop, homelab, Mark-done page (read-only)
+nuauto selftest        # is this install OK? demo mode end to end in a hidden browser (nothing real touched)
 nuauto assist [<row>]  # company-site agent for a Needs Human row; asks me before any Submit
 nuauto answers list    # answer bank; edit with: nvim local/answers.json
 nuauto setup-sheet format          # restyle the sheet (formatting only, safe to re-run)

@@ -92,6 +92,7 @@ THE PACKAGED APP (packaging/, config.FROZEN)
 - Programs it starts that are not its own children (system python3, browsers, a terminal) get none of its PyInstaller / AppImage / Python variables | window.system_env | test_window
 - Closing NUauto's own window quits it; a run in progress stops the way Ctrl+C stops it | window.open_gtk / run_mac -> App.quit | packaging/smoke.py (process group gone after SIGTERM); the window close itself: no test
 - The update check sends nothing about you (GET of the latest public release) | health.app_update | test_health (source install: no call)
+- A hidden browser only in demo mode (NUAUTO_DEMO_HEADLESS or no screen); a real apply always opens a visible one | browser.launch (config.DEMO check), gui.VISIBLE | test_selftest / test_demo (no screen); the real side: no test
 
 SETUP WIZARD (onboard.py)
 - Only a Desktop-app Google client file is accepted; saved mode 600 | onboard.check_client, save_client | test_setup

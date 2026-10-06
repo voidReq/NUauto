@@ -35,9 +35,10 @@ PACKAGED APP (packaging/; built by .github/workflows/release.yml on every v* tag
   PyInstaller / AppImage variables (window.system_env); LD_LIBRARY_PATH is restored at start.
 - Updates: once a day the app asks GitHub's public API for the latest release (Version in Settings; Download opens the
   release page). Your files stay when you replace the app.
-- Build and check one yourself: `sh packaging/build.sh` (needs uv; Linux: curl for appimagetool), then
+- Build and check one yourself: `sh packaging/build.sh` (needs uv; Linux: curl and binutils), then
   `packaging/build/venv/bin/python packaging/smoke.py <the AppImage, or NUauto.app/Contents/MacOS/NUauto>`: the app's
-  commands, the Firefox install through the app, and demo mode end to end (approve, apply with a question, the sheet).
+  commands, `_window`, and `selftest` run by the app itself. Other distributions: `sh packaging/distros.sh <AppImage>`
+  (podman or docker: Ubuntu 22.04 and 24.04, Debian 12, Fedora, Arch; logs in packaging/build/distros/).
 
 SCREENS
   Today          health problems with fix buttons, this week's count, next steps, what only you can do
@@ -118,6 +119,10 @@ DEMO MODE (demo.py) AND TESTING WITH AGENTS
 - `--no-open --port 0`: prints one JSON line {"url", "port", "demo", "state_dir"} when ready; open the url (it
   carries the secret) in Playwright. Everything on screen has a JSON API (below); key controls have data-testid.
 - `nuauto gui --demo --screenshots DIR`: every screen, light/dark, wide/narrow, as PNGs; then it quits.
+- `nuauto selftest` (also Settings > Run a self-test): the whole demo flow in a hidden browser (Firefox installed if
+  missing; approve, apply with a question, the fake sheet), in its own temp folder; exit 0 = this install works.
+- Demo runs nobody watches use a hidden browser: with NUAUTO_DEMO_HEADLESS=1 (tests and the self-test set it) or no
+  screen (CI, containers). Real runs always open a visible browser.
 - Agents: only ever --demo. Never start the real GUI, never click Start in a real one.
 - Tests (in `nuauto test`): test_gui.py (security rules, API, single instance, the main flows in headless
   Firefox), test_setup.py (each wizard step's checks, then the wizard end to end), test_demo.py (the real apply.py
@@ -155,6 +160,6 @@ FILES IT WRITES (all under local/, mode 700, except as noted)
 NOT YET PROVEN FOR REAL (only in demo mode so far)
 - A real GUI apply with you watching; the Google and NUworks logins through the GUI; the resume-label and term
   reads against the real NUworks; the systemd/launchd toggle.
-- The packaged app: the AppImage was built and smoke-tested on Fedora 44 only, and its GTK window seen only off-screen
-  (GTK's Broadway backend). The macOS app and the release workflow have not run yet (they run on the first push of a
-  v* tag, or by hand from Actions).
+- The packaged app on a real desktop other than Fedora 44 (containers ran it on Ubuntu 22.04/24.04, Debian 12, Fedora
+  and Arch; its own window was rendered on GTK 4 and on GTK 3 / Ubuntu 22.04 with a virtual X server). The macOS app
+  and the release workflow have not run yet (they run on a pull request, or on a v* tag).
