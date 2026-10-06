@@ -6,6 +6,7 @@ a password; logins happen in Google's and NUworks' own pages.
 
   python -m nuauto.onboard resume-labels   read the Resume dropdown's options from a real NUworks Apply popup
   python -m nuauto.onboard terms           read NUworks' list of co-op terms (for the term preference)
+  python -m nuauto.onboard launcher        add NUauto to your apps menu / ~/Applications (install.sh runs it)
 Both are read-only (hidden browser, domain lock on, nothing filled or submitted) and save what they read in
 local/onboard.json for the wizard.
 
@@ -67,7 +68,7 @@ def write_json(path, data, mode=0o600):
 def local_config():
     cfg = read_json(config.LOCAL_CONFIG_PATH, None)
     if cfg is None:  # first start: the template's keys, empty
-        cfg = {k: ([] if isinstance(v, list) else "") for k, v in
+        cfg = {k: ([] if isinstance(v, list) else {} if isinstance(v, dict) else "") for k, v in
                read_json(os.path.join(config.PROJECT_DIR, "local_config.example.json"), {}).items()}
     return cfg
 
@@ -492,6 +493,61 @@ def scheduler_disable():
         subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True)
 
 
+# ---------------------------------------------------------------- app launcher (apps menu / Applications folder)
+
+def launcher_paths():
+    if config.DEMO:
+        return [os.path.join(config.STATE_DIR, "launcher", "nuauto.desktop")]
+    if sys.platform == "darwin":
+        return [os.path.expanduser("~/Applications/NUauto.app")]
+    return [os.path.expanduser("~/.local/share/applications/nuauto.desktop")]
+
+
+DESKTOP = """[Desktop Entry]
+Type=Application
+Name=NUauto
+Comment=Find, review and apply to NUworks co-ops
+Exec="{nuauto}" gui
+Icon={icon}
+Terminal=false
+Categories=Office;Education;
+StartupNotify=false
+"""
+
+
+def launcher_create():
+    """NUauto in your apps menu (Linux: a .desktop file) or ~/Applications (macOS: a small app that starts
+    `nuauto gui` in the background). Everything in your home folder; run again any time."""
+    icon_src = os.path.join(config.SRC_DIR, "gui_static", "icon.svg")
+    target = launcher_paths()[0]
+    if sys.platform == "darwin" and not config.DEMO:
+        macos = os.path.join(target, "Contents", "MacOS")
+        os.makedirs(macos, exist_ok=True)
+        with open(os.path.join(target, "Contents", "Info.plist"), "wb") as f:
+            plistlib.dump({"CFBundleName": "NUauto", "CFBundleDisplayName": "NUauto", "CFBundleIdentifier": "com.nuauto.gui",
+                           "CFBundleExecutable": "NUauto", "CFBundlePackageType": "APPL",
+                           "CFBundleShortVersionString": __import__("nuauto").__version__}, f)
+        script = os.path.join(macos, "NUauto")
+        with open(script, "w") as f:  # in the background: the app itself ends at once, the window stays
+            f.write(f'#!/bin/sh\nnohup "{nuauto_bin()}" gui >/dev/null 2>&1 &\n')
+        os.chmod(script, 0o755)
+        return target
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    icon = os.path.expanduser("~/.local/share/icons/hicolor/scalable/apps/nuauto.svg") if not config.DEMO else \
+        os.path.join(os.path.dirname(target), "nuauto.svg")
+    os.makedirs(os.path.dirname(icon), exist_ok=True)
+    shutil.copyfile(icon_src, icon)
+    with open(target, "w") as f:
+        f.write(DESKTOP.format(nuauto=nuauto_bin(), icon=icon))
+    if not config.DEMO and shutil.which("update-desktop-database"):
+        subprocess.run(["update-desktop-database", os.path.dirname(target)], capture_output=True)
+    return target
+
+
+def launcher_exists():
+    return os.path.exists(launcher_paths()[0])
+
+
 # ---------------------------------------------------------------- the steps, for the page
 
 def chrome_found():
@@ -546,9 +602,9 @@ def steps(checks):
         prefs={**jobs.DEFAULTS, **(prefs or {})}, years=jobs.YEARS, categories=sorted(jobs.CATEGORIES),
         terms=found.get("terms"), terms_error=found.get("terms_error"), using_defaults=not prefs)
     kind = scheduler_kind()
-    add("extras", "Notifications and automatic updates", False, "Optional.", optional=True,
+    add("extras", "Notifications, automatic updates, app icon", False, "Optional.", optional=True,
         discord=os.path.exists(config.DISCORD_WEBHOOK_PATH), scheduler=kind, scheduled=scheduler_enabled() if kind else False,
-        homelab=config.HAS_SERVER)
+        homelab=config.HAS_SERVER, launcher=launcher_exists(), mac=sys.platform == "darwin")
     return out
 
 
@@ -687,7 +743,9 @@ def read_terms():
 
 
 def main(argv):
-    if argv == ["resume-labels"]:
+    if argv == ["launcher"]:  # install.sh
+        print(f"App launcher: {launcher_create()}")
+    elif argv == ["resume-labels"]:
         read_resume_labels()
     elif argv == ["terms"]:
         read_terms()

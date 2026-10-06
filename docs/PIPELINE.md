@@ -17,7 +17,11 @@ job id; work/resume.txt is regenerated from the resume PDF on every export.
 Data: data/ (list, triage, details/, scores, categories, ratings, pool). The homelab owns it;
 the laptop pulls a copy.
 
-MY BOUNDS (decided 2026-10-02)
+MY BOUNDS (decided 2026-10-02; since 2026-10-05 these are preferences: local_config.json "preferences", set in the
+GUI's setup. jobs.DEFAULTS holds the values below, used for any key not set, so nothing changed for an existing setup.
+TRIAGE_PROMPT.md's student / keep / drop lines come from the same preferences ({{student}}, {{keep_roles}},
+{{drop_roles}}, filled into work/ by jobs.render_prompt). Class year in general: your year or below = threshold,
+the next year up = threshold_above + a "<year>+" flag, two or more up = dropped.)
 - Co-op, or Internship only if explicitly Spring 2027. Term unclear = keep + flag.
 - 4 or 6 month. Undergrad must be allowed.
 - Class level: I'm a SOPHOMORE (NUworks profile says Junior; ignore that).

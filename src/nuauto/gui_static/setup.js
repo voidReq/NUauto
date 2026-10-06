@@ -226,6 +226,11 @@
             el("button", { class: "btn " + (d.scheduled ? "" : "primary"), testid: "setup-schedule", text: d.scheduled ? "Turn off" : "Turn on",
               onclick: async () => { if (await post({ action: d.scheduled ? "schedule_off" : "schedule_on" }, d.scheduled ? "Automatic updates off." : "Automatic updates on.")) redraw(); } })) :
             el("p", { class: "small muted", text: "Not available on this system (needs systemd or macOS): use Check for new jobs on Today." }),
+        el("hr", { class: "sep" }),
+        el("h3", { text: "App icon" }),
+        el("div", { class: "row between" }, el("span", { class: "small muted", text: d.mac ? "NUauto in your Applications folder (~/Applications)." : "NUauto in your apps menu." }),
+          el("button", { class: "btn" + (d.launcher ? "" : " primary"), testid: "setup-launcher", text: d.launcher ? "Make it again" : "Add it",
+            onclick: async () => { if (await post({ action: "launcher" }, "App icon added.")) redraw(); } })),
       ];
     },
   };

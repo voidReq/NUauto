@@ -21,7 +21,7 @@ PACKAGE = ["__init__.py", "__main__.py", "cli.py", "config.py", "sheet.py", "job
            "apply.py", "answers.py", "inspect_form.py", "setup_sheet.py", "sync.py", "web.py", "doctor.py", "assist.py",
            "health.py", "demo.py", "gui.py", "onboard.py"]
 CODE = (["pyproject.toml", "README.md", "local_config.example.json", "CLAUDE.md", "CONTRIBUTING.md",
-         "docs/DEPLOY.md", "docs/PIPELINE.md", "docs/ARCHITECTURE.md", "docs/SAFETY.md"]
+         "docs/DEPLOY.md", "docs/PIPELINE.md", "docs/ARCHITECTURE.md", "docs/SAFETY.md", "docs/GUI.md"]
         + [f"src/nuauto/{f}" for f in PACKAGE]
         + [f"prompts/{f}" for f in ("TRIAGE_PROMPT.md", "SCORE_PROMPT.md", "CATEGORY_PROMPT.md", "ASSIST_PROMPT.md")])
 

@@ -4,7 +4,8 @@
   nuauto gui --demo [--demo-state a,b]
                                   everything fake (demo.py) in a temp folder: for trying it out, and for agents
   options: --port N (default: any free port), --no-open (print the URL instead of opening a window),
-           --browser (a normal browser tab instead of an app window)
+           --browser (a normal browser tab instead of an app window),
+           --screenshots DIR (demo only: every screen, light and dark, wide and narrow, saved as PNGs; then quits)
 
 How it is safe to run:
 - It listens on 127.0.0.1 only. A secret made at each start is in the URL it opens once; the page swaps it for a
@@ -30,7 +31,7 @@ import tempfile
 import threading
 import time
 import webbrowser
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -958,6 +959,8 @@ def setup_post(body):
             onboard.scheduler_enable()
         elif a == "schedule_off":
             onboard.scheduler_disable()
+        elif a == "launcher":
+            onboard.launcher_create()
         else:
             raise Refused(f"Unknown setup action {a!r}.")
     except onboard.Refused as e:
@@ -1190,6 +1193,31 @@ def open_window(url, browser_tab=False):
     webbrowser.open(url)
 
 
+SCREENS = ["home", "review", "apply", "company", "answers", "settings", "setup", "logs"]
+
+
+def screenshots(folder, url):
+    """Every screen in headless Firefox, light and dark, desktop and phone width: <screen>-<scheme>-<width>.png.
+    For reviewing the design (agents too). Demo mode only, so no real data ends up in a picture."""
+    from playwright.sync_api import sync_playwright
+    os.makedirs(folder, exist_ok=True)
+    base = url.split("/?")[0]
+    with sync_playwright() as p:
+        b = p.firefox.launch(headless=True)
+        for scheme in ("light", "dark"):
+            for width, label in ((1280, "wide"), (420, "narrow")):
+                ctx = b.new_context(viewport={"width": width, "height": 900}, color_scheme=scheme)
+                page = ctx.new_page()
+                page.goto(url)  # the start URL: sets the cookie
+                for name in SCREENS:
+                    page.goto(f"{base}/#/{name}")
+                    page.wait_for_timeout(1500)
+                    page.screenshot(path=os.path.join(folder, f"{name}-{scheme}-{label}.png"), full_page=True)
+                ctx.close()
+        b.close()
+    print(json.dumps({"screenshots": folder, "count": len(SCREENS) * 4}), flush=True)
+
+
 def pull_loop():
     """Homelab mode: the job data comes from the homelab (like the pull before `nuauto approve`), now and every
     30 minutes. Nothing is pushed on a timer: pushes happen after Review and the Google login, as in the CLI."""
@@ -1232,6 +1260,12 @@ def main(argv):
             sys.exit(__doc__)
         port = int(argv[i + 1])
     no_open = "--no-open" in argv
+    shots = None
+    if "--screenshots" in argv:
+        i = argv.index("--screenshots")
+        if not config.DEMO or i + 1 >= len(argv):
+            sys.exit("--screenshots DIR works only with --demo.")
+        shots, no_open = os.path.abspath(argv[i + 1]), True
     lock = running_instance()
     if lock and not port:
         if no_open:
@@ -1251,6 +1285,13 @@ def main(argv):
     print(json.dumps({"url": url, "port": APP.port, "demo": config.DEMO, "state_dir": config.STATE_DIR}), flush=True)
     if not no_open:
         open_window(url, browser_tab="--browser" in argv)
+    if shots:
+        def shoot():
+            try:
+                screenshots(shots, url)
+            finally:
+                APP.quit()
+        threading.Thread(target=shoot, daemon=True).start()
 
     def bye(*_):
         threading.Thread(target=APP.quit, daemon=True).start()

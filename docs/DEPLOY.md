@@ -6,6 +6,8 @@ means local/local_config.json. The code is the nuauto package (src/nuauto/), ins
 MODES
 - Local mode (default): server_hostname "" in local_config.json (config.HAS_SERVER False).
   Everything runs on one machine: `nuauto update` runs the update here, nothing syncs, no Mark links.
+  Automatic updates: the GUI's setup (Notifications, automatic updates) installs a user timer at 08:00 and 18:00:
+  systemd (~/.config/systemd/user/nuauto-daily.{timer,service}) or launchd (~/Library/LaunchAgents/com.nuauto.daily.plist).
 - Homelab mode: an always-on Linux box runs the update twice a day and sends Discord messages;
   the laptop syncs with it. Set in local_config.json:
     server_hostname  the homelab's hostname (that is how config.IS_SERVER knows it is the homelab)
@@ -16,8 +18,8 @@ MODES
   Below, `ssh homelab` means ssh to server_ssh.
 
 MACHINES (homelab mode)
-- Laptop. Where code is edited; the git repo. Runs everything interactive: approve, rate,
-  apply (needs a real terminal and a visible browser), `nuauto login` (manual SSO),
+- Laptop. Where code is edited; the git repo. Runs everything interactive: the GUI (`nuauto gui`, docs/GUI.md),
+  approve, rate, apply (a real terminal or the GUI, and a visible browser), `nuauto login` (manual SSO),
   `nuauto login google`. Owns data/ratings.json and the resume (local_config.json resume_path).
 - Homelab = PROD. Key-based ssh from the laptop (e.g. over Tailscale). venv made with uv
   (Python 3.12), claude CLI logged in (~/.local/bin/claude, or on PATH), user lingering on
@@ -63,6 +65,7 @@ SECRETS AND STATE (never print or log any of these; all mode 600)
   web_secret.txt        no      yes      created by `nuauto web` on first start. Replacing it breaks
                                          every Mark link already sent.
   assist_profile/       yes     no       company-site logins of `nuauto assist`; never synced
+  gui.lock              yes     no       the running GUI (pid, port, a secret that only opens a window); not synced
   answers.json, profile.json  laptop only in practice (apply runs on the laptop); not synced
 Not secret, gitignored, pushed by sync.push: local_config.json (personal settings),
 docs/STATUS.md (your local log), google_login.txt (date of the last Google login), the resume
@@ -88,6 +91,8 @@ SYNC (sync.py; runs automatically inside `nuauto` on the laptop, homelab mode on
 - `nuauto login`: copy browser_profile/ + session_cookies.json to the homelab (refuses while
   the homelab update is running, because that uses the profile).
 - `nuauto test` and `nuauto doctor` don't sync.
+- The GUI: pull at start and every 30 minutes; push after a Review session and after the Google login, never on a
+  timer (an open GUI on a work-in-progress branch does not deploy it by itself).
 
 DEPLOYING A CHANGE
 1. Change code on the laptop (on a branch; merge to main when approved).

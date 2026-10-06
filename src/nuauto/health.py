@@ -243,17 +243,20 @@ def claude_live():
 
 
 def firefox():
+    """Playwright's Firefox is installed and really starts (a hidden one, with its own empty profile: never the
+    NUworks profile). On Linux a missing system library shows up here."""
     try:
         from playwright.sync_api import sync_playwright
         with sync_playwright() as p:
-            exe = p.firefox.executable_path
+            if not os.path.exists(p.firefox.executable_path):
+                return [check("firefox", "Browser", FAIL, "Playwright's Firefox is not installed.",
+                              ("install_firefox", "Install the browser"))]
+            p.firefox.launch(headless=True).close()
     except Exception as e:
-        return [check("firefox", "Browser", FAIL, f"Playwright does not start ({type(e).__name__}).",
-                      ("install_firefox", "Install the browser"))]
-    if not os.path.exists(exe):
-        return [check("firefox", "Browser", FAIL, "Playwright's Firefox is not installed.",
-                      ("install_firefox", "Install the browser"))]
-    return [check("firefox", "Browser", OK, "Playwright's Firefox is installed.")]
+        first = (str(e).strip().splitlines() or [""])[0][:160]
+        return [check("firefox", "Browser", FAIL, f"Playwright's Firefox does not start: {first} "
+                      "(on Linux it may need system libraries: see README.md, Setup).", ("install_firefox", "Install the browser"))]
+    return [check("firefox", "Browser", OK, "Playwright's Firefox is installed and starts.")]
 
 
 WEBHOOK = re.compile(r"^https://(?:ptb\.|canary\.)?discord(?:app)?\.com/api/webhooks/\d+/[\w-]+$")

@@ -4,32 +4,48 @@ Pool rules and ranking: docs/PIPELINE.md. Safety rules: docs/SAFETY.md.)
 
 MODULES (src/nuauto/)
   cli.py          the `nuauto` command. main() syncs, then dispatches. TOOLS run a module's own
-                  __main__ via run_tool(); COMMANDS are approve/rate/apply/status/update/login/test/doctor/assist.
+                  __main__ via run_tool(); COMMANDS are approve/rate/apply/status/update/login/test/doctor/assist/gui.
+                  `nuauto test` runs the test files 4 at a time.
   config.py       every path and host; reads local/local_config.json. ALLOWED_HOSTS, SSO_HOSTS,
-                  HAS_SERVER, IS_SERVER, find_client_json(), lock_token(). No logic beyond that.
-  sheet.py        the Google Sheet. open_worksheet(), read_rows(), check_limits() (MAX_PER_WEEK/MAX_TOTAL),
-                  set_status(), mark_submit_started()/resolve_submit(), mark_applied_by_hand(),
-                  mark_site_done(), append_note(), add_proposed(), google_login().
-  jobs.py         the job pool + viewers. cmd_list, cmd_triage_export/import, cmd_details (hard_rules),
-                  cmd_score_export/import, cmd_cat_export/import, build_pool(), ranked_pool(),
-                  rate_viewer(), cmd_rate(), cmd_approve(), cmd_suggest(), check_applied().
+                  HAS_SERVER, IS_SERVER, STATE_DIR / DEMO (NUAUTO_STATE_DIR, NUAUTO_DEMO), DEMO_PACE,
+                  find_client_json(), lock_token(), tool_path() (claude/npx, saved paths first). No logic beyond that.
+  sheet.py        the Google Sheet. client() / open_worksheet(interactive) (interactive=False never opens a
+                  login page: NotLoggedIn), read_rows(), check_limits() (MAX_PER_WEEK/MAX_TOTAL), set_status(),
+                  mark_submit_started()/resolve_submit(), mark_applied_by_hand(), mark_site_done(), append_note(),
+                  add_proposed(), unapprove() (GUI Undo), create_sheet() (Sheets API), google_login().
+  jobs.py         the job pool + viewers. PREFS (local_config "preferences" over DEFAULTS), RULES, set_prefs(),
+                  render_prompt(); cmd_list, cmd_triage_export/import, cmd_details (hard_rules),
+                  cmd_score_export/import, cmd_cat_export/import, build_pool(), ranked_pool(), review_queue()
+                  (shared with the GUI), job_view()/text_blocks() (the GUI's job card), rate_viewer(), cmd_rate(),
+                  cmd_approve(), cmd_suggest(), check_applied().
   daily.py        what the homelab timers run. main() -> scan() (steps above via step()), reminders(),
                   run_claude(), notify()/discord(), record_hand_applications(), weekly().
   web.py          Mark-done page. link() makes signed URLs, Handler.do_GET (confirm page) / do_POST (change sheet).
-  browser.py      Playwright Firefox. launch(), goto_logged_in(), relogin(), install_domain_lock(),
-                  RunLog (per-run logs/ dir + screenshots), cmd_login(), cmd_open().
+  browser.py      Playwright Firefox. launch() (takes lock_profile(): one process on the profile), goto_logged_in(),
+                  relogin(), install_domain_lock(), RunLog (per-run logs/ dir + screenshots), cmd_login(), cmd_open().
   apply.py        the NUworks runner. main(), apply_one(), fill_popup(), submit_flow(), check_popup(),
                   submit_nuworks_side(), apply_order().
   answers.py      answer bank. load()/save(), find() (exact match after norm()), resolve_answer(),
-                  TerminalIO / NoTerminalIO, Stop.
+                  TerminalIO (the question methods, terminal wording) / NoTerminalIO / JsonIO (the GUI's channel),
+                  json_ui_allowed(), Stop.
   assist.py       company-site agent. run() launches claude; hook_main() -> hook() -> decide() /
                   update_after() is the guard; bank() is the answer-bank command; assist_target(),
                   nuworks_side().
   inspect_form.py read-only lister of an Apply form. main(); FIELDS_JS is reused by apply.py.
   sync.py         laptop<->homelab rsync. pull(), push(), push_session(), server_busy(); PACKAGE/CODE
                   list the files that reach the homelab.
-  doctor.py       health check. main() -> laptop(), server(), check_public_page().
-  setup_sheet.py  one-time sheet setup; format_sheet() restyles. HEADERS, STATUSES.
+  doctor.py       health check. main() -> laptop() (health.py's checks), server() (piped to the homelab),
+                  server_results(), check_public_page(); --json.
+  health.py       the checks behind doctor and the GUI's status strip: Check, quick (files), light (sheet, claude,
+                  firefox, discord, homelab), heavy (nuworks in a hidden browser, claude_live); desktop_notify().
+  gui.py          `nuauto gui`: Handler (the local server and its checks), App (tasks, health monitor, cached rows),
+                  Task (one child process + its JSON-lines questions), the pages' data (state, review, apply,
+                  company, answers, settings, setup), open_terminal(), screenshots(). Static files: gui_static/.
+  onboard.py      the setup wizard's steps (steps(), check_client, open_and_prepare, resume_preview, check_prefs,
+                  save_webhook, scheduler_*, launcher_create) and the read-only NUworks reads (resume labels, terms).
+  demo.py         demo mode: FakeClient/FakeWorksheet (sheet), serve_nuworks (fake NUworks pages in Playwright), the
+                  fake claude script, sample data, forced states; setup() / update().
+  setup_sheet.py  one-time sheet setup: setup() (refuses a sheet with data: HasData); format_sheet() restyles.
   __main__.py     python -m nuauto -> cli.main.
 
 WHO CALLS WHAT (from the imports)
@@ -44,7 +60,11 @@ WHO CALLS WHAT (from the imports)
   assist      -> answers, config; sheet, browser, apply (inside functions).
   inspect_form-> browser, config.
   sync        -> config.
-  doctor      -> config, sync; web (inside a function).
+  doctor      -> config, sync; health, web (inside functions).
+  health      -> config; sheet, jobs, browser, doctor (inside functions).
+  gui         -> answers, config, health, jobs, sheet; apply, assist, onboard, sync, browser (inside functions).
+  onboard     -> config, health, jobs; sheet, setup_sheet, apply, browser, demo (inside functions).
+  demo        -> config; sheet, jobs, answers (inside functions). browser and sheet import it only in demo mode.
   setup_sheet -> config; sheet (SITE_MARK).
   cli         -> config; everything else is imported lazily per command (sync, doctor, jobs, apply,
                  sheet, daily, assist, browser). Tools via runpy: jobs, answers, sheet, setup_sheet,
@@ -67,6 +87,12 @@ MAIN FLOWS
     browser.launch + install_domain_lock -> fill_popup (check_popup, resume dropdown,
     fill_extra_fields via answers.resolve_answer) -> submit_flow: sheet.mark_submit_started, click,
     confirm text -> sheet.resolve_submit (Applied or Failed). Any stop -> sheet.set_status("Needs Human").
+  nuauto gui
+    gui.main: refuses in a Claude Code shell (real mode); single instance (local/gui.lock); ThreadingHTTPServer on
+    127.0.0.1; App.monitor runs the health groups on timers. A button -> /api/action -> App.start -> Task runs
+    `python -m nuauto <cmd>` (apply / assist nuworks with --ui json). Task._read splits the child's output: plain
+    lines = log, "::nuauto:: " lines = JsonIO questions/events. /api/answer writes the reply to the child's stdin;
+    /api/stop sends SIGINT. The page (gui_static/app.js) polls /api/state, /api/health, /api/task.
   nuauto assist <row>
     assist.run: find_row, sheet.check_limits, write mcp.json + settings.json (hooks) into a
     logs/<stamp>_assist_row<N>/ dir, start `claude` with the Playwright MCP browser. Every tool call goes
@@ -88,8 +114,9 @@ STATE ON DISK (repo root; all gitignored except as noted)
           actions.log, state.json, mcp.json, settings.json). daily.py: daily-<stamp>.txt. web.py: web.log.
   local/  personal and secret, mode 700, never committed. config + profile (local_config.json,
           profile.json), answers.json (answers.py), Google files (token.json, google_login.txt;
-          sheet.py), NUworks session (session_cookies.json, browser_profile/; browser.py),
-          assist_profile/ (assist.py), web_secret.txt (web.py), discord_webhook.txt (daily.py).
+          sheet.py), NUworks session (session_cookies.json, browser_profile/, browser_profile.lock; browser.py),
+          assist_profile/ (assist.py), web_secret.txt (web.py), discord_webhook.txt (daily.py),
+          gui.lock (gui.py), onboard.json (onboard.py). Demo mode: all of these under a temp NUAUTO_STATE_DIR.
           Which of these sync to the homelab: docs/DEPLOY.md.
   Also in the repo, tracked: prompts/ (Claude prompts), tests/ (offline checks), deploy/systemd/.
 
