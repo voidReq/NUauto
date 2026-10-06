@@ -418,7 +418,7 @@ def cmd_triage_import():
     results, problems = read_outputs("triage")
     bad = [i for i, r in results.items() if not isinstance(r.get("keep"), bool)]
     if problems or bad:
-        sys.exit("Not imported:\n  " + "\n  ".join(problems + [f"{len(bad)} rows without a true/false keep"]))
+        sys.exit("Not imported:\n  " + "\n  ".join(problems + ([f"{len(bad)} rows without a true/false keep"] if bad else [])))
     triage = load("triage.json", {})
     triage.update({i: {"keep": r["keep"], "why": str(r.get("why", ""))[:200]} for i, r in results.items()})
     save("triage.json", triage)

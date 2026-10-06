@@ -9,6 +9,7 @@ Claude runs as `claude -p` (Sonnet) with only Read/Write tools, one call per bat
 """
 import json
 import os
+import re
 import subprocess
 import sys
 import traceback
@@ -22,6 +23,8 @@ from nuauto import jobs  # noqa: E402
 
 # config.tool_path searches ~/.local/bin and the usual install folders: systemd units run with a short PATH
 CLAUDE = config.tool_path("claude") or "claude"
+# Claude's error when its login is gone (e.g. "Failed to authenticate: OAuth session expired", "Please run /login")
+AUTH_RE = re.compile(r"authenticat|logged out|/login|log in|oauth|401", re.I)
 SCANS = "scans.json"  # per-run counts for the morning summary (data/)
 LOG_PATH = os.path.join(config.LOGS_DIR, f"daily-{datetime.now():%Y%m%d-%H%M}.txt")
 
@@ -57,6 +60,7 @@ def discord(text):
 
 
 def run_claude(prompt_file, batch_file):
+    """One Claude call on one batch file. Returns None, or Claude's error text if it exited with an error."""
     name = os.path.basename(batch_file)
     w = config.WORK_DIR
     prompt = (f"Follow {jobs.render_prompt(prompt_file)} exactly: read it first, then "
@@ -72,20 +76,50 @@ def run_claude(prompt_file, batch_file):
          "--disallowedTools", "Bash", "WebFetch", "WebSearch", "Edit",
          "--permission-mode", "acceptEdits"],
         cwd=config.STATE_DIR, capture_output=True, text=True, timeout=1800)  # work/ is under it: Claude may write there
-    log(f"claude: {name} exit {r.returncode} {r.stdout.strip()[-200:]!r}")
+    out = (r.stdout.strip() or r.stderr.strip())[-200:]
+    log(f"claude: {name} exit {r.returncode} {out!r}")
+    return None if r.returncode == 0 else out or f"exit {r.returncode}"
+
+
+def where():
+    return "the homelab" if config.IS_SERVER else "this machine"
 
 
 def claude_ready():
     """Before the first Claude batch: is Claude Code there and logged in? Otherwise every batch would fail one by
     one. An unclear answer from `claude auth status` does not block the run."""
     from nuauto import health
-    where = "the homelab" if config.IS_SERVER else "this machine"
     status = health.claude_status()
     if status is None:
-        notify("NUauto: Claude Code not found", f"Scoring can't run. Install Claude Code on {where} (README.md, Setup).")
+        notify("NUauto: Claude Code not found", f"Scoring can't run. Install Claude Code on {where()} (README.md, Setup).")
         return False
     if status and not status.get("loggedIn"):
-        notify("NUauto: Claude Code is logged out", f"Scoring can't run. On {where} run: claude auth login")
+        notify("NUauto: Claude Code is logged out", f"Scoring can't run. On {where()} run: claude auth login")
+        return False
+    return True
+
+
+def claude_step(ready, prompt_file, batches, import_fn, title):
+    """Claude on each batch file, then import the results. Returns False if it stopped (already notified).
+    A login error stops at once with the "logged out" message: `claude auth status` can still say logged in
+    while the saved login can no longer be renewed. Other Claude errors go in front of the import's problems."""
+    if not batches:
+        return True
+    if not ready():
+        return False
+    errors = []
+    for b in batches:
+        err = run_claude(prompt_file, b)
+        if err and AUTH_RE.search(err):
+            notify("NUauto: Claude Code is logged out",
+                   f"Scoring can't run. On {where()} run: claude auth login\nClaude said: {err}")
+            return False
+        if err:
+            errors.append(f"{os.path.basename(b)}: {err}")
+    ok, msg = step(import_fn)
+    if not ok:
+        said = "Claude failed on " + "; ".join(errors) + "\n" if errors else ""
+        notify(title, (said + msg)[:600])
         return False
     return True
 
@@ -129,16 +163,9 @@ def scan(before):
             checked.append(claude_ready())
         return checked[0]
 
-    batches = jobs.cmd_triage_export()
-    if batches and not ready():
+    if not claude_step(ready, "TRIAGE_PROMPT.md", jobs.cmd_triage_export(), jobs.cmd_triage_import,
+                       "NUauto: triage results incomplete"):
         return 1
-    for b in batches:
-        run_claude("TRIAGE_PROMPT.md", b)
-    if batches:
-        ok, msg = step(jobs.cmd_triage_import)
-        if not ok:
-            notify("NUauto: triage results incomplete", msg[:200])
-            return 1
 
     log("details")
     ok, msg = step(jobs.cmd_details)
@@ -146,26 +173,12 @@ def scan(before):
         notify("NUauto: update stopped", f"{msg}. Run `nuauto login` on your laptop (it copies the session to the homelab).")
         return 1
 
-    batches = jobs.cmd_score_export()
-    if batches and not ready():
+    if not claude_step(ready, "SCORE_PROMPT.md", jobs.cmd_score_export(), jobs.cmd_score_import,
+                       "NUauto: scoring incomplete"):
         return 1
-    for b in batches:
-        run_claude("SCORE_PROMPT.md", b)
-    if batches:
-        ok, msg = step(jobs.cmd_score_import)
-        if not ok:
-            notify("NUauto: scoring incomplete", msg[:200])
-            return 1
 
-    batches = jobs.cmd_cat_export()
-    if batches and not ready():
-        return 1
-    for b in batches:
-        run_claude("CATEGORY_PROMPT.md", b)
-    if batches:
-        ok, msg = step(jobs.cmd_cat_import)
-        if not ok:
-            notify("NUauto: categories incomplete", msg[:200])  # pool still builds; those jobs show 'uncategorized'
+    # a failure here still builds the pool; those jobs show 'uncategorized'
+    claude_step(ready, "CATEGORY_PROMPT.md", jobs.cmd_cat_export(), jobs.cmd_cat_import, "NUauto: categories incomplete")
 
     pool = jobs.build_pool()
     jobs.save("pool.json", pool)
