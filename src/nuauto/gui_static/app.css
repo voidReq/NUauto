@@ -85,6 +85,8 @@ code, .mono { font-family: var(--mono); font-size: 12.5px; }
 .stack { display: flex; flex-direction: column; gap: 10px; }
 .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .between { justify-content: space-between; }
+.row + .card, .row + table.grid, .row + .note { margin-top: 14px; }
+.toolbar { margin-bottom: 16px; }
 .muted { color: var(--muted); }
 .small { font-size: 12.5px; }
 .big { font-size: 34px; font-weight: 700; letter-spacing: -.02em; line-height: 1.1; }
@@ -155,7 +157,7 @@ label.field span.muted { font-weight: 400; }
 .match.good { color: var(--ok); }
 .match.ok { color: var(--warn); }
 .decide { position: sticky; bottom: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 88%, transparent);
-  backdrop-filter: blur(6px); border-top: 1px solid var(--border); padding: 12px 0; margin-top: 8px; }
+  backdrop-filter: blur(6px); border-top: 1px solid var(--border); padding: 16px 0 20px; margin-top: 8px; }
 
 /* runs: log, screenshot */
 .log { font: 12px/1.55 var(--mono); background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm);

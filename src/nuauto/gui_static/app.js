@@ -462,12 +462,22 @@ function markRow(kind, t) {
 // ---- Review (approve, or rate only)
 screens.review = async (view) => {
   let mode = sessionStorage.getItem("reviewMode") || "approve";
-  let jobs = [], i = 0, card = null, history = {};
+  let jobs = [], i = 0, card = null, history = {}, shown = 0;
+  const cards = new Map();  // job id -> promise of its card (the next ones are fetched ahead)
+  let queue = Promise.resolve();  // decisions are sent to the server one at a time, behind the screen
+  const getCard = (id) => {
+    if (!cards.has(id)) {
+      const p = api.get(`/api/job/${encodeURIComponent(id)}`);
+      p.catch(() => cards.delete(id));
+      cards.set(id, p);
+    }
+    return cards.get(id);
+  };
   const body = el("div");
   const seg = el("div", { class: "seg", role: "group", "aria-label": "Mode" },
     el("button", { "aria-pressed": String(mode === "approve"), testid: "mode-approve", text: "Approve", onclick: () => setMode("approve") }),
     el("button", { "aria-pressed": String(mode === "rate"), testid: "mode-rate", text: "Rate only", onclick: () => setMode("rate") }));
-  fill(view, el("div", { class: "row between" }, seg, el("span", { class: "small muted", id: "review-pos" })), body);
+  fill(view, el("div", { class: "row between toolbar" }, seg, el("span", { class: "small muted", id: "review-pos" })), body);
 
   function setMode(m) {
     mode = m;
@@ -478,7 +488,7 @@ screens.review = async (view) => {
 
   async function load() {
     fill(body, el("p", { class: "empty", text: "Loading the review list…" }));
-    try { const r = await api.get(`/api/review?mode=${mode}`); jobs = r.jobs; i = 0; }
+    try { const r = await api.get(`/api/review?mode=${mode}`); jobs = r.jobs; i = 0; cards.clear(); }
     catch (e) { fill(body, el("div", { class: "note fail", text: e.message })); return; }
     show();
   }
@@ -493,11 +503,13 @@ screens.review = async (view) => {
           el("a", { class: "btn primary", href: mode === "approve" ? "#/apply" : "#/home", text: mode === "approve" ? "Go to Apply" : "Done" }))));
       return;
     }
-    const j = jobs[i];
-    try { card = await api.get(`/api/job/${encodeURIComponent(j.id)}`); }
-    catch (e) { fill(body, el("div", { class: "note fail", text: e.message })); return; }
+    const j = jobs[i], mine = ++shown;
+    try { card = await getCard(j.id); }
+    catch (e) { if (mine === shown) fill(body, el("div", { class: "note fail", text: e.message })); return; }
+    if (mine !== shown) return;  // you already moved on
     fill(body, jobCard(card, j, history[j.id]), decideBar(j));
     window.scrollTo(0, 0);
+    jobs.slice(i + 1, i + 3).forEach((n) => getCard(n.id).catch(() => {}));
   }
 
   function decideBar(j) {
@@ -510,32 +522,51 @@ screens.review = async (view) => {
       el("a", { class: "btn ghost", href: card.url, target: "_blank", rel: "noopener noreferrer", testid: "btn-open" }, "Open on NUworks", el("kbd", { text: "O" })));
   }
 
-  async function decide(decision) {
+  // The next job shows at once; the sheet / ratings write happens behind it (one at a time, in order).
+  // If it fails you are taken back to that job with the error.
+  function decide(decision) {
     const j = jobs[i];
     if (!j) return;
     if (decision === "skip") { i++; return show(); }
     if (decision === "back") { i = Math.max(0, i - 1); return show(); }
-    const before = history[j.id];
-    try {
+    const before = history[j.id], index = i, oldRating = j.rating;
+    if (before && before.decision === "approve" && decision === "approve") { i++; return show(); }  // already in the sheet
+    const entry = { decision, row: null, previous: before ? before.previous : null };
+    history[j.id] = entry;
+    j.rating = decision === "no" ? 0 : 1;
+    let undone = false;
+    queue = queue.then(async () => {
       if (before && before.row && decision !== "approve") {  // changed your mind about an approved job
         await api.post("/api/undo", { id: j.id, row: before.row, previous: before.previous });
-        delete history[j.id];
+        undone = true;
       }
-      if (before && before.row && decision === "approve") { i++; return show(); }  // already in the sheet
       const r = await api.post("/api/decide", { id: j.id, decision, mode });
-      history[j.id] = { decision, row: r.row, previous: before ? before.previous : r.previous };
-      j.rating = decision === "no" ? 0 : 1;
-      if (decision === "approve") {
-        const id = j.id, row = r.row, previous = history[id].previous;
-        toast(`Approved: added to the sheet${row ? ` (row ${row})` : ""}.`, { action: "Undo", onaction: async () => {
-          try { await api.post("/api/undo", { id, row, previous }); delete history[id]; toast("Undone: the row is back to Proposed."); pollState(); }
-          catch (e) { fail(e); }
-        } });
-      }
-      i++;
-      show();
+      entry.row = r.row;
+      if (!before) entry.previous = r.previous;
       pollState();
-    } catch (e) { fail(e); }
+    }).catch((e) => {
+      entry.failed = true;
+      if (before && !undone) history[j.id] = before; else delete history[j.id];
+      j.rating = oldRating;
+      i = index;
+      show();
+      fail(e);
+    });
+    if (decision === "approve") {
+      toast("Approved: adding it to the sheet.", { action: "Undo", onaction: async () => {
+        try {
+          await queue;
+          if (entry.failed) return;
+          await api.post("/api/undo", { id: j.id, row: entry.row, previous: entry.previous });
+          delete history[j.id];
+          j.rating = oldRating;
+          toast("Undone: the row is back to Proposed.");
+          pollState();
+        } catch (e) { fail(e); }
+      } });
+    }
+    i++;
+    show();
   }
 
   const keys = (e) => {
@@ -551,7 +582,7 @@ screens.review = async (view) => {
   };
   document.addEventListener("keydown", keys);
   await load();
-  return { leave: () => { document.removeEventListener("keydown", keys); api.post("/api/review/done", {}).catch(() => {}); } };
+  return { leave: () => { document.removeEventListener("keydown", keys); queue.then(() => api.post("/api/review/done", {})).catch(() => {}); } };
 };
 
 function jobCard(c, j, mine) {
