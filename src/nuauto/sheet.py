@@ -168,10 +168,13 @@ def google_login_age():
 
 
 def google_login():
-    """Fresh Google login now (resets the 7-day clock)."""
+    """Fresh Google login now (resets the 7-day clock). Before a sheet is chosen (first setup) it only logs in."""
     if os.path.exists(config.TOKEN_PATH):
         os.remove(config.TOKEN_PATH)
-    open_worksheet()
+    if config.SHEET_ID in ("", "YOUR_GOOGLE_SHEET_ID"):
+        client()
+    else:
+        open_worksheet()
     print("Google login done.")
 
 

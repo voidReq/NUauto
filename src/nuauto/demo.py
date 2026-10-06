@@ -322,8 +322,8 @@ def setup(state_names=()):
         _write(config.LOCAL_CONFIG_PATH, base, mode=0o644)
         _write(_path("demo_sheet_DEMO-SHEET.json"), {"title": "NUauto jobs (demo)", "rows": []})
         return
-    _write(config.LOCAL_CONFIG_PATH, {**base, "sheet_id": SHEET_ID, "resume_path": resume,
-                                      "tos_ack": today.isoformat()}, mode=0o644)
+    _write(config.LOCAL_CONFIG_PATH, {**base, "sheet_id": SHEET_ID, "resume_path": resume, "tos_ack": today.isoformat(),
+                                      "preferences": dict(jobs.DEFAULTS)}, mode=0o644)
     _write(config.PROFILE_PATH, {"resume_label": RESUME_LABEL})
     _write(_path("client_secret.json"), {"installed": {"client_id": "demo.apps.googleusercontent.com",
                                                        "client_secret": "demo", "redirect_uris": ["http://localhost"]}})
@@ -475,6 +475,14 @@ SSO_PASSWORD = _page("Log in", """<h1>Northeastern sign in (demo)</h1>
 <label for=u>Username</label><input id=u><label for=p>Password</label><input id=p type=password>""")
 SSO_BACK = _page("Signing in", f"<p>Signing you in...</p><script>location.replace('{HOST}/students/app/jobs/discover?demo_relogin=1')</script>")
 DISCOVER = _page("Jobs | NUworks", "<h1>Jobs</h1><p>Welcome back (demo).</p>")
+SEARCH = _page("Search Jobs | NUworks", "<h1>Search jobs</h1><script>fetch('/api/v2/jobs/filters/students')"
+               ".then(function (r) { return r.json(); })</script>")
+# what the term picker reads (the real response's shape may differ: onboard.find_terms looks for terms anywhere)
+FILTERS = {"models": [{"key": "el_work_term", "options": [
+    {"_id": "d13c36bce4531e63c56c9b58b90dbb71", "_label": "2027 - Spring"},
+    {"_id": "demo00000000000000000000fall2027", "_label": "2027 - Fall"},
+    {"_id": "demo00000000000000000000fall2026", "_label": "2026 - Fall"}]},
+    {"key": "job_type", "options": [{"_id": "5", "_label": "Co-op"}]}]}
 
 POPUPS = {
     "plain": "",
@@ -541,6 +549,10 @@ def _nuworks(route, u, req):
         set_state("nuworks-relogin", False)
     if {"nuworks-relogin", "nuworks-password"} & states():  # the session expired
         return _html(route, SIGN_IN)
+    if u.path.startswith("/api/v2/jobs/filters"):
+        return route.fulfill(status=200, content_type="application/json", body=json.dumps(FILTERS))
+    if u.path.startswith("/students/app/jobs/search"):
+        return _html(route, SEARCH)
     if u.path.startswith("/students/app/jobs/detail/"):
         return _html(route, job_page(u.path.rstrip("/").split("/")[-1]))
     if u.path.startswith("/students/app/"):

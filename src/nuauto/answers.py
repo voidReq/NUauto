@@ -194,7 +194,10 @@ class JsonIO(TerminalIO):
             self.send({"t": "ask", "id": self._n, "kind": kind, "context": self._context, **fields})
             self._context = []
             while True:
-                msg = self._answers.get()
+                try:  # short waits: a Ctrl+C / Stop that lands just as the wait starts is still seen within 0.5 s
+                    msg = self._answers.get(timeout=0.5)
+                except queue.Empty:
+                    continue
                 if msg is None:
                     raise KeyboardInterrupt  # the GUI went away mid-question
                 if msg.get("id") == self._n:

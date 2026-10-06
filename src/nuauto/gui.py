@@ -11,8 +11,8 @@ How it is safe to run:
   cookie. Every request needs that cookie and a Host header naming this server; every POST also needs the header
   X-NUauto: 1 (other websites can't send it) and JSON. Secrets (tokens, cookies, the webhook) never reach the page.
 - Long or browser work runs as the same `nuauto ...` commands, one at a time, in child processes (Task). Their
-  questions come over answers.JsonIO and show as dialogs; Stop sends SIGINT to the child's process group, the
-  signal Ctrl+C sends. If this process dies, the child's stdin closes and it stops the same way.
+  questions come over answers.JsonIO and show as dialogs; Stop sends SIGINT to the child (the KeyboardInterrupt
+  path Ctrl+C takes). If this process dies, the child's stdin closes and it stops the same way.
 - Real mode refuses to start inside a Claude Code shell (CLAUDECODE): agents use --demo.
 """
 import hmac
@@ -126,12 +126,16 @@ class Task:
         return True
 
     def stop(self, force=False):
-        """SIGINT to the process group (what Ctrl+C sends); force: SIGKILL, for a run that will not stop."""
+        """SIGINT to the run's own process: the KeyboardInterrupt path Ctrl+C takes, while the browser stays up to be
+        closed cleanly. force: SIGKILL to the whole process group (browser included), for a run that won't stop."""
         if self.state != "running":
             return
         self.stopping = True
         try:
-            os.killpg(self.proc.pid, signal.SIGKILL if force else signal.SIGINT)
+            if force:
+                os.killpg(self.proc.pid, signal.SIGKILL)
+            else:
+                os.kill(self.proc.pid, signal.SIGINT)
         except ProcessLookupError:
             pass
 
@@ -432,10 +436,11 @@ def review_counts(rows):
 
 
 def setup_needed():
-    if not os.path.exists(config.LOCAL_CONFIG_PATH):
-        return True
+    """From the files only (the page asks every few seconds); the Setup screen checks each step for real."""
     cfg = read_local()
-    return not (cfg.get("sheet_id") and cfg.get("sheet_id") != health.PLACEHOLDER_SHEET and cfg.get("tos_ack"))
+    return not (cfg.get("tos_ack") and cfg.get("sheet_id") not in (None, "", health.PLACEHOLDER_SHEET)
+                and cfg.get("preferences") and os.path.isfile(os.path.expanduser(cfg.get("resume_path") or ""))
+                and health.resume_label() and os.path.exists(config.TOKEN_PATH))
 
 
 def read_local():
@@ -587,6 +592,9 @@ def demo_cmd(*args):
     return [PY, "-m", "nuauto.demo", *args]
 
 
+VISIBLE = {"AUTO_HEADLESS": ""}  # runs you watch get a visible browser, whatever this process's environment says
+
+
 def act(body):
     kind = body.get("kind")
     args = body.get("args") or {}
@@ -600,14 +608,15 @@ def act(body):
             if not str(n).isdigit() or int(n) < 1:
                 raise Refused("At most how many? A whole number, 1 or more.")
             cmd += ["-n", str(int(n))]
-        task = APP.start("apply", "Applying", cmd, on_done=lambda t: APP.run_now(["quick"]))
+        task = APP.start("apply", "Applying", cmd, env=VISIBLE, on_done=lambda t: APP.run_now(["quick"]))
     elif kind == "update":
         cmd = demo_cmd("update") if config.DEMO else [PY, "-m", "nuauto", "update"]
         task = APP.start("update", "Checking for new jobs", cmd, browser=not config.HAS_SERVER,
                          on_done=lambda t: APP.run_now(["quick"]))
     elif kind == "login_nuworks":
         cmd = demo_cmd("login_nuworks") if config.DEMO else [PY, "-m", "nuauto", "login"]
-        task = APP.start("login_nuworks", "NUworks login", cmd, on_done=lambda t: APP.run_now(["quick", "nuworks"]))
+        task = APP.start("login_nuworks", "NUworks login", cmd, env=VISIBLE,
+                         on_done=lambda t: APP.run_now(["quick", "nuworks"]))
     elif kind == "login_google":
         task = APP.start("login_google", "Google login", [PY, "-m", "nuauto", "login", "google"], browser=False,
                          on_done=lambda t: APP.run_now(["quick", "sheet"]))
@@ -634,7 +643,7 @@ def act(body):
         if not str(row).isdigit():
             raise Refused("Which row?")
         task = APP.start("nuworks_side", f"NUworks side of row {row}",
-                         [PY, "-m", "nuauto", "assist", "nuworks", str(int(row)), "--ui", "json"])
+                         [PY, "-m", "nuauto", "assist", "nuworks", str(int(row)), "--ui", "json"], env=VISIBLE)
     elif kind == "assist":
         row = args.get("row")
         if not str(row).isdigit():
@@ -870,6 +879,86 @@ def write_json_secret(path, data):
     os.replace(tmp, path)
 
 
+# ---------------------------------------------------------------- setup wizard (onboard.py does the work)
+
+def setup_get():
+    from nuauto import onboard
+    found = onboard.steps({c.id: c for c in APP.checks()})
+    return {"steps": found, "complete": onboard.complete(found), "demo": config.DEMO}
+
+
+def setup_post(body):
+    from nuauto import onboard
+    from nuauto import sheet as sheet_
+    a = body.get("action")
+    try:
+        if a == "ack":
+            onboard.save_config({"tos_ack": date.today().isoformat()})
+        elif a == "client_upload":
+            onboard.save_client(str(body.get("text", "")))
+            APP.run_now(["quick"])
+        elif a == "client_downloads":
+            path = onboard.downloads_client()
+            if not path:
+                raise Refused("No client_secret_*.json in your Downloads folder.")
+            with open(path) as f:
+                onboard.save_client(f.read())
+            APP.run_now(["quick"])
+        elif a == "sheet_create":
+            new_id = sheet_.create_sheet("NUauto jobs")
+            onboard.open_and_prepare(new_id)
+            onboard.save_config({"sheet_id": new_id})
+            APP.refresh_rows(force=True)
+        elif a == "sheet_link":
+            sid = onboard.sheet_id_from(body.get("text"))
+            onboard.open_and_prepare(sid)
+            onboard.save_config({"sheet_id": sid})
+            APP.refresh_rows(force=True)
+        elif a == "resume_pick":
+            return {"path": onboard.pick_file()}
+        elif a == "resume_set":
+            path = os.path.abspath(os.path.expanduser(str(body.get("path", "")).strip()))
+            ok, text = onboard.resume_preview(path)
+            if not ok:
+                raise Refused(text)
+            onboard.save_config({"resume_path": path})
+            APP.run_now(["quick"])
+        elif a == "labels_read":
+            task = APP.start("onboard_labels", "Reading your resumes on NUworks", [PY, "-m", "nuauto.onboard", "resume-labels"])
+            return {"task": task.view()}
+        elif a == "terms_read":
+            task = APP.start("onboard_terms", "Reading the term list on NUworks", [PY, "-m", "nuauto.onboard", "terms"])
+            return {"task": task.view()}
+        elif a == "label_set":
+            label = str(body.get("label", "")).strip()
+            if not label:
+                raise Refused("Pick a resume.")
+            write_json_secret(config.PROFILE_PATH, {**read_json(config.PROFILE_PATH), "resume_label": label})
+            APP.run_now(["quick"])
+        elif a == "prefs_save":
+            onboard.save_config({"preferences": onboard.check_prefs(body.get("prefs"))})
+        elif a == "discord_save":
+            onboard.save_webhook(body.get("url"))
+            APP.run_now(["discord"])
+        elif a == "discord_test":
+            return {"message": onboard.test_webhook()}
+        elif a == "discord_remove":
+            if os.path.exists(config.DISCORD_WEBHOOK_PATH):
+                os.remove(config.DISCORD_WEBHOOK_PATH)
+            APP.run_now(["discord"])
+        elif a == "schedule_on":
+            onboard.scheduler_enable()
+        elif a == "schedule_off":
+            onboard.scheduler_disable()
+        else:
+            raise Refused(f"Unknown setup action {a!r}.")
+    except onboard.Refused as e:
+        raise Refused(str(e))
+    except sheet_.SheetError as e:
+        raise Refused(str(e))
+    return setup_get()
+
+
 # ---------------------------------------------------------------- HTTP
 
 class NotFound(Exception):
@@ -886,6 +975,7 @@ GET_ROUTES = {
     "/api/answers": lambda q: answers_get(),
     "/api/logs": lambda q: logs(),
     "/api/settings": lambda q: settings_get(),
+    "/api/setup": lambda q: setup_get(),
 }
 POST_ROUTES = {
     "/api/action": act,
@@ -897,6 +987,7 @@ POST_ROUTES = {
     "/api/mark": mark,
     "/api/answers": answers_put,
     "/api/settings": settings_put,
+    "/api/setup": setup_post,
     "/api/health/run": lambda body: APP.run_now(body.get("groups") or ["quick", "sheet", "claude"]) or {},
     "/api/quit": lambda body: (threading.Timer(0.3, APP.quit).start(), {})[1],
 }

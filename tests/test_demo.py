@@ -127,8 +127,8 @@ def answer(p, msg):
     p.stdin.flush()
 
 
-def ctrl_c(p, msg):  # what the GUI's Stop button sends: SIGINT to the run's process group, like Ctrl+C
-    os.killpg(p.pid, signal.SIGINT)
+def ctrl_c(p, msg):  # what the GUI's Stop button sends: SIGINT to the run (Ctrl+C's KeyboardInterrupt path)
+    os.kill(p.pid, signal.SIGINT)
 
 
 def gui_gone(p, msg):  # the GUI died: its end of the pipe closes

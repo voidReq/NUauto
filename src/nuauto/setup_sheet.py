@@ -8,8 +8,6 @@
 """
 import sys
 
-import gspread
-
 from nuauto import config
 
 HEADERS = ["URL", "Company", "Title", "Status", "Notes", "Date"]
@@ -86,24 +84,15 @@ def format_sheet(sh, ws):
     sh.batch_update({"requests": reqs})
 
 
-def main():
-    gc = gspread.oauth(
-        scopes=config.WRITE_SCOPES,
-        credentials_filename=config.find_client_json(),
-        authorized_user_filename=config.TOKEN_PATH,
-    )
-    config.lock_token()
-    sh = gc.open_by_key(config.SHEET_ID)
-    ws = sh.sheet1
+class HasData(Exception):
+    """The sheet already has values; setup never writes over them."""
 
-    if sys.argv[1:] == ["format"]:
-        format_sheet(sh, ws)
-        return print("Done: styling applied (no values changed).")
-    if sys.argv[1:]:
-        sys.exit(__doc__)
+
+def setup(sh, ws):
+    """One-time setup of an empty sheet: headers, Status dropdown, frozen row 1, styling. Refuses (HasData) if any
+    cell already has a value. Used by main() and by the GUI's setup wizard."""
     if any(cell.strip() for row in ws.get_all_values() for cell in row):
-        sys.exit("Sheet already has data. Nothing was changed. To restyle it: nuauto setup-sheet format")
-
+        raise HasData("Sheet already has data. Nothing was changed. To restyle it: nuauto setup-sheet format")
     ws.update(range_name="A1:F1", values=[HEADERS])
     ws.freeze(rows=1)
     sh.batch_update({
@@ -128,6 +117,21 @@ def main():
         }]
     })
     format_sheet(sh, ws)
+
+
+def main():
+    from nuauto import sheet
+    sh = sheet.client().open_by_key(config.SHEET_ID)
+    ws = sh.sheet1
+    if sys.argv[1:] == ["format"]:
+        format_sheet(sh, ws)
+        return print("Done: styling applied (no values changed).")
+    if sys.argv[1:]:
+        sys.exit(__doc__)
+    try:
+        setup(sh, ws)
+    except HasData as e:
+        sys.exit(str(e))
     print("Done: headers written, Status dropdown added (D2:D1000), row 1 frozen, styled.")
 
 

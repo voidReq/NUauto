@@ -550,7 +550,7 @@ function jobCard(c, j, mine) {
   const margin = c.match - c.threshold;
   const facts = [
     ["Match", el("span", {}, el("span", { class: "match " + (margin >= 15 ? "good" : "ok"), text: `${c.match}%` }),
-      el("span", { class: "muted", text: ` · needs ${c.threshold}%` + (c.bonus ? ` · +${c.bonus} Boston for ranking` : "") +
+      el("span", { class: "muted", text: ` · needs ${c.threshold}%` + (c.bonus ? ` · +${c.bonus} ${c.bonus_label} for ranking` : "") +
         (c.taste !== null && c.taste !== undefined ? ` · your taste ${Math.round(c.taste * 100)}%` : "") }))],
     ["Closes", el("span", { class: c.soon ? "chip warn" : "", text: c.closes_text })],
     ["Pay", c.pay || "not listed"],
@@ -810,6 +810,7 @@ async function route() {
   fill(view, );
   try { S.screen = (await screens[key](view)) || {}; } catch (e) { fail(e); S.screen = {}; }
   renderTaskbar();
+  pollState();  // fresh counts for the new screen, not the last poll's
   view.focus({ preventScroll: true });
 }
 

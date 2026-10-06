@@ -94,7 +94,7 @@ assert jobs.category_bonus("embedded") == 15 and jobs.category_bonus("hardware")
 assert jobs.is_header("Responsibilities:") and jobs.is_header("WHAT YOU'LL DO") and jobs.is_header("What You'll Bring")
 assert not jobs.is_header("Boston, MA") and not jobs.is_header("- Write firmware.") and not jobs.is_header("We build robots.")
 # Boston bonus
-assert jobs.boston(d(states=["US-MA"])) and not jobs.boston(d())
+assert jobs.in_home_state(d(states=["US-MA"])) and not jobs.in_home_state(d())
 
 # html stripping keeps line structure
 assert jobs.strip_html("<p>a &amp; b</p><ul><li>x</li><li>y</li></ul>") == "a & b\n- x\n- y"
