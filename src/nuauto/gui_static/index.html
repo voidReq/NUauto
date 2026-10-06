@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>NUauto</title>
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/app.js" defer></script>
+<script src="/static/setup.js" defer></script>
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="brand"><img src="/static/icon.svg" alt="" width="28" height="28"><span>NUauto</span></div>
+    <nav aria-label="Main">
+      <a href="#/home" data-testid="nav-home" data-route="home"><span>Today</span></a>
+      <a href="#/review" data-testid="nav-review" data-route="review"><span>Review</span><b class="count" data-count="review"></b></a>
+      <a href="#/apply" data-testid="nav-apply" data-route="apply"><span>Apply</span><b class="count" data-count="approved"></b></a>
+      <a href="#/company" data-testid="nav-company" data-route="company"><span>Company sites</span><b class="count" data-count="company"></b></a>
+      <a href="#/answers" data-testid="nav-answers" data-route="answers"><span>Answers</span></a>
+      <a href="#/settings" data-testid="nav-settings" data-route="settings"><span>Settings</span></a>
+    </nav>
+    <div class="side-foot" id="side-foot"></div>
+  </aside>
+  <div class="main">
+    <header class="top">
+      <h1 id="page-title">NUauto</h1>
+      <div class="health" id="health" role="group" aria-label="Health"></div>
+    </header>
+    <div id="banner"></div>
+    <main id="view" tabindex="-1"></main>
+  </div>
+</div>
+<div id="taskbar" class="taskbar" hidden></div>
+<div id="modal-root"></div>
+<div id="toasts" class="toasts" aria-live="polite" data-testid="toasts"></div>
+<noscript>NUauto needs JavaScript turned on.</noscript>
+</body>
+</html>

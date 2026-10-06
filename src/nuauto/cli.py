@@ -1,5 +1,6 @@
 """nuauto: the one command for this project (installed by `pip install -e .`; see pyproject.toml).
 
+  nuauto gui             the NUauto window: setup, review, apply, health (`--demo`: everything fake, for trying it)
   nuauto approve         browse the best jobs; y approves (goes in the sheet as Approved), n rejects
   nuauto apply           apply to every Approved row, up to the weekly limit  (-n 3 = at most 3)
   nuauto rate            teach the ranking your taste (y/n only, nothing goes in the sheet)
@@ -28,7 +29,7 @@ from nuauto import config
 
 TOOLS = {"jobs": "jobs", "answers": "answers", "sheet": "sheet", "setup-sheet": "setup_sheet",
          "inspect": "inspect_form", "daily": "daily", "web": "web"}
-COMMANDS = ("approve", "rate", "apply", "status", "update", "login", "test", "doctor", "assist")
+COMMANDS = ("approve", "rate", "apply", "status", "update", "login", "test", "doctor", "assist", "gui")
 
 
 def run_tool(name, rest):
@@ -44,16 +45,29 @@ def main():
         return run_tool(cmd, rest)
     laptop = config.HAS_SERVER and not config.IS_SERVER  # a laptop that syncs with a homelab
     if cmd not in COMMANDS or \
-            (rest and cmd not in ("apply", "assist") and not (cmd == "login" and rest == ["google"])):
+            (rest and cmd not in ("apply", "assist", "gui", "doctor") and not (cmd == "login" and rest == ["google"])):
         sys.exit(__doc__)
-    if cmd == "test":
+    if cmd == "test":  # every tests/test_*.py, 4 at a time (each uses its own temp folder); output in order
         import glob
         import subprocess
-        failed = [t for t in sorted(glob.glob("tests/test_*.py")) if subprocess.run([sys.executable, t]).returncode]
+        from concurrent.futures import ThreadPoolExecutor
+
+        def run(t):
+            return t, subprocess.run([sys.executable, t], capture_output=True, text=True)
+        failed = []
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            for t, r in pool.map(run, sorted(glob.glob("tests/test_*.py"))):
+                sys.stdout.write(r.stdout)
+                sys.stderr.write(r.stderr)
+                if r.returncode:
+                    failed.append(t)
         sys.exit(f"FAILED: {', '.join(failed)}" if failed else 0)
     if cmd == "doctor":
         from nuauto import doctor
         sys.exit(doctor.main())
+    if cmd == "gui":  # syncs by itself, in the background (the window opens at once)
+        from nuauto import gui
+        return gui.main(rest)
     if laptop:
         from nuauto import sync
         if cmd == "update":
