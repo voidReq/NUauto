@@ -3,7 +3,7 @@
   --bg: #f6f6f3; --surface: #ffffff; --surface-2: #f1f1ed; --border: #e2e2dc; --border-strong: #cfcfc8;
   --text: #1c1c1e; --muted: #67676d; --faint: #9a9aa0;
   --accent: #3355d1; --accent-hover: #2846b8; --accent-ink: #ffffff; --accent-soft: #e9edfc;
-  --ok: #1d8a4c; --ok-soft: #e2f3e9; --warn: #a96500; --warn-soft: #fcf0d9; --fail: #c4352b; --fail-soft: #fbe6e3;
+  --ok: #13703c; --ok-soft: #e2f3e9; --warn: #8a5000; --warn-soft: #fcf0d9; --fail: #c4352b; --fail-soft: #fbe6e3;
   --off: #a5a5ab; --shadow: 0 1px 2px rgba(20, 20, 30, .05), 0 4px 16px rgba(20, 20, 30, .05);
   --radius: 12px; --radius-sm: 8px;
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Cantarell, Ubuntu, "Noto Sans", Roboto, sans-serif;
@@ -62,7 +62,7 @@ code, .mono { font-family: var(--mono); font-size: 12.5px; }
 }
 
 /* health strip */
-.health { display: flex; gap: 6px; flex-wrap: wrap; position: relative; }
+.health { display: flex; gap: 10px; flex-wrap: wrap; position: relative; }
 .dot { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); background: var(--surface);
   border-radius: 999px; padding: 3px 10px 3px 8px; font: inherit; font-size: 12.5px; color: var(--text); cursor: pointer; }
 .dot:hover { border-color: var(--border-strong); }
@@ -78,8 +78,9 @@ code, .mono { font-family: var(--mono); font-size: 12.5px; }
 /* cards and building blocks */
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 20px;
   box-shadow: var(--shadow); margin-bottom: 16px; }
-.card h3 { margin-bottom: 10px; }
-.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+.card h2, .steps h2, .popover h2 { font-size: 15px; margin-bottom: 10px; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-bottom: 16px; }
 .grid2 > .card { margin-bottom: 0; }
 .stack { display: flex; flex-direction: column; gap: 10px; }
 .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -141,13 +142,13 @@ label.field span.muted { font-weight: 400; }
 .seg button[aria-pressed=true] { background: var(--accent-soft); color: var(--accent); }
 
 /* review: one job card */
-.job h2 { font-size: 22px; margin-bottom: 4px; }
+.card.job h2 { font-size: 22px; margin-bottom: 4px; }
 .job .meta { color: var(--muted); margin-bottom: 12px; }
 .job .facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 12px 0; }
 .job .facts dt { color: var(--muted); font-weight: 500; }
 .job .facts dd { margin: 0; }
 .job .why { border-left: 3px solid var(--accent); padding: 4px 0 4px 12px; margin: 12px 0; }
-.job .desc h4 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 18px 0 6px; }
+.job .desc h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 18px 0 6px; }
 .job .desc ul { margin: 0 0 8px; padding-left: 20px; }
 .job .desc p { margin: 0 0 8px; }
 .match { font-weight: 700; }

@@ -20,6 +20,7 @@ Tools (each module's own command line; `nuauto <tool>` with no arguments shows i
   nuauto inspect <url>   read-only look at a NUworks Apply form
   nuauto daily [weekly]  the update itself / the Sunday check-in (what the homelab timers run)
   nuauto web             the Mark-done page (what the homelab's nuauto-web service runs)
+  nuauto selftest        is this install working? demo mode end to end (nothing real is touched)
   nuauto health | demo | onboard ...   the GUI's helpers (health checks, demo mode, setup reads)
 
 The packaged app (AppImage / NUauto.app) is this same command: started with nothing (double-clicked) it opens the
@@ -33,7 +34,7 @@ from nuauto import config
 
 TOOLS = {"jobs": "jobs", "answers": "answers", "sheet": "sheet", "setup-sheet": "setup_sheet",
          "inspect": "inspect_form", "daily": "daily", "web": "web", "health": "health", "demo": "demo",
-         "onboard": "onboard"}
+         "onboard": "onboard", "selftest": "selftest"}
 COMMANDS = ("approve", "rate", "apply", "status", "update", "login", "test", "doctor", "assist", "gui")
 
 

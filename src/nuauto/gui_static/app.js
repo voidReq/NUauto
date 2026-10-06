@@ -201,7 +201,7 @@ function terminalResult(r) {
     el("h2", { text: r.demo ? "Demo: this opens a terminal" : "Run this in a terminal" }),
     el("p", { class: "muted", text: r.demo ? "In real use NUauto opens a terminal window and runs this command there." :
       "No terminal app was found. Open one yourself and run:" }),
-    el("pre", { class: "log", testid: "terminal-command", text: r.command }),
+    el("pre", { class: "log", testid: "terminal-command", tabindex: "0", text: r.command }),
     el("div", { class: "foot" }, el("span"), el("div", { class: "row" },
       el("button", { class: "btn", text: "Copy", onclick: () => navigator.clipboard.writeText(r.command).then(() => toast("Copied.")) }),
       el("button", { class: "btn primary", text: "Close", onclick: close })))), { label: "Terminal command" });
@@ -256,7 +256,7 @@ function renderHealth() {
 function healthPopover(c) {
   document.querySelectorAll(".popover").forEach((p) => p.remove());
   const pop = el("div", { class: "popover", testid: "health-popover" },
-    el("div", { class: "row between" }, el("h3", { text: c.title }), el("span", { class: `chip ${c.status}`, text: SHORT[c.status] || c.status })),
+    el("div", { class: "row between" }, el("h2", { text: c.title }), el("span", { class: `chip ${c.status}`, text: SHORT[c.status] || c.status })),
     el("p", { text: c.detail }),
     el("div", { class: "row" }, fixButton(c, "btn small primary"),
       el("a", { href: "#/settings", class: "btn small ghost", text: "All checks", onclick: () => pop.remove() })));
@@ -285,7 +285,7 @@ async function stopTask(t, force) {
 }
 
 function showLog(t) {
-  const pre = el("pre", { class: "log", testid: "log-modal" });
+  const pre = el("pre", { class: "log", testid: "log-modal", tabindex: "0", "aria-label": "Log" });
   const refresh = () => { pre.textContent = (S.task && S.task.id === t.id ? S.taskLog : []).join("\n") || "(no output)"; pre.scrollTop = pre.scrollHeight; };
   refresh();
   const timer = setInterval(refresh, 800);
@@ -404,19 +404,19 @@ screens.home = (view) => {
     const problems = S.checks.filter((c) => c.status === "fail" || c.status === "warn");
     const lu = st.last_update;
     fill(view, 
-      st.setup_needed ? el("div", { class: "card", testid: "setup-needed" }, el("h3", { text: "Finish setting up" }),
+      st.setup_needed ? el("div", { class: "card", testid: "setup-needed" }, el("h2", { text: "Finish setting up" }),
         el("p", { class: "muted", text: "A few steps (Google, your sheet, NUworks, your resume), each checked as you go." }),
         el("a", { href: "#/setup", class: "btn primary", text: "Open setup" })) : null,
-      problems.length ? el("div", { class: "card", testid: "problems" }, el("h3", { text: "Needs attention" }),
+      problems.length ? el("div", { class: "card", testid: "problems" }, el("h2", { text: "Needs attention" }),
         el("ul", { class: "list" }, ...problems.map((c) => el("li", {}, el("div", { class: "what" },
           el("span", { class: `chip ${c.status}`, text: c.title }), " ", el("span", { text: c.detail })), fixButton(c, "btn small primary"))))) : null,
       el("div", { class: "grid2" },
-        el("div", { class: "card", testid: "week" }, el("h3", { text: "This week" }),
+        el("div", { class: "card", testid: "week" }, el("h2", { text: "This week" }),
           el("div", { class: "big" }, `${w.applied} `, el("span", { class: "muted small", text: `of ${w.max} applied ${w.label}` })),
           el("div", { class: "bar" + (w.applied >= w.max ? " full" : "") }, el("span", { style: null, testid: "week-bar" })),
           el("p", { class: "small muted", text: (w.room ? `Room for ${w.room} more` : "Weekly limit reached; Approved jobs wait") +
             (w.next ? ` · new week ${w.next}` : "") + ` · ${w.total} of ${w.max_total} in total` })),
-        el("div", { class: "card stack" }, el("h3", { text: "Next steps" }),
+        el("div", { class: "card stack" }, el("h2", { text: "Next steps" }),
           el("a", { class: "btn big" + (st.counts.review ? " primary" : ""), href: "#/review", testid: "go-review",
             text: st.counts.review ? `Review ${plural(st.counts.review, "new job")}` : "Nothing new to review" }),
           el("a", { class: "btn big" + (st.counts.approved && !st.counts.review ? " primary" : ""), href: "#/apply", testid: "go-apply",
@@ -425,7 +425,7 @@ screens.home = (view) => {
             text: "Check for new jobs now", onclick: () => action("update") }),
           el("p", { class: "small muted", text: lu ? `Last check ${ago(lu.time)}: ${lu.listed} new on NUworks, ${lu.pool} made your pool.` :
             "No check for new jobs has run yet." }))),
-      el("div", { class: "card", testid: "todo" }, el("h3", { text: "Only you can do these" }), todoList(st.todo)));
+      el("div", { class: "card", testid: "todo" }, el("h2", { text: "Only you can do these" }), todoList(st.todo)));
     const weekBar = view.querySelector("[data-testid=week-bar]");
     if (weekBar) weekBar.style.width = pct + "%";
   }
@@ -486,7 +486,7 @@ screens.review = async (view) => {
   async function show() {
     $("#review-pos").textContent = jobs.length ? `Job ${Math.min(i + 1, jobs.length)} of ${jobs.length}` : "";
     if (i >= jobs.length) {
-      fill(body, el("div", { class: "card", testid: "review-empty" }, el("h3", { text: jobs.length ? "That's all of them" : "Nothing new to review" }),
+      fill(body, el("div", { class: "card", testid: "review-empty" }, el("h2", { text: jobs.length ? "That's all of them" : "Nothing new to review" }),
         el("p", { class: "muted", text: mode === "approve" ? "Approved jobs are in your sheet. Apply to them next." :
           "Ratings teach the ranking your taste (it needs 5 yes and 5 no)." }),
         el("div", { class: "row" }, jobs.length ? el("button", { class: "btn", text: "Back one", onclick: () => { i = Math.max(0, i - 1); show(); } }) : null,
@@ -572,7 +572,7 @@ function jobCard(c, j, mine) {
     for (const b of blocks) {
       if (b.kind === "bullet") { if (!ul) { ul = el("ul"); out.push(ul); } ul.append(el("li", { text: b.text })); continue; }
       ul = null;
-      out.push(b.kind === "header" ? el("h4", { text: b.text }) : el("p", { text: b.text }));
+      out.push(b.kind === "header" ? el("h3", { text: b.text }) : el("p", { text: b.text }));
     }
     return out;
   };
@@ -585,7 +585,7 @@ function jobCard(c, j, mine) {
     el("div", { class: "meta", text: `${c.company} · ${c.location || "location not listed"}` }),
     el("dl", { class: "facts" }, ...facts.flatMap(([k, v]) => [el("dt", { text: k }), el("dd", {}, v)])),
     c.why ? el("div", { class: "why" }, el("b", { text: "Why: " }), c.why) : null,
-    el("div", { class: "desc" }, desc(c.description), c.qualifications.length ? [el("h4", { text: "Qualifications" }), desc(c.qualifications)] : null));
+    el("div", { class: "desc" }, desc(c.description), c.qualifications.length ? [el("h3", { text: "Qualifications" }), desc(c.qualifications)] : null));
 }
 
 // ---- Apply
@@ -606,7 +606,7 @@ screens.apply = async (view) => {
     const w = data.week;
     fill(head, el("div", { class: "card" },
       el("div", { class: "row between" }, el("div", {},
-        el("h3", { text: w.room ? `You can apply to ${plural(w.room, "more job")} this week` : "Weekly limit reached" }),
+        el("h2", { text: w.room ? `You can apply to ${plural(w.room, "more job")} this week` : "Weekly limit reached" }),
         el("p", { class: "small muted", text: `${w.applied} of ${w.max} ${w.label} · ${w.total} of ${w.max_total} in total` + (w.next ? ` · new week ${w.next}` : "") })),
       running() ? null : el("div", { class: "row" },
         el("label", { class: "small muted" }, "At most ", el("input", { type: "number", min: "1", id: "apply-n", testid: "apply-n", style: null, "aria-label": "At most this many", placeholder: "all" })),
@@ -614,12 +614,12 @@ screens.apply = async (view) => {
           text: "Start applying", onclick: startApply }))),
       data.why_not ? el("div", { class: "note warn", testid: "apply-why", text: data.why_not }) :
         el("p", { class: "small muted", text: "Approved in the sheet is your go-ahead. Each job is filled and submitted in a visible Firefox window, one at a time, 30–60 s apart. Every form is screenshotted before Submit. Questions without a saved answer come up here. Stop works like Ctrl+C." })));
-    fill(list, el("div", { class: "card" }, el("h3", { text: `Approved (${data.rows.length})` }),
+    fill(list, el("div", { class: "card" }, el("h2", { text: `Approved (${data.rows.length})` }),
       data.rows.length ? el("ul", { class: "list", testid: "approved-list" }, ...data.rows.map((r) => el("li", { testid: `approved-${r.row}` },
         el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title, el("div", { class: "small muted", text: `Row ${r.row} · closes ${r.closes_text}` })),
         el("div", { class: "row" }, r.past ? el("span", { class: "chip fail", text: "deadline passed" }) : r.soon ? el("span", { class: "chip warn", text: "closing soon" }) : null,
           linkOut(r.url, "Open"))))) : el("p", { class: "empty", text: "Nothing approved yet. Approve jobs in Review." })));
-    fill(past, data.history.length ? el("div", { class: "card" }, el("div", { class: "row between" }, el("h3", { text: "Recent runs here" }),
+    fill(past, data.history.length ? el("div", { class: "card" }, el("div", { class: "row between" }, el("h2", { text: "Recent runs here" }),
       el("a", { href: "#/logs", class: "btn small ghost", text: "All logs and screenshots" })),
       el("ul", { class: "list" }, ...data.history.map((t) => el("li", {}, el("div", { class: "what" }, el("b", { text: t.label }), " · ",
         el("span", { class: "muted", text: `${t.state} · ${ago(t.started)}` })))))) : "");
@@ -634,7 +634,7 @@ screens.apply = async (view) => {
     const waiting = live && t.wait_until && t.wait_until > now;
     fill(runBox, el("div", { class: "card", testid: "apply-run" },
       el("div", { class: "row between" }, el("div", { class: "row" }, live ? el("span", { class: "spinner" }) : null,
-        el("h3", { text: live ? (waiting ? `Next job in ${Math.ceil(t.wait_until - now)} s` : "Applying…") : `Last run: ${t.state}` })),
+        el("h2", { text: live ? (waiting ? `Next job in ${Math.ceil(t.wait_until - now)} s` : "Applying…") : `Last run: ${t.state}` })),
         live ? el("div", { class: "row" }, el("button", { class: "btn danger", testid: "btn-stop", text: "Stop", onclick: () => stopTask(t) }),
           el("button", { class: "btn ghost small", text: "Force stop", title: "Only if Stop does nothing", onclick: () =>
             confirmBox("Force stop?", "Kills the run at once. If Submit was already clicked, that row stays Needs Human: check NUworks.", "Force stop", () => stopTask(t, true), { danger: true }) })) : null),
@@ -645,7 +645,7 @@ screens.apply = async (view) => {
         t.screenshot ? el("div", {}, el("img", { class: "shot thumb", src: t.screenshot, alt: "Latest screenshot of the form", testid: "apply-shot",
           onclick: () => modal((box, close) => box.append(el("img", { class: "full", src: t.screenshot, alt: "Screenshot" }),
             el("div", { class: "foot" }, el("span"), el("button", { class: "btn primary", text: "Close", onclick: close }))), { label: "Screenshot" }) })) : null),
-      el("pre", { class: "log", testid: "task-log", text: S.taskLog.slice(-400).join("\n") || "Starting…" })));
+      el("pre", { class: "log", testid: "task-log", tabindex: "0", "aria-label": "Run log", text: S.taskLog.slice(-400).join("\n") || "Starting…" })));
     const pre = runBox.querySelector(".log");
     pre.scrollTop = pre.scrollHeight;
   }
@@ -666,7 +666,7 @@ screens.company = async (view) => {
     let d;
     try { d = await api.get("/api/company"); } catch (e) { fill(view, el("div", { class: "note fail", text: e.message })); return; }
     fill(view, 
-      el("div", { class: "card" }, el("h3", { text: "Ready for the assistant" }),
+      el("div", { class: "card" }, el("h2", { text: "Ready for the assistant" }),
         el("p", { class: "small muted", text: "Jobs that send you to the company's own site. The assistant (Claude, in a terminal window) fills the application in a visible browser; it asks you before anything is submitted. You sign in, solve captchas and approve Submit." }),
         d.agent.length ? el("ul", { class: "list" }, ...d.agent.map((r) => el("li", { testid: `company-${r.row}` },
           el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title, el("div", { class: "small muted", text: `Row ${r.row} · ${r.host}` })),
@@ -674,18 +674,18 @@ screens.company = async (view) => {
             linkOut(r.target, "Open site"),
             el("button", { class: "btn small", text: "I applied myself", onclick: () => markRow("applied", r) }))))) :
           el("p", { class: "empty", text: "None waiting." })),
-      d.site.length ? el("div", { class: "card" }, el("h3", { text: "Submitted on NUworks; the company site still wants you" }),
+      d.site.length ? el("div", { class: "card" }, el("h2", { text: "Submitted on NUworks; the company site still wants you" }),
         el("ul", { class: "list" }, ...d.site.map((r) => el("li", { testid: `site-${r.row}` }, el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title,
           el("div", { class: "small muted", text: r.notes.slice(0, 160) })), el("div", { class: "row" }, linkOut(r.url, "Open job"),
           el("button", { class: "btn small", text: "Mark done", onclick: () => markRow("site", r) })))))) : null,
-      d.retry.length ? el("div", { class: "card" }, el("h3", { text: "Company site done; the NUworks side did not go out" }),
+      d.retry.length ? el("div", { class: "card" }, el("h2", { text: "Company site done; the NUworks side did not go out" }),
         el("p", { class: "small muted", text: "Submits the same job on NUworks too, with the usual NUworks checks (a visible browser; questions come up here)." }),
         el("ul", { class: "list" }, ...d.retry.map((r) => el("li", { testid: `retry-${r.row}` }, el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title,
           el("div", { class: "small muted", text: r.notes.slice(-160) })), el("div", { class: "row" }, linkOut(r.url, "Open job"),
           el("button", { class: "btn small primary", text: "Submit on NUworks too", testid: `retry-btn-${r.row}`,
             onclick: () => confirmBox("Submit on NUworks too?", `Row ${r.row} (${r.company}) is Applied on the company site. This submits the same job on NUworks.`,
               "Submit on NUworks", () => action("nuworks_side", { row: r.row })) })))))) : null,
-      d.other.length ? el("div", { class: "card" }, el("h3", { text: "Needs you on NUworks" }),
+      d.other.length ? el("div", { class: "card" }, el("h2", { text: "Needs you on NUworks" }),
         el("ul", { class: "list" }, ...d.other.map((r) => el("li", {}, el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title,
           el("div", { class: "small muted", text: r.notes || r.why })), linkOut(r.url, "Open job"))))) : null);
   }
@@ -722,7 +722,8 @@ screens.answers = async (view) => {
         oninput: (e) => { filter = e.target.value.toLowerCase(); draw(); $("input[aria-label='Search answers']").focus(); } }),
         el("div", { class: "row" }, el("button", { class: "btn", text: "Add a question", onclick: () => { rows.unshift({ question: "", answer: "", field_type: "", always_ask: false, aliases: "" }); filter = ""; draw(); } }),
           el("button", { class: "btn primary", text: "Save", testid: "answers-save", disabled: data.locked, onclick: save }))),
-      el("table", { class: "grid" }, el("thead", {}, el("tr", {}, ...["Question", "Answer", "Type", "", "Aliases", ""].map((h) => el("th", { text: h })))), tbody)));
+      el("table", { class: "grid" }, el("thead", {}, el("tr", {}, ...["Question", "Answer", "Type", "Always ask", "Aliases"].map((h) => el("th", { text: h })),
+        el("th", {}, el("span", { class: "sr-only", text: "Remove" })))), tbody)));
   }
   async function save() {
     const entries = rows.map((r) => ({ ...r, aliases: r.aliases.split(",").map((a) => a.trim()).filter(Boolean) }));
@@ -754,7 +755,7 @@ async function openLogFile(d, run, file) {
     return;
   }
   const text = await fetch(url, { credentials: "same-origin" }).then((r) => r.ok ? r.text() : "Could not open it.");
-  modal((box, close) => box.append(el("h2", { text: file }), el("pre", { class: "log", text }),
+  modal((box, close) => box.append(el("h2", { text: file }), el("pre", { class: "log", tabindex: "0", text }),
     el("div", { class: "foot" }, el("span"), el("button", { class: "btn primary", text: "Close", onclick: close }))), { label: file });
 }
 
@@ -770,7 +771,7 @@ screens.settings = async (view) => {
     const label = el("input", { type: "text", value: d.resume_label, "aria-label": "Resume label", testid: "set-resume-label" });
     const week = el("input", { type: "date", value: s.week_start || "", "aria-label": "Week start", testid: "set-week-start" });
     fill(view, 
-      el("div", { class: "card", testid: "all-checks" }, el("div", { class: "row between" }, el("h3", { text: "Health" }),
+      el("div", { class: "card", testid: "all-checks" }, el("div", { class: "row between" }, el("h2", { text: "Health" }),
         el("button", { class: "btn small", text: "Run all checks now", testid: "btn-run-checks", onclick: async () => {
           await api.post("/api/health/run", { groups: ["quick", "sheet", "claude", "firefox", "discord", "homelab", "nuworks"] }).catch(fail);
           toast("Checking…"); setTimeout(pollHealth, 1500); setTimeout(pollHealth, 6000); } })),
@@ -778,22 +779,25 @@ screens.settings = async (view) => {
           el("span", { class: `chip ${c.status}`, text: SHORT[c.status] || c.status }), " ", el("b", { text: c.title }), " ",
           el("span", { class: "muted", text: c.detail }), el("div", { class: "small muted", text: `checked ${ago(c.at)}` })), fixButton(c))))),
       el("div", { class: "grid2" },
-        el("div", { class: "card stack" }, el("h3", { text: "Logins" }),
+        el("div", { class: "card stack" }, el("h2", { text: "Logins" }),
           el("div", { class: "row between" }, el("span", { text: "Google" }), el("button", { class: "btn small", text: d.google_login ? "Log in again" : "Log in", onclick: () => action("login_google") })),
           el("div", { class: "row between" }, el("span", { text: "NUworks" }), el("div", { class: "row" },
             el("button", { class: "btn small", text: "Check now", onclick: () => { action("check_nuworks"); toast("Checking NUworks in the background…"); } }),
             el("button", { class: "btn small", text: "Log in", onclick: () => action("login_nuworks") }))),
           el("div", { class: "row between" }, el("span", { text: "Claude Code" }), el("button", { class: "btn small", text: "Log in", onclick: () => action("login_claude") })),
           el("p", { class: "small muted", text: "Google logins last 7 days (Testing-mode apps); NUauto warns you a day before." })),
-        el("div", { class: "card stack" }, el("h3", { text: "Applying" }),
+        el("div", { class: "card stack" }, el("h2", { text: "Applying" }),
           el("label", { class: "field" }, "NUworks resume label", el("span", { class: "muted small", text: "Exactly as in the Apply popup's Resume dropdown." }), label),
           el("label", { class: "field" }, "Weekly limit counts from", el("span", { class: "muted small", text: "Fixed 7-day weeks from this day. Empty: any rolling 7 days." }), week),
           el("div", {}, el("button", { class: "btn primary", text: "Save", testid: "settings-save", onclick: async () => {
             try { d = await api.post("/api/settings", { resume_label: label.value, week_start: week.value }); toast("Saved."); pollState(); draw(); } catch (e) { fail(e); } } })))),
-      el("div", { class: "card stack" }, el("h3", { text: "Setup" }),
+      el("div", { class: "card stack" }, el("h2", { text: "Setup" }),
         el("p", { class: "small muted", text: "Google client, sheet, resume, NUworks, preferences, notifications: each step checked." }),
-        el("div", { class: "row" }, el("a", { class: "btn", href: "#/setup", text: "Open setup" }), el("a", { class: "btn ghost", href: "#/logs", text: "Logs and screenshots" }))),
-      el("div", { class: "card stack" }, el("h3", { text: "About" }),
+        el("div", { class: "row" }, el("a", { class: "btn", href: "#/setup", text: "Open setup" }),
+          el("button", { class: "btn", text: "Run a self-test", testid: "btn-selftest", title: "Demo mode end to end in a hidden browser: nothing real is touched",
+            onclick: () => action("selftest") }),
+          el("a", { class: "btn ghost", href: "#/logs", text: "Logs and screenshots" }))),
+      el("div", { class: "card stack" }, el("h2", { text: "About" }),
         el("p", { class: "small muted" }, `Version ${S.state ? S.state.version : ""} · your files: `, el("code", { text: d.paths.state }),
           d.tools.claude ? [" · claude: ", el("code", { text: d.tools.claude })] : " · claude not found"),
         el("div", {}, el("button", { class: "btn danger", text: "Quit NUauto", testid: "btn-quit", onclick: () => confirmBox("Quit NUauto?",

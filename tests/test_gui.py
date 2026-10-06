@@ -146,7 +146,7 @@ try:
     errors = []
     with sync_playwright() as p:
         b = p.firefox.launch(headless=True)
-        page = b.new_page(viewport={"width": 1200, "height": 900})
+        page = b.new_context(viewport={"width": 1200, "height": 900}).new_page()
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
         page.goto(URL)
@@ -182,6 +182,51 @@ try:
         assert rows["Harbor Embedded"] == rows["Lumen Security"] == rows[approved_company] == "Applied", rows
         assert rows["Cobalt Systems"] == "Proposed", rows  # approved, then undone (API part above)
         assert rows["Quarry Hardware"] == "Needs Human", rows
+
+        # another site on this machine (another port: same site to the browser, so the cookie IS sent) tries to change
+        # the sheet three ways. All must fail: no X-NUauto header / no JSON / a CORS preflight the server never allows.
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        target = f"http://127.0.0.1:{PORT}/api/mark"
+        body = json.dumps({"action": "applied", "row": 10, "url": "https://northeastern-csm.symplicity.com/students/app/jobs/detail/900120"})
+        evil_page = f"""<!doctype html><body><form id=f method=post action="{target}" enctype="text/plain">
+<input name='{body[:-1]}' value='}}'></form><script>
+const out = [];
+fetch("{target}", {{method: "POST", credentials: "include", body: {json.dumps(body)}}})
+  .then(r => out.push("simple:" + r.status), e => out.push("simple:blocked"))
+  .then(() => fetch("{target}", {{method: "POST", credentials: "include", body: {json.dumps(body)},
+                    headers: {{"Content-Type": "application/json", "X-NUauto": "1"}}}}))
+  .then(r => out.push("preflighted:" + r.status), e => out.push("preflighted:blocked"))
+  .then(() => {{ document.title = out.join(","); }});
+</script>"""
+
+        class Evil(BaseHTTPRequestHandler):
+            def do_GET(self):
+                data = evil_page.encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def log_message(self, *a):
+                pass
+        evil = ThreadingHTTPServer(("127.0.0.1", 0), Evil)
+        threading.Thread(target=evil.serve_forever, daemon=True).start()
+        sheet_file = os.path.join(STATE, "local", "demo_sheet_DEMO-SHEET.json")
+        before = open(sheet_file).read()
+        evil_tab = page.context.new_page()
+        evil_tab.goto(f"http://127.0.0.1:{evil.server_address[1]}/")
+        evil_tab.wait_for_function("() => document.title.includes('preflighted')", timeout=20000)
+        results = evil_tab.title()
+        assert "simple:403" in results or "simple:blocked" in results, results
+        assert "preflighted:blocked" in results, results  # the browser never sends it: the server allows no CORS
+        with evil_tab.expect_response(lambda r: r.url == target) as posted:  # a plain form post: no header, not JSON
+            evil_tab.evaluate("document.getElementById('f').submit()")
+        assert posted.value.status == 403, posted.value.status
+        assert open(sheet_file).read() == before, "the sheet changed"
+        evil_tab.close()
+        evil.shutdown()
 
         page.click("[data-testid=nav-company]")
         page.wait_for_selector("[data-testid=company-10]")

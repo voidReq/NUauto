@@ -665,6 +665,8 @@ def act(body):
             raise Refused("Which row?")
         return open_terminal(f"{shlex.quote(config.self_exe())} assist {int(row)}",
                              "The assistant runs here. It asks you before anything is submitted.")
+    elif kind == "selftest":  # demo mode end to end in its own temp folder: safe while anything else runs
+        task = APP.start("selftest", "Self-test", config.self_cmd("selftest"), browser=False)
     elif kind == "fix_permissions":
         health.fix_permissions()
         APP.run_now(["quick"])
@@ -1046,11 +1048,10 @@ class Handler(BaseHTTPRequestHandler):
                          "script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
         for k, v in (headers or {}).items():
             self.send_header(k, v)
+        if self.close_connection:
+            self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(data)
-
-    def _error(self, code, msg):
-        self._send(code, {"error": msg})
 
     def do_GET(self):
         if not self._host_ok():
@@ -1083,7 +1084,27 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(404, "not found")
         self._call(lambda: route(q))
 
+    MAX_BODY = 2_000_000
+
+    def _read_body(self):
+        """The request body, read before anything else: a rejected request must not leave it on a kept-alive
+        connection, where it would be read as the start of the next request. None if missing or too big."""
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = -1
+        if not 0 <= length <= self.MAX_BODY:
+            self.close_connection = True
+            return None
+        return self.rfile.read(length)
+
+    def _error(self, code, msg):
+        if code >= 400 and code != 404 and code != 409:
+            self.close_connection = True  # nothing more on this connection after a refusal
+        self._send(code, {"error": msg})
+
     def do_POST(self):
+        raw = self._read_body()
         if not self._host_ok():
             return self._error(403, "wrong host")
         u = urlparse(self.path)
@@ -1099,8 +1120,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(403, "forbidden")
         APP.last_request = now()
         try:
-            length = int(self.headers.get("Content-Length") or 0)
-            body = json.loads(self.rfile.read(length) or b"{}") if length <= 2_000_000 else None
+            body = json.loads(raw or b"{}") if raw is not None else None
         except ValueError:
             body = None
         if not isinstance(body, dict):

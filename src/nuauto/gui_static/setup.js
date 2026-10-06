@@ -212,7 +212,7 @@
       const d = s.data;
       const url = el("input", { type: "text", placeholder: "https://discord.com/api/webhooks/…", "aria-label": "Discord webhook", testid: "setup-discord-url" });
       return [
-        el("h3", { text: "Discord" }),
+        el("h2", { text: "Discord" }),
         el("p", { class: "small muted", text: "NUauto can post to a Discord channel: new jobs, deadlines, a Google login about to expire. In Discord: channel settings, Integrations, Webhooks, New webhook, Copy URL." }),
         d.discord ? el("div", { class: "row" }, el("span", { class: "chip ok", text: "set up" }),
           el("button", { class: "btn small", text: "Send a test message", onclick: async () => { const r = await post({ action: "discord_test" }); if (r && r.message) toast(r.message); } }),
@@ -220,14 +220,14 @@
           el("div", { class: "row" }, url, el("button", { class: "btn", text: "Save", testid: "setup-discord-save",
             onclick: async () => { if (await post({ action: "discord_save", url: url.value }, "Discord set up.")) redraw(); } })),
         el("hr", { class: "sep" }),
-        el("h3", { text: "Automatic updates" }),
+        el("h2", { text: "Automatic updates" }),
         d.homelab ? el("p", { class: "small muted", text: "Your homelab checks for new jobs twice a day." }) :
           d.scheduler ? el("div", { class: "row between" }, el("span", { class: "small muted", text: "Check NUworks for new jobs at 08:00 and 18:00 while you are logged in (a missed run happens at the next start)." }),
             el("button", { class: "btn " + (d.scheduled ? "" : "primary"), testid: "setup-schedule", text: d.scheduled ? "Turn off" : "Turn on",
               onclick: async () => { if (await post({ action: d.scheduled ? "schedule_off" : "schedule_on" }, d.scheduled ? "Automatic updates off." : "Automatic updates on.")) redraw(); } })) :
             el("p", { class: "small muted", text: "Not available on this system (needs systemd or macOS): use Check for new jobs on Today." }),
         el("hr", { class: "sep" }),
-        el("h3", { text: "App icon" }),
+        el("h2", { text: "App icon" }),
         d.mac_app ? el("p", { class: "small muted", text: "NUauto is already an app: keep it in your Applications folder and open it from there or the Dock." }) :
         el("div", { class: "row between" }, el("span", { class: "small muted", text: d.mac ? "NUauto in your Applications folder (~/Applications)." : "NUauto in your apps menu." }),
           el("button", { class: "btn" + (d.launcher ? "" : " primary"), testid: "setup-launcher", text: d.launcher ? "Make it again" : "Add it",
@@ -271,7 +271,7 @@
       }));
       view.replaceChildren(
         el("div", { class: "card" }, el("div", { class: "row between" }, el("div", {},
-          el("h3", { text: data.complete ? "You're set up" : "Set up NUauto" }),
+          el("h2", { text: data.complete ? "You're set up" : "Set up NUauto" }),
           el("p", { class: "small muted", text: `${done} of ${steps.length} steps done. Each step checks itself; come back any time from Settings.` })),
           data.complete ? el("a", { class: "btn primary", href: "#/home", text: "Go to Today", testid: "setup-finish" }) : null),
           el("div", { class: "bar" }, el("span", { testid: "setup-bar" }))),

@@ -86,9 +86,10 @@ blank = os.path.join(SCRATCH, "blank.pdf")
 open(blank, "wb").write(demo.tiny_pdf([""]))
 assert "no text" in onboard.resume_preview(blank)[1]
 
-# preferences: the defaults pass as they are; each field is checked
+# preferences: the defaults pass as they are, unchanged (saving the prefilled form keeps an existing setup exactly
+# as it was: same pool, same prompt); each field is checked
 clean = onboard.check_prefs(dict(jobs.DEFAULTS))
-assert clean["term"] == jobs.DEFAULTS["term"] and clean["category_bonus"] == jobs.DEFAULTS["category_bonus"]
+assert clean == jobs.DEFAULTS, {k: (clean.get(k), v) for k, v in jobs.DEFAULTS.items() if clean.get(k) != v}
 for bad, needle in (({"threshold_above": 50}, "can't be lower"), ({"class_year": "middler"}, "Your year"),
                     ({"term_id": "x!"}, "Term ID"), ({"category_bonus": {"cooking": 5}}, "unknown category"),
                     ({"student": "{{student}}"}, "student"), ({"threshold": "lots"}, "whole number"),
