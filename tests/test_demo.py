@@ -13,7 +13,7 @@ import tempfile
 from datetime import date
 
 STATE = tempfile.mkdtemp(prefix="nuauto-test-demo-")
-os.environ.update(NUAUTO_STATE_DIR=STATE, NUAUTO_DEMO="1", NUAUTO_DEMO_PACE="0")
+os.environ.update(NUAUTO_STATE_DIR=STATE, NUAUTO_DEMO="1", NUAUTO_DEMO_PACE="0.02")
 
 from nuauto import answers  # noqa: E402
 from nuauto import config  # noqa: E402
@@ -51,7 +51,7 @@ def rows():
 # the fake sheet runs the real sheet.py rules
 by = rows()
 assert by["Harbor Embedded"].status == "Approved" and by["Iron Valley Medical"].status == "Needs Human"
-assert sheet.check_limits_safe(list(by.values())) == (5, 5)
+assert sheet.check_limits_safe(list(by.values())) == (5, 6)  # one applied 10 days ago: total only
 ws = sheet.open_worksheet(interactive=False)
 sheet.unapprove(ws, by["Quarry Hardware"].number, by["Quarry Hardware"].url)
 assert rows()["Quarry Hardware"].status == "Proposed"

@@ -409,9 +409,14 @@ def row_view(r, **extra):
             "notes": r.notes, "date": r.date, **extra}
 
 
+NUWORKS_SIDE_NOT_SENT = ("NUworks side NOT submitted", "before Submit; not submitted")
+
+
 def company_rows(rows):
+    """agent: Needs Human rows for the assistant; other: Needs Human rows only you can finish; site: Applied rows
+    whose company site still wants you; retry: Applied rows whose NUworks side did not go out (nuauto assist nuworks)."""
     from nuauto import assist
-    agent, other, site = [], [], []
+    agent, other, site, retry = [], [], [], []
     for r in rows or []:
         if r.status == "Needs Human":
             url, why = assist.assist_target(r.notes)
@@ -421,7 +426,10 @@ def company_rows(rows):
                 other.append(row_view(r, why=why))
         elif r.status == "Applied" and r.notes.startswith(sheet.SITE_MARK):
             site.append(row_view(r))
-    return agent, other, site
+        elif r.status == "Applied" and any(m in r.notes for m in NUWORKS_SIDE_NOT_SENT) \
+                and assist.nuworks_side_blocked(r.notes) is None:
+            retry.append(row_view(r))
+    return agent, other, site, retry
 
 
 def review_counts(rows):
@@ -454,7 +462,7 @@ def read_local():
 def state():
     rows = APP.rows
     todo, soon = review_counts(rows)
-    agent, other, site = company_rows(rows)
+    agent, other, site, retry = company_rows(rows)
     approved = [r for r in rows or [] if r.status == "Approved"]
     scans = jobs.load("scans.json", [])
     cfg = read_local()
@@ -464,7 +472,7 @@ def state():
         "demo": config.DEMO, "version": __import__("nuauto").__version__,
         "mode": "homelab" if config.HAS_SERVER else "local", "setup_needed": setup_needed(),
         "rows_loaded": rows is not None, "rows_error": APP.rows_error, "week": week_info(rows),
-        "counts": {"review": len(todo), "approved": len(approved), "company": len(agent), "site": len(site),
+        "counts": {"review": len(todo), "approved": len(approved), "company": len(agent) + len(retry), "site": len(site),
                    "needs_human": len(agent) + len(other)},
         "todo": ([{"kind": "site", **x} for x in site] + [{"kind": "company", **x} for x in agent]
                  + [{"kind": "urgent", "id": r["id"], "title": r["title"], "company": r["company"],
@@ -681,8 +689,8 @@ def stop(body):
 
 def company():
     rows = need_rows()
-    agent, other, site = company_rows(rows)
-    return {"agent": agent, "other": other, "site": site}
+    agent, other, site, retry = company_rows(rows)
+    return {"agent": agent, "other": other, "site": site, "retry": retry}
 
 
 def mark(body):

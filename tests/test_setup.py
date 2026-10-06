@@ -12,7 +12,7 @@ import sys
 import tempfile
 
 STATE = tempfile.mkdtemp(prefix="nuauto-test-setup-")
-os.environ.update(NUAUTO_STATE_DIR=STATE, NUAUTO_DEMO="1", NUAUTO_DEMO_PACE="0")
+os.environ.update(NUAUTO_STATE_DIR=STATE, NUAUTO_DEMO="1", NUAUTO_DEMO_PACE="0.02")
 
 from playwright.sync_api import sync_playwright  # noqa: E402
 

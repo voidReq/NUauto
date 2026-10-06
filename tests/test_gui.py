@@ -15,7 +15,7 @@ import time
 from playwright.sync_api import sync_playwright
 
 STATE = tempfile.mkdtemp(prefix="nuauto-test-gui-")
-ENV = {**os.environ, "NUAUTO_STATE_DIR": STATE, "NUAUTO_DEMO": "1", "NUAUTO_DEMO_PACE": "0", "PYTHONUNBUFFERED": "1"}
+ENV = {**os.environ, "NUAUTO_STATE_DIR": STATE, "NUAUTO_DEMO": "1", "NUAUTO_DEMO_PACE": "0.02", "PYTHONUNBUFFERED": "1"}
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PY = sys.executable
 
@@ -117,6 +117,22 @@ try:
     r = post("/api/action", {"kind": "assist", "args": {"row": 10}})
     assert r["opened"] is False and r["demo"] and "assist 10" in r["command"]  # demo: shows the command only
 
+    # Company sites: the NUworks side of a company-site application, sent again from the GUI
+    company = get("/api/company")
+    assert [x["company"] for x in company["agent"]] == ["Iron Valley Medical"] and [x["company"] for x in company["site"]] == ["Willow Devices"]
+    retry = company["retry"][0]
+    assert retry["company"] == "Maple Controls"
+    task = post("/api/action", {"kind": "nuworks_side", "args": {"row": retry["row"]}})["task"]
+    for _ in range(300):
+        t = get("/api/task?after=0")["task"]
+        if t["state"] != "running":
+            break
+        time.sleep(0.2)
+    assert t["id"] == task["id"] and t["state"] == "done", t["log"][-6:]
+    notes = {r[1]: r[4] for r in json.load(open(os.path.join(STATE, "local", "demo_sheet_DEMO-SHEET.json")))["rows"][1:]}
+    assert "NUworks side submitted too (confirmed by NUworks page)." in notes["Maple Controls"], notes["Maple Controls"]
+    assert get("/api/company")["retry"] == []  # never offered twice
+
     # a second start opens a window on this one instead (here: --no-open, so it just says so and exits)
     second = subprocess.run([PY, "-m", "nuauto", "gui", "--no-open"], env=ENV, cwd=ROOT, capture_output=True, text=True,
                             timeout=60)
@@ -158,7 +174,9 @@ try:
         assert "18 years old" in page.inner_text("[data-testid=q-label]")
         assert "Select" not in page.locator("[data-testid=question] .choices").inner_text()  # placeholder hidden
         page.get_by_role("button", name="Yes", exact=True).click()
-        page.wait_for_function("() => document.body.innerText.includes('Last run: done')", timeout=120000)
+        page.wait_for_function("() => document.body.innerText.includes('Last run: done') || "
+                               "document.querySelector('[data-testid=q-menu-u]')", timeout=120000)
+        assert page.locator("[data-testid=q-menu-u]").count() == 0, "unexpected: NUworks' confirmation was not seen"
         assert page.locator("[data-testid=apply-shot]").count() == 1
         rows = {r[1]: r[3] for r in json.load(open(os.path.join(STATE, "local", "demo_sheet_DEMO-SHEET.json")))["rows"][1:]}
         assert rows["Harbor Embedded"] == rows["Lumen Security"] == rows[approved_company] == "Applied", rows

@@ -259,6 +259,9 @@ JOBS = [
          "Controls coursework and robot projects match well.", "plain", held_back=True, skills=["ROS", "C++"]),
     _job("900110", "Network Security Co-op", "Granite Networks", "Hartford, CT, USA", "US-CT", "security", 70, 21,
          "Networking labs and Linux fit; SIEM tools are missing.", "plain", held_back=True, skills=["Wireshark"]),
+    # in the sheet only: applied on the company site, the NUworks side still to send (Company sites -> retry)
+    _job("900140", "Firmware Test Co-op", "Maple Controls", "Lowell, MA, USA", "US-MA", "embedded", 75, 12,
+         "Test automation and C fit.", "plain", sheet_only=True),
 ]
 # In the sheet from the start (not in the pool): Approved ones for Apply, one external Needs Human for Company sites
 SHEET_JOBS = {
@@ -346,7 +349,7 @@ def setup(state_names=()):
     os.makedirs(os.path.join(config.DATA_DIR, "details"), exist_ok=True)
     listed, scores, cats = {}, {}, {}
     for j in JOBS:
-        if j.get("held_back"):
+        if j.get("held_back") or j.get("sheet_only"):
             continue
         with open(os.path.join(config.DATA_DIR, "details", f"{j['id']}.json"), "w") as f:
             json.dump(details(j, today), f, indent=1)
@@ -378,6 +381,9 @@ def setup(state_names=()):
         rows.append([_url(i), j["company"], j["title"], status, f"match {j['match']}%", ""])
     i, company, title, notes = EXTERNAL_ROW
     rows.append([_url(i), company, title, "Needs Human", notes, ""])
+    rows.append([_url("900140"), "Maple Controls", "Firmware Test Co-op", "Applied",
+                 "Applied on the company site (nuauto assist; you pressed Submit). NUworks side NOT submitted: "
+                 "the session expired.", (today - timedelta(days=10)).isoformat()])
     _write(_path(f"demo_sheet_{SHEET_ID}.json"), {"title": "NUauto jobs (demo)", "rows": rows})
 
 

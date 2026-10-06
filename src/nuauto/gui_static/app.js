@@ -670,6 +670,13 @@ screens.company = async (view) => {
         el("ul", { class: "list" }, ...d.site.map((r) => el("li", { testid: `site-${r.row}` }, el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title,
           el("div", { class: "small muted", text: r.notes.slice(0, 160) })), el("div", { class: "row" }, linkOut(r.url, "Open job"),
           el("button", { class: "btn small", text: "Mark done", onclick: () => markRow("site", r) })))))) : null,
+      d.retry.length ? el("div", { class: "card" }, el("h3", { text: "Company site done; the NUworks side did not go out" }),
+        el("p", { class: "small muted", text: "Submits the same job on NUworks too, with the usual NUworks checks (a visible browser; questions come up here)." }),
+        el("ul", { class: "list" }, ...d.retry.map((r) => el("li", { testid: `retry-${r.row}` }, el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title,
+          el("div", { class: "small muted", text: r.notes.slice(-160) })), el("div", { class: "row" }, linkOut(r.url, "Open job"),
+          el("button", { class: "btn small primary", text: "Submit on NUworks too", testid: `retry-btn-${r.row}`,
+            onclick: () => confirmBox("Submit on NUworks too?", `Row ${r.row} (${r.company}) is Applied on the company site. This submits the same job on NUworks.`,
+              "Submit on NUworks", () => action("nuworks_side", { row: r.row })) })))))) : null,
       d.other.length ? el("div", { class: "card" }, el("h3", { text: "Needs you on NUworks" }),
         el("ul", { class: "list" }, ...d.other.map((r) => el("li", {}, el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title,
           el("div", { class: "small muted", text: r.notes || r.why })), linkOut(r.url, "Open job"))))) : null);
