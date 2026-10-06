@@ -122,7 +122,8 @@ GUI (`nuauto gui`, gui.py + gui_static/ + onboard.py + health.py + demo.py; adde
   `python -m` or file paths in code that may run packaged). Build locally: sh packaging/build.sh; check: packaging/smoke.py;
   other distros: sh packaging/distros.sh <AppImage> (podman).
 - Not yet proven for real: a GUI apply with me watching, the logins through the GUI, the NUworks reads
-  (resume labels, term list), macOS (CI runs the tests there in demo mode).
+  (resume labels, term list), a Mac app opened by a person (CI builds both Mac apps and runs the tests and their
+  self-test there, in demo mode).
 
 COMPANY-SITE AGENT (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`; added 2026-10-05)
 - Only for Needs Human rows stopped at an external application (Notes start "External application";

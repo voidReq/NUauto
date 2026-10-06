@@ -163,4 +163,5 @@ NOT YET PROVEN FOR REAL (only in demo mode so far)
   reads against the real NUworks; the systemd/launchd toggle.
 - The packaged app on a real desktop other than Fedora 44 (containers ran it on Ubuntu 22.04/24.04, Debian 12, Fedora
   and Arch; its own window was rendered on GTK 4 and on GTK 3 / Ubuntu 22.04 with a virtual X server). The macOS app
-  and the release workflow have not run yet (they run on a pull request, or on a v* tag).
+  on a real Mac: CI builds both (Apple Silicon, Intel) and runs their self-test, but nobody has opened one yet. No
+  release has been published (that takes a v* tag).
