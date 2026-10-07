@@ -23,6 +23,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 from contextlib import contextmanager
@@ -157,6 +158,18 @@ def update_after(state, tool, text):
         state["refs"] = {}
 
 
+def upload_copy(resume, run_dir):
+    """Copy the resume (same file name) into the run's log folder; return the copy's real path.
+    The browser tool only uploads from its working and output folders, and the resume usually lives
+    elsewhere. The copy is the one file the guard lets the agent upload."""
+    folder = os.path.join(run_dir, "upload")
+    os.makedirs(folder, mode=0o700, exist_ok=True)
+    copy = os.path.join(folder, os.path.basename(resume))
+    shutil.copyfile(resume, copy)
+    os.chmod(copy, 0o600)
+    return os.path.realpath(copy)
+
+
 def under(path, roots):
     """True if path (symlinks resolved) is one of the file roots or inside one of the folder roots."""
     if not path:
@@ -266,16 +279,23 @@ def lookup(entries, label, options, page):
         return {"status": "ask_every_time", "why": "voluntary / self-identify page"}
     entry = answers.find(entries, label_key(label))
     if entry is None:
-        return {"status": "unknown"}
+        return {"status": "unknown", "saved": saved_answers(entries)}
     if entry.get("always_ask"):
         return {"status": "ask_every_time", "why": "always_ask question"}
     if entry.get("leave_blank"):
         return {"status": "leave_blank"}
     if not entry["answer"]:
-        return {"status": "unknown"}
+        return {"status": "unknown", "saved": saved_answers(entries)}
     if options and entry["answer"] not in options:
         return {"status": "not_an_option", "saved": entry["answer"], "options": options}
     return {"status": "answer", "value": entry["answer"]}
+
+
+def saved_answers(entries):
+    """What the agent may work an unknown field out from: every saved answer, minus the always-ask and
+    leave-blank ones (those are never reused under another wording)."""
+    return [{"question": e["question"], "answer": e["answer"]} for e in entries
+            if e["answer"] and not e.get("always_ask") and not e.get("leave_blank")]
 
 
 def valid_answer(value, options):
@@ -455,7 +475,7 @@ def run(number, url_override):
     d = log_.dir
     answer_cmd = answer_prefix()
     read_roots = [os.path.realpath(r) for r in [*config.ASSIST_READ_PATHS, config.LAPTOP_RESUME] if os.path.exists(r)]
-    resume = os.path.realpath(config.LAPTOP_RESUME) if os.path.exists(config.LAPTOP_RESUME) else None
+    resume = upload_copy(config.LAPTOP_RESUME, d) if os.path.exists(config.LAPTOP_RESUME) else None
     state = {"current_url": url, "refs": {}, "issued": {}, "issued_values": [], "answer_cmd": answer_cmd,
              "read_roots": read_roots, "resume": resume}
     with open(os.path.join(d, "state.json"), "w") as f:

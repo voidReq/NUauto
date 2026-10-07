@@ -114,6 +114,15 @@ ok(s, B + "browser_file_upload", {"paths": []})   # cancel the file chooser
 blocked(s, B + "browser_file_upload", {"paths": [os.path.join(config.PROJECT_DIR, "token.json")]}, "only the resume")
 blocked(s, B + "browser_file_upload", {"paths": [RESUME, "/etc/passwd"]}, "only the resume")
 blocked({**s, "resume": None}, B + "browser_file_upload", {"paths": [RESUME]}, "only the resume")
+# the browser tool only uploads from its output folder: the run gets a copy there, and only the copy is allowed
+run_dir = tempfile.mkdtemp()
+copy = assist.upload_copy(RESUME, run_dir)
+assert copy == os.path.realpath(os.path.join(run_dir, "upload", "Resume.pdf")) and open(copy).read() == "x"
+assert os.stat(copy).st_mode & 0o777 == 0o600
+c = {**s, "resume": copy}
+ok(c, B + "browser_file_upload", {"paths": [copy]})
+blocked(c, B + "browser_file_upload", {"paths": [RESUME]}, "only the resume")
+assert assist.upload_copy(RESUME, run_dir) == copy   # a second run into the same folder is fine
 
 # Bash: only the answer-bank command, no shell tricks
 ok(s, "Bash", {"command": '/venv/python /proj/assist.py answer "City*" --option "A (+1)"'})
@@ -194,7 +203,7 @@ assert assist.link_from_notes("Popup requires Cover Letter") is None
 answers.save([answers.new_entry("email", "me@example.com", "text"), answers.new_entry("work authorization", "", "select", always_ask=True)])
 E = answers.load()
 assert assist.lookup(E, "Email*", [], "My Information") == {"status": "answer", "value": "me@example.com"}
-assert assist.lookup(E, "City*", [], "My Information")["status"] == "unknown"
+assert assist.lookup(E, "City*", [], "My Information") == {"status": "unknown", "saved": [{"question": "email", "answer": "me@example.com"}]}
 assert assist.lookup(E, "Work Authorization*", ["Yes", "No"], "")["status"] == "ask_every_time"
 assert assist.lookup(E, "Email*", [], "Voluntary Disclosures")["status"] == "ask_every_time"
 assert assist.lookup(E, "Email*", ["a@b.c"], "")["status"] == "not_an_option"
@@ -234,6 +243,10 @@ assert "Decline" in state()["issued_values"]
 assert bank("blank", "Phone Extension")["status"] == "leave_blank"
 assert bank("answer", "Phone Extension")["status"] == "leave_blank"
 assert bank("alias", "E-mail Address*", "email")["value"] == "me@example.com"
+# unknown: the agent gets the saved answers to work it out from; never always-ask or leave-blank ones
+saved = bank("answer", "Your e-mail*")["saved"]
+assert {"question": "email", "answer": "me@example.com"} in saved and {"question": "city", "answer": "Boston"} in saved
+assert all(x["question"] not in ("work authorization", "phone extension") for x in saved)
 
 # NUworks prompt: typing the option's exact text works too (was: number only)
 class IO(answers.TerminalIO):  # the terminal wording, canned replies
