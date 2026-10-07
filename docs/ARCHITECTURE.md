@@ -37,6 +37,8 @@ MODULES (src/nuauto/)
   inspect_form.py read-only lister of an Apply form. main(); FIELDS_JS is reused by apply.py.
   sync.py         laptop<->homelab rsync. pull(), push(), push_session(), server_busy(), deploy_now(); PACKAGE/CODE
                   list the files that reach the homelab (not sent when deploy_from_git is on).
+  insights.py     summarize(pool, details, rows) -> pay (hourly(), buckets, median, middle half), places (place(),
+                  by state), categories, sheet statuses; text() for `nuauto insights`; gui.py's /api/insights.
   deploy.py       homelab: Deploy.run() deploys GitHub's main (unpack aside, import check, copy changed files,
                   reinstall, unit files, restart web only if needed, undo on failure); run by nuauto-deploy.timer.
   doctor.py       health check. main() -> laptop() (health.py's checks), server() (piped to the homelab),

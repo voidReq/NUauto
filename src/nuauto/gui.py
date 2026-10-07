@@ -605,6 +605,16 @@ def review_done():
     return {}
 
 
+def insights_get():
+    """Pay, places, kinds of work (pool and applied) and the sheet's statuses. The pool numbers work without the sheet."""
+    from nuauto import insights
+    try:
+        APP.refresh_rows()
+    except Exception:
+        pass
+    return insights.collect(APP.rows)
+
+
 def apply_list():
     from nuauto import apply
     rows = need_rows()
@@ -1021,6 +1031,7 @@ GET_ROUTES = {
     "/api/health": lambda q: {"checks": [c.to_dict() for c in APP.checks()], "running": sorted(APP.running_groups)},
     "/api/review": lambda q: review(q.get("mode", "approve") if q.get("mode") in ("approve", "rate") else "approve"),
     "/api/apply": lambda q: apply_list(),
+    "/api/insights": lambda q: insights_get(),
     "/api/company": lambda q: company(),
     "/api/task": lambda q: {"task": APP.task.view(int(q.get("after", 0) or 0)) if APP.task else None},
     "/api/answers": lambda q: answers_get(),
@@ -1232,7 +1243,7 @@ def ask_instance_to_open(lock):
         return False
 
 
-SCREENS = ["home", "review", "apply", "company", "answers", "settings", "setup", "logs"]
+SCREENS = ["home", "review", "apply", "company", "insights", "answers", "settings", "setup", "logs"]
 
 
 def screenshots(folder, url):

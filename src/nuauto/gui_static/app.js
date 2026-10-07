@@ -388,7 +388,7 @@ function questionMenu(box, q, reply) {
 // ------------------------------------------------------------------ screens
 
 const screens = {};
-const TITLES = { home: "Today", review: "Review", apply: "Apply", company: "Company sites", answers: "Answers",
+const TITLES = { home: "Today", review: "Review", apply: "Apply", company: "Company sites", insights: "Insights", answers: "Answers",
   settings: "Settings", setup: "Setup", logs: "Past runs" };
 
 // ---- Today
@@ -747,6 +747,105 @@ screens.company = async (view) => {
   }
   await reload();
   return { reload };
+};
+
+// ---- Insights: pay, places and kinds of work in the pool / what you applied to; where the sheet stands
+const SVGNS = "http://www.w3.org/2000/svg";
+function svg(tag, attrs, ...kids) {
+  const n = document.createElementNS(SVGNS, tag);
+  for (const [k, v] of Object.entries(attrs || {})) if (v !== null && v !== undefined) n.setAttribute(k, String(v));
+  for (const kid of kids.flat()) if (kid) n.append(kid);
+  return n;
+}
+// Status colors (state, not series): each always shown with its label and count in the legend.
+const STATUS_COLOR = { Proposed: "var(--off)", Approved: "var(--accent)", Applied: "var(--ok)", "Needs Human": "var(--warn)", Failed: "var(--fail)" };
+// Ring (and legend) order, chosen with the dataviz palette validator so no two neighbors are the hard-to-tell pairs
+// (red/amber, green/amber next to each other); labels, counts and 2px gaps carry identity too.
+const RING = ["Applied", "Needs Human", "Proposed", "Failed", "Approved"];
+const usd = (x) => x === null || x === undefined ? "—" : `$${x >= 100 || Number.isInteger(x) ? Math.round(x) : x.toFixed(2)}`;
+
+function donut(items, total) {
+  // A ring of arcs (one per status) with a 2px surface gap between them; the total in the middle.
+  const r = 52, c = 2 * Math.PI * r, gap = items.length > 1 ? 2 : 0;
+  let at = 0;
+  const arcs = items.map((it) => {
+    const len = (c * it.count) / total;
+    const arc = svg("circle", { cx: 70, cy: 70, r, fill: "none", stroke: STATUS_COLOR[it.label] || "var(--off)", "stroke-width": 18,
+      "stroke-dasharray": `${Math.max(0, len - gap)} ${c}`, "stroke-dashoffset": -at, transform: "rotate(-90 70 70)" },
+      svg("title", {}, `${it.label}: ${it.count}`));
+    at += len;
+    return arc;
+  });
+  const mid = svg("text", { x: 70, y: 66, "text-anchor": "middle", class: "donut-total" });
+  mid.textContent = String(total);
+  const sub = svg("text", { x: 70, y: 86, "text-anchor": "middle", class: "donut-sub" });
+  sub.textContent = total === 1 ? "row" : "rows";
+  return svg("svg", { viewBox: "0 0 140 140", width: 140, height: 140, role: "img", "aria-label": items.map((i) => `${i.label} ${i.count}`).join(", ") },
+    ...arcs, mid, sub);
+}
+
+function hbars(items, testid) {
+  // One series: one hue, the count beside each bar (text in ink, not the bar color).
+  const top = Math.max(1, ...items.map((i) => i.count));
+  return el("ul", { class: "hbars", testid }, ...items.map((i) => el("li", { title: `${i.label}: ${i.count}` },
+    el("span", { class: "hb-label", text: i.label }),
+    el("span", { class: "hb-track" }, el("span", { class: "hb-bar", style: null, "data-w": Math.max(2, (100 * i.count) / top) })),
+    el("span", { class: "hb-n", text: String(i.count) }))));
+}
+
+function vbars(items, testid) {
+  const top = Math.max(1, ...items.map((i) => i.count));
+  return el("div", { class: "vbars", testid }, ...items.map((i) => el("div", { class: "vb", title: `${i.label}: ${i.count}` },
+    el("span", { class: "vb-n", text: i.count ? String(i.count) : "" }),
+    el("span", { class: "vb-col" }, el("span", { class: "vb-bar", "data-h": i.count ? Math.max(3, (100 * i.count) / top) : 0 })),
+    el("span", { class: "vb-label", text: i.label }))));
+}
+
+function sizeBars(root) {  // widths/heights from data-* (the CSP allows no inline style attributes from markup)
+  root.querySelectorAll("[data-w]").forEach((b) => { b.style.width = b.dataset.w + "%"; });
+  root.querySelectorAll("[data-h]").forEach((b) => { b.style.height = b.dataset.h + "%"; });
+}
+
+function tile(label, value, note, testid) {
+  return el("div", { class: "tile", testid }, el("div", { class: "tile-label", text: label }),
+    el("div", { class: "tile-value", text: value }), note ? el("div", { class: "tile-note", text: note }) : null);
+}
+
+screens.insights = async (view) => {
+  let d, which = "pool";
+  try { d = await api.get("/api/insights"); } catch (e) { fill(view, el("div", { class: "note fail", text: e.message })); return {}; }
+  if (d.statuses) d.statuses.sort((x, y) => RING.indexOf(x.label) - RING.indexOf(y.label));
+  function draw() {
+    const g = d[which], p = g.pay;
+    const seg = el("div", { class: "seg", role: "group", "aria-label": "Which jobs" },
+      ...[["pool", `Your pool (${d.pool.count})`], ["applied", `Applied (${d.applied.count})`]].map(([k, t]) =>
+        el("button", { "aria-pressed": String(which === k), testid: `ins-${k}`, text: t, onclick: () => { which = k; draw(); } })));
+    const status = d.statuses === null ? el("div", { class: "card" }, el("h2", { text: "Your sheet" }),
+      el("p", { class: "empty", text: "Can't read the sheet right now; the pool numbers below still work." })) :
+      el("div", { class: "card", testid: "ins-status" }, el("h2", { text: "Where your applications stand" }),
+        d.rows ? el("div", { class: "donut-wrap" }, donut(d.statuses, d.rows),
+          el("ul", { class: "legend" }, ...d.statuses.map((s) => el("li", {},
+            el("span", { class: "swatch", "data-status": s.label }), el("span", { text: s.label }), el("b", { text: String(s.count) })))))
+          : el("p", { class: "empty", text: "Nothing in your sheet yet." }));
+    const body = !g.count ? [el("p", { class: "empty", testid: "ins-empty", text: which === "applied" ? "Nothing applied yet. Applied rows show up here." : "Your pool is empty. Check for new jobs on Today." })] : [
+      el("div", { class: "tiles" },
+        tile("Median pay", p.median === null ? "—" : `${usd(p.median)}/h`, p.mid_low !== null ? `most ${usd(p.mid_low)}–${usd(p.mid_high)}` : null, "tile-pay"),
+        tile("In Massachusetts", `${g.in_ma} of ${g.count}`, `${g.states} state${g.states === 1 ? "" : "s"} in all`, "tile-ma"),
+        which === "pool" ? tile("Closing this week", String(g.closing_week), "in your pool", "tile-closing") :
+          tile("Pay listed", `${p.listed} of ${g.count}`, null, "tile-listed")),
+      el("div", { class: "card", testid: "ins-pay" }, el("div", { class: "row between" }, el("h2", { text: "Hourly pay" }),
+        el("span", { class: "small muted", text: p.listed ? `${p.listed} of ${g.count} list pay · all ${usd(p.low)}–${usd(p.high)}` : "none listed" })),
+        p.listed ? vbars(p.buckets, "pay-bars") : null),
+      el("div", { class: "grid2" },
+        el("div", { class: "card", testid: "ins-where" }, el("h2", { text: "Where" }), hbars(g.places, "where-bars"),
+          g.cities.length ? el("p", { class: "small muted", text: "Top cities: " + g.cities.map((c) => `${c.label} (${c.count})`).join(", ") }) : null),
+        g.categories.length ? el("div", { class: "card", testid: "ins-kind" }, el("h2", { text: "Kind of work" }), hbars(g.categories, "kind-bars")) : null)];
+    fill(view, status, el("div", { class: "row between ins-head" }, el("h2", { text: which === "pool" ? "Jobs in your pool" : "Jobs you applied to" }), seg), ...body);
+    view.querySelectorAll(".swatch").forEach((s) => { s.style.background = STATUS_COLOR[s.dataset.status] || "var(--off)"; });
+    sizeBars(view);
+  }
+  draw();
+  return {};
 };
 
 // ---- Answers
