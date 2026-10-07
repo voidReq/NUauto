@@ -187,6 +187,7 @@ src/nuauto/: cli.py (the nuauto command)   config.py (all paths, hosts; reads lo
   setup_sheet.py (sheet setup / `format` restyle)   gui.py (the window's server)   gui_static/ (its page)
   health.py (the checks behind doctor and the GUI)   onboard.py (setup wizard)   demo.py (demo mode fakes)
   window.py (which window) + window_gtk.py (the Linux window, run by the system python3)
+  insights.py (pay, places, kinds of work, sheet statuses: the GUI's Insights screen and `nuauto insights`)
   Imports are always absolute: `from nuauto import sheet` (test_sync enforces it).
 prompts/ (TRIAGE_, SCORE_, CATEGORY_PROMPT.md: Claude batch prompts; ASSIST_PROMPT.md: agent rules)
 tests/ (test_*.py offline checks)   docs/ (DEPLOY, PIPELINE, GUI, ARCHITECTURE, SAFETY, STATUS)
@@ -215,6 +216,7 @@ nuauto login google    # Google Sheets login, every 7 days (Discord warns the da
 nuauto test            # all offline tests
 nuauto doctor [--json] # health check: laptop, homelab, Mark-done page (read-only)
 nuauto deploy          # homelab: deploy GitHub's main now (laptop: starts it there); the timer does it every 5 min
+nuauto insights        # pay, places, kinds of work in my pool and applications; sheet statuses (read-only)
 nuauto selftest        # is this install OK? demo mode end to end in a hidden browser (nothing real touched)
 nuauto assist [<row>]  # company-site agent for a Needs Human row; asks me before any Submit
 nuauto answers list    # answer bank; edit with: nvim local/answers.json
@@ -229,7 +231,7 @@ TESTS
 Ubuntu and macOS. tests/test_sync.py fails if a new module or prompt isn't in sync.CODE (so it would never
 reach the homelab). test_web.py covers the public Mark-done links (signatures; GET never
 changes the sheet). test_browser.py covers the domain lock and the profile lock. test_assist.py covers the
-company-site agent's guard. test_deploy.py runs deploy.py on a throwaway git repo (copy, web restart only when needed, undo on failure). test_demo.py runs the real apply.py on demo mode's fake pages (stops, cap, re-login).
+company-site agent's guard. test_insights.py covers the Insights numbers (pay parsing, folding, no guessing). test_deploy.py runs deploy.py on a throwaway git repo (copy, web restart only when needed, undo on failure). test_demo.py runs the real apply.py on demo mode's fake pages (stops, cap, re-login).
 test_gui.py covers the GUI server's security and flows; test_setup.py the wizard; test_health.py the checks;
 test_window.py the packaged-app plumbing (self_cmd, the assistant's command, the window choice, clean env).
 

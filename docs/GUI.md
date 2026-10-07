@@ -57,6 +57,10 @@ SCREENS
                  company site or needs a cover letter / transcript becomes Needs Human (Company sites)
   Company sites  Needs Human rows for the assistant (opens `nuauto assist <row>` in a terminal window, or shows the
                  command), "I applied myself", company sites still owed (Mark done), the NUworks side to retry
+  Insights       where your sheet stands (a status ring: arcs in an order checked for color-blind separation, with a
+                 labeled legend), then for Your pool / Applied: median and usual pay, share in Massachusetts, closing this
+                 week; an hourly-pay histogram; by state (top 5 + Other, top cities); kind of work. insights.py, also
+                 `nuauto insights` in a terminal. Read-only; pay that doesn't read as $10-150/h counts as not listed
   Answers        the answer bank as a table (exact-match rules unchanged); locked while a run uses it
   Settings       every health check (run them now), logins, resume label, applications per week (the weekly cap), week start, setup, logs, quit
   Setup          the wizard (below); opens by itself until setup is done
@@ -149,6 +153,7 @@ API (JSON; all need the cookie; POSTs need X-NUauto: 1)
   GET  /api/task?after=N     the current task: state, new log lines, question, row, screenshot, countdown
   POST /api/answer           {"task", "id", "reply"}; POST /api/stop {"task", "force"}
   GET  /api/company          agent / other / site / retry rows; POST /api/mark {"action": applied|site, "row", "url"}
+  GET  /api/insights         pool / applied numbers (pay, places, categories) and the sheet's statuses
   GET  /api/answers          entries + version; POST /api/answers {"entries", "version"}
   GET  /api/settings         settings (no secrets); POST /api/settings {"resume_label", "week_start", ...}
   GET  /api/setup            wizard steps; POST /api/setup {"action": ack|client_upload|client_downloads|

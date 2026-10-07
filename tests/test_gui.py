@@ -90,6 +90,9 @@ try:
     dated = [t["closes"] for t in st["todo"] if t["closes"]]
     assert dated == sorted(dated) and [t["closes"] for t in st["todo"]][:len(dated)] == dated, st["todo"]
     assert all(t["closes_text"] == "no deadline listed" for t in st["todo"] if not t["closes"])
+    ins = get("/api/insights")  # the demo: 8 pool jobs, one paid yearly (made hourly), one with no pay
+    assert ins["pool"]["count"] == 8 and ins["pool"]["pay"]["listed"] == 7 and ins["rows"] == sum(x["count"] for x in ins["statuses"])
+    assert ins["applied"]["count"] == {x["label"]: x["count"] for x in ins["statuses"]}["Applied"]
     applying = get("/api/apply")["rows"]
     assert applying and all({"closes", "closes_text", "past", "soon", "company_site"} <= set(r) for r in applying), applying
     checks = {c["id"]: c for c in get("/api/health")["checks"]}
@@ -256,6 +259,26 @@ fetch("{target}", {{method: "POST", credentials: "include", body: {json.dumps(bo
         page.click("[data-testid=nav-home]")
         page.wait_for_selector("[data-testid=todo-company-10]")
         assert page.locator("[data-testid=todo] [data-testid=due]").count() == len(get("/api/state")["todo"])
+        # Insights: the status ring has one arc per status, bars have real sizes, the toggle switches to Applied
+        ins = get("/api/insights")  # again: the runs above changed the sheet
+        page.click("[data-testid=nav-insights]")
+        page.wait_for_selector("[data-testid=ins-status] svg")
+        assert page.locator("[data-testid=ins-status] svg circle").count() == len(ins["statuses"])
+        assert page.locator("[data-testid=ins-status] .legend li").count() == len(ins["statuses"])
+        assert page.locator("[data-testid=pay-bars] .vb").count() == 6
+        heights = page.eval_on_selector_all("[data-testid=pay-bars] .vb-bar", "bs => bs.map(b => b.getBoundingClientRect().height)")
+        assert max(heights) > 50 and sum(1 for h in heights if h > 0) == sum(1 for b in ins["pool"]["pay"]["buckets"] if b["count"]), heights
+        widths = page.eval_on_selector_all("[data-testid=where-bars] .hb-bar", "bs => bs.map(b => b.getBoundingClientRect().width)")
+        assert widths and min(widths) > 0 and widths[0] == max(widths), widths
+        assert "$" in page.inner_text("[data-testid=tile-pay]") and "of 8" in page.inner_text("[data-testid=tile-ma]")
+        page.click("[data-testid=ins-applied]")
+        page.wait_for_selector("[data-testid=ins-applied][aria-pressed=true]")
+        assert f"Applied ({ins['applied']['count']})" in page.inner_text("[data-testid=ins-applied]")
+        assert page.locator("[data-testid=tile-listed]").count() == 1  # applied: "pay listed" instead of "closing"
+        page.set_viewport_size({"width": 420, "height": 900})  # phone width: nothing sticks out sideways
+        page.wait_for_timeout(200)
+        assert page.evaluate("document.documentElement.scrollWidth") <= 420
+        page.set_viewport_size({"width": 1200, "height": 900})
         page.click("[data-testid=nav-answers]")
         page.wait_for_selector("[data-testid=answers-save]")
         assert "are you at least 18 years old? *" in [x.input_value() for x in page.locator("tbody input[aria-label=Question]").all()]
