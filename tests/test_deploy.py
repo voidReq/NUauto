@@ -185,7 +185,7 @@ try:
     sent.clear()
     config.DEPLOY_FROM_GIT = True
     sync.push()
-    assert "push code" not in sent and "push ratings" in sent and "push local config" in sent, sent
+    assert "push code" not in sent and "push ratings" in sent, sent  # (local config only when the file exists: not on CI)
     sent.clear()
     sync.push(code=True)
     assert "push code" in sent
