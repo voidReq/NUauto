@@ -74,6 +74,11 @@ ANSWER BANK (answers.json)
   If not present, ask me.
 - always_ask entries (e.g., salary, work authorization, demographic questions) are never
   auto-filled.
+- (Changed 2026-10-06, my call: "I'd rather agents infer based on answers".) The rules above are for the
+  NUworks runner (apply.py). The company-site agent (`nuauto assist`) may work an unmatched field out from
+  my saved answers (other wording, or a direct part like city from address; a dropdown option that means
+  the saved answer), says what it used, and aliases the label so the next run matches exactly. Never from
+  always_ask or leave-blank entries; anything my answers don't cover, it asks. I review before Submit.
 - Starter questions to prefill: name, preferred name, email, phone, address, school, major,
   expected graduation date, GPA, work authorization, sponsorship needed, available start/end
   dates, hours per week, co-op term, relocation, commute, LinkedIn, GitHub, portfolio, how did
@@ -142,7 +147,8 @@ COMPANY-SITE AGENT (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`;
   "Apply"), Enter and type(submit) make the terminal ask me first ("ask"); element names come from the
   latest full snapshot only (refs cleared by anything that changes the page), never from the agent's
   description. Never: password fields, page scripts (could submit behind the review), uploads other than
-  the resume, non-web links; Bash only the answer-bank command (answer|save|once|alias|blank|wait);
+  the resume (the launcher copies it into the run's log folder, logs/<run>/upload/, because the browser tool
+  only uploads from there; only that copy is allowed), non-web links; Bash only the answer-bank command (answer|save|once|alias|blank|wait);
   Read/Glob/Grep only inside my resume and local_config.json "assist_read_paths" (my writeups).
 - Mine: sign-in, captchas, approving Submit. After I /exit, the launcher asks "did you submit?"; y =
   Applied (dated today, counts toward the weekly limit), then the same job is submitted on NUworks too by

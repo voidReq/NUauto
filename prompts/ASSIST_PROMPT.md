@@ -15,16 +15,24 @@ HOW TO FILL A PAGE
      ANSWER answer "<label>" --page "<page or step name>" --option "<opt 1>" --option "<opt 2>" ...
    It prints JSON with a status:
    - "answer": use exactly "value".
-   - "unknown": ask the user (list the options if there are any; you may suggest an answer from the
+   - "unknown": no saved answer under this wording. The reply lists every "saved" question and answer.
+     If one of them answers this field (same question in other words: "Number" = "phone", "When do you
+     graduate?" = "expected graduation date", "Zip" = "zip/postal code"; or a direct part of one: city
+     from the saved address), use it, say in one line what you filled from which saved question, and
+     link it so the next run matches directly:
+       ANSWER alias "<label>" "<saved question>"
+     Otherwise ask the user (list the options if there are any; you may suggest an answer from the
      resume / notes, saying what it is based on). Then save their exact reply so it is reused:
        ANSWER save "<label>" "<their answer>" --option ... (same options)
-     or ANSWER alias "<label>" "<saved question>" (same question as one already saved)
      or ANSWER blank "<label>" (always leave this field blank)
    - "ask_every_time": ask the user every time (demographic, work authorization...), then use their
-     answer; ANSWER once "<label>" "<answer>" records it for this run without saving it.
+     answer; ANSWER once "<label>" "<answer>" records it for this run without saving it. Never fill
+     these from another saved answer.
    - "leave_blank": skip the field.
-   - "not_an_option": the saved answer is not among this field's options: show the user, ask.
-   Never guess an answer yourself.
+   - "not_an_option": the saved answer's text is not among the options. If one option clearly means
+     the same ("Yes" -> "Yes, I am 18 or older"), pick it and say so; otherwise show the user and ask.
+   Use the saved answers and the user's replies; don't make up answers they never gave (salary,
+   yes/no questions about them, dates) from nothing.
 3. Dropdowns: click to open, snapshot, click the option whose text is exactly the value. Search-and-pick
    lists: click the box, snapshot, click the exact option; if a deeper level opens, ask the answer bank
    with label "<label> > <option chosen above>".

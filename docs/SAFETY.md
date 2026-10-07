@@ -51,11 +51,12 @@ COMPANY-SITE AGENT (assist.py, prompts/ASSIST_PROMPT.md)
 - Password fields: no typing or filling | assist.decide (browser_type, browser_fill_form) | test_assist
 - No page scripts; only tools in assist.TOOLS | assist.decide | test_assist
 - Navigation only to http(s) | assist.decide | test_assist
-- Uploads: only the resume file (resolved path) | assist.decide (browser_file_upload) | test_assist
+- Uploads: only the run's copy of the resume (logs/<run>/upload/, resolved path) | assist.decide (browser_file_upload) | test_assist
 - Bash: only the answer-bank command (answer|save|once|alias|blank|wait), no shell operators | assist.check_bash | test_assist
 - Read/Glob/Grep only inside the resume and local_config.json assist_read_paths; symlinks resolved | assist.check_read, assist.under | test_assist
 - Saved/once answers: one line, max 300 chars, must equal an option; already-saved answers are not overwritten; always_ask / voluntary pages are never saved | assist.valid_answer, assist.bank | test_assist
 - Voluntary / EEO pages always ask the user | assist.page_always_asks, assist.lookup | test_assist
+- Unknown label: the agent gets the saved answers to infer from (not always_ask, not leave-blank), then aliases the label; anything else it asks | assist.lookup, assist.saved_answers | test_assist (what is handed out); the inference itself is prompt-only
 - Guard crash blocks the action | assist.hook_main (exit 2) | no test
 - Rows the agent may take: Needs Human + "External application"; never NUworks (even with --url) | assist.assist_target | test_assist
 - Sheet touched only by the launcher, after you answer y; agent has no sheet access | assist.run (mark_applied_by_hand), tools limited to the list above | test_assist (target rules only; the y/n flow is not tested)
@@ -102,7 +103,7 @@ SETUP WIZARD (onboard.py)
 - Preferences are validated before they shape the pool or Claude's prompt (no "{{" in text, known categories, ranges) | onboard.check_prefs | test_setup
 
 GAPS (policy or prompt only, or weaker than the rules read)
-- Assist: typed text is not checked against the answer bank. assist.issue records what the bank handed out (state issued / issued_values) but decide never compares it with browser_type / browser_fill_form text. "Never guess" and "essays only after I approve" are prompt-only.
+- Assist: typed text is not checked against the answer bank. assist.issue records what the bank handed out (state issued / issued_values) but decide never compares it with browser_type / browser_fill_form text. "Only infer from saved answers, else ask" and "essays only after I approve" are prompt-only.
 - Assist: Submit detection is by exact button name (SUBMIT_RE). An icon-only or differently worded final button ("Place order", "Done") is not caught. Pressing Space on a focused button is not asked about (only Enter is).
 - Assist: no domain lock. The agent may visit any http(s) site and tick any box; only the Submit review stands between it and a submission.
 - Assist: the cap is checked once at start (sheet.check_limits); marking a row Applied by hand has no cap check (the application has already gone out).
