@@ -433,20 +433,26 @@ screens.home = (view) => {
   return { update: draw, health: () => draw(S.state) };
 };
 
+// When the NUworks posting closes: a chip (red once past, amber within a week), or "no deadline listed".
+function dueChip(t) {
+  if (!t.closes) return el("span", { class: "chip", text: "no deadline listed", testid: "due" });
+  return el("span", { class: "chip" + (t.past ? " fail" : t.soon ? " warn" : ""), testid: "due",
+    text: `${t.past ? "closed" : "closes"} ${t.closes_text}` });
+}
+
 function todoList(items) {
   if (!items.length) return el("p", { class: "empty", text: "Nothing waiting on you." });
   return el("ul", { class: "list" }, ...items.map((t) => {
     if (t.kind === "site") return el("li", { testid: `todo-site-${t.row}` },
       el("div", { class: "what" }, el("b", { text: t.company }), " · apply on their own site too ", el("span", { class: "muted", text: `(row ${t.row})` })),
-      el("div", { class: "row" }, linkOut(t.url, "Open job"), el("button", { class: "btn small", text: "Mark done",
+      el("div", { class: "row" }, dueChip(t), linkOut(t.url, "Open job"), el("button", { class: "btn small", text: "Mark done",
         onclick: () => markRow("site", t) })));
     if (t.kind === "company") return el("li", { testid: `todo-company-${t.row}` },
       el("div", { class: "what" }, el("b", { text: t.company }), " · company-site application ", linkOut(t.target, t.host)),
-      el("a", { class: "btn small", href: "#/company", text: "Open" }));
+      el("div", { class: "row" }, dueChip(t), el("a", { class: "btn small", href: "#/company", text: "Open" })));
     return el("li", { testid: `todo-urgent-${t.id}` },
-      el("div", { class: "what" }, el("span", { class: "chip warn", text: `closes ${t.closes}` }), " ", el("b", { text: t.title }), " · ", t.company,
-        el("span", { class: "muted", text: ` · ${t.match}%` })),
-      el("a", { class: "btn small", href: "#/review", text: "Review" }));
+      el("div", { class: "what" }, el("b", { text: t.title }), " · ", t.company, el("span", { class: "muted", text: ` · ${t.match}%` })),
+      el("div", { class: "row" }, dueChip(t), el("a", { class: "btn small", href: "#/review", text: "Review" })));
   }));
 }
 
@@ -663,12 +669,12 @@ screens.apply = async (view) => {
         el("button", { class: "btn primary big", testid: "btn-start-apply", disabled: !!data.why_not || !!(S.task && S.task.state === "running"),
           text: "Start applying", onclick: startApply }))),
       data.why_not ? el("div", { class: "note warn", testid: "apply-why", text: data.why_not }) :
-        el("p", { class: "small muted", text: "Approved in the sheet is your go-ahead. Each job is filled and submitted in a visible Firefox window, one at a time, 30–60 s apart. Every form is screenshotted before Submit. Questions without a saved answer come up here. Stop works like Ctrl+C." })));
+        el("p", { class: "small muted", text: "Approved in the sheet is your go-ahead. Each job is filled and submitted in a visible Firefox window, one at a time, 30–60 s apart. Every form is screenshotted before Submit. Questions without a saved answer come up here. A job that sends you to the company's own site, or needs something only you can give (a cover letter, a transcript), stops and moves to Company sites. Stop works like Ctrl+C." })));
     fill(list, el("div", { class: "card" }, el("h2", { text: `Approved (${data.rows.length})` }),
       data.rows.length ? el("ul", { class: "list", testid: "approved-list" }, ...data.rows.map((r) => el("li", { testid: `approved-${r.row}` },
-        el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title, el("div", { class: "small muted", text: `Row ${r.row} · closes ${r.closes_text}` })),
-        el("div", { class: "row" }, r.past ? el("span", { class: "chip fail", text: "deadline passed" }) : r.soon ? el("span", { class: "chip warn", text: "closing soon" }) : null,
-          linkOut(r.url, "Open"))))) : el("p", { class: "empty", text: "Nothing approved yet. Approve jobs in Review." })));
+        el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title, el("div", { class: "small muted", text: `Row ${r.row}` })),
+        el("div", { class: "row" }, r.company_site ? el("span", { class: "chip", text: "may also want the company's site", title: r.company_site }) : null,
+          dueChip(r), linkOut(r.url, "Open"))))) : el("p", { class: "empty", text: "Nothing approved yet. Approve jobs in Review." })));
     fill(past, data.history.length ? el("div", { class: "card" }, el("div", { class: "row between" }, el("h2", { text: "Recent runs here" }),
       el("a", { href: "#/logs", class: "btn small ghost", text: "All logs and screenshots" })),
       el("ul", { class: "list" }, ...data.history.map((t) => el("li", {}, el("div", { class: "what" }, el("b", { text: t.label }), " · ",
@@ -720,13 +726,13 @@ screens.company = async (view) => {
         el("p", { class: "small muted", text: "Jobs that send you to the company's own site. The assistant (Claude, in a terminal window) fills the application in a visible browser; it asks you before anything is submitted. You sign in, solve captchas and approve Submit." }),
         d.agent.length ? el("ul", { class: "list" }, ...d.agent.map((r) => el("li", { testid: `company-${r.row}` },
           el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title, el("div", { class: "small muted", text: `Row ${r.row} · ${r.host}` })),
-          el("div", { class: "row" }, el("button", { class: "btn small primary", text: "Start assistant", testid: `assist-${r.row}`, onclick: () => action("assist", { row: r.row }) }),
+          el("div", { class: "row" }, dueChip(r), el("button", { class: "btn small primary", text: "Start assistant", testid: `assist-${r.row}`, onclick: () => action("assist", { row: r.row }) }),
             linkOut(r.target, "Open site"),
             el("button", { class: "btn small", text: "I applied myself", onclick: () => markRow("applied", r) }))))) :
           el("p", { class: "empty", text: "None waiting." })),
       d.site.length ? el("div", { class: "card" }, el("h2", { text: "Submitted on NUworks; the company site still wants you" }),
         el("ul", { class: "list" }, ...d.site.map((r) => el("li", { testid: `site-${r.row}` }, el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title,
-          el("div", { class: "small muted", text: r.notes.slice(0, 160) })), el("div", { class: "row" }, linkOut(r.url, "Open job"),
+          el("div", { class: "small muted", text: r.notes.slice(0, 160) })), el("div", { class: "row" }, dueChip(r), linkOut(r.url, "Open job"),
           el("button", { class: "btn small", text: "Mark done", onclick: () => markRow("site", r) })))))) : null,
       d.retry.length ? el("div", { class: "card" }, el("h2", { text: "Company site done; the NUworks side did not go out" }),
         el("p", { class: "small muted", text: "Submits the same job on NUworks too, with the usual NUworks checks (a visible browser; questions come up here)." }),
@@ -737,7 +743,7 @@ screens.company = async (view) => {
               "Submit on NUworks", () => action("nuworks_side", { row: r.row })) })))))) : null,
       d.other.length ? el("div", { class: "card" }, el("h2", { text: "Needs you on NUworks" }),
         el("ul", { class: "list" }, ...d.other.map((r) => el("li", {}, el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title,
-          el("div", { class: "small muted", text: r.notes || r.why })), linkOut(r.url, "Open job"))))) : null);
+          el("div", { class: "small muted", text: r.notes || r.why })), el("div", { class: "row" }, dueChip(r), linkOut(r.url, "Open job")))))) : null);
   }
   await reload();
   return { reload };
