@@ -2,7 +2,9 @@
 
 The homelab owns the job data (it runs the update); the laptop owns your ratings.
   pull()          homelab data/ -> laptop (everything except ratings.json)
-  push()          laptop -> homelab: ratings.json, code, local_config.json, resume, Google token (only if newer)
+  push()          laptop -> homelab: ratings.json, code, local_config.json, resume, Google token (only if newer).
+                  Not the code when "deploy_from_git" is on: the homelab then deploys main from GitHub itself (deploy.py)
+  deploy_now()    start that deploy on the homelab now
   push_session()  laptop -> homelab: NUworks browser profile + session cookies (after `nuauto login`)
 Secrets are copied file-to-file with rsync and never printed.
 """
@@ -19,7 +21,7 @@ REMOTE = f"{config.SERVER}:{config.SERVER_DIR}"
 # there read current ones. The homelab installs the package once (uv pip install -e .); code changes need no reinstall.
 PACKAGE = ["__init__.py", "__main__.py", "cli.py", "config.py", "sheet.py", "jobs.py", "daily.py", "browser.py",
            "apply.py", "answers.py", "inspect_form.py", "setup_sheet.py", "sync.py", "web.py", "doctor.py", "assist.py",
-           "health.py", "demo.py", "gui.py", "onboard.py", "window.py", "window_gtk.py", "selftest.py"]
+           "health.py", "demo.py", "gui.py", "onboard.py", "window.py", "window_gtk.py", "selftest.py", "deploy.py"]
 CODE = (["pyproject.toml", "README.md", "local_config.example.json", "CLAUDE.md", "CONTRIBUTING.md",
          "docs/DEPLOY.md", "docs/PIPELINE.md", "docs/ARCHITECTURE.md", "docs/SAFETY.md", "docs/GUI.md"]
         + [f"src/nuauto/{f}" for f in PACKAGE]
@@ -61,11 +63,15 @@ def lock_remote_local():
     return remote(f"chmod -R go-rwx {shlex.quote(config.SERVER_DIR + '/local')}", "lock down homelab local/")
 
 
-def push():
+def push(code=None):
+    """code: send the laptop's code too (default: yes, unless the homelab deploys main from GitHub)."""
+    if code is None:
+        code = not config.DEPLOY_FROM_GIT
     ok = remote_dirs("local", "data", "docs")
     if os.path.exists(config.LOCAL_CONFIG_PATH):  # before the code, which reads it
         ok &= _run(RSYNC + ["-c", "local/local_config.json", f"{REMOTE}/local/local_config.json"], "push local config")
-    ok &= _run(RSYNC + ["-c", "-R"] + CODE + [f"{REMOTE}/"], "push code")
+    if code:
+        ok &= _run(RSYNC + ["-c", "-R"] + CODE + [f"{REMOTE}/"], "push code")
     if os.path.exists("docs/STATUS.md"):  # local log (gitignored); agents on the homelab read it too
         ok &= _run(RSYNC + ["-c", "docs/STATUS.md", f"{REMOTE}/docs/STATUS.md"], "push status")
     ok &= _run(RSYNC + ["data/ratings.json", f"{REMOTE}/data/ratings.json"], "push ratings")
@@ -77,6 +83,12 @@ def push():
         ok &= _run(RSYNC + ["-u", "local/google_login.txt", f"{REMOTE}/local/google_login.txt"], "push Google login date")
     ok &= lock_remote_local()
     return ok
+
+
+def deploy_now():
+    """Run the homelab's deploy now (the timer does it every 5 minutes) and show the end of its log."""
+    return ssh("systemctl --user start nuauto-deploy.service; "
+               f"tail -n 6 {shlex.quote(config.SERVER_DIR + '/logs/deploy.log')}")
 
 
 def server_busy():

@@ -14,7 +14,10 @@ MODES
     server_hostname  the homelab's hostname (that is how config.IS_SERVER knows it is the homelab)
     server_ssh       how the laptop reaches it with ssh (an ~/.ssh/config alias; default: the hostname)
     server_dir       the project dir there. The units in deploy/systemd/ assume ~/projects/auto;
-                     edit their WorkingDirectory/ExecStart if yours differs.
+                     if yours differs, change them with `systemctl --user edit <unit>` (a drop-in), not by editing
+                     the file: with deploy_from_git the repo's copy is installed over it.
+    deploy_from_git  true = the homelab deploys GitHub's main by itself (DEPLOYING A CHANGE); the laptop stops
+                     pushing code. deploy_repo: the URL of another fork (default: this project's GitHub repo).
     web_base_url, web_listen_host   the Mark-done page (below); "" = no Mark links.
   Below, `ssh homelab` means ssh to server_ssh.
 
@@ -25,7 +28,8 @@ MACHINES (homelab mode)
 - Homelab = PROD. Key-based ssh from the laptop (e.g. over Tailscale). venv made with uv
   (Python 3.12), claude CLI logged in (~/.local/bin/claude, or on PATH), user lingering on
   (user timers run without anyone logged in). Owns data/ (the job pool). NOT a git checkout:
-  code is copied there by sync.py. Never edit code on the homelab; the next push overwrites it.
+  code is copied there by deploy.py (GitHub's main, deploy_from_git) or by sync.py (the laptop's checkout).
+  Never edit code on the homelab; the next deploy or push overwrites it.
 - Mark-done page (optional). `nuauto web` (web.py) listens on web_listen_host:8765 (use the homelab's
   Tailscale IP so it is not reachable from the LAN). To click Mark links from your phone,
   publish it at web_base_url with any tunnel or reverse proxy. Example: cloudflared on another
@@ -49,6 +53,12 @@ Unit files live in this repo (deploy/systemd/) and are installed in ~/.config/sy
   Headless browser; never applies to anything.
 - nuauto-weekly.timer -> nuauto-weekly.service: `nuauto daily weekly`, Sunday 19:00 New York time
   (Discord check-in).
+- nuauto-deploy.timer -> nuauto-deploy.service: `nuauto deploy` every 5 minutes (deploy_from_git only): looks at
+  GitHub's main; a new commit is unpacked aside, imported as a check, then its changed files are copied in, the
+  package is reinstalled if pyproject.toml changed, changed unit files are installed (daemon-reload, timers
+  restarted, new ones enabled) and nuauto-web restarts only if web.py or a module it uses changed. A commit that
+  does not import, or a web that does not come back, is undone and Discord says so once. It waits while the
+  update (`nuauto daily`) runs. Record: local/deployed.json; log: logs/deploy.log.
 - nuauto-web.service: `nuauto web`, always on (Restart=on-failure). Listens on web_listen_host:8765
   only (web.LISTEN). Serves the signed Discord links: GET = confirm page only, POST (button)
   changes the sheet. Every link is HMAC-signed with web_secret.txt for one action on one
@@ -86,7 +96,8 @@ GOOGLE SHEETS LOGIN (gspread + OAuth)
 SYNC (sync.py; runs automatically inside `nuauto` on the laptop, homelab mode only)
 - Before approve / rate / apply / status: pull homelab data/ -> laptop (except ratings.json).
 - After approve / rate / status / login google: push to the homelab: local_config.json, the
-  code (files listed in sync.CODE: pyproject.toml, src/nuauto/, prompts/, docs; rsync -c), docs/STATUS.md, data/ratings.json, the resume,
+  code (files listed in sync.CODE: pyproject.toml, src/nuauto/, prompts/, docs; rsync -c; NOT with deploy_from_git:
+  then the homelab deploys main itself), docs/STATUS.md, data/ratings.json, the resume,
   token.json (if newer), google_login.txt.
 - `nuauto update`: push, start nuauto-daily.service on the homelab, show its log tail, pull.
 - `nuauto login`: copy browser_profile/ + session_cookies.json to the homelab (refuses while
@@ -96,6 +107,15 @@ SYNC (sync.py; runs automatically inside `nuauto` on the laptop, homelab mode on
   timer (an open GUI on a work-in-progress branch does not deploy it by itself).
 
 DEPLOYING A CHANGE
+With deploy_from_git (the homelab pulls main; no unit file or dependency steps by hand):
+1. Change code on the laptop (on a branch; merge to main when approved).
+2. Merge to main. Within 5 minutes the homelab has it (Discord: "Deployed <commit>"). Now: `nuauto deploy`
+   (starts the run on the homelab and shows its log). A branch on the laptop never reaches the homelab.
+3. `nuauto doctor` shows the deployed commit; a failed deploy shows as FAIL with the reason (logs/deploy.log).
+   Roll back: revert the commit on main (a new commit), merge it; the homelab deploys the revert.
+What it copies: src/nuauto/, prompts/, docs/, deploy/systemd/ and the top-level pyproject.toml, README.md, CLAUDE.md,
+CONTRIBUTING.md, local_config.example.json (deploy.DIRS / deploy.FILES). Not tests/, packaging/ or .github/.
+The old way, without deploy_from_git:
 1. Change code on the laptop (on a branch; merge to main when approved).
 2. Push it: any `nuauto status` (or approve/rate), or `.venv/bin/python -c "from nuauto import sync; sync.push()"`.
    Whatever is checked out on the laptop is what gets pushed.
@@ -118,6 +138,15 @@ HEALTH AND LOGS
   ssh homelab 'journalctl --user -u nuauto-daily -n 50'    # last run's output
   ssh homelab 'ls -t ~/projects/auto/logs/daily-*.txt | head -3'   # per-run logs (homelab)
   ssh homelab 'systemctl --user status nuauto-web'
+  ssh homelab 'tail -n 20 ~/projects/auto/logs/deploy.log'   # deploys (deploy_from_git)
+
+TURN ON DEPLOY FROM GITHUB (once, after this is merged to main)
+1. Laptop, on main: push the code once the old way: `nuauto status` (it carries deploy.py and the unit files).
+2. scp deploy/systemd/nuauto-deploy.* homelab:.config/systemd/user/
+   ssh homelab 'systemctl --user daemon-reload && systemctl --user enable --now nuauto-deploy.timer'
+3. Add "deploy_from_git": true to local_config.json; `nuauto status` pushes it. From then on the laptop sends no code.
+4. `nuauto deploy`, then `nuauto doctor`.
+Turn it off: set it to false (the laptop pushes code again) and `systemctl --user disable --now nuauto-deploy.timer`.
 
 SET UP (OR REBUILD) A HOMELAB
 1. Linux with systemd; `ssh homelab` works from the laptop with a key (BatchMode).

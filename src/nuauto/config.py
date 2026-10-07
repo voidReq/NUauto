@@ -93,6 +93,10 @@ SERVER = LOCAL.get("server_ssh") or SERVER_HOSTNAME  # how the laptop reaches it
 SERVER_DIR = LOCAL["server_dir"]
 HAS_SERVER = bool(SERVER_HOSTNAME)
 IS_SERVER = HAS_SERVER and socket.gethostname() == SERVER_HOSTNAME
+# Homelab code comes from GitHub's main (deploy.py, run by nuauto-deploy.timer) instead of from the laptop's checkout.
+# Off by default: then sync.push copies the laptop's code, as before. deploy_repo: another fork's URL.
+DEPLOY_FROM_GIT = bool(LOCAL.get("deploy_from_git")) and HAS_SERVER
+DEPLOY_REPO = LOCAL.get("deploy_repo") or f"https://github.com/{REPO}.git"
 DISCORD_WEBHOOK_PATH = os.path.join(LOCAL_DIR, "discord_webhook.txt")  # secret, mode 600, never print
 
 WEB_SECRET_PATH = os.path.join(LOCAL_DIR, "web_secret.txt")  # homelab only: signs the Mark links; secret

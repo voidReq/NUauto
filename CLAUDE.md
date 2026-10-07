@@ -15,7 +15,9 @@ WHERE AM I
 - Laptop (Fedora, ~/projects/auto): code is edited here. Interactive commands run here.
 - Homelab (`ssh homelab`; hostname and path in local_config.json) = PROD. Runs the
   scheduled update, Discord messages and the Mark-done page. config.IS_SERVER is True there.
-  Code is copied there by sync.py: never edit it on the homelab. Details: docs/DEPLOY.md.
+  Code gets there by itself: with "deploy_from_git" (mine, once turned on) the homelab deploys GitHub's main every
+  5 minutes (deploy.py, nuauto-deploy.timer); otherwise sync.py copies the laptop's checkout. Never edit it on the
+  homelab. Details: docs/DEPLOY.md.
 
 GIT
 - This folder is a git repo (since 2026-10-03). Remote: github.com/voidReq/NUauto, PUBLIC (since
@@ -23,7 +25,9 @@ GIT
   Before any push: no personal info in tracked files or commit messages (names, emails, hosts,
   IPs, IDs, companies I applied to); those go in local_config.json or docs/STATUS.md.
 - Gitignored: local/ (all personal files and secrets), docs/STATUS.md, data/, work/, logs/, .venv/.
-- Whatever is checked out on the laptop is what the next `nuauto` command pushes to the homelab.
+- Prod = whatever is on main: merging to main deploys it to the homelab within 5 minutes (deploy_from_git; web is
+  restarted when needed). Without that setting, whatever is checked out on the laptop is what the next `nuauto`
+  command pushes to the homelab.
 
 HARD LIMITS
 - Under 100 applications total.
@@ -178,7 +182,7 @@ pyproject.toml (package + dependencies; defines the `nuauto` command: .venv/bin/
 src/nuauto/: cli.py (the nuauto command)   config.py (all paths, hosts; reads local/local_config.json)
   sheet.py (rows, limits, status updates, Google login)   apply.py (the NUworks runner)
   browser.py (login/open, domain lock, cookies)   answers.py (answer bank)   jobs.py (pool + viewers)
-  daily.py (homelab update + Discord)   web.py (Mark-done page, homelab)   sync.py (laptop<->homelab)
+  daily.py (homelab update + Discord)   web.py (Mark-done page, homelab)   sync.py (laptop<->homelab)   deploy.py (homelab: deploys main)
   doctor.py (health check)   inspect_form.py (read-only form lister)   assist.py (company-site agent)
   setup_sheet.py (sheet setup / `format` restyle)   gui.py (the window's server)   gui_static/ (its page)
   health.py (the checks behind doctor and the GUI)   onboard.py (setup wizard)   demo.py (demo mode fakes)
@@ -210,6 +214,7 @@ nuauto login           # manual SSO login; close the window when done
 nuauto login google    # Google Sheets login, every 7 days (Discord warns the day before)
 nuauto test            # all offline tests
 nuauto doctor [--json] # health check: laptop, homelab, Mark-done page (read-only)
+nuauto deploy          # homelab: deploy GitHub's main now (laptop: starts it there); the timer does it every 5 min
 nuauto selftest        # is this install OK? demo mode end to end in a hidden browser (nothing real touched)
 nuauto assist [<row>]  # company-site agent for a Needs Human row; asks me before any Submit
 nuauto answers list    # answer bank; edit with: nvim local/answers.json
@@ -224,7 +229,7 @@ TESTS
 Ubuntu and macOS. tests/test_sync.py fails if a new module or prompt isn't in sync.CODE (so it would never
 reach the homelab). test_web.py covers the public Mark-done links (signatures; GET never
 changes the sheet). test_browser.py covers the domain lock and the profile lock. test_assist.py covers the
-company-site agent's guard. test_demo.py runs the real apply.py on demo mode's fake pages (stops, cap, re-login).
+company-site agent's guard. test_deploy.py runs deploy.py on a throwaway git repo (copy, web restart only when needed, undo on failure). test_demo.py runs the real apply.py on demo mode's fake pages (stops, cap, re-login).
 test_gui.py covers the GUI server's security and flows; test_setup.py the wizard; test_health.py the checks;
 test_window.py the packaged-app plumbing (self_cmd, the assistant's command, the window choice, clean env).
 
