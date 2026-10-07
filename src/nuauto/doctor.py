@@ -20,6 +20,7 @@ from nuauto import config
 from nuauto import sync
 
 UNITS = ["nuauto-daily.timer", "nuauto-weekly.timer", "nuauto-web.service"]
+WEB_FILES = ("web.py", "config.py", "sheet.py", "jobs.py")  # nuauto-web needs a restart when these change (= deploy.WEB_CODE)
 JSON = "--json" in sys.argv
 fails = []
 results = []  # every say(), for --json
@@ -189,7 +190,7 @@ def server():
     if not os.path.exists(config.RESUME_PATH):
         say("FAIL", "local/resume.pdf missing (the laptop pushes it: `nuauto status`)")
     check_google_login()
-    for unit in UNITS:
+    for unit in UNITS + (["nuauto-deploy.timer"] if getattr(config, "DEPLOY_FROM_GIT", False) else []):
         enabled = sh(["systemctl", "--user", "is-enabled", unit]).stdout.strip()
         active = sh(["systemctl", "--user", "is-active", unit]).stdout.strip()
         if enabled == "enabled" and active == "active":
@@ -207,6 +208,8 @@ def server():
     elif result == "success":
         say("ok", f"last update run {hours:.0f}h ago, succeeded")
     check_web_fresh()
+    if getattr(config, "DEPLOY_FROM_GIT", False):  # (getattr: this file may run against older code there)
+        check_deploy()
     if sh(["loginctl", "show-user", os.environ.get("USER", ""), "-p", "Linger", "--value"]).stdout.strip() != "yes":
         say("FAIL", "lingering is off, so timers stop when you log out: sudo loginctl enable-linger $USER")
     check_claude()
@@ -223,10 +226,35 @@ def check_web_fresh():
     if not up.isdigit():
         return
     started = time.time() - int(up)
-    newer = [n for n in ("web.py", "config.py", "sheet.py", "jobs.py")
+    newer = [n for n in WEB_FILES
              if os.path.getctime(os.path.join(config.SRC_DIR, n)) > started]
     if newer:
         say("WARN", f"{', '.join(newer)} changed after nuauto-web started: systemctl --user restart nuauto-web")
+
+
+def check_deploy():
+    """deploy.py's record (local/deployed.json) against GitHub's main. Uses only config, like the rest of --server."""
+    try:
+        with open(os.path.join(config.LOCAL_DIR, "deployed.json")) as f:
+            state = json.load(f)
+    except (OSError, ValueError):
+        state = {}
+    if state.get("failed"):
+        say("FAIL", f"deploying {state['failed'][:7]} failed ({state.get('error', '?')[:120]}); still on "
+                    f"{str(state.get('sha') or 'older code')[:7]}: logs/deploy.log")
+    try:
+        r = subprocess.run(["git", "ls-remote", config.DEPLOY_REPO, "refs/heads/main"], capture_output=True, text=True,
+                           timeout=30, env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
+        main_sha = r.stdout.split()[0] if r.returncode == 0 and r.stdout.strip() else None
+    except (OSError, subprocess.SubprocessError):
+        main_sha = None
+    if main_sha is None:
+        say("WARN", "can't ask GitHub which commit main is at")
+    elif state.get("sha") == main_sha:
+        say("ok", f"deployed main {main_sha[:7]} ({state.get('time', '?')})")
+    elif not state.get("failed"):
+        say("WARN", f"main is at {main_sha[:7]} but the homelab runs {str(state.get('sha') or 'something older')[:7]} "
+                    "(the timer deploys within 5 minutes; now: nuauto deploy)")
 
 
 def main():

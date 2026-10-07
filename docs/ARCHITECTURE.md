@@ -35,8 +35,10 @@ MODULES (src/nuauto/)
                   update_after() is the guard; bank() is the answer-bank command; assist_target(),
                   nuworks_side().
   inspect_form.py read-only lister of an Apply form. main(); FIELDS_JS is reused by apply.py.
-  sync.py         laptop<->homelab rsync. pull(), push(), push_session(), server_busy(); PACKAGE/CODE
-                  list the files that reach the homelab.
+  sync.py         laptop<->homelab rsync. pull(), push(), push_session(), server_busy(), deploy_now(); PACKAGE/CODE
+                  list the files that reach the homelab (not sent when deploy_from_git is on).
+  deploy.py       homelab: Deploy.run() deploys GitHub's main (unpack aside, import check, copy changed files,
+                  reinstall, unit files, restart web only if needed, undo on failure); run by nuauto-deploy.timer.
   doctor.py       health check. main() -> laptop() (health.py's checks), server() (piped to the homelab),
                   server_results(), check_public_page(); --json.
   health.py       the checks behind doctor and the GUI's status strip: Check, quick (files), light (sheet, claude,

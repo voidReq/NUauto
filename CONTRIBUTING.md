@@ -24,6 +24,8 @@ nuauto test        # runs every tests/test_*.py
 - **Absolute imports only:** `from nuauto import sheet`. `tests/test_sync.py` fails on relative imports.
 - **New module or prompt:** add it to `PACKAGE` (modules) or `CODE` (prompts, docs) in
   `src/nuauto/sync.py`. Otherwise it never reaches the optional server, and `test_sync.py` fails.
+  (A server that deploys from GitHub, `deploy_from_git`, takes everything in `src/nuauto/`, `prompts/`, `docs/`
+  and `deploy/systemd/` by itself; see `deploy.py`.)
 - **New `nuauto` command:** a user-facing command goes in `COMMANDS` in `src/nuauto/cli.py`, with a branch
   in `main()` and a line in the docstring. A tool that is just a module's own command line goes in
   `TOOLS` instead (it runs that module's `if __name__ == "__main__":` block).

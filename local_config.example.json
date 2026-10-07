@@ -4,6 +4,7 @@
   "server_hostname": "",
   "server_ssh": "",
   "server_dir": "",
+  "deploy_from_git": false,
   "web_base_url": "",
   "web_listen_host": "",
   "assist_read_paths": [],

@@ -11,6 +11,7 @@
   nuauto assist          company-site applications: list rows / `<row>` starts the agent (asks before Submit)
   nuauto test            run all offline tests (no network, no sheet, no browser)
   nuauto doctor          health check of this machine (and the homelab + Mark-done page, if any; read-only)
+  nuauto deploy          homelab: deploy GitHub's main now (the timer does it every 5 min; docs/DEPLOY.md)
 
 Tools (each module's own command line; `nuauto <tool>` with no arguments shows its help):
   nuauto jobs ...        job pool steps (list, triage-export, details, pool, suggest N, stats...)
@@ -35,7 +36,7 @@ from nuauto import config
 TOOLS = {"jobs": "jobs", "answers": "answers", "sheet": "sheet", "setup-sheet": "setup_sheet",
          "inspect": "inspect_form", "daily": "daily", "web": "web", "health": "health", "demo": "demo",
          "onboard": "onboard", "selftest": "selftest"}
-COMMANDS = ("approve", "rate", "apply", "status", "update", "login", "test", "doctor", "assist", "gui")
+COMMANDS = ("approve", "rate", "apply", "status", "update", "login", "test", "doctor", "assist", "gui", "deploy")
 
 
 def run_tool(name, rest):
@@ -97,8 +98,13 @@ def main():
     if cmd == "gui":  # syncs by itself, in the background (the window opens at once)
         from nuauto import gui
         return gui.main(rest)
+    if cmd == "deploy" and not laptop:  # on the homelab itself (what nuauto-deploy.service runs)
+        from nuauto import deploy
+        sys.exit(deploy.main())
     if laptop:
         from nuauto import sync
+        if cmd == "deploy":
+            sys.exit(sync.deploy_now())
         if cmd == "update":
             sync.push()
             print("Running the update on the homelab (a few minutes; Ctrl+C stops watching, not the run)...")

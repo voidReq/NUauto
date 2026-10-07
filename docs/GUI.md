@@ -42,15 +42,19 @@ it as a GitHub release on every v* tag)
   (podman or docker: Ubuntu 22.04 and 24.04, Debian 12, Fedora, Arch; logs in packaging/build/distros/).
 
 SCREENS
-  Today          health problems with fix buttons, this week's count, next steps, what only you can do
+  Today          health problems with fix buttons, this week's count, next steps, what only you can do (each item with
+                 its due date, soonest first; same on Company sites)
   Review         one pool job at a time. Approve mode: Approve (y) adds it to the sheet as Approved at once
                  (or, for one of your Proposed rows, which Review shows first, turns that row Approved);
                  Keys as in the CLI viewer: y n s u o, plus j/k scroll, space/b page, g/G top/bottom. Decisions are
                  sent behind the screen (the next job shows at once; a failed write brings you back to that job).
                  Undo puts the row back to Proposed; Not for me (n) rates it no; Skip (s); Back (u); Open (o).
                  Rate only mode: yes/no ratings for the taste model, nothing in the sheet.
-  Apply          Approved rows in apply order, Start (optionally "at most N"), the live run: current row, latest
-                 screenshot, log, next-job countdown, Stop / Force stop; question dialogs; recent runs
+  Apply          Approved rows in apply order, each with when it closes (due chip: amber within a week, red once
+                 past) and a "may also want the company's site" chip when the posting says so; Start (optionally
+                 "at most N"), the live run: current row, latest screenshot, log, next-job countdown, Stop / Force
+                 stop; question dialogs; recent runs. Start tries every row on its own; one that sends you to a
+                 company site or needs a cover letter / transcript becomes Needs Human (Company sites)
   Company sites  Needs Human rows for the assistant (opens `nuauto assist <row>` in a terminal window, or shows the
                  command), "I applied myself", company sites still owed (Mark done), the NUworks side to retry
   Answers        the answer bank as a table (exact-match rules unchanged); locked while a run uses it

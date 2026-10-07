@@ -423,6 +423,16 @@ def row_view(r, **extra):
             "notes": r.notes, "date": r.date, **extra}
 
 
+def closing(r):
+    """When the row's NUworks posting closes (from the saved job data): the date, its text, whether it is past or
+    within a week. All empty/false when the job is unknown or lists no deadline."""
+    from nuauto import apply
+    day = apply.row_closes(r)
+    left = (day - date.today()).days if day else None
+    return {"closes": day.isoformat() if day else None, "closes_text": jobs.closes_text(day),
+            "past": left is not None and left < 0, "soon": left is not None and 0 <= left <= jobs.URGENT_DAYS}
+
+
 NUWORKS_SIDE_NOT_SENT = ("NUworks side NOT submitted", "before Submit; not submitted")
 
 
@@ -435,14 +445,14 @@ def company_rows(rows):
         if r.status == "Needs Human":
             url, why = assist.assist_target(r.notes)
             if url:
-                agent.append(row_view(r, target=url, host=urlparse(url).hostname or url))
+                agent.append(row_view(r, **closing(r), target=url, host=urlparse(url).hostname or url))
             else:
-                other.append(row_view(r, why=why))
+                other.append(row_view(r, **closing(r), why=why))
         elif r.status == "Applied" and r.notes.startswith(sheet.SITE_MARK):
-            site.append(row_view(r))
+            site.append(row_view(r, **closing(r)))
         elif r.status == "Applied" and any(m in r.notes for m in NUWORKS_SIDE_NOT_SENT) \
                 and assist.nuworks_side_blocked(r.notes) is None:
-            retry.append(row_view(r))
+            retry.append(row_view(r, **closing(r)))
     return agent, other, site, retry
 
 
@@ -488,9 +498,12 @@ def state():
         "rows_loaded": rows is not None, "rows_error": APP.rows_error, "week": week_info(rows),
         "counts": {"review": len(todo), "approved": len(approved), "company": len(agent) + len(retry), "site": len(site),
                    "needs_human": len(agent) + len(other)},
-        "todo": ([{"kind": "site", **x} for x in site] + [{"kind": "company", **x} for x in agent]
-                 + [{"kind": "urgent", "id": r["id"], "title": r["title"], "company": r["company"],
-                     "closes": r["closes"], "match": r["match"], "url": jobs.job_url(r["id"])} for r in soon]),
+        "todo": sorted(([{"kind": "site", **x} for x in site] + [{"kind": "company", **x} for x in agent]
+                        + [{"kind": "urgent", "id": r["id"], "title": r["title"], "company": r["company"],
+                            "closes": r["closes"], "match": r["match"], "url": jobs.job_url(r["id"]),
+                            "closes_text": jobs.closes_text(date.fromisoformat(r["closes"])), "past": False, "soon": True}
+                           for r in soon]),
+                       key=lambda t: t["closes"] or "9999"),  # soonest deadline first; no deadline last
         "last_update": scans[-1] if scans else None,
         "sheet_url": f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit" if sheet_id and not config.DEMO else None,
         "task": task.view(task.total()) if task else None,
@@ -598,9 +611,8 @@ def apply_list():
     week = week_info(rows)
     out = []
     for r in apply.apply_order(sheet.approved(rows)):
-        day = apply.row_closes(r)
-        out.append(row_view(r, closes_text=jobs.closes_text(day), past=day is not None and day < date.today(),
-                            soon=day is not None and (day - date.today()).days <= jobs.URGENT_DAYS))
+        hint = jobs.external_hint(apply.row_details(r))  # the posting may want the company's own site too
+        out.append(row_view(r, **closing(r), company_site=hint))
     why = None
     if not out:
         why = "Nothing is Approved. Approve jobs in Review first."

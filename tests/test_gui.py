@@ -85,6 +85,13 @@ try:
     st = get("/api/state")
     assert st["demo"] and not st["setup_needed"] and st["week"]["applied"] == 5 and st["counts"]["approved"] == 3
     assert {t["kind"] for t in st["todo"]} >= {"site", "company"}
+    # every to-do item says when it closes (or that no deadline is listed), soonest first, undated last
+    assert all({"closes", "closes_text", "past", "soon"} <= set(t) for t in st["todo"]), st["todo"]
+    dated = [t["closes"] for t in st["todo"] if t["closes"]]
+    assert dated == sorted(dated) and [t["closes"] for t in st["todo"]][:len(dated)] == dated, st["todo"]
+    assert all(t["closes_text"] == "no deadline listed" for t in st["todo"] if not t["closes"])
+    applying = get("/api/apply")["rows"]
+    assert applying and all({"closes", "closes_text", "past", "soon", "company_site"} <= set(r) for r in applying), applying
     checks = {c["id"]: c for c in get("/api/health")["checks"]}
     assert checks["google"]["status"] == "ok" and checks["files"]["status"] == "ok", checks
     rev = get("/api/review?mode=approve")
@@ -179,6 +186,7 @@ try:
         page.click("[data-testid=nav-apply]")
         page.wait_for_selector("[data-testid=btn-start-apply]:not([disabled])")
         assert page.locator("[data-testid=approved-list] li").count() == 4
+        assert page.locator("[data-testid=approved-list] [data-testid=due]").count() == 4  # each row shows its due date
         page.click("[data-testid=btn-start-apply]")
         page.wait_for_selector("[data-testid=question]", timeout=90000)
         assert "18 years old" in page.inner_text("[data-testid=q-label]")
@@ -244,6 +252,10 @@ fetch("{target}", {{method: "POST", credentials: "include", body: {json.dumps(bo
 
         page.click("[data-testid=nav-company]")
         page.wait_for_selector("[data-testid=company-10]")
+        assert page.locator("[data-testid=company-10] [data-testid=due]").count() == 1  # due date on the company-site row
+        page.click("[data-testid=nav-home]")
+        page.wait_for_selector("[data-testid=todo-company-10]")
+        assert page.locator("[data-testid=todo] [data-testid=due]").count() == len(get("/api/state")["todo"])
         page.click("[data-testid=nav-answers]")
         page.wait_for_selector("[data-testid=answers-save]")
         assert "are you at least 18 years old? *" in [x.input_value() for x in page.locator("tbody input[aria-label=Question]").all()]

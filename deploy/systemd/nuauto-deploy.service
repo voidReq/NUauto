@@ -1,0 +1,11 @@
+[Unit]
+Description=NUauto: deploy main from GitHub (code, unit files, restarts)
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/projects/auto
+Environment=TZ=America/New_York
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/projects/auto/.venv/bin/nuauto deploy
+TimeoutStartSec=20min
+Nice=10
