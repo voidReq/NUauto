@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
 
 from playwright.sync_api import sync_playwright
 
@@ -94,10 +95,22 @@ try:
     assert ins["pool"]["count"] == 8 and ins["pool"]["pay"]["listed"] == 7 and ins["rows"] == sum(x["count"] for x in ins["statuses"])
     assert ins["applied"]["count"] == {x["label"]: x["count"] for x in ins["statuses"]}["Applied"]
     applying = get("/api/apply")["rows"]
-    assert applying and all({"closes", "closes_text", "past", "soon", "company_site"} <= set(r) for r in applying), applying
+    assert applying and all({"closes", "closes_text", "past", "soon", "company_site", "match", "pay"} <= set(r) for r in applying), applying
+    assert all(isinstance(r["match"], int) for r in applying) and any(r["pay"] for r in applying), applying
+    post("/api/action", {"kind": "apply", "args": {"row": 1}}, expect=409)       # the header row: not an Approved row
+    post("/api/action", {"kind": "apply", "args": {"row": "2; rm"}}, expect=409)
     checks = {c["id"]: c for c in get("/api/health")["checks"]}
     assert checks["google"]["status"] == "ok" and checks["files"]["status"] == "ok", checks
     rev = get("/api/review?mode=approve")
+    # search and kind-of-work filter: only narrow what is shown; the counts are of the whole queue
+    assert rev["total"] == len(rev["jobs"]) and sum(c["count"] for c in rev["categories"]) == rev["total"], rev
+    cat0 = rev["categories"][0]["key"]
+    sec = get(f"/api/review?mode=approve&category={cat0}")
+    assert sec["jobs"] and all(j["category"] == cat0 for j in sec["jobs"]) and sec["total"] == rev["total"], sec
+    one = rev["jobs"][0]
+    hit = get("/api/review?mode=approve&q=" + urllib.parse.quote(f'"{one["company"].upper()}"'))["jobs"]
+    assert one["id"] in [j["id"] for j in hit] and len(hit) < len(rev["jobs"]), hit
+    assert get("/api/review?mode=approve&q=zzqxnotaword")["jobs"] == []
     first = rev["jobs"][0]["id"]
     card = get(f"/api/job/{first}")
     assert card["id"] == first and card["description"]
@@ -266,6 +279,10 @@ try:
 
         page.click("[data-testid=nav-review]")
         page.wait_for_selector("[data-testid=job-card]")
+        page.fill("[data-testid=review-search]", "zzqxnotaword")  # a search with no hits, then cleared
+        page.wait_for_selector("[data-testid=review-nomatch]")
+        page.click("[data-testid=review-nomatch] button")
+        page.wait_for_selector("[data-testid=job-card]")
         title = page.inner_text("[data-testid=job-title]")
         approved_company = page.inner_text("[data-testid=job-card] .meta").split(" · ")[0]
         page.click("[data-testid=btn-approve]")
@@ -283,6 +300,8 @@ try:
         page.wait_for_selector("[data-testid=btn-start-apply]:not([disabled])")
         assert page.locator("[data-testid=approved-list] li").count() == 4
         assert page.locator("[data-testid=approved-list] [data-testid=due]").count() == 4  # each row shows its due date
+        assert page.locator("[data-testid=approved-list] button[data-testid^=btn-apply-row-]").count() == 4  # one Apply each
+        assert "% match" in page.inner_text("[data-testid=approved-facts] >> nth=0")
         page.click("[data-testid=btn-start-apply]")
         page.wait_for_selector("[data-testid=question]", timeout=90000)
         assert "18 years old" in page.inner_text("[data-testid=q-label]")

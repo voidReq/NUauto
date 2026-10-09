@@ -468,7 +468,8 @@ function markRow(kind, t, tab) {  // tab "other": a row of the sheet's Other job
 // ---- Review (approve, or rate only)
 screens.review = async (view) => {
   let mode = sessionStorage.getItem("reviewMode") || "approve";
-  let jobs = [], i = 0, card = null, history = {}, shown = 0;
+  let jobs = [], i = 0, card = null, history = {}, shown = 0, total = 0;
+  let q = sessionStorage.getItem("reviewQ") || "", category = sessionStorage.getItem("reviewCat") || "";
   const cards = new Map();  // job id -> promise of its card (the next ones are fetched ahead)
   let queue = Promise.resolve();  // decisions are sent to the server one at a time, behind the screen
   const getCard = (id) => {
@@ -483,7 +484,31 @@ screens.review = async (view) => {
   const seg = el("div", { class: "seg", role: "group", "aria-label": "Mode" },
     el("button", { "aria-pressed": String(mode === "approve"), testid: "mode-approve", text: "Approve", onclick: () => setMode("approve") }),
     el("button", { "aria-pressed": String(mode === "rate"), testid: "mode-rate", text: "Rate only", onclick: () => setMode("rate") }));
-  fill(view, el("div", { class: "row between toolbar" }, seg, el("span", { class: "small muted", id: "review-pos" })), body);
+  // search: words or "quoted phrases" (all must appear in the posting), and/or one kind of work
+  const search = el("input", { type: "search", class: "grow", testid: "review-search", value: q, placeholder: 'Search: words or "a phrase"',
+    "aria-label": "Search the jobs to review" });
+  const cat = el("select", { testid: "review-category", "aria-label": "Kind of work" });
+  let timer = null;
+  search.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(() => setFilter(search.value.trim(), category), 300); });
+  search.addEventListener("keydown", (e) => { if (e.key === "Escape") { search.value = ""; setFilter("", category); search.blur(); } });
+  cat.addEventListener("change", () => setFilter(q, cat.value));
+  fill(view, el("div", { class: "row between toolbar" }, seg, el("span", { class: "small muted", id: "review-pos" })),
+    el("div", { class: "row toolbar" }, search, cat), body);
+
+  function setFilter(newQ, newCat) {
+    if (newQ === q && newCat === category) return;
+    q = newQ; category = newCat;
+    sessionStorage.setItem("reviewQ", q);
+    sessionStorage.setItem("reviewCat", category);
+    load();
+  }
+
+  function drawCategories(list) {
+    if (category && !list.some((c) => c.key === category)) list = list.concat([{ key: category, label: category.replace("_", " "), count: 0 }]);
+    fill(cat, el("option", { value: "", text: `All kinds of work (${total})` }),
+      ...list.map((c) => el("option", { value: c.key, text: `${c.label} (${c.count})` })));
+    cat.value = category;
+  }
 
   function setMode(m) {
     mode = m;
@@ -494,13 +519,21 @@ screens.review = async (view) => {
 
   async function load() {
     fill(body, el("p", { class: "empty", text: "Loading the review list…" }));
-    try { const r = await api.get(`/api/review?mode=${mode}`); jobs = r.jobs; i = 0; cards.clear(); }
+    const params = new URLSearchParams({ mode, q, category });
+    try { const r = await api.get(`/api/review?${params}`); jobs = r.jobs; total = r.total; i = 0; cards.clear(); drawCategories(r.categories); }
     catch (e) { fill(body, el("div", { class: "note fail", text: e.message })); return; }
     show();
   }
 
   async function show() {
-    $("#review-pos").textContent = jobs.length ? `Job ${Math.min(i + 1, jobs.length)} of ${jobs.length} · j/k scroll` : "";
+    const filtered = !!(q || category);
+    $("#review-pos").textContent = jobs.length ? `Job ${Math.min(i + 1, jobs.length)} of ${jobs.length}${filtered ? ` (${total} without the search)` : ""} · j/k scroll` : "";
+    if (!jobs.length && filtered) {
+      fill(body, el("div", { class: "card", testid: "review-nomatch" }, el("h2", { text: "No jobs match" }),
+        el("p", { class: "muted", text: `None of the ${total} jobs to review match this search.` }),
+        el("button", { class: "btn primary", text: "Clear the search", onclick: () => { search.value = ""; setFilter("", ""); } })));
+      return;
+    }
     if (i >= jobs.length) {
       fill(body, el("div", { class: "card", testid: "review-empty" }, el("h2", { text: jobs.length ? "That's all of them" : "Nothing new to review" }),
         el("p", { class: "muted", text: mode === "approve" ? "Approved jobs are in your sheet. Apply to them next." :
@@ -674,9 +707,14 @@ screens.apply = async (view) => {
         el("p", { class: "small muted", text: "Approved in the sheet is your go-ahead. Each job is filled and submitted in a visible Firefox window, one at a time, 30–60 s apart. Every form is screenshotted before Submit. Questions without a saved answer come up here. A job that sends you to the company's own site, or needs something only you can give (a cover letter, a transcript), stops and moves to Company sites. Stop works like Ctrl+C." })));
     fill(list, el("div", { class: "card" }, el("h2", { text: `Approved (${data.rows.length})` }),
       data.rows.length ? el("ul", { class: "list", testid: "approved-list" }, ...data.rows.map((r) => el("li", { testid: `approved-${r.row}` },
-        el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title, el("div", { class: "small muted", text: `Row ${r.row}` })),
+        el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title,
+          el("div", { class: "small muted", testid: "approved-facts", text: [`Row ${r.row}`, r.match != null ? `${r.match}% match` : "match not scored",
+            r.pay ? `pay ${r.pay}` : "pay not listed"].join(" · ") })),
         el("div", { class: "row" }, r.company_site ? el("span", { class: "chip", text: "may also want the company's site", title: r.company_site }) : null,
-          dueChip(r), linkOut(r.url, "Open"))))) : el("p", { class: "empty", text: "Nothing approved yet. Approve jobs in Review." })));
+          dueChip(r), linkOut(r.url, "Open"),
+          el("button", { class: "btn small", testid: `btn-apply-row-${r.row}`, disabled: !!data.why_not || !!(S.task && S.task.state === "running"),
+            text: "Apply", title: "Apply to just this job now", onclick: () => applyRow(r) }))))) :
+        el("p", { class: "empty", text: "Nothing approved yet. Approve jobs in Review." })));
     fill(past, data.history.length ? el("div", { class: "card" }, el("div", { class: "row between" }, el("h2", { text: "Recent runs here" }),
       el("a", { href: "#/logs", class: "btn small ghost", text: "All logs and screenshots" })),
       el("ul", { class: "list" }, ...data.history.map((t) => el("li", {}, el("div", { class: "what" }, el("b", { text: t.label }), " · ",
@@ -706,6 +744,11 @@ screens.apply = async (view) => {
       el("pre", { class: "log", testid: "task-log", tabindex: "0", "aria-label": "Run log", text: S.taskLog.slice(-400).join("\n") || "Starting…" })));
     const pre = runBox.querySelector(".log");
     pre.scrollTop = pre.scrollHeight;
+  }
+
+  function applyRow(r) {
+    confirmBox(`Apply to ${r.company}?`, `${r.title} (row ${r.row}) is filled and submitted now in a visible Firefox window, the same way Start does it. Only this job.`,
+      "Apply now", async () => { if (await action("apply", { row: r.row })) draw(); });
   }
 
   async function startApply() {

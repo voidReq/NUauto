@@ -52,8 +52,12 @@ SCREENS
                  sent behind the screen (the next job shows at once; a failed write brings you back to that job).
                  Undo puts the row back to Proposed; Not for me (n) rates it no; Skip (s); Back (u); Open (o).
                  Rate only mode: yes/no ratings for the taste model, nothing in the sheet.
+                 Search box (words or "quoted phrases", all must appear, any case, in title, company, place, kind of
+                 work, tag, skills, description, qualifications) and a kind-of-work menu narrow the list; the order
+                 inside stays the same. Esc clears the search.
   Apply          Approved rows in apply order, each with when it closes (due chip: amber within a week, red once
-                 past) and a "may also want the company's site" chip when the posting says so; Start (optionally
+                 past), its match % and pay, a "may also want the company's site" chip when the posting says so, and
+                 its own Apply button (after a confirm: just that row, `nuauto apply --row N`); Start (optionally
                  "at most N"), the live run: current row, latest screenshot, log, next-job countdown, Stop / Force
                  stop; question dialogs; recent runs. Start tries every row on its own; one that sends you to a
                  company site or needs a cover letter / transcript becomes Needs Human (Company sites)
@@ -155,11 +159,12 @@ DEMO MODE (demo.py) AND TESTING WITH AGENTS
 API (JSON; all need the cookie; POSTs need X-NUauto: 1)
   GET  /api/state            counts, week, to-do, last scan, setup_needed, the current task
   GET  /api/health           the checks; POST /api/health/run {"groups": [...]}
-  GET  /api/review?mode=     the review queue; GET /api/job/<id> one card
+  GET  /api/review?mode=&q=&category=   the review queue (q / category narrow it; total, categories = the whole
+                             queue); GET /api/job/<id> one card
   POST /api/decide           {"id", "mode", "decision": approve|yes|no} -> {"row", "previous"}
   POST /api/undo             {"id", "row", "previous"}; POST /api/review/done (push ratings, homelab mode)
   GET  /api/apply            Approved rows in apply order, week, why_not, recent runs
-  POST /api/action           {"kind": apply|update|login_google|login_nuworks|check_nuworks|login_claude|
+  POST /api/action           {"kind": apply ({"n"} or {"row"})|update|login_google|login_nuworks|check_nuworks|login_claude|
                              install_firefox|install_claude|nuworks_side|assist|fix_permissions, "args"}
                              (assist: {"row", "tab": "other"} for the Other jobs tab)
   GET  /api/task?after=N     the current task: state, new log lines, question, row, screenshot, countdown
