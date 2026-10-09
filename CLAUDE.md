@@ -109,8 +109,9 @@ Status values: Proposed, Approved, Applied, Failed, Needs Human
 - By hand (manage.py, added 2026-10-09; GUI Sheet screen, `nuauto sheet add|move|remove`): add a job to either tab
   (Approved, or Proposed; the NUworks tab takes NUworks job links only and fills company, title, match from data/),
   move a row to the other tab (status, notes, date go with it; a new link if needed), remove one. Rows are never
-  deleted, only cleared, so no row number shifts under a run or a Mark link. Applied rows (they count toward the
-  caps) and unresolved Submit clicks are never moved or removed.
+  deleted, only cleared, so no row number shifts under a run or a Mark link. Applied rows are never removed and never
+  leave the NUworks tab (they count toward the caps); an Applied Other job may move to NUworks (then it counts
+  there; my call 2026-10-09). Unresolved Submit clicks are never moved or removed.
 Google access is OAuth only, never service accounts (docs/DEPLOY.md, GOOGLE SHEETS LOGIN).
 
 BROWSER (Playwright, Firefox)

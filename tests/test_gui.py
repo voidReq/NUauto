@@ -322,6 +322,10 @@ try:
         page.keyboard.press("n")  # keyboard works too: the next job is rated no
         page.wait_for_timeout(500)
 
+        page.evaluate("location.hash = '#/company'")  # Company sites is a part of Apply now: old links land there
+        page.wait_for_function("() => location.hash === '#/apply'")
+        page.wait_for_selector("[data-testid=company-agent] li:has-text('Iron Valley Medical')")
+        assert page.locator("[data-testid=nav-company]").count() == 0
         page.click("[data-testid=nav-apply]")
         page.wait_for_selector("[data-testid=btn-start-apply]:not([disabled])")
         assert page.locator("[data-testid=approved-list] li").count() == 4
@@ -345,6 +349,8 @@ try:
         all_rows = json.load(open(os.path.join(STATE, "local", "demo_sheet_DEMO-SHEET.json")))["rows"][1:]
         assert sum(r[1] == "Cobalt Systems" for r in all_rows) == 1, all_rows
         assert rows["Quarry Hardware"] == "Needs Human", rows
+        # the external job stopped (nothing submitted) and now waits on the same page, ready for the assistant
+        page.wait_for_selector("[data-testid=company-agent] li:has-text('Quarry Hardware') button:has-text('Start assistant')")
 
         # another site on this machine (another port: same site to the browser, so the cookie IS sent) tries to change
         # the sheet three ways. All must fail: no X-NUauto header / no JSON / a CORS preflight the server never allows.
@@ -391,7 +397,7 @@ fetch("{target}", {{method: "POST", credentials: "include", body: {json.dumps(bo
         evil_tab.close()
         evil.shutdown()
 
-        page.click("[data-testid=nav-company]")
+        page.click("[data-testid=nav-apply]")
         page.wait_for_selector("[data-testid=company-10]")
         assert page.locator("[data-testid=company-10] [data-testid=due]").count() == 1  # due date on the company-site row
         page.click("[data-testid=nav-home]")

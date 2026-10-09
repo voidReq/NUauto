@@ -497,6 +497,7 @@ def state():
         "mode": "homelab" if config.HAS_SERVER else "local", "setup_needed": setup_needed(),
         "rows_loaded": rows is not None, "rows_error": APP.rows_error, "week": week_info(rows),
         "counts": {"review": len(todo), "approved": len(approved), "company": len(agent) + len(retry), "site": len(site),
+                   "apply": len(approved) + len(agent) + len(retry),  # the Apply menu item: its rows + Company sites
                    "needs_human": len(agent) + len(other)},
         "todo": sorted(([{"kind": "site", **x} for x in site] + [{"kind": "company", **x} for x in agent]
                         + [{"kind": "urgent", "id": r["id"], "title": r["title"], "company": r["company"],
@@ -1382,7 +1383,7 @@ def ask_instance_to_open(lock):
         return False
 
 
-SCREENS = ["home", "review", "apply", "company", "other", "sheet", "insights", "answers", "settings", "setup", "logs"]
+SCREENS = ["home", "review", "apply", "other", "sheet", "insights", "answers", "settings", "setup", "logs"]
 
 
 def screenshots(folder, url):

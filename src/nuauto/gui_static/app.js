@@ -388,7 +388,7 @@ function questionMenu(box, q, reply) {
 // ------------------------------------------------------------------ screens
 
 const screens = {};
-const TITLES = { home: "Today", review: "Review", apply: "Apply", company: "Company sites", other: "Other jobs", sheet: "Sheet", insights: "Insights", answers: "Answers",
+const TITLES = { home: "Today", review: "Review", apply: "Apply", other: "Other jobs", sheet: "Sheet", insights: "Insights", answers: "Answers",
   settings: "Settings", setup: "Setup", logs: "Past runs" };
 
 // ---- Today
@@ -682,12 +682,21 @@ function jobCard(c, j, mine) {
 // ---- Apply
 screens.apply = async (view) => {
   let data = null;
-  const head = el("div"), runBox = el("div"), list = el("div"), past = el("div");
-  fill(view, head, runBox, list, past);
+  let sites = null;
+  const head = el("div"), runBox = el("div"), list = el("div"), company = el("div", { id: "company-sites" }), past = el("div");
+  fill(view, head, runBox, list, company, past);
 
   async function reload() {
-    try { data = await api.get("/api/apply"); } catch (e) { fill(list, el("div", { class: "note fail", text: e.message })); return; }
+    const [a, c] = await Promise.allSettled([api.get("/api/apply"), api.get("/api/company")]);
+    sites = c.status === "fulfilled" ? c.value : { error: c.reason.message };
+    if (a.status === "rejected") { fill(list, el("div", { class: "note fail", text: a.reason.message })); drawSites(); return; }
+    data = a.value;
     draw();
+  }
+
+  function drawSites() {
+    if (!sites) return;
+    fill(company, sites.error ? el("div", { class: "note fail", text: sites.error }) : companyCards(sites));
   }
 
   function running() { return S.task && S.task.kind === "apply" && S.task.state === "running"; }
@@ -704,7 +713,7 @@ screens.apply = async (view) => {
         el("button", { class: "btn primary big", testid: "btn-start-apply", disabled: !!data.why_not || !!(S.task && S.task.state === "running"),
           text: "Start applying", onclick: startApply }))),
       data.why_not ? el("div", { class: "note warn", testid: "apply-why", text: data.why_not }) :
-        el("p", { class: "small muted", text: "Approved in the sheet is your go-ahead. Each job is filled and submitted in a visible Firefox window, one at a time, 30–60 s apart. Every form is screenshotted before Submit. Questions without a saved answer come up here. A job that sends you to the company's own site, or needs something only you can give (a cover letter, a transcript), stops and moves to Company sites. Stop works like Ctrl+C." })));
+        el("p", { class: "small muted", text: "Approved in the sheet is your go-ahead. Each job is filled and submitted in a visible Firefox window, one at a time, 30–60 s apart. Every form is screenshotted before Submit. Questions without a saved answer come up here. A job that sends you to the company's own site, or needs something only you can give (a cover letter, a transcript), stops (nothing submitted) and shows up below, under Company sites. Stop works like Ctrl+C." })));
     fill(list, el("div", { class: "card" }, el("div", { class: "row between" }, el("h2", { text: `Approved (${data.rows.length})` }),
         data.rows.length > 1 ? el("span", { class: "small muted", text: "in the order Start goes: closing within a week first, then best score" }) : null),
       data.rows.length ? el("ul", { class: "list", testid: "approved-list" }, ...data.rows.map((r, k) => el("li", { testid: `approved-${r.row}` },
@@ -720,6 +729,7 @@ screens.apply = async (view) => {
       el("a", { href: "#/logs", class: "btn small ghost", text: "All logs and screenshots" })),
       el("ul", { class: "list" }, ...data.history.map((t) => el("li", {}, el("div", { class: "what" }, el("b", { text: t.label }), " · ",
         el("span", { class: "muted", text: `${t.state} · ${ago(t.started)}` })))))) : "");
+    drawSites();
     drawRun();
   }
 
@@ -759,41 +769,36 @@ screens.apply = async (view) => {
   }
 
   await reload();
+  if (S.focus === "company") { S.focus = null; company.scrollIntoView({ block: "start" }); }
   return { task: () => { drawRun(); if (S.task && S.task.state !== "running") reload(); }, update: () => { if (!running()) draw(); }, reload };
 };
 
-// ---- Company sites
-screens.company = async (view) => {
-  async function reload() {
-    let d;
-    try { d = await api.get("/api/company"); } catch (e) { fill(view, el("div", { class: "note fail", text: e.message })); return; }
-    fill(view, 
-      el("div", { class: "card" }, el("h2", { text: "Ready for the assistant" }),
-        el("p", { class: "small muted", text: "Jobs that send you to the company's own site. The assistant (Claude, in a terminal window) fills the application in a visible browser; it asks you before anything is submitted. You sign in, solve captchas and approve Submit." }),
-        d.agent.length ? el("ul", { class: "list" }, ...d.agent.map((r) => el("li", { testid: `company-${r.row}` },
-          el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title, el("div", { class: "small muted", text: `Row ${r.row} · ${r.host}` })),
-          el("div", { class: "row" }, dueChip(r), el("button", { class: "btn small primary", text: "Start assistant", testid: `assist-${r.row}`, onclick: () => action("assist", { row: r.row }) }),
-            linkOut(r.target, "Open site"),
-            el("button", { class: "btn small", text: "I applied myself", onclick: () => markRow("applied", r) }))))) :
-          el("p", { class: "empty", text: "None waiting." })),
-      d.site.length ? el("div", { class: "card" }, el("h2", { text: "Submitted on NUworks; the company site still wants you" }),
-        el("ul", { class: "list" }, ...d.site.map((r) => el("li", { testid: `site-${r.row}` }, el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title,
-          el("div", { class: "small muted", text: r.notes.slice(0, 160) })), el("div", { class: "row" }, dueChip(r), linkOut(r.url, "Open job"),
-          el("button", { class: "btn small", text: "Mark done", onclick: () => markRow("site", r) })))))) : null,
-      d.retry.length ? el("div", { class: "card" }, el("h2", { text: "Company site done; the NUworks side did not go out" }),
-        el("p", { class: "small muted", text: "Submits the same job on NUworks too, with the usual NUworks checks (a visible browser; questions come up here)." }),
-        el("ul", { class: "list" }, ...d.retry.map((r) => el("li", { testid: `retry-${r.row}` }, el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title,
-          el("div", { class: "small muted", text: r.notes.slice(-160) })), el("div", { class: "row" }, linkOut(r.url, "Open job"),
-          el("button", { class: "btn small primary", text: "Submit on NUworks too", testid: `retry-btn-${r.row}`,
-            onclick: () => confirmBox("Submit on NUworks too?", `Row ${r.row} (${r.company}) is Applied on the company site. This submits the same job on NUworks.`,
-              "Submit on NUworks", () => action("nuworks_side", { row: r.row })) })))))) : null,
-      d.other.length ? el("div", { class: "card" }, el("h2", { text: "Needs you on NUworks" }),
-        el("ul", { class: "list" }, ...d.other.map((r) => el("li", {}, el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title,
-          el("div", { class: "small muted", text: r.notes || r.why })), el("div", { class: "row" }, dueChip(r), linkOut(r.url, "Open job")))))) : null);
-  }
-  await reload();
-  return { reload };
-};
+// ---- Company sites (a part of the Apply screen): Needs Human rows for the assistant, company sites still owed,
+// the NUworks side to send again, and rows only you can finish on NUworks. Only the sections that have rows show.
+function companyCards(d) {
+  return [
+    d.agent.length ? el("div", { class: "card", testid: "company-agent" }, el("h2", { text: "Company sites: ready for the assistant" }),
+      el("p", { class: "small muted", text: "Jobs that send you to the company's own site. The assistant (Claude, in a terminal window) fills the application in a visible browser; it asks you before anything is submitted. You sign in, solve captchas and approve Submit." }),
+      el("ul", { class: "list" }, ...d.agent.map((r) => el("li", { testid: `company-${r.row}` },
+        el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title, el("div", { class: "small muted", text: r.host })),
+        el("div", { class: "row" }, dueChip(r), el("button", { class: "btn small primary", text: "Start assistant", testid: `assist-${r.row}`, onclick: () => action("assist", { row: r.row }) }),
+          linkOut(r.target, "Open site"),
+          el("button", { class: "btn small", text: "I applied myself", onclick: () => markRow("applied", r) })))))) : null,
+    d.site.length ? el("div", { class: "card" }, el("h2", { text: "Submitted on NUworks; the company site still wants you" }),
+      el("ul", { class: "list" }, ...d.site.map((r) => el("li", { testid: `site-${r.row}` }, el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title,
+        el("div", { class: "small muted", text: r.notes.slice(0, 160) })), el("div", { class: "row" }, dueChip(r), linkOut(r.url, "Open job"),
+        el("button", { class: "btn small", text: "Mark done", onclick: () => markRow("site", r) })))))) : null,
+    d.retry.length ? el("div", { class: "card" }, el("h2", { text: "Company site done; the NUworks side did not go out" }),
+      el("p", { class: "small muted", text: "Submits the same job on NUworks too, with the usual NUworks checks (a visible browser; questions come up here)." }),
+      el("ul", { class: "list" }, ...d.retry.map((r) => el("li", { testid: `retry-${r.row}` }, el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title,
+        el("div", { class: "small muted", text: r.notes.slice(-160) })), el("div", { class: "row" }, linkOut(r.url, "Open job"),
+        el("button", { class: "btn small primary", text: "Submit on NUworks too", testid: `retry-btn-${r.row}`,
+          onclick: () => confirmBox("Submit on NUworks too?", `${r.company} · ${r.title} is Applied on the company site. This submits the same job on NUworks.`,
+            "Submit on NUworks", () => action("nuworks_side", { row: r.row })) })))))) : null,
+    d.other.length ? el("div", { class: "card" }, el("h2", { text: "Needs you on NUworks" }),
+      el("ul", { class: "list" }, ...d.other.map((r) => el("li", {}, el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title,
+        el("div", { class: "small muted", text: r.notes || r.why })), el("div", { class: "row" }, dueChip(r), linkOut(r.url, "Open job")))))) : null];
+}
 
 // ---- Other jobs: the sheet's Other jobs tab (jobs that are not on NUworks; the same assistant, nothing sent to NUworks)
 screens.other = async (view) => {
@@ -1168,7 +1173,12 @@ screens.setup = async (view) => {
 // ------------------------------------------------------------------ router
 
 async function route() {
-  const name = (location.hash.replace(/^#\/?/, "").split("?")[0]) || "home";
+  let name = (location.hash.replace(/^#\/?/, "").split("?")[0]) || "home";
+  if (name === "company") {  // Company sites is a part of Apply now (old links and Today's buttons land there)
+    S.focus = "company";
+    history.replaceState(null, "", "#/apply");
+    name = "apply";
+  }
   const key = screens[name] ? name : "home";
   if (S.screen && S.screen.leave) S.screen.leave();
   S.screen = null;
