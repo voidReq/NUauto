@@ -106,18 +106,24 @@ def add(tab, url, company="", title="", status="Approved", interactive=True):
     return next(r.number for r in sheet.read_rows(ws) if r.url == url)
 
 
-def movable(row):
-    """None if this row may be removed or moved, else why not."""
+def movable(row, tab="nuworks", action="move"):
+    """None if this row of tab may be moved (action "move") or removed ("remove"), else why not.
+    An Applied row never leaves the NUworks tab (that would hide it from the limits) and is never removed; an Applied
+    Other job may move to the NUworks tab (it then counts toward the limits there: the safe direction)."""
     if row.status == "Applied":
+        if tab == "other" and action == "move":
+            return None
+        if tab == "other":
+            return "it is Applied (your record that you applied; you can move it to the NUworks tab)"
         return "it is Applied (it counts toward your weekly and total limits)"
     if row.status == "Needs Human" and row.notes.startswith(sheet.SUBMIT_MARK):
         return "its Submit click is still unresolved: check NUworks first"
     return None
 
 
-def _take(ws, number, url):
+def _take(ws, number, url, tab, action):
     current = sheet._row_for(ws, number, url)
-    why = movable(current)
+    why = movable(current, tab, action)
     if why:
         raise sheet.SheetError(f"Row {number} can't be changed: {why}.")
     return current
@@ -132,7 +138,7 @@ def clear(ws, number, url):
 def remove(tab, number, url, interactive=True):
     """Remove a job from the sheet (its cells are cleared). Only while the row still holds this job."""
     ws = open_tab(tab, interactive)
-    _take(ws, number, url)
+    _take(ws, number, url, tab, "remove")
     clear(ws, number, url)
 
 
@@ -142,7 +148,7 @@ def move(tab, number, url, new_url=None, interactive=True):
     posting for Other jobs). Returns (the other tab, its new row number)."""
     to = "other" if tab == "nuworks" else "nuworks"
     src = open_tab(tab, interactive)
-    current = _take(src, number, url)
+    current = _take(src, number, url, tab, "move")
     dest_url, why = check_url(to, new_url or current.url)
     if why:
         raise sheet.SheetError(why[0].upper() + why[1:] + ".")
@@ -180,9 +186,12 @@ def main(argv):
             if row is None:
                 sys.exit(f"{TABS[tab]} row {n} is empty.")
             what = f"{TABS[tab]} row {n}: {row.company} | {row.title} ({row.status or 'no status'})"
-            if movable(row):
-                sys.exit(f"{what}\nCan't be changed: {movable(row)}.")
+            why = movable(row, tab, cmd)
+            if why:
+                sys.exit(f"{what}\nCan't be changed: {why}.")
             verb = "Move it to the other tab" if cmd == "move" else "Remove it from the sheet"
+            if cmd == "move" and row.status == "Applied":
+                verb += " (in the NUworks tab it counts toward your weekly and total limits)"
             if input(f"{what}\n{verb}? [y/N]: ").strip().lower() != "y":
                 return print("Nothing changed.")
             if cmd == "remove":

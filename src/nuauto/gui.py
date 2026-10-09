@@ -830,7 +830,8 @@ def sheet_get():
         except NoOtherTab:
             out[tab] = {"exists": False, "rows": []}
             continue
-        out[tab] = {"exists": True, "rows": [row_view(r, locked=manage.movable(r)) for r in rows]}
+        out[tab] = {"exists": True, "rows": [row_view(r, locked=manage.movable(r, tab, "move"),
+                                                      remove_locked=manage.movable(r, tab, "remove")) for r in rows]}
     return {"tabs": out, "names": manage.TABS, "busy": running("apply", "nuworks_side")}
 
 

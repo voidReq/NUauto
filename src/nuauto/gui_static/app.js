@@ -861,12 +861,15 @@ screens.sheet = async (view) => {
   }
   function move(tab, r) {
     const to = tab === "nuworks" ? "other" : "nuworks";
-    let link = r.url;
+    const isNu = (u) => /^https:\/\/northeastern-csm\.symplicity\.com\//.test(u || "");
+    let link = (to === "nuworks") === isNu(r.url) ? r.url : "";  // the old link only if it fits the new tab
     modal((box, close) => box.append(
       el("h2", { text: `Move to ${d.names[to]}?` }),
-      el("p", { class: "muted", text: `${r.company} · ${r.title} (row ${r.row}, ${r.status || "no status"}). Its status and notes go with it; the row here is cleared.` +
-        (to === "nuworks" ? " The NUworks tab needs the job's NUworks link." : " Other jobs needs the company's own posting (not NUworks).") }),
-      el("label", { class: "field" }, `Link in ${d.names[to]}`, el("input", { type: "url", value: link, testid: "move-url", oninput: (e) => { link = e.target.value; } })),
+      el("p", { class: "muted", text: `${r.company} · ${r.title} (${r.status || "no status"}). Its status, notes and date go with it; the row here is cleared.` +
+        (to === "nuworks" ? " The NUworks tab needs the job's NUworks link (copy it from the job's page on NUworks)." : " Other jobs needs the company's own posting (not NUworks).") }),
+      r.status === "Applied" ? el("div", { class: "note warn", text: "It is Applied: in the NUworks tab it counts toward your weekly and total limits." }) : null,
+      el("label", { class: "field" }, `Link in ${d.names[to]}`, el("input", { type: "url", value: link, testid: "move-url", required: true,
+        placeholder: to === "nuworks" ? "https://northeastern-csm.symplicity.com/students/app/jobs/detail/…" : "https://", oninput: (e) => { link = e.target.value; } })),
       el("div", { class: "foot" }, el("span"), el("div", { class: "row" },
         el("button", { class: "btn", text: "Cancel", onclick: close }),
         el("button", { class: "btn primary", text: "Move", testid: "move-yes", onclick: async () => {
@@ -906,7 +909,7 @@ screens.sheet = async (view) => {
             el("button", { class: "btn small", text: `Move to ${tab === "nuworks" ? "Other jobs" : "NUworks"}`, testid: `move-${tab}-${r.row}`,
               disabled: !!r.locked || d.busy, title: r.locked || (d.busy ? "A run is using the sheet" : null), onclick: () => move(tab, r) }),
             el("button", { class: "btn small", text: "Remove", testid: `remove-${tab}-${r.row}`,
-              disabled: !!r.locked || d.busy, title: r.locked || (d.busy ? "A run is using the sheet" : null), onclick: () => remove(tab, r) }))))));
+              disabled: !!r.remove_locked || d.busy, title: r.remove_locked || (d.busy ? "A run is using the sheet" : null), onclick: () => remove(tab, r) }))))));
     };
     fill(view,
       el("div", { class: "card", testid: "add-form" }, el("h2", { text: "Add a job" }),
@@ -923,7 +926,7 @@ screens.sheet = async (view) => {
             (form.tab === "nuworks" ? "Approved NUworks jobs are submitted by Apply (your weekly limit applies)." : "Approved Other jobs are ready for the assistant (no limits there).") :
             "Proposed: it waits in the sheet (NUworks ones show first in Review) until you approve it." }),
           el("div", {}, el("button", { class: "btn primary", type: "submit", text: "Add", testid: "add-submit" })))),
-      el("p", { class: "small muted", text: "Applied rows can't be moved or removed (they count toward your limits). Removing clears the row's cells, so no other row changes number." }),
+      el("p", { class: "small muted", text: "Applied rows can't be removed, and NUworks ones can't be moved (they count toward your limits); an Applied Other job can move to NUworks. Removing clears the row's cells, so no other row changes number." }),
       tabCard("nuworks"), tabCard("other"));
   }
   await reload();

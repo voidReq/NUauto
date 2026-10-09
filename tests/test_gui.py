@@ -236,6 +236,32 @@ try:
     assert back["tab"] == "nuworks" and main_rows()[back["row"] - 1][:4] == [NU + "999999", "Ash", "Co-op", "Approved"]
     post("/api/sheet", {"action": "remove", "tab": "nuworks", "row": back["row"], "url": NU + "999999"})
     assert get("/api/state")["week"] == week_before
+    # an Applied Other job: never removed, but it may move to the NUworks tab (there it counts toward the limits)
+    data = json.load(open(other_file))
+    data["rows"].append(["https://jobs.example.net/5", "Pumice", "Intern", "Applied", "", "2020-01-02"])
+    json.dump(data, open(other_file, "w"))
+    n = len(data["rows"])
+    entry = next(r for r in get("/api/sheet")["tabs"]["other"]["rows"] if r["row"] == n)
+    assert entry["locked"] is None and "Applied" in entry["remove_locked"], entry
+    post("/api/sheet", {"action": "remove", "tab": "other", "row": n, "url": "https://jobs.example.net/5"}, expect=409)
+    moved = post("/api/sheet", {"action": "move", "tab": "other", "row": n, "url": "https://jobs.example.net/5",
+                                "new_url": NU + "999998"})
+    row = main_rows()[moved["row"] - 1]
+    assert row[:4] == [NU + "999998", "Pumice", "Intern", "Applied"] and row[5] == "2020-01-02", row
+    assert get("/api/state")["week"]["total"] == week_before["total"] + 1
+    entry = next(r for r in get("/api/sheet")["tabs"]["nuworks"]["rows"] if r["row"] == moved["row"])
+    assert entry["locked"] and entry["remove_locked"]  # in the NUworks tab it stays put
+    post("/api/sheet", {"action": "move", "tab": "nuworks", "row": moved["row"], "url": NU + "999998",
+                        "new_url": "https://jobs.example.net/5"}, expect=409)
+    data = json.load(open(main_file))
+    data["rows"][moved["row"] - 1] = [""] * 6  # undo by hand, so the counts below are as before
+    json.dump(data, open(main_file, "w"))
+    post("/api/health/run", {"groups": ["sheet"]})  # the GUI keeps rows for a minute: read them again now
+    for _ in range(100):
+        if get("/api/state")["week"] == week_before:
+            break
+        time.sleep(0.2)
+    assert get("/api/state")["week"] == week_before
 
     # the Other jobs answers: their own bank; answers.json marks NUworks-only entries (default list or own flag)
     main_bank = get("/api/answers")
