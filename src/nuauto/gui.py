@@ -544,11 +544,20 @@ def need_rows():
     return APP.rows
 
 
-def worksheet():
+class NoOtherTab(Refused):
+    """The sheet has no Other jobs tab yet (adding the first job makes it)."""
+
+
+def worksheet(other=False):
+    """The main tab, or (other) the Other jobs tab. Never a login page."""
     try:
-        return sheet.open_worksheet(interactive=False)
+        return sheet.open_other(interactive=False) if other else sheet.open_worksheet(interactive=False)
     except sheet.NotLoggedIn as e:
         raise Refused(f"{e} Log in to Google first (Settings, or the Google dot at the top).")
+    except sheet.NoOtherTab as e:
+        raise NoOtherTab(str(e))
+    except sheet.SheetError as e:
+        raise Refused(str(e))
 
 
 def decide(body):
@@ -693,11 +702,12 @@ def act(body):
             raise Refused("Which row?")
         task = APP.start("nuworks_side", f"NUworks side of row {row}",
                          config.self_cmd("assist", "nuworks", str(int(row)), "--ui", "json"), env=VISIBLE)
-    elif kind == "assist":
+    elif kind == "assist":  # args.tab "other": a row of the Other jobs tab
         row = args.get("row")
         if not str(row).isdigit():
             raise Refused("Which row?")
-        return open_terminal(f"{shlex.quote(config.self_exe())} assist {int(row)}",
+        tab = "other " if args.get("tab") == "other" else ""
+        return open_terminal(f"{shlex.quote(config.self_exe())} assist {tab}{int(row)}",
                              "The assistant runs here. It asks you before anything is submitted.")
     elif kind == "selftest":  # demo mode end to end in its own temp folder: safe while anything else runs
         task = APP.start("selftest", "Self-test", config.self_cmd("selftest"), browser=False)
@@ -738,9 +748,10 @@ def company():
 
 def mark(body):
     action, row, url = body.get("action"), body.get("row"), str(body.get("url", ""))
-    if action not in ("applied", "site") or not str(row).isdigit():
+    other = body.get("tab") == "other"  # a row of the Other jobs tab (only "applied" there)
+    if action not in ("applied", "site") or not str(row).isdigit() or (other and action != "applied"):
         raise Refused("Unknown action.")
-    ws = worksheet()
+    ws = worksheet(other)
     try:
         if action == "site":
             sheet.mark_site_done(ws, int(row), url)
@@ -748,8 +759,94 @@ def mark(body):
             sheet.mark_applied_by_hand(ws, int(row), url, how="by hand (marked in NUauto)")
     except sheet.SheetError as e:
         raise Refused(str(e))
-    APP.refresh_rows(force=True)
+    if not other:
+        APP.refresh_rows(force=True)
     return {}
+
+
+# ---------------------------------------------------------------- other jobs (the sheet's Other jobs tab)
+
+def other_list():
+    """The Other jobs tab, read fresh: ready (Approved: for the assistant), applied (newest first), the rest.
+    exists is False until the first job is added (that makes the tab)."""
+    from nuauto import assist
+    try:
+        rows = sheet.read_rows(worksheet(other=True))
+    except NoOtherTab:
+        return {"exists": False, "tab": sheet.OTHER_TAB, "ready": [], "applied": [], "rest": []}
+    ready, applied, rest = [], [], []
+    for r in rows:
+        if r.status == "Approved":
+            url, why = assist.other_target(r)
+            ready.append(row_view(r, target=url, host=urlparse(url).hostname if url else None, why=why))
+        elif r.status == "Applied":
+            applied.append(row_view(r))
+        else:
+            rest.append(row_view(r))
+    applied.sort(key=lambda x: x["date"], reverse=True)
+    return {"exists": True, "tab": sheet.OTHER_TAB, "ready": ready, "applied": applied, "rest": rest}
+
+
+def other_add(body):
+    """Add a job that is not on NUworks: the Other jobs tab, Approved (made if missing)."""
+    from nuauto import assist
+    fields = [str(body.get(k) or "") for k in ("url", "company", "title")]
+    try:
+        return {"row": assist.add_other(*fields, interactive=False)}
+    except sheet.NotLoggedIn as e:
+        raise Refused(f"{e} Log in to Google first (Settings, or the Google dot at the top).")
+    except sheet.SheetError as e:
+        raise Refused(str(e))
+
+
+# ---------------------------------------------------------------- the Sheet screen: add / move / remove by hand
+
+def sheet_get():
+    """Both tabs, read fresh: every row, and why it can't be moved or removed (None = it can)."""
+    from nuauto import manage
+    out = {}
+    for tab in manage.TABS:
+        try:
+            rows = sheet.read_rows(worksheet(other=tab == "other"))
+        except NoOtherTab:
+            out[tab] = {"exists": False, "rows": []}
+            continue
+        out[tab] = {"exists": True, "rows": [row_view(r, locked=manage.movable(r)) for r in rows]}
+    return {"tabs": out, "names": manage.TABS, "busy": running("apply", "nuworks_side")}
+
+
+def sheet_lookup(url):
+    from nuauto import manage
+    return manage.lookup(url or "")
+
+
+def sheet_change(body):
+    """add {tab, url, company, title, status} / move {tab, row, url, new_url} / remove {tab, row, url}."""
+    from nuauto import manage
+    action, tab = body.get("action"), body.get("tab")
+    if action not in ("add", "move", "remove") or tab not in manage.TABS:
+        raise Refused("Unknown sheet change.")
+    if action != "add" and running("apply", "nuworks_side"):
+        raise Refused("A run is using the sheet: move or remove rows when it is done.")
+    row, url = body.get("row"), str(body.get("url") or "")
+    if action != "add" and not (isinstance(row, int) and not isinstance(row, bool) and row >= 2):
+        raise Refused("Which row?")
+    try:
+        if action == "add":
+            out = {"tab": tab, "row": manage.add(tab, url, body.get("company"), body.get("title"),
+                                                 str(body.get("status") or "Approved"), interactive=False)}
+        elif action == "move":
+            to, n = manage.move(tab, row, url, str(body.get("new_url") or "") or None, interactive=False)
+            out = {"tab": to, "row": n}
+        else:
+            manage.remove(tab, row, url, interactive=False)
+            out = {}
+    except sheet.NotLoggedIn as e:
+        raise Refused(f"{e} Log in to Google first (Settings, or the Google dot at the top).")
+    except sheet.SheetError as e:
+        raise Refused(str(e))
+    APP.refresh_rows(force=True)
+    return out
 
 
 TERMINALS = [  # (command, how it takes a command to run)
@@ -784,13 +881,23 @@ def open_terminal(command, intro):
 
 # ---------------------------------------------------------------- answers, logs, files
 
-def answers_get():
-    entries = answers.load()
+def bank_path(bank):
+    """bank "other": the Other jobs tab's answers (answers_other.json); anything else: answers.json."""
+    return config.OTHER_ANSWERS_PATH if bank == "other" else config.ANSWERS_PATH
+
+
+def answers_get(bank="nuworks"):
+    """One bank's entries. answers.json entries carry nuworks_only as it applies (the default list, or the entry's own)."""
+    path = bank_path(bank)
+    entries = answers.load(path)
+    if bank != "other":
+        entries = [{**e, "nuworks_only": answers.nuworks_only(e)} for e in entries]
     try:
-        version = os.path.getmtime(config.ANSWERS_PATH)
+        version = os.path.getmtime(path)
     except OSError:
         version = 0
-    return {"entries": entries, "version": version, "locked": running("apply", "nuworks_side")}
+    return {"bank": "other" if bank == "other" else "nuworks", "entries": entries, "version": version,
+            "locked": bank != "other" and running("apply", "nuworks_side")}
 
 
 def running(*kinds):
@@ -799,9 +906,10 @@ def running(*kinds):
 
 
 def answers_put(body):
-    if running("apply", "nuworks_side"):
+    bank = "other" if body.get("bank") == "other" else "nuworks"
+    if bank == "nuworks" and running("apply", "nuworks_side"):
         raise Refused("A run is using the answer bank. Edit it when the run is over.")
-    if body.get("version") != answers_get()["version"]:
+    if body.get("version") != answers_get(bank)["version"]:
         raise Refused("The answer bank changed since you opened it (a run saved an answer). Reload, then edit again.")
     entries = body.get("entries")
     if not isinstance(entries, list):
@@ -819,11 +927,16 @@ def answers_put(body):
         ft = e.get("field_type", "")
         if ft not in ("", "text", "select"):
             raise Refused(f"{q!r}: field type must be text or select.")
-        clean.append({"question": q, "aliases": keys[1:], "answer": str(e.get("answer", "")).strip(),
-                      "field_type": ft, "date_added": str(e.get("date_added") or date.today().isoformat())[:10],
-                      "always_ask": bool(e.get("always_ask"))})
-    answers.save(clean)
-    return answers_get()
+        entry = {"question": q, "aliases": keys[1:], "answer": str(e.get("answer", "")).strip(),
+                 "field_type": ft, "date_added": str(e.get("date_added") or date.today().isoformat())[:10],
+                 "always_ask": bool(e.get("always_ask"))}
+        if e.get("leave_blank") and not entry["answer"]:  # "always leave blank" (the assistant's), until you answer it
+            entry["leave_blank"] = True
+        if bank == "nuworks" and bool(e.get("nuworks_only")) != (q in answers.NUWORKS_ONLY):
+            entry["nuworks_only"] = bool(e.get("nuworks_only"))  # only when it differs from the default list
+        clean.append(entry)
+    answers.save(clean, bank_path(bank))
+    return answers_get(bank)
 
 
 def logs():
@@ -1034,7 +1147,10 @@ GET_ROUTES = {
     "/api/insights": lambda q: insights_get(),
     "/api/company": lambda q: company(),
     "/api/task": lambda q: {"task": APP.task.view(int(q.get("after", 0) or 0)) if APP.task else None},
-    "/api/answers": lambda q: answers_get(),
+    "/api/answers": lambda q: answers_get(q.get("bank", "nuworks")),
+    "/api/other": lambda q: other_list(),
+    "/api/sheet": lambda q: sheet_get(),
+    "/api/sheet/lookup": lambda q: sheet_lookup(q.get("url")),
     "/api/logs": lambda q: logs(),
     "/api/settings": lambda q: settings_get(),
     "/api/setup": lambda q: setup_get(),
@@ -1047,6 +1163,8 @@ POST_ROUTES = {
     "/api/undo": undo,
     "/api/review/done": lambda body: review_done(),
     "/api/mark": mark,
+    "/api/other/add": other_add,
+    "/api/sheet": sheet_change,
     "/api/answers": answers_put,
     "/api/settings": settings_put,
     "/api/setup": setup_post,
@@ -1243,7 +1361,7 @@ def ask_instance_to_open(lock):
         return False
 
 
-SCREENS = ["home", "review", "apply", "company", "insights", "answers", "settings", "setup", "logs"]
+SCREENS = ["home", "review", "apply", "company", "other", "sheet", "insights", "answers", "settings", "setup", "logs"]
 
 
 def screenshots(folder, url):

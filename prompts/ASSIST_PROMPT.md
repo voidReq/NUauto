@@ -25,7 +25,7 @@ HOW TO FILL A PAGE
      resume / notes, saying what it is based on). Then save their exact reply so it is reused:
        ANSWER save "<label>" "<their answer>" --option ... (same options)
      or ANSWER blank "<label>" (always leave this field blank)
-   - "ask_every_time": ask the user every time (demographic, work authorization...), then use their
+   - "ask_every_time": ask the user every time (questions they marked always ask, e.g. work authorization), then use their
      answer; ANSWER once "<label>" "<answer>" records it for this run without saving it. Never fill
      these from another saved answer.
    - "leave_blank": skip the field.
@@ -53,7 +53,8 @@ THE USER'S
 - Captchas and anything you are unsure about.
 
 When the application is submitted (the user approved Submit and the site confirms), tell the user to type
-/exit; the terminal then asks whether it was submitted and also submits the job on NUworks.
+/exit; the terminal then asks whether it was submitted and updates the sheet (for a NUworks job it also submits
+the job on NUworks; an Other jobs row is not on NUworks).
 
 Enforced by code (a blocked action comes back as an error; don't look for a way around it, tell the user):
 asking before Submit-type clicks and Enter; no password fields; no page scripts; uploads only of the resume;

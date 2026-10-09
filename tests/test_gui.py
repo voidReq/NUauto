@@ -148,6 +148,99 @@ try:
     assert "NUworks side submitted too (confirmed by NUworks page)." in notes["Maple Controls"], notes["Maple Controls"]
     assert get("/api/company")["retry"] == []  # never offered twice
 
+    # Other jobs: the sheet's Other jobs tab (not NUworks). Add, mark applied, start the assistant; no caps
+    other_file = os.path.join(STATE, "local", "demo_sheet_DEMO-SHEET.other.json")
+    other = get("/api/other")
+    assert other["exists"] and [(x["row"], x["company"], x["host"]) for x in other["ready"]] == [(2, "Granite Robotics", "careers.example.com")]
+    assert [x["company"] for x in other["applied"]] == ["Northwind Labs"] and other["rest"] == []
+    for bad in ({"url": "https://northeastern-csm.symplicity.com/students/app/jobs/detail/1", "company": "A", "title": "B"},
+                {"url": "http://jobs.example.net/1", "company": "A", "title": "B"},
+                {"url": "https://jobs.example.net/1", "company": "", "title": "B"},
+                {"url": "https://careers.example.com/jobs/4821", "company": "Again", "title": "Duplicate"}):
+        post("/api/other/add", bad, expect=409)
+    week_before = get("/api/state")["week"]
+    added = post("/api/other/add", {"url": " https://jobs.example.net/1 ", "company": "Basalt Bio", "title": "Lab Automation Intern"})
+    assert added["row"] == 4
+    rows = json.load(open(other_file))["rows"]
+    assert rows[3] == ["https://jobs.example.net/1", "Basalt Bio", "Lab Automation Intern", "Approved", "", ""], rows
+    post("/api/mark", {"action": "site", "tab": "other", "row": 4, "url": "https://jobs.example.net/1"}, expect=409)
+    post("/api/mark", {"action": "applied", "tab": "other", "row": 4, "url": "https://wrong.example/1"}, expect=409)
+    post("/api/mark", {"action": "applied", "tab": "other", "row": 4, "url": "https://jobs.example.net/1"})
+    assert json.load(open(other_file))["rows"][3][3] == "Applied"
+    assert get("/api/state")["week"] == week_before  # the Other jobs tab has no weekly / total cap
+    r = post("/api/action", {"kind": "assist", "args": {"row": 2, "tab": "other"}})
+    assert r["demo"] and r["command"].endswith("assist other 2"), r
+    # no tab yet: adding the first job makes it (headers, then the job as row 2)
+    os.remove(other_file)
+    assert get("/api/other") == {"exists": False, "tab": "Other jobs", "ready": [], "applied": [], "rest": []}
+    assert post("/api/other/add", {"url": "https://jobs.example.net/2", "company": "Cinder", "title": "Intern"})["row"] == 2
+    rows = json.load(open(other_file))["rows"]
+    assert rows[0] == ["URL", "Company", "Title", "Status", "Notes", "Date"] and rows[1][3] == "Approved", rows
+    assert get("/api/other")["ready"][0]["company"] == "Cinder"
+
+    # the Sheet screen: add to either tab by hand, move between the tabs, remove (cells cleared, no row renumbered)
+    main_file = os.path.join(STATE, "local", "demo_sheet_DEMO-SHEET.json")
+    NU = "https://northeastern-csm.symplicity.com/students/app/jobs/detail/"
+    main_rows = lambda: json.load(open(main_file))["rows"]
+    tabs = get("/api/sheet")["tabs"]
+    assert tabs["other"]["exists"] and [r["company"] for r in tabs["other"]["rows"]] == ["Cinder"]
+    applied_row = next(r for r in tabs["nuworks"]["rows"] if r["status"] == "Applied")
+    assert applied_row["locked"] and all(r["locked"] is None for r in tabs["nuworks"]["rows"] if r["status"] == "Approved")
+    assert NU + "900107" not in [r["url"] for r in tabs["nuworks"]["rows"]]
+    info = get("/api/sheet/lookup?url=" + NU + "900107?from=search")
+    assert info["tab"] == "nuworks" and info["known"] and info["in_pool"] and info["company"] == "Beacon Web Studio", info
+    assert get("/api/sheet/lookup?url=" + NU + "999999") == {"tab": "nuworks", "url": NU + "999999", "known": False}
+    assert get("/api/sheet/lookup?url=https://jobs.example.net/9")["tab"] == "other"
+    assert get("/api/sheet/lookup?url=http://jobs.example.net/9")["tab"] is None
+    for bad in ({"tab": "nuworks", "url": "https://jobs.example.net/9", "company": "A", "title": "B"},   # not NUworks
+                {"tab": "nuworks", "url": NU + "999999"},                                         # unknown: needs names
+                {"tab": "nuworks", "url": NU + "900101"},                                         # already there
+                {"tab": "other", "url": NU + "999999", "company": "A", "title": "B"},              # NUworks in Other
+                {"tab": "nuworks", "url": NU + "999999", "company": "A", "title": "B", "status": "Applied"},
+                {"tab": "elsewhere", "url": "https://jobs.example.net/9", "company": "A", "title": "B"}):
+        post("/api/sheet", {"action": "add", **bad}, expect=409)
+    known = post("/api/sheet", {"action": "add", "tab": "nuworks", "url": NU + "900107?from=search", "status": "Proposed"})
+    assert known["tab"] == "nuworks"
+    assert main_rows()[known["row"] - 1][:4] == [NU + "900107", "Beacon Web Studio", "Web Developer Co-op", "Proposed"]
+    assert "match 72%" in main_rows()[known["row"] - 1][4]
+    unknown = post("/api/sheet", {"action": "add", "tab": "nuworks", "url": NU + "999999", "company": "Ash", "title": "Co-op"})
+    assert main_rows()[unknown["row"] - 1][3:5] == ["Approved", "not in your job data; added by hand"]
+    count = len(main_rows())
+    post("/api/sheet", {"action": "remove", "tab": "nuworks", "row": applied_row["row"], "url": applied_row["url"]}, expect=409)
+    post("/api/sheet", {"action": "remove", "tab": "nuworks", "row": known["row"], "url": NU + "999999"}, expect=409)  # wrong job
+    post("/api/sheet", {"action": "remove", "tab": "nuworks", "row": known["row"], "url": NU + "900107"})
+    assert main_rows()[known["row"] - 1] == [""] * 6 and len(main_rows()) == count  # cleared, nothing shifted
+    assert main_rows()[unknown["row"] - 1][1] == "Ash"
+    post("/api/sheet", {"action": "move", "tab": "nuworks", "row": unknown["row"], "url": NU + "999999"}, expect=409)  # NUworks link
+    moved = post("/api/sheet", {"action": "move", "tab": "nuworks", "row": unknown["row"], "url": NU + "999999",
+                                "new_url": "https://ash.example.com/jobs/1"})
+    assert moved["tab"] == "other" and main_rows()[unknown["row"] - 1] == [""] * 6
+    row = json.load(open(other_file))["rows"][moved["row"] - 1]
+    assert row[:4] == ["https://ash.example.com/jobs/1", "Ash", "Co-op", "Approved"] and "Moved from the NUworks tab" in row[4], row
+    post("/api/sheet", {"action": "move", "tab": "other", "row": moved["row"], "url": "https://ash.example.com/jobs/1"}, expect=409)
+    back = post("/api/sheet", {"action": "move", "tab": "other", "row": moved["row"], "url": "https://ash.example.com/jobs/1",
+                               "new_url": NU + "999999"})
+    assert back["tab"] == "nuworks" and main_rows()[back["row"] - 1][:4] == [NU + "999999", "Ash", "Co-op", "Approved"]
+    post("/api/sheet", {"action": "remove", "tab": "nuworks", "row": back["row"], "url": NU + "999999"})
+    assert get("/api/state")["week"] == week_before
+
+    # the Other jobs answers: their own bank; answers.json marks NUworks-only entries (default list or own flag)
+    main_bank = get("/api/answers")
+    flags = {e["question"]: e["nuworks_only"] for e in main_bank["entries"]}
+    assert flags["available start date"] and flags["co-op term"] and not flags["email"], flags
+    other_bank = get("/api/answers?bank=other")
+    assert other_bank["bank"] == "other" and [(e["question"], e["answer"]) for e in other_bank["entries"]] == [("available start date", "2027-05-24")]
+    main_text = open(os.path.join(STATE, "local", "answers.json")).read()
+    entry = {"question": "Graduation Month", "answer": "May 2028", "field_type": "text", "always_ask": False, "aliases": []}
+    blank = {"question": "middle name", "answer": "", "field_type": "", "always_ask": False, "aliases": [], "leave_blank": True}
+    saved = post("/api/answers", {"bank": "other", "entries": other_bank["entries"] + [entry, blank], "version": other_bank["version"]})
+    assert [e["question"] for e in saved["entries"]] == ["available start date", "graduation month", "middle name"]
+    assert saved["entries"][2]["leave_blank"] and open(os.path.join(STATE, "local", "answers.json")).read() == main_text
+    edited = [dict(e, nuworks_only=(e["question"] == "email") or e["nuworks_only"]) for e in main_bank["entries"]]
+    saved = post("/api/answers", {"entries": edited, "version": main_bank["version"]})
+    on_disk = {e["question"]: e for e in json.load(open(os.path.join(STATE, "local", "answers.json")))}
+    assert on_disk["email"]["nuworks_only"] is True and "nuworks_only" not in on_disk["available start date"]  # stored only when not the default
+
     # a second start opens a window on this one instead (here: --no-open, so it just says so and exits)
     second = subprocess.run([PY, "-m", "nuauto", "gui", "--no-open"], env=ENV, cwd=ROOT, capture_output=True, text=True,
                             timeout=60)
@@ -282,6 +375,46 @@ fetch("{target}", {{method: "POST", credentials: "include", body: {json.dumps(bo
         page.click("[data-testid=nav-answers]")
         page.wait_for_selector("[data-testid=answers-save]")
         assert "are you at least 18 years old? *" in [x.input_value() for x in page.locator("tbody input[aria-label=Question]").all()]
+        assert page.locator("thead th", has_text="NUworks only").count() == 1
+        page.click("[data-testid=bank-other]")
+        page.wait_for_selector("[data-testid=bank-other][aria-pressed=true]")
+        questions = [x.input_value() for x in page.locator("tbody input[aria-label=Question]").all()]
+        assert questions == ["available start date", "graduation month", "middle name"], questions
+        assert page.locator("thead th", has_text="NUworks only").count() == 0
+        page.click("[data-testid=bank-nuworks]")
+        page.wait_for_selector("[data-testid=bank-nuworks][aria-pressed=true]")
+        # Other jobs: Add a job opens the Sheet screen on the Other jobs tab; the job shows up ready for the assistant
+        page.click("[data-testid=nav-other]")
+        page.wait_for_selector("[data-testid=other-2]")
+        page.click("[data-testid=other-add]")
+        page.wait_for_selector("[data-testid=add-tab-other][aria-pressed=true]")
+        page.fill("[data-testid=add-url]", "https://jobs.example.net/3")
+        page.fill("[data-testid=add-company]", "Dune Optics")
+        page.fill("[data-testid=add-title]", "Optics Intern")
+        page.click("[data-testid=add-submit]")
+        page.wait_for_selector("[data-testid=sheet-other] li:has-text('Dune Optics')")
+        assert page.input_value("[data-testid=add-url]") == ""
+        # a NUworks link: the tab switches and company / title come from the job data; then remove it again
+        page.click("[data-testid=add-tab-other]")
+        page.fill("[data-testid=add-url]", "https://northeastern-csm.symplicity.com/students/app/jobs/detail/900106")
+        page.press("[data-testid=add-url]", "Tab")
+        page.wait_for_selector("[data-testid=add-tab-nuworks][aria-pressed=true]")
+        assert page.input_value("[data-testid=add-company]") == "Fern Data Co"
+        page.click("[data-testid=add-status-Proposed]")
+        page.click("[data-testid=add-submit]")
+        item = page.locator("[data-testid=sheet-nuworks] li:has-text('Fern Data Co')")
+        item.wait_for()
+        assert "Proposed" in item.inner_text()
+        item.locator("button:has-text('Remove')").click()
+        page.click("[data-testid=confirm-yes]")
+        item.wait_for(state="detached")
+        page.click("[data-testid=nav-other]")
+        dune = page.locator("li:has-text('Dune Optics')")
+        dune.wait_for()
+        dune.locator("button:has-text('Start assistant')").click()
+        page.wait_for_selector("[data-testid=terminal-command]")
+        assert page.inner_text("[data-testid=terminal-command]").endswith("assist other 3")
+        page.keyboard.press("Escape")
         page.click("[data-testid=nav-settings]")
         page.wait_for_selector("[data-testid=check-google]")
         page.click("[data-testid=btn-quit]")

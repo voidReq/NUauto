@@ -4,9 +4,14 @@
                                  Refuses to touch the sheet if any cell already has a value.
   nuauto setup-sheet format   (re)apply the styling only: header, column widths, Status colors,
                                  alternating rows. Never changes a value; safe to re-run. Replaces this
-                                 tab's conditional formats and alternating colors with ours.
+                                 tab's conditional formats and alternating colors with ours. Styles the
+                                 Other jobs tab too, if there is one.
+  nuauto setup-sheet other    add the Other jobs tab (jobs not on NUworks; NUauto also makes it the first
+                                 time you add one). Never touches a tab that exists.
 """
 import sys
+
+import gspread
 
 from nuauto import config
 
@@ -32,8 +37,8 @@ STATUS_COLORS = {
 WIDTHS = {"URL": 110, "Company": 215, "Title": 370, "Status": 115, "Notes": 380, "Date": 95}
 
 
-def format_sheet(sh, ws):
-    """Styling only (see the module docstring)."""
+def format_sheet(sh, ws, title="Jobs"):
+    """Styling only (see the module docstring). title: the tab's name ("Jobs", or sheet.OTHER_TAB)."""
     from nuauto import sheet  # SITE_MARK
     meta = sh.fetch_sheet_metadata()
     tab = next(t for t in meta["sheets"] if t["properties"]["sheetId"] == ws.id)
@@ -52,7 +57,7 @@ def format_sheet(sh, ws):
     if extra > 0 and not any(len(r) > len(HEADERS) and any(c.strip() for c in r[len(HEADERS):]) for r in ws.get_all_values()):
         reqs.append({"deleteDimension": {"range": {"sheetId": ws.id, "dimension": "COLUMNS",
                                                    "startIndex": len(HEADERS), "endIndex": len(HEADERS) + extra}}})
-    reqs.append({"updateSheetProperties": {"properties": {"sheetId": ws.id, "title": "Jobs"}, "fields": "title"}})
+    reqs.append({"updateSheetProperties": {"properties": {"sheetId": ws.id, "title": title}, "fields": "title"}})
     reqs.append(style(cells(0, len(HEADERS), 0, 1), {
         "backgroundColor": rgb(HEADER_BG), "verticalAlignment": "MIDDLE", "horizontalAlignment": "LEFT",
         "textFormat": {"bold": True, "foregroundColor": rgb("#FFFFFF"), "fontSize": 10},
@@ -88,9 +93,9 @@ class HasData(Exception):
     """The sheet already has values; setup never writes over them."""
 
 
-def setup(sh, ws):
+def setup(sh, ws, title="Jobs"):
     """One-time setup of an empty sheet: headers, Status dropdown, frozen row 1, styling. Refuses (HasData) if any
-    cell already has a value. Used by main() and by the GUI's setup wizard."""
+    cell already has a value. Used by main(), the GUI's setup wizard and sheet.open_other (title: the tab's name)."""
     if any(cell.strip() for row in ws.get_all_values() for cell in row):
         raise HasData("Sheet already has data. Nothing was changed. To restyle it: nuauto setup-sheet format")
     ws.update(range_name="A1:F1", values=[HEADERS])
@@ -116,7 +121,7 @@ def setup(sh, ws):
             }
         }]
     })
-    format_sheet(sh, ws)
+    format_sheet(sh, ws, title)
 
 
 def main():
@@ -125,7 +130,18 @@ def main():
     ws = sh.sheet1
     if sys.argv[1:] == ["format"]:
         format_sheet(sh, ws)
+        try:
+            format_sheet(sh, sh.worksheet(sheet.OTHER_TAB), sheet.OTHER_TAB)
+        except gspread.exceptions.WorksheetNotFound:
+            pass
         return print("Done: styling applied (no values changed).")
+    if sys.argv[1:] == ["other"]:
+        try:
+            sh.worksheet(sheet.OTHER_TAB)
+            return print(f"The {sheet.OTHER_TAB!r} tab is already there (nothing changed).")
+        except gspread.exceptions.WorksheetNotFound:
+            sheet.open_other(create=True)
+            return print(f"Done: {sheet.OTHER_TAB!r} tab added (headers, Status dropdown, styled).")
     if sys.argv[1:]:
         sys.exit(__doc__)
     try:

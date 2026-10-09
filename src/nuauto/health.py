@@ -30,7 +30,7 @@ SETUP = ("setup", "Open setup")
 LOGIN_GOOGLE = ("login_google", "Log in to Google")
 LOGIN_NUWORKS = ("login_nuworks", "Log in to NUworks")
 SECRET_FILES = ["token.json", "session_cookies.json", "client_secret.json", "discord_webhook.txt", "profile.json",
-                "answers.json", "web_secret.txt"]
+                "answers.json", "answers_other.json", "web_secret.txt"]
 PLACEHOLDER_SHEET = "YOUR_GOOGLE_SHEET_ID"
 STALE_UPDATE_HOURS = 15  # updates run 10 and 14 hours apart (+ up to 15 min random delay)
 

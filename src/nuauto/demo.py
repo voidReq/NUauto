@@ -134,15 +134,35 @@ def google_age():
 
 
 class FakeSpreadsheet:
+    """The main tab is demo_sheet_<id>.json; the Other jobs tab (sheet.OTHER_TAB), once made, demo_sheet_<id>.other.json."""
+
     def __init__(self, key):
         self.id = key
         self.sheet1 = FakeWorksheet(key)
+        self._other = _path(f"demo_sheet_{key}.other.json")
+
+    def worksheet(self, title):
+        from nuauto import sheet
+        if title == self.sheet1.title:
+            return self.sheet1
+        if title == sheet.OTHER_TAB and os.path.exists(self._other):
+            return FakeWorksheet(self.id, other=True)
+        raise gspread.exceptions.WorksheetNotFound(title)
+
+    def add_worksheet(self, title, rows=1000, cols=26):
+        from nuauto import sheet
+        if title != sheet.OTHER_TAB or os.path.exists(self._other):
+            raise ValueError(f"demo: can't add a tab named {title!r}")
+        _write(self._other, {"rows": []})
+        return FakeWorksheet(self.id, other=True)
 
     def batch_update(self, body):
         return {}
 
     def fetch_sheet_metadata(self):
-        return {"sheets": [{"properties": {"sheetId": 0, "title": "Jobs", "gridProperties": {"columnCount": 6}}}]}
+        from nuauto import sheet
+        tabs = [(0, "Jobs")] + ([(1, sheet.OTHER_TAB)] if os.path.exists(self._other) else [])
+        return {"sheets": [{"properties": {"sheetId": i, "title": t, "gridProperties": {"columnCount": 6}}} for i, t in tabs]}
 
 
 CELL = re.compile(r"^([A-Z]+)(\d+)$")
@@ -163,13 +183,13 @@ def _range(a1):
 
 
 class FakeWorksheet:
-    """The worksheet calls sheet.py makes, on local/demo_sheet_<id>.json. A file lock keeps the GUI and a child
-    process (apply) from writing at the same time."""
-    id = 0
-    title = "Jobs"
+    """The worksheet calls sheet.py makes, on local/demo_sheet_<id>.json (other=True: the Other jobs tab's file). A file
+    lock keeps the GUI and a child process (apply) from writing at the same time."""
 
-    def __init__(self, key):
-        self.path = _path(f"demo_sheet_{key}.json")
+    def __init__(self, key, other=False):
+        from nuauto import sheet
+        self.path = _path(f"demo_sheet_{key}{'.other' if other else ''}.json")
+        self.id, self.title = (1, sheet.OTHER_TAB) if other else (0, "Jobs")
 
     def _locked(self):
         fd = os.open(self.path + ".lock", os.O_RDWR | os.O_CREAT, 0o600)
@@ -298,6 +318,13 @@ def score(j, today):
             "scored": today.isoformat()}
 
 
+def OTHER_ROWS(today):
+    """The Other jobs tab: jobs that are not on NUworks."""
+    return [("https://careers.example.com/jobs/4821", "Granite Robotics", "Summer Robotics Intern", "Approved", "", ""),
+            ("https://jobs.example.org/posting/77", "Northwind Labs", "Security Research Intern", "Applied",
+             "Applied on the company site (nuauto assist; you pressed Submit).", (today - timedelta(days=3)).isoformat())]
+
+
 def _url(i):
     return f"{HOST}/students/app/jobs/detail/{i}"
 
@@ -341,10 +368,11 @@ def setup(state_names=()):
     bank = [answers.new_entry(q, always_ask=a) for q, a in answers.STARTERS]
     for e in bank:
         e["answer"] = {"name": "Demo Student", "email": "demo.student@example.com", "phone": "555-0100",
-                       "school": "Northeastern University", "major": "Electrical and Computer Engineering"}.get(
-                           e["question"], "")
+                       "school": "Northeastern University", "major": "Electrical and Computer Engineering",
+                       "available start date": "2027-01-11"}.get(e["question"], "")
     bank.append(answers.new_entry("linkedin *", "https://www.linkedin.com/in/demo-student", "text"))
     answers.save(bank)
+    answers.save([answers.new_entry("available start date", "2027-05-24", "text")], config.OTHER_ANSWERS_PATH)
 
     # job pool data (the update steps' outputs), minus the held-back jobs
     os.makedirs(os.path.join(config.DATA_DIR, "details"), exist_ok=True)
@@ -388,6 +416,7 @@ def setup(state_names=()):
                  "Applied on the company site (nuauto assist; you pressed Submit). NUworks side NOT submitted: "
                  "the session expired.", (today - timedelta(days=10)).isoformat()])
     _write(_path(f"demo_sheet_{SHEET_ID}.json"), {"title": "NUauto jobs (demo)", "rows": rows})
+    _write(_path(f"demo_sheet_{SHEET_ID}.other.json"), {"rows": [list(sheet.HEADERS)] + [list(r) for r in OTHER_ROWS(today)]})
 
 
 def update():

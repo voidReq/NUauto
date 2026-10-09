@@ -16,7 +16,7 @@
 Tools (each module's own command line; `nuauto <tool>` with no arguments shows its help):
   nuauto jobs ...        job pool steps (list, triage-export, details, pool, suggest N, stats...)
   nuauto answers ...     answer bank (init, list)
-  nuauto sheet ...       sheet commands (status...)
+  nuauto sheet ...       sheet commands (status; add / move / remove a job by hand)
   nuauto setup-sheet     one-time sheet setup; `format` restyles it
   nuauto inspect <url>   read-only look at a NUworks Apply form
   nuauto daily [weekly]  the update itself / the Sunday check-in (what the homelab timers run)
