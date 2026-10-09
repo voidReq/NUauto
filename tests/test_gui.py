@@ -236,6 +236,32 @@ try:
     assert back["tab"] == "nuworks" and main_rows()[back["row"] - 1][:4] == [NU + "999999", "Ash", "Co-op", "Approved"]
     post("/api/sheet", {"action": "remove", "tab": "nuworks", "row": back["row"], "url": NU + "999999"})
     assert get("/api/state")["week"] == week_before
+    # an Applied Other job: never removed, but it may move to the NUworks tab (there it counts toward the limits)
+    data = json.load(open(other_file))
+    data["rows"].append(["https://jobs.example.net/5", "Pumice", "Intern", "Applied", "", "2020-01-02"])
+    json.dump(data, open(other_file, "w"))
+    n = len(data["rows"])
+    entry = next(r for r in get("/api/sheet")["tabs"]["other"]["rows"] if r["row"] == n)
+    assert entry["locked"] is None and "Applied" in entry["remove_locked"], entry
+    post("/api/sheet", {"action": "remove", "tab": "other", "row": n, "url": "https://jobs.example.net/5"}, expect=409)
+    moved = post("/api/sheet", {"action": "move", "tab": "other", "row": n, "url": "https://jobs.example.net/5",
+                                "new_url": NU + "999998"})
+    row = main_rows()[moved["row"] - 1]
+    assert row[:4] == [NU + "999998", "Pumice", "Intern", "Applied"] and row[5] == "2020-01-02", row
+    assert get("/api/state")["week"]["total"] == week_before["total"] + 1
+    entry = next(r for r in get("/api/sheet")["tabs"]["nuworks"]["rows"] if r["row"] == moved["row"])
+    assert entry["locked"] and entry["remove_locked"]  # in the NUworks tab it stays put
+    post("/api/sheet", {"action": "move", "tab": "nuworks", "row": moved["row"], "url": NU + "999998",
+                        "new_url": "https://jobs.example.net/5"}, expect=409)
+    data = json.load(open(main_file))
+    data["rows"][moved["row"] - 1] = [""] * 6  # undo by hand, so the counts below are as before
+    json.dump(data, open(main_file, "w"))
+    post("/api/health/run", {"groups": ["sheet"]})  # the GUI keeps rows for a minute: read them again now
+    for _ in range(100):
+        if get("/api/state")["week"] == week_before:
+            break
+        time.sleep(0.2)
+    assert get("/api/state")["week"] == week_before
 
     # the Other jobs answers: their own bank; answers.json marks NUworks-only entries (default list or own flag)
     main_bank = get("/api/answers")
@@ -296,6 +322,10 @@ try:
         page.keyboard.press("n")  # keyboard works too: the next job is rated no
         page.wait_for_timeout(500)
 
+        page.evaluate("location.hash = '#/company'")  # Company sites is a part of Apply now: old links land there
+        page.wait_for_function("() => location.hash === '#/apply'")
+        page.wait_for_selector("[data-testid=company-agent] li:has-text('Iron Valley Medical')")
+        assert page.locator("[data-testid=nav-company]").count() == 0
         page.click("[data-testid=nav-apply]")
         page.wait_for_selector("[data-testid=btn-start-apply]:not([disabled])")
         assert page.locator("[data-testid=approved-list] li").count() == 4
@@ -319,6 +349,8 @@ try:
         all_rows = json.load(open(os.path.join(STATE, "local", "demo_sheet_DEMO-SHEET.json")))["rows"][1:]
         assert sum(r[1] == "Cobalt Systems" for r in all_rows) == 1, all_rows
         assert rows["Quarry Hardware"] == "Needs Human", rows
+        # the external job stopped (nothing submitted) and now waits on the same page, ready for the assistant
+        page.wait_for_selector("[data-testid=company-agent] li:has-text('Quarry Hardware') button:has-text('Start assistant')")
 
         # another site on this machine (another port: same site to the browser, so the cookie IS sent) tries to change
         # the sheet three ways. All must fail: no X-NUauto header / no JSON / a CORS preflight the server never allows.
@@ -365,7 +397,7 @@ fetch("{target}", {{method: "POST", credentials: "include", body: {json.dumps(bo
         evil_tab.close()
         evil.shutdown()
 
-        page.click("[data-testid=nav-company]")
+        page.click("[data-testid=nav-apply]")
         page.wait_for_selector("[data-testid=company-10]")
         assert page.locator("[data-testid=company-10] [data-testid=due]").count() == 1  # due date on the company-site row
         page.click("[data-testid=nav-home]")

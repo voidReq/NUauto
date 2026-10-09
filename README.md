@@ -67,7 +67,7 @@ popup); `nuauto login`; `nuauto doctor`. Your preferences go in `local_config.js
 ## Use it
 
 `nuauto gui` (or the app icon) opens the window: **Today** (what needs you, this week's count), **Review**
-(approve jobs: `y`/`n`/`s`), **Apply** (submit the Approved ones, watch, stop any time), **Company sites**,
+(approve jobs: `y`/`n`/`s`), **Apply** (submit the Approved ones, watch, stop any time; company-site applications too),
 **Answers** (your saved form answers) and **Settings** (every health check: logins, Claude Code, the sheet).
 It keeps checking that your logins still work and tells you before something expires. Something seems off?
 Settings > **Run a self-test** checks the whole app in demo mode, without touching anything real.

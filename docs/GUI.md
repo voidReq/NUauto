@@ -43,7 +43,7 @@ it as a GitHub release on every v* tag)
 
 SCREENS
   Today          health problems with fix buttons, this week's count, next steps, what only you can do (each item with
-                 its due date, soonest first; same on Company sites)
+                 its due date, soonest first; same in Apply's Company sites part)
   Review         one pool job at a time. Approve mode: Approve (y) adds it to the sheet as Approved at once
                  (or, for one of your Proposed rows, which Review shows first, turns that row Approved);
                  Each card shows its Score (match + each bonus) and Order (why it sits there: closing soon,
@@ -60,16 +60,20 @@ SCREENS
                  site" chip when the posting says so, and its own Apply button (after a confirm: just that row, `nuauto apply --row N`); Start (optionally
                  "at most N"), the live run: current row, latest screenshot, log, next-job countdown, Stop / Force
                  stop; question dialogs; recent runs. Start tries every row on its own; one that sends you to a
-                 company site or needs a cover letter / transcript becomes Needs Human (Company sites)
-  Company sites  Needs Human rows for the assistant (opens `nuauto assist <row>` in a terminal window, or shows the
-                 command), "I applied myself", company sites still owed (Mark done), the NUworks side to retry
+                 company site or needs a cover letter / transcript becomes Needs Human (nothing submitted) and shows
+                 up below, under Company sites (since 2026-10-09 a part of Apply; #/company opens it there; the menu
+                 count is Approved + the assistant's rows + retries; each part shows only when it has rows):
+                 Needs Human rows for the assistant (opens `nuauto assist <row>` in a terminal window, or shows the
+                 command), "I applied myself", company sites still owed (Mark done), the NUworks side to retry,
+                 rows only you can finish on NUworks
   Other jobs     the sheet's Other jobs tab (jobs not on NUworks; read fresh, no nav count): Add a job (opens Sheet on
                  the Other jobs tab), Approved rows with Start assistant (opens `nuauto assist other <row>`), Open
                  site, I applied myself; Applied rows; the rest. No caps there
   Sheet          add a job by hand (manage.py): NUworks co-op or Other job, Approved or Proposed, link; a NUworks
                  link switches the tab and fills company / title / match from your job data. Both tabs' rows with
                  Move to the other tab (asks for the link there) and Remove (clears the row's cells: no row is
-                 renumbered). Applied rows and unresolved Submit clicks are locked; nothing moves while a run is on
+                 renumbered). Applied rows are never removed and never leave the NUworks tab (an Applied Other job may move
+                 to NUworks: there it counts toward the limits); unresolved Submit clicks are locked; nothing moves while a run is on
   Insights       where your sheet stands (a status ring: arcs in an order checked for color-blind separation, with a
                  labeled legend), then for Your pool / Applied: median and usual pay, share in Massachusetts, closing this
                  week; an hourly-pay histogram; by state (top 5 + Other, top cities); kind of work. insights.py, also
