@@ -24,6 +24,10 @@ GIT
   2026-10-04). main only receives merges: work on a branch, merge when I OK it, push when I OK it.
   Before any push: no personal info in tracked files or commit messages (names, emails, hosts,
   IPs, IDs, companies I applied to); those go in local_config.json or docs/STATUS.md.
+- After every merge (and at the start of a session): bring the laptop checkout up to date (`git fetch --prune`,
+  then on main `git pull --ff-only`; never over uncommitted changes: ask me), then clear stale branches: delete
+  local and remote branches already merged into main (`git branch -d`, `git push origin --delete`) and remove
+  their worktrees. Never delete a branch that is not merged, or main.
 - Gitignored: local/ (all personal files and secrets), docs/STATUS.md, data/, work/, logs/, .venv/.
 - Prod = whatever is on main: merging to main deploys it to the homelab within 5 minutes (deploy_from_git; web is
   restarted when needed). Without that setting, whatever is checked out on the laptop is what the next `nuauto`
