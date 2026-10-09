@@ -160,7 +160,24 @@ label.field span.muted { font-weight: 400; }
 .decide { position: sticky; bottom: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 88%, transparent);
   backdrop-filter: blur(6px); border-top: 1px solid var(--border); padding: 16px 0 20px; margin-top: 8px; }
 
+/* review: search results as a list of cards */
+.joblist .slot { margin-bottom: 16px; }
+.joblist .slot > .card, .joblist .slot > .note { margin-bottom: 0; }
+.job .desc.clamp { max-height: 9.5em; overflow: hidden; -webkit-mask-image: linear-gradient(#000 60%, transparent); mask-image: linear-gradient(#000 60%, transparent); }
+.job .inline-decide { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+.card.decided { padding: 12px 20px; }
+.row.center { justify-content: center; margin-bottom: 16px; }
+
+/* apply: tabs */
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin: 18px 0 14px; flex-wrap: wrap; }
+.tabs button { font: inherit; font-weight: 600; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; background: none;
+  color: var(--muted); padding: 8px 14px; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
+.tabs button:hover { color: var(--text); }
+.tabs button[aria-selected=true] { color: var(--accent); border-bottom-color: var(--accent); }
+.tabs .count { font-size: 12px; font-weight: 600; background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; padding: 0 8px; }
+
 /* runs: log, screenshot */
+.runtop { margin-bottom: 16px; }
 .log { font: 12px/1.55 var(--mono); background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm);
   padding: 10px 12px; max-height: 340px; overflow: auto; white-space: pre-wrap; word-break: break-word; margin: 0; }
 .shot { max-width: 100%; border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: zoom-in; display: block; }

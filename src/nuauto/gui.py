@@ -57,7 +57,7 @@ class Task:
     """One `nuauto ...` child process. Plain output lines are its log; answers.JsonIO lines are questions and
     progress events. Reads stdout in a thread; answer() and stop() are called from request threads."""
 
-    def __init__(self, kind, label, cmd, browser, background=False, env=None, on_done=None):
+    def __init__(self, kind, label, cmd, browser, background=False, env=None, on_done=None, on_row=None):
         self.id = secrets.token_hex(4)
         self.kind, self.label, self.cmd, self.browser, self.background = kind, label, cmd, browser, background
         self.log, self.events, self.question, self.dropped = [], [], None, 0
@@ -65,7 +65,7 @@ class Task:
         self.done_rows = []
         self.state, self.code, self.stopping = "running", None, False
         self.started, self.ended = now(), None
-        self.on_done = on_done
+        self.on_done, self.on_row = on_done, on_row
         env = {**os.environ, **(env or {}), "PYTHONUNBUFFERED": "1"}
         self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                      text=True, bufsize=1, env=env, cwd=config.STATE_DIR, start_new_session=True)
@@ -107,6 +107,8 @@ class Task:
             self.row, self.screenshot, self.wait_until = msg, None, None
         elif kind == "row_done":
             self.done_rows.append(msg)
+            if self.on_row:
+                self.on_row()
         elif kind == "screenshot":
             self.screenshot = self.last_shot = msg.get("path")
         elif kind == "wait":
@@ -172,7 +174,7 @@ class App:
         self.next_run = {}         # group -> time
         self.notified = {}         # check id -> (status, time) of the last desktop notification
         self.first_round_done = False
-        self.rows, self.rows_at, self.rows_error = None, 0, None
+        self.rows, self.rows_at, self.rows_error, self.rows_try_at = None, 0, None, 0
         self.queue = {}            # job id -> pool entry, from the last review queue
         self.last_request = now()
         self.stopping = False
@@ -201,7 +203,8 @@ class App:
             if holder:
                 raise Busy(f"The NUworks browser is in use by another nuauto run ({holder.get('what')}, "
                            f"pid {holder.get('pid')}). Try again when it is done.")
-            task = Task(kind, label, cmd, browser, background, env, on_done=self._done(on_done))
+            task = Task(kind, label, cmd, browser, background, env, on_done=self._done(on_done),
+                        on_row=None if background else self.refresh_soon)
             if background:
                 self.background = task
             else:
@@ -236,6 +239,17 @@ class App:
             return
         if force or self.rows is None or now() - self.rows_at >= 60:
             self.run_group("sheet")
+
+    def refresh_soon(self, max_age=0):
+        """Read the sheet again in the background when the rows are older than max_age seconds, so the lists and counts
+        follow changes made elsewhere (a row finished in a run, an assistant in a terminal, the sheet itself). A failed
+        read is not tried again for 30 s."""
+        if self.rows is None or "sheet" in self.running_groups:
+            return
+        if now() - max(self.rows_at, self.rows_try_at) < max(max_age, 1):
+            return
+        self.rows_try_at = now()
+        threading.Thread(target=self.refresh_rows, kwargs={"force": True}, daemon=True).start()
 
     # ---- health
 
@@ -495,7 +509,7 @@ def state():
     return {
         "demo": config.DEMO, "version": __import__("nuauto").__version__,
         "mode": "homelab" if config.HAS_SERVER else "local", "setup_needed": setup_needed(),
-        "rows_loaded": rows is not None, "rows_error": APP.rows_error, "week": week_info(rows),
+        "rows_loaded": rows is not None, "rows_at": APP.rows_at, "rows_error": APP.rows_error, "week": week_info(rows),
         "counts": {"review": len(todo), "approved": len(approved), "company": len(agent) + len(retry), "site": len(site),
                    "apply": len(approved) + len(agent) + len(retry),  # the Apply menu item: its rows + Company sites
                    "needs_human": len(agent) + len(other)},
@@ -1161,7 +1175,7 @@ class NotFound(Exception):
 
 
 GET_ROUTES = {
-    "/api/state": lambda q: state(),
+    "/api/state": lambda q: (APP.refresh_soon(30), state())[1],
     "/api/health": lambda q: {"checks": [c.to_dict() for c in APP.checks()], "running": sorted(APP.running_groups)},
     "/api/review": lambda q: review(q.get("mode", "approve") if q.get("mode") in ("approve", "rate") else "approve",
                                     q.get("q", "")[:200], q.get("category", "")[:40]),

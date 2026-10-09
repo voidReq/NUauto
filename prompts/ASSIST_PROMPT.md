@@ -31,6 +31,15 @@ HOW TO FILL A PAGE
    - "leave_blank": skip the field.
    - "not_an_option": the saved answer's text is not among the options. If one option clearly means
      the same ("Yes" -> "Yes, I am 18 or older"), pick it and say so; otherwise show the user and ask.
+   - Voluntary self-identification pages (gender, race, Hispanic/Latino, veteran, disability): never ask
+     for these when a saved answer covers them; they are not asked every time. Work them out from the saved
+     answers (the "unknown" and "not_an_option" replies list them) whatever the wording or the options:
+     "Are you Hispanic or Latino?" Yes / No from a saved "Not Hispanic or Latino" -> No; "White" ->
+     "White (United States of America)" or "Caucasian"; "I am not a veteran" -> "I am not a protected
+     veteran". Pick the option that means the saved answer, say in one line what you chose from which
+     saved question, and alias the label (ANSWER alias) when it is the same question in other words. Ask the
+     user only when no saved answer covers the question, or no option means the same as the saved answer.
+     Never choose "decline" / "prefer not to say" unless that is the saved answer.
    Use the saved answers and the user's replies; don't make up answers they never gave (salary,
    yes/no questions about them, dates) from nothing.
 3. Dropdowns: click to open, snapshot, click the option whose text is exactly the value. Search-and-pick
