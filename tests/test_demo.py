@@ -103,10 +103,10 @@ assert jobs.load("scans.json", [])[-1]["pool"] == 2
 
 # ---------------------------------------------------------------- the real apply.py over the GUI's channel
 
-def apply_run(react):
+def apply_run(react, *extra):
     """Start `nuauto apply --ui json` like the GUI does (own process group). react(proc, msg) answers or stops.
     Returns (exit code, log lines, protocol messages)."""
-    p = subprocess.Popen([sys.executable, "-m", "nuauto", "apply", "--ui", "json"], stdin=subprocess.PIPE,
+    p = subprocess.Popen([sys.executable, "-m", "nuauto", "apply", "--ui", "json", *extra], stdin=subprocess.PIPE,
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=ENV,
                          cwd=config.PROJECT_DIR, start_new_session=True)
     log, msgs = [], []
@@ -147,6 +147,14 @@ assert [m["kind"] for m in msgs if m["t"] == "ask"] == ["unknown"]
 code, log, msgs = apply_run(gui_gone)
 assert rows()["Lumen Security"].status == "Approved"
 assert any("row stays Approved" in line for line in log), log[-8:]
+
+# one row only (Apply's per-row button: --row): the later row is handled, the first in apply order is not touched
+code, log, msgs = apply_run(answer, "--row", str(rows()["Quarry Hardware"].number))
+by = rows()
+assert code == 0 and by["Quarry Hardware"].status == "Needs Human" and by["Lumen Security"].status == "Approved", log[-8:]
+assert [m["row"] for m in msgs if m.get("kind") == "row"] == [by["Quarry Hardware"].number], msgs
+code, log, msgs = apply_run(answer, "--row", str(by["Harbor Embedded"].number))  # not Approved: refused
+assert code != 0 and any("is not an Approved row" in line for line in log), log
 
 # answered: the new answer is saved to the bank, the row submitted; the external job stops as Needs Human
 code, log, msgs = apply_run(answer)

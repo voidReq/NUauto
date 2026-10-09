@@ -1135,6 +1135,22 @@ def review_queue(mode, details, ratings, rows, today=None):
     return urgent + [r for r in todo if r not in urgent], urgent
 
 
+def search_terms(q):
+    """Review's search box as lowercase terms: words, or "quoted phrases" kept whole."""
+    return [(a or b).lower() for a, b in re.findall(r'"([^"]+)"|(\S+)', str(q or "")) if (a or b).strip()]
+
+
+def search_match(r, d, terms):
+    """True if every term appears (any case) in the job's title, company, place, kind of work, tag, skills,
+    description or qualifications."""
+    if not terms:
+        return True
+    text = " ".join(str(x or "") for x in (r["title"], r["company"], d.get("location"), r["category"].replace("_", " "),
+                                           r.get("tag"), " ".join(d.get("skills") or []), d.get("description"),
+                                           d.get("qualifications"))).lower()
+    return all(t in text for t in terms)
+
+
 def text_blocks(text):
     """Description text as [{"kind": "header" | "bullet" | "text", "text": ...}], by the same rules as job_lines."""
     out = []

@@ -510,13 +510,21 @@ def state():
     }
 
 
-def review(mode):
+def review(mode, q="", category=""):
+    """The review queue; q (words or "quoted phrases", all must appear) and category narrow what is shown.
+    Decisions work on any job of the whole queue."""
     rows = need_rows()
     details, ratings = jobs.load_details(), jobs.load("ratings.json", {})
     todo, urgent = jobs.review_queue(mode, details, ratings, rows)
     APP.queue = {r["id"]: r for r in todo}
-    out, urgent_ids = [], {r["id"] for r in urgent}
+    counts = {}
     for r in todo:
+        counts[r["category"]] = counts.get(r["category"], 0) + 1
+    terms = jobs.search_terms(q)
+    shown = [r for r in todo if (not category or r["category"] == category)
+             and jobs.search_match(r, details[r["id"]], terms)]
+    out, urgent_ids = [], {r["id"] for r in urgent}
+    for r in shown:
         d = details[r["id"]]
         day = jobs.closes(d)
         why = "rate" if mode == "rate" else "urgent" if r["id"] in urgent_ids else "proposed" if "row" in r else "pool"
@@ -525,7 +533,9 @@ def review(mode):
                     "match": r["match"], "closes_text": jobs.closes_text(day),
                     "soon": day is not None and (day - date.today()).days <= jobs.URGENT_DAYS,
                     "rating": (ratings.get(r["id"]) or {}).get("label")})
-    return {"jobs": out, "urgent": [r["id"] for r in urgent], "mode": mode}
+    return {"jobs": out, "urgent": [r["id"] for r in urgent], "mode": mode, "total": len(todo),
+            "categories": [{"key": k, "label": k.replace("_", " "), "count": counts[k]}
+                           for k in sorted(counts, key=lambda k: (-counts[k], k))]}
 
 
 def job(job_id):
@@ -631,9 +641,12 @@ def apply_list():
     rows = need_rows()
     week = week_info(rows)
     out = []
+    scores = jobs.load("scores.json", {})
     for r in apply.apply_order(sheet.approved(rows)):
-        hint = jobs.external_hint(apply.row_details(r))  # the posting may want the company's own site too
-        out.append(row_view(r, **closing(r), company_site=hint))
+        d = apply.row_details(r)
+        hint = jobs.external_hint(d)  # the posting may want the company's own site too
+        match = (scores.get(jobs.job_id(r.url)) or {}).get("match")
+        out.append(row_view(r, **closing(r), company_site=hint, match=match, pay=d.get("pay") or None))
     why = None
     if not out:
         why = "Nothing is Approved. Approve jobs in Review first."
@@ -662,9 +675,13 @@ def act(body):
         why = apply_list()["why_not"]
         if why:
             raise Refused(why)
-        n = args.get("n")
+        n, row = args.get("n"), args.get("row")
         cmd = config.self_cmd("apply", "--ui", "json")
-        if n not in (None, ""):
+        if row not in (None, ""):  # just this one Approved row (its Apply button)
+            if not str(row).isdigit() or int(row) not in {r["row"] for r in apply_list()["rows"]}:
+                raise Refused("That row is not Approved (reload the list).")
+            cmd += ["--row", str(int(row))]
+        elif n not in (None, ""):
             if not str(n).isdigit() or int(n) < 1:
                 raise Refused("At most how many? A whole number, 1 or more.")
             cmd += ["-n", str(int(n))]
@@ -1144,7 +1161,8 @@ class NotFound(Exception):
 GET_ROUTES = {
     "/api/state": lambda q: state(),
     "/api/health": lambda q: {"checks": [c.to_dict() for c in APP.checks()], "running": sorted(APP.running_groups)},
-    "/api/review": lambda q: review(q.get("mode", "approve") if q.get("mode") in ("approve", "rate") else "approve"),
+    "/api/review": lambda q: review(q.get("mode", "approve") if q.get("mode") in ("approve", "rate") else "approve",
+                                    q.get("q", "")[:200], q.get("category", "")[:40]),
     "/api/apply": lambda q: apply_list(),
     "/api/insights": lambda q: insights_get(),
     "/api/company": lambda q: company(),
