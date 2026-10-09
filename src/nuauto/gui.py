@@ -515,11 +515,13 @@ def review(mode):
     details, ratings = jobs.load_details(), jobs.load("ratings.json", {})
     todo, urgent = jobs.review_queue(mode, details, ratings, rows)
     APP.queue = {r["id"]: r for r in todo}
-    out = []
+    out, urgent_ids = [], {r["id"] for r in urgent}
     for r in todo:
         d = details[r["id"]]
         day = jobs.closes(d)
+        why = "rate" if mode == "rate" else "urgent" if r["id"] in urgent_ids else "proposed" if "row" in r else "pool"
         out.append({"id": r["id"], "title": r["title"], "company": r["company"], "category": r["category"],
+                    "order": jobs.order_text(r, why),
                     "match": r["match"], "closes_text": jobs.closes_text(day),
                     "soon": day is not None and (day - date.today()).days <= jobs.URGENT_DAYS,
                     "rating": (ratings.get(r["id"]) or {}).get("label")})

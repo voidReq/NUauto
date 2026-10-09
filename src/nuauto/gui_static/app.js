@@ -614,8 +614,10 @@ function jobCard(c, j, mine) {
   const margin = c.match - c.threshold;
   const facts = [
     ["Match", el("span", {}, el("span", { class: "match " + (margin >= 15 ? "good" : "ok"), text: `${c.match}%` }),
-      el("span", { class: "muted", text: ` · needs ${c.threshold}%` + (c.bonus ? ` · +${c.bonus} ${c.bonus_label} for ranking` : "") +
-        (c.taste !== null && c.taste !== undefined ? ` · your taste ${Math.round(c.taste * 100)}%` : "") }))],
+      el("span", { class: "muted", text: ` · needs ${c.threshold}%` }))],
+    ["Score", el("span", {}, c.score, c.taste !== null && c.taste !== undefined ?
+      el("span", { class: "muted", text: ` · your taste ${Math.round(c.taste * 100)}%` }) : null)],
+    j.order ? ["Order", el("span", { class: "muted", testid: "job-order", text: j.order })] : null,
     ["Closes", el("span", { class: c.soon ? "chip warn" : "", text: c.closes_text })],
     ["Pay", c.pay || "not listed"],
     c.external ? ["Apply", el("span", { class: "chip warn", text: `Also on the company site? "${c.external}"` })] : null,

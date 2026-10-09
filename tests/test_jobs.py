@@ -97,6 +97,14 @@ assert jobs.job_tag(d(description="EV battery firmware")) == "cars" and jobs.tag
 assert jobs.job_tag(d(description="every device; smart glasses")) is None
 jobs.set_prefs(None)
 assert jobs.category_bonus("embedded") == 15 and jobs.category_bonus("hardware") == 10
+# the Review card's Score and Order lines: the rank's parts, and why the job sits where it does
+R = {"match": 73, "bonus": 10, "category": "security", "tag": "AR/XR", "rank": 108}
+assert jobs.rank_text(R) == f"108 = 73% match + 10 {jobs.PREFS['home_label']} + 20 security + 5 AR/XR"
+assert jobs.rank_text({"match": 70, "bonus": 0, "category": "other", "tag": None, "rank": 70}) == "70"
+assert jobs.order_text(dict(R, taste=0.62), "pool") == "half score, half taste: (108 + 62) / 2 = 85"
+assert jobs.order_text(R, "pool").startswith("by score")
+assert jobs.order_text(dict(R, category="fullstack_web"), "pool").endswith("always after the rest")
+assert jobs.order_text(R, "urgent").startswith("closing within") and jobs.order_text(R, "proposed").startswith("your Proposed")
 # description headers and bullets
 assert jobs.is_header("Responsibilities:") and jobs.is_header("WHAT YOU'LL DO") and jobs.is_header("What You'll Bring")
 assert not jobs.is_header("Boston, MA") and not jobs.is_header("- Write firmware.") and not jobs.is_header("We build robots.")
