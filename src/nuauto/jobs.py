@@ -727,6 +727,37 @@ def pool_sort_key(r):
     return (r["category"] in PREFS["rank_last"], -value)
 
 
+def score_parts(r):
+    """What the job's ranking score (rank) is made of, as [(points, label)]: match first, then each bonus."""
+    parts = [(r["match"], "% match"), (r["bonus"], " " + PREFS["home_label"]),
+             (category_bonus(r["category"]), " " + r["category"].replace("_", " ")), (tag_bonus(r.get("tag")), f" {r.get('tag')}")]
+    return [p for k, p in enumerate(parts) if k == 0 or p[0]]
+
+
+def rank_text(r):
+    """'103 = 73% match + 20 security + 10 MA', or just '73' with no bonuses."""
+    parts = score_parts(r)
+    if len(parts) == 1:
+        return str(r["rank"])
+    return f"{r['rank']} = " + " + ".join(f"{n}{label}" for n, label in parts)
+
+
+def order_text(r, why):
+    """Why a job sits where it does in Review. why: urgent | proposed | pool | rate."""
+    if why == "urgent":
+        return "closing within %d days (these come first, soonest first)" % URGENT_DAYS
+    if why == "proposed":
+        return "your Proposed row (these come next)"
+    if why == "rate":
+        return "rating order (takes turns between kinds of work)"
+    if r["category"] in PREFS["rank_last"]:
+        return f"{r['category'].replace('_', '/')}: always after the rest"
+    if "taste" in r:
+        taste = round(r["taste"] * 100)
+        return f"half score, half taste: ({r['rank']} + {taste}) / 2 = {(r['rank'] + taste) / 2:g}"
+    return "by score (taste counts once you have 5 yes and 5 no)"
+
+
 def pool_entry(i, d, score, cat, threshold, flags):
     """One job as a pool row (what pool.json holds and the viewers show)."""
     bonus = PREFS["home_bonus"] if in_home_state(d) else 0
@@ -940,8 +971,8 @@ def job_lines(r, d, width):
     out.append([(f"{'Type':<10}", "label")] + tags)
     margin = r["match"] - r["threshold"]
     out.append([(f"{'Match':<10}", "label"), (f"{r['match']}%", "good" if margin >= 15 else "ok"),
-                (f"   needs {r['threshold']}%", "dim"), (f"   (+{r['bonus']} {PREFS['home_label']} for ranking)" if r["bonus"] else "", "dim"),
-                ("      Pay  ", "label"), (d["pay"] or "?", "text")])
+                (f"   needs {r['threshold']}%", "dim"), ("      Pay  ", "label"), (d["pay"] or "?", "text")])
+    labeled("Score", rank_text(r) + (f"   ·   taste {round(r['taste'] * 100)}%" if "taste" in r else ""), "dim")
     day = closes(d)
     soon = day is not None and (day - date.today()).days <= URGENT_DAYS
     labeled("Closes", closes_text(day), "flag" if soon else "dim")
@@ -1126,7 +1157,7 @@ def job_view(r, d, today=None):
     day = closes(d)
     return {"id": r["id"], "url": job_url(r["id"]), "title": r["title"], "company": r["company"],
             "location": d["location"], "category": r["category"], "tag": r.get("tag"), "match": r["match"],
-            "threshold": r["threshold"], "bonus": r["bonus"], "bonus_label": PREFS["home_label"], "taste": r.get("taste"),
+            "threshold": r["threshold"], "score": rank_text(r), "taste": r.get("taste"),
             "pay": d["pay"],
             "closes": day.isoformat() if day else None, "closes_text": closes_text(day, today),
             "soon": day is not None and (day - (today or date.today())).days <= URGENT_DAYS,

@@ -46,6 +46,8 @@ SCREENS
                  its due date, soonest first; same on Company sites)
   Review         one pool job at a time. Approve mode: Approve (y) adds it to the sheet as Approved at once
                  (or, for one of your Proposed rows, which Review shows first, turns that row Approved);
+                 Each card shows its Score (match + each bonus) and Order (why it sits there: closing soon,
+                 your Proposed row, half score / half taste, or full-stack last); the terminal viewer shows the Score.
                  Keys as in the CLI viewer: y n s u o, plus j/k scroll, space/b page, g/G top/bottom. Decisions are
                  sent behind the screen (the next job shows at once; a failed write brings you back to that job).
                  Undo puts the row back to Proposed; Not for me (n) rates it no; Skip (s); Back (u); Open (o).
