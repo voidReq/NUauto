@@ -55,9 +55,9 @@ SCREENS
                  Search box (words or "quoted phrases", all must appear, any case, in title, company, place, kind of
                  work, tag, skills, description, qualifications) and a kind-of-work menu narrow the list; the order
                  inside stays the same. Esc clears the search.
-  Apply          Approved rows in apply order, each with when it closes (due chip: amber within a week, red once
-                 past), its match % and pay, a "may also want the company's site" chip when the posting says so, and
-                 its own Apply button (after a confirm: just that row, `nuauto apply --row N`); Start (optionally
+  Apply          Approved rows in apply order (numbered 1, 2, 3: the order Start goes), each with when it closes
+                 (due chip: amber within a week, red once past), its match % and pay, a "may also want the company's
+                 site" chip when the posting says so, and its own Apply button (after a confirm: just that row, `nuauto apply --row N`); Start (optionally
                  "at most N"), the live run: current row, latest screenshot, log, next-job countdown, Stop / Force
                  stop; question dialogs; recent runs. Start tries every row on its own; one that sends you to a
                  company site or needs a cover letter / transcript becomes Needs Human (Company sites)

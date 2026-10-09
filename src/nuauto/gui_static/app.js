@@ -705,10 +705,11 @@ screens.apply = async (view) => {
           text: "Start applying", onclick: startApply }))),
       data.why_not ? el("div", { class: "note warn", testid: "apply-why", text: data.why_not }) :
         el("p", { class: "small muted", text: "Approved in the sheet is your go-ahead. Each job is filled and submitted in a visible Firefox window, one at a time, 30–60 s apart. Every form is screenshotted before Submit. Questions without a saved answer come up here. A job that sends you to the company's own site, or needs something only you can give (a cover letter, a transcript), stops and moves to Company sites. Stop works like Ctrl+C." })));
-    fill(list, el("div", { class: "card" }, el("h2", { text: `Approved (${data.rows.length})` }),
-      data.rows.length ? el("ul", { class: "list", testid: "approved-list" }, ...data.rows.map((r) => el("li", { testid: `approved-${r.row}` },
-        el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title,
-          el("div", { class: "small muted", testid: "approved-facts", text: [`Row ${r.row}`, r.match != null ? `${r.match}% match` : "match not scored",
+    fill(list, el("div", { class: "card" }, el("div", { class: "row between" }, el("h2", { text: `Approved (${data.rows.length})` }),
+        data.rows.length > 1 ? el("span", { class: "small muted", text: "in the order Start goes: closing within a week first, then best score" }) : null),
+      data.rows.length ? el("ul", { class: "list", testid: "approved-list" }, ...data.rows.map((r, k) => el("li", { testid: `approved-${r.row}` },
+        el("div", { class: "what" }, el("span", { class: "muted", text: `${k + 1}. ` }), el("b", { text: r.company }), " · ", r.title,
+          el("div", { class: "small muted", testid: "approved-facts", text: [r.match != null ? `${r.match}% match` : "match not scored",
             r.pay ? `pay ${r.pay}` : "pay not listed"].join(" · ") })),
         el("div", { class: "row" }, r.company_site ? el("span", { class: "chip", text: "may also want the company's site", title: r.company_site }) : null,
           dueChip(r), linkOut(r.url, "Open"),
@@ -747,7 +748,7 @@ screens.apply = async (view) => {
   }
 
   function applyRow(r) {
-    confirmBox(`Apply to ${r.company}?`, `${r.title} (row ${r.row}) is filled and submitted now in a visible Firefox window, the same way Start does it. Only this job.`,
+    confirmBox(`Apply to ${r.company}?`, `${r.title} is filled and submitted now in a visible Firefox window, the same way Start does it. Only this job.`,
       "Apply now", async () => { if (await action("apply", { row: r.row })) draw(); });
   }
 
