@@ -12,6 +12,7 @@ from nuauto import config
 
 tmp = tempfile.mkdtemp()
 config.ANSWERS_PATH = os.path.join(tmp, "answers.json")
+config.OTHER_ANSWERS_PATH = os.path.join(tmp, "answers_other.json")  # never the real banks
 
 from nuauto import answers  # noqa: E402
 from nuauto import assist  # noqa: E402
@@ -205,7 +206,7 @@ E = answers.load()
 assert assist.lookup(E, "Email*", [], "My Information") == {"status": "answer", "value": "me@example.com"}
 assert assist.lookup(E, "City*", [], "My Information") == {"status": "unknown", "saved": [{"question": "email", "answer": "me@example.com"}]}
 assert assist.lookup(E, "Work Authorization*", ["Yes", "No"], "")["status"] == "ask_every_time"
-assert assist.lookup(E, "Email*", [], "Voluntary Disclosures")["status"] == "ask_every_time"
+assert assist.lookup(E, "Email*", [], "Voluntary Disclosures") == {"status": "answer", "value": "me@example.com"}  # saved demographics are reused
 assert assist.lookup(E, "Email*", ["a@b.c"], "")["status"] == "not_an_option"
 assert assist.valid_answer("x" * 301, []) and assist.valid_answer("two\nlines", []) and assist.valid_answer(" ", [])
 assert assist.valid_answer("No", ["Yes", "No"]) is None and assist.valid_answer("Nope", ["Yes", "No"])
@@ -274,5 +275,110 @@ assert "check NUworks" in blocked(f"x {NUWORKS_CLICK_MARK}")
 assert "check NUworks" in blocked("NUworks side: Submit clicked but no confirmation seen; check NUworks.")
 assert "check NUworks" in blocked("NUworks side: stopped by Ctrl+C after Submit was clicked; check NUworks.")
 assert blocked("NUworks side: stopped by Ctrl+C before Submit; not submitted.") is None
+
+# ---- the Other jobs tab: jobs that are not on NUworks
+from nuauto import sheet  # noqa: E402
+
+Row = sheet.Row
+assert assist.other_target(Row(2, f"https://{H}/careers/job/X_1", "Acme", "Intern", "Approved", "", "")) == (f"https://{H}/careers/job/X_1", None)
+assert "not Approved" in assist.other_target(Row(2, f"https://{H}/j", "Acme", "Intern", "Proposed", "", ""))[1]
+assert "not Approved" in assist.other_target(Row(2, f"https://{H}/j", "Acme", "Intern", "Applied", "", ""))[1]
+assert "NUworks itself" in assist.other_target(Row(2, nu, "Acme", "Intern", "Approved", "", ""))[1]
+assert "https" in assist.other_target(Row(2, f"http://{H}/j", "Acme", "Intern", "Approved", "", ""))[1]
+
+# NUworks-only answers: the default list, or the entry's own flag
+assert answers.nuworks_only(answers.new_entry("Available Start Date")) and not answers.nuworks_only(answers.new_entry("email"))
+assert not answers.nuworks_only({**answers.new_entry("co-op term"), "nuworks_only": False})
+assert answers.nuworks_only({**answers.new_entry("email"), "nuworks_only": True})
+
+# an Other jobs run: its own bank first, then the NUworks one minus NUworks-only entries; saves go to its own bank
+start = answers.new_entry("available start date", "2027-01-11", "text")
+start["aliases"] = ["start date"]
+answers.save([answers.new_entry("email", "me@example.com", "text"), start, answers.new_entry("gpa", "", "text"),
+              answers.new_entry("work authorization", "", "select", always_ask=True)])
+answers.save([answers.new_entry("phone", "555-0199", "text")], config.OTHER_ANSWERS_PATH)
+other_state = {**fresh(), "tab": "other"}
+json.dump(other_state, open(os.path.join(d, "state.json"), "w"))
+main_before = open(config.ANSWERS_PATH).read()
+assert bank("answer", "Email*")["value"] == "me@example.com"                  # shared answers still work
+assert bank("answer", "Phone*")["value"] == "555-0199"                        # its own bank
+unknown = bank("answer", "Start Date*")                                       # NUworks-only (even by alias): asked
+assert unknown["status"] == "unknown" and all("start" not in x["question"] for x in unknown["saved"]), unknown
+assert {"question": "phone", "answer": "555-0199"} in unknown["saved"] and {"question": "email", "answer": "me@example.com"} in unknown["saved"]
+assert bank("answer", "Work Authorization*", "--option", "Yes", "--option", "No")["status"] == "ask_every_time"
+V = ["--option", "Decline to self-identify", "--option", "Yes", "--page", "Voluntary Self-Identification"]
+assert bank("save", "Veteran Status*", "Decline to self-identify", *V)["saved"]   # demographics are saved...
+assert bank("answer", "Veteran Status*", *V) == {"status": "answer", "value": "Decline to self-identify"}  # ...and reused
+assert bank("save", "Start Date*", "2027-05-24")["saved"]
+assert bank("save", "GPA", "3.9")["saved"]                                   # a NUworks starter with no answer: saved here
+assert open(config.ANSWERS_PATH).read() == main_before, "an Other jobs run changed answers.json"
+own = answers.load(config.OTHER_ANSWERS_PATH)
+assert answers.find(own, "start date")["answer"] == "2027-05-24" and answers.find(own, "gpa")["answer"] == "3.9"
+assert bank("answer", "Start Date*")["value"] == "2027-05-24"
+assert "error" in bank("save", "Email*", "other@example.com")                 # never silently overwritten
+assert bank("blank", "Middle Name")["saved"] and answers.find(answers.load(config.OTHER_ANSWERS_PATH), "middle name")["leave_blank"]
+assert open(config.ANSWERS_PATH).read() == main_before
+assert bank("alias", "E-mail address*", "email")["value"] == "me@example.com"  # an alias goes on the entry it names
+assert "e-mail address" in answers.find(answers.load(), "email")["aliases"]
+assert bank("alias", "Mobile*", "phone")["value"] == "555-0199"
+assert "mobile" in answers.find(answers.load(config.OTHER_ANSWERS_PATH), "phone")["aliases"]
+assert "error" in bank("alias", "Begin*", "available start date")             # NUworks-only: not even by alias
+# a NUworks job never sees the Other jobs bank
+json.dump(fresh(), open(os.path.join(d, "state.json"), "w"))
+assert bank("answer", "Start Date*")["value"] == "2027-01-11" and bank("answer", "Phone*")["status"] == "unknown"
+
+
+# the whole run for an Other jobs row, with fakes for the terminal, Claude and the sheet: Applied when you say so,
+# never anything on NUworks, no weekly / total cap
+class FakeWS:
+    def __init__(self, values):
+        self.values = values
+
+    def get_all_values(self):
+        return [list(r) for r in self.values]
+
+    def update(self, range_name, values, value_input_option=None):
+        row = int(range_name.split(":")[0][1:])
+        self.values[row - 1][3:6] = values[0]
+
+
+from nuauto import browser  # noqa: E402
+
+config.LOGS_DIR, config.ASSIST_PROFILE_DIR, config.LAPTOP_RESUME = os.path.join(tmp, "logs"), os.path.join(tmp, "prof"), RESUME
+config.ASSIST_READ_PATHS = []
+posting = "https://careers.example.com/jobs/4821"
+full_week = [list(sheet.HEADERS)] + [[f"https://x/{i}", "Co", "Job", "Applied", "", __import__("datetime").date.today().isoformat()]
+                                    for i in range(sheet.MAX_PER_WEEK + 2)]
+ws = FakeWS(full_week + [[posting, "Granite Robotics", "Summer Robotics Intern", "Approved", "", ""]])
+row_n = len(ws.values)
+calls = []
+sheet.open_other = lambda interactive=True, create=False: ws
+sheet.open_worksheet = lambda interactive=True: (_ for _ in ()).throw(AssertionError("opened the NUworks tab"))
+assist.nuworks_side = lambda *a, **k: calls.append("nuworks_side")
+assist.subprocess.run = lambda cmd, **kw: calls.append(cmd)
+sys.stdin.isatty = lambda: True
+for reply, status in (("n", "Approved"), ("y", "Applied")):
+    __builtins__.input = lambda prompt, r=reply: r
+    out, sys.stdout = sys.stdout, io.StringIO()
+    try:
+        assist.main(["other", str(row_n)])
+    finally:
+        sys.stdout = out
+    assert ws.values[row_n - 1][3] == status, ws.values[row_n - 1]
+cmd = calls[0]
+context = cmd[cmd.index("--append-system-prompt") + 1]
+assert f"Other jobs row {row_n}: Granite Robotics" in context and "not on NUworks" in context and posting in context
+assert cmd[-1].endswith(f"for Other jobs row {row_n}, following the rules.")
+assert "nuworks_side" not in calls
+assert ws.values[row_n - 1][5] == __import__("datetime").date.today().isoformat()
+assert "nuauto assist" in ws.values[row_n - 1][4]
+upload = [p for p in os.listdir(config.LOGS_DIR) if p.endswith(f"assist_other_row{row_n}")]
+assert upload and os.path.exists(os.path.join(config.LOGS_DIR, upload[0], "upload", "Resume.pdf"))  # the resume copy
+assert json.load(open(os.path.join(config.LOGS_DIR, upload[0], "state.json")))["tab"] == "other"
+try:
+    assist.main(["other", str(row_n)])  # Applied now: refused
+    raise AssertionError("ran on an Applied row")
+except SystemExit as e:
+    assert "not Approved" in str(e), e
 
 print("All assist (agent guard) checks passed.")

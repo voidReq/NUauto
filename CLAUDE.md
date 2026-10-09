@@ -36,6 +36,7 @@ HARD LIMITS
   fixed 7-day periods from local_config.json "week_start" (sheet.week_window); without it, the last
   7 days. Mine: week_start 2026-10-06 (reset because I started applying late), then every 7 days.
   Approved rows beyond the cap just wait for the next week.
+  Both caps count the main (NUworks) tab only: the Other jobs tab has no cap (my call, 2026-10-07).
 - One application at a time.
 - I should check NUworks' terms of use before running against the real site.
 
@@ -72,13 +73,19 @@ ANSWER BANK (answers.json)
   existing question.
 - Dropdowns/radios: only select an option whose text exactly matches my saved answer.
   If not present, ask me.
-- always_ask entries (e.g., salary, work authorization, demographic questions) are never
-  auto-filled.
+- always_ask entries (e.g., salary, work authorization) are never auto-filled.
+  (Changed 2026-10-09, my call.) Demographic / voluntary self-identify questions (gender, race, Hispanic/Latino,
+  veteran, disability) are saved and reused like any answer; the agent no longer asks on every such page.
 - (Changed 2026-10-06, my call: "I'd rather agents infer based on answers".) The rules above are for the
   NUworks runner (apply.py). The company-site agent (`nuauto assist`) may work an unmatched field out from
   my saved answers (other wording, or a direct part like city from address; a dropdown option that means
   the saved answer), says what it used, and aliases the label so the next run matches exactly. Never from
   always_ask or leave-blank entries; anything my answers don't cover, it asks. I review before Submit.
+- (Added 2026-10-07.) Jobs in the sheet's Other jobs tab use a second bank, local/answers_other.json, checked
+  first; then answers.json minus its NUworks-only entries (answers.NUWORKS_ONLY: available start/end date,
+  co-op term; an entry's own "nuworks_only" true/false wins, GUI Answers checkbox). Everything the agent saves
+  in such a run goes to answers_other.json, never answers.json; an alias goes on the entry it names
+  (assist.Bank). always_ask entries in answers.json stay always-ask there.
 - Starter questions to prefill: name, preferred name, email, phone, address, school, major,
   expected graduation date, GPA, work authorization, sponsorship needed, available start/end
   dates, hours per week, co-op term, relocation, commute, LinkedIn, GitHub, portfolio, how did
@@ -94,6 +101,16 @@ Status values: Proposed, Approved, Applied, Failed, Needs Human
 - Failed / Needs Human: script stopped. Put the reason in Notes.
 - Notes starting "ALSO APPLY ON COMPANY SITE" (SITE_MARK): submitted on NUworks, but the
   company also wants its own site; I do that part.
+- The first tab is NUworks only (sheet.open_worksheet refuses if "Other jobs" is first). A second tab,
+  "Other jobs" (sheet.OTHER_TAB, added 2026-10-07), holds jobs that are not on NUworks: same columns and
+  statuses, made by sheet.open_other(create=True) the first time I add one (GUI Sheet screen, or
+  `nuauto sheet add other` / `nuauto assist other add`; added rows are Approved), styled by `nuauto setup-sheet format` / `other`.
+  Only `nuauto assist other` acts on it (Approved rows only); no weekly or total cap.
+- By hand (manage.py, added 2026-10-09; GUI Sheet screen, `nuauto sheet add|move|remove`): add a job to either tab
+  (Approved, or Proposed; the NUworks tab takes NUworks job links only and fills company, title, match from data/),
+  move a row to the other tab (status, notes, date go with it; a new link if needed), remove one. Rows are never
+  deleted, only cleared, so no row number shifts under a run or a Mark link. Applied rows (they count toward the
+  caps) and unresolved Submit clicks are never moved or removed.
 Google access is OAuth only, never service accounts (docs/DEPLOY.md, GOOGLE SHEETS LOGIN).
 
 BROWSER (Playwright, Firefox)
@@ -155,6 +172,11 @@ COMPANY-SITE AGENT (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`;
   apply.submit_nuworks_side (the tested NUworks code; every popup check except the off-site-link stop;
   outcome appended to Notes; retry: `nuauto assist nuworks <row>`). The agent never touches the sheet.
   Log per run: logs/<stamp>_assist_row<N>/ (actions.log = every guard decision).
+- Other jobs (added 2026-10-07): `nuauto assist other <row>` runs the same agent, rules and hooks on an Approved
+  row of the Other jobs tab (its URL column; https, never NUworks: assist.other_target), with the layered answer
+  bank (ANSWER BANK). After /exit, y = Applied (dated today, no cap), and nothing is sent to NUworks; n = stays
+  Approved. Log: logs/<stamp>_assist_other_row<N>/. GUI: the Other jobs screen (Start assistant, I applied
+  myself; Add a job opens the Sheet screen). Not yet run for real.
 - Proven: a first application end to end (2026-10-05, stricter version). The "ask before Submit" hook
   prompt is proven in an interactive session; a full run with the relaxed rules is not yet.
 
@@ -194,6 +216,7 @@ src/nuauto/: cli.py (the nuauto command)   config.py (all paths, hosts; reads lo
   health.py (the checks behind doctor and the GUI)   onboard.py (setup wizard)   demo.py (demo mode fakes)
   window.py (which window) + window_gtk.py (the Linux window, run by the system python3)
   insights.py (pay, places, kinds of work, sheet statuses: the GUI's Insights screen and `nuauto insights`)
+  manage.py (add / move / remove sheet rows by hand: the GUI's Sheet screen and `nuauto sheet add|move|remove`)
   Imports are always absolute: `from nuauto import sheet` (test_sync enforces it).
 prompts/ (TRIAGE_, SCORE_, CATEGORY_PROMPT.md: Claude batch prompts; ASSIST_PROMPT.md: agent rules)
 tests/ (test_*.py offline checks)   docs/ (DEPLOY, PIPELINE, GUI, ARCHITECTURE, SAFETY, STATUS)
@@ -202,7 +225,7 @@ deploy/systemd/ (homelab units)   install.sh (installer from source)   packaging
 README.md (public, new-user setup; keep it short)   LICENSE   local_config.example.json (template)
 local/ (gitignored, mode 700): everything personal or secret, on both machines:
   local_config.json (sheet ID, resume path, homelab hostname/dir, Mark-done URL, Tailscale IP),
-  profile.json (resume_label), answers.json, google_login.txt, browser_profile/, assist_profile/,
+  profile.json (resume_label), answers.json, answers_other.json (Other jobs tab), google_login.txt, browser_profile/, assist_profile/,
   resume.pdf (homelab copy), gui.lock, browser_profile.lock, onboard.json, and the SECRETS below.
   Keep personal values (names, emails, hosts, IPs, IDs, companies) out of every committed file: the
   repo is public.
@@ -225,6 +248,10 @@ nuauto deploy          # homelab: deploy GitHub's main now (laptop: starts it th
 nuauto insights        # pay, places, kinds of work in my pool and applications; sheet statuses (read-only)
 nuauto selftest        # is this install OK? demo mode end to end in a hidden browser (nothing real touched)
 nuauto assist [<row>]  # company-site agent for a Needs Human row; asks me before any Submit
+nuauto assist other [<row>]                      # same agent for the sheet's Other jobs tab (no NUworks step after)
+nuauto assist other add <url> <company> <title>  # add a job there as Approved
+nuauto sheet add <nuworks|other> <url> [<company> <title>] [--proposed]   # add a job by hand
+nuauto sheet move <nuworks|other> <row> [<new url>]  # to the other tab;  nuauto sheet remove <nuworks|other> <row>
 nuauto answers list    # answer bank; edit with: nvim local/answers.json
 nuauto setup-sheet format          # restyle the sheet (formatting only, safe to re-run)
 nuauto jobs stats | pool | suggest 5

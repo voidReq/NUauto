@@ -1,6 +1,7 @@
 """Sheet module: read Approved rows, update Status/Notes/Date, enforce limits.
 
 Run `nuauto sheet status` to see the Approved rows and the weekly count.
+`nuauto sheet add|move|remove ...`: add, move or remove a job by hand (manage.py).
 """
 import os
 import sys
@@ -145,9 +146,9 @@ def client(interactive=True):
     return gc
 
 
-def open_worksheet(interactive=True):
+def spreadsheet(interactive=True):
     try:
-        return client(interactive and not config.IS_SERVER).open_by_key(config.SHEET_ID).sheet1
+        return client(interactive and not config.IS_SERVER).open_by_key(config.SHEET_ID)
     except RefreshError:
         if config.IS_SERVER:
             raise NotLoggedIn("Google login expired. On the laptop run: nuauto login google")
@@ -155,7 +156,38 @@ def open_worksheet(interactive=True):
             raise NotLoggedIn(f"Google login expired (it lasts {config.GOOGLE_LOGIN_DAYS} days).")
         print(f"Google login expired (it lasts {config.GOOGLE_LOGIN_DAYS} days). Opening the browser to log in again...")
         os.remove(config.TOKEN_PATH)
-        return open_worksheet()
+        return spreadsheet()
+
+
+def open_worksheet(interactive=True):
+    """The main tab (the first one): NUworks jobs only."""
+    ws = spreadsheet(interactive).sheet1
+    if ws.title == OTHER_TAB:
+        raise SheetError(f"The first tab is {OTHER_TAB!r}. Drag your NUworks tab back to the first place.")
+    return ws
+
+
+OTHER_TAB = "Other jobs"  # jobs that are not on NUworks (nuauto assist other): same columns, no weekly or total cap
+
+
+class NoOtherTab(SheetError):
+    """The sheet has no Other jobs tab yet."""
+
+
+def open_other(interactive=True, create=False):
+    """The Other jobs tab. create=True makes it (headers, Status dropdown, styling) if the sheet has none yet;
+    else a missing tab is a SheetError."""
+    sh = spreadsheet(interactive)
+    try:
+        return sh.worksheet(OTHER_TAB)
+    except gspread.exceptions.WorksheetNotFound:
+        if not create:
+            raise NoOtherTab(f"No {OTHER_TAB!r} tab yet: add a job to it (NUauto's Other jobs screen, or "
+                             "nuauto assist other add <url> <company> <title>).")
+    from nuauto import setup_sheet
+    ws = sh.add_worksheet(title=OTHER_TAB, rows=setup_sheet.LAST_ROW, cols=len(HEADERS))
+    setup_sheet.setup(sh, ws, title=OTHER_TAB)
+    return ws
 
 
 SHEETS_API = "https://sheets.googleapis.com/v4/spreadsheets"
@@ -321,8 +353,11 @@ def add_proposed(ws, items, status="Proposed"):
 
 
 def main():
+    if sys.argv[1:2] in (["add"], ["move"], ["remove"]):
+        from nuauto import manage
+        return manage.main(sys.argv[1:])
     if sys.argv[1:] != ["status"]:
-        sys.exit("Usage: nuauto sheet status")
+        sys.exit("Usage: nuauto sheet status | add | move | remove (nuauto sheet add for details)")
     rows = read_rows(open_worksheet())
     week, total = check_limits_safe(rows)
     print(f"Applied {week_window()[1]}: {week}/{max_per_week()}. Total applied: {total}/{MAX_TOTAL}.")

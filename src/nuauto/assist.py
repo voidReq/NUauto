@@ -5,12 +5,17 @@
                                       visible browser
   nuauto assist nuworks <row>         submit an Applied row's job on NUworks too (retry; you at a terminal,
                                       or `--ui json` from nuauto gui)
+  nuauto assist other                 list the Approved rows of the sheet's Other jobs tab (jobs not on NUworks)
+  nuauto assist other <row>           the same agent for that tab's row; afterwards nothing is sent to NUworks
+  nuauto assist other add <url> <company> <title>
+                                      add a job to the Other jobs tab as Approved (the tab is made if missing)
 
 The agent may browse any site the application needs, fill fields, tick boxes and upload the resume. It
 NEVER submits without you: every Submit-type click (SUBMIT_RE, incl. "Apply") and the Enter key make
 Claude Code ask you in the terminal first (hook "ask"); you review the application, then approve.
 When you /exit, the terminal asks whether you submitted; y marks the row Applied (dated today), then the
-same job is submitted on NUworks too (apply.submit_nuworks_side, the tested NUworks code).
+same job is submitted on NUworks too (apply.submit_nuworks_side, the tested NUworks code). For an Other jobs tab
+row, y only marks it Applied (those rows have no weekly or total cap), and its answers come from Bank.
 
 Code checks every call (Claude Code hooks -> `assist.py hook pre|post`, logic in decide / update_after):
 - ask first: Submit-type clicks, Enter, type(submit=true). Element names come from the latest snapshot,
@@ -85,17 +90,25 @@ def assist_target(notes, url_override=None):
     url = url_override or link_from_notes(notes)
     if not url:
         return None, "the notes name the site but not the link: add --url <posting link>"
+    return check_link(url)
+
+
+def check_link(url):
+    """(url, None) for an https link the agent may open first, else (None, reason). Never NUworks itself."""
     h = host(url)
     if urlparse(url).scheme != "https" or not h:
         return None, f"not an https link: {url!r}"
     if h in config.ALLOWED_HOSTS or h in config.SSO_HOSTS or h.endswith("symplicity.com"):
-        return None, "that is NUworks itself: the agent never drives NUworks"
+        return None, "that is NUworks itself: the agent never drives NUworks (NUworks jobs go in the main tab)"
     return url, None
 
 
-def page_always_asks(page):
-    p = (page or "").lower()
-    return any(w in p for w in ("voluntary", "self identify", "self-identify", "disclosure", "eeo", "demographic"))
+def other_target(row, url_override=None):
+    """(url, None) if the agent may work on this Other jobs tab row (Approved, an https link that is not NUworks),
+    else (None, reason)."""
+    if row.status != "Approved":
+        return None, f"it is {row.status or 'not marked'}, not Approved"
+    return check_link(url_override or row.url)
 
 
 def parse_refs(text):
@@ -274,9 +287,9 @@ def check_bash(state, command):
 
 
 def lookup(entries, label, options, page):
-    """The answer bank's reply for `answer`: dict with status (and value)."""
-    if page_always_asks(page):
-        return {"status": "ask_every_time", "why": "voluntary / self-identify page"}
+    """The answer bank's reply for `answer`: dict with status (and value). Voluntary / self-identify pages (gender,
+    race, veteran, disability...) work like any other: a saved answer is used (until 2026-10-09 they were asked every
+    time). page: the step's name, for the log only."""
     entry = answers.find(entries, label_key(label))
     if entry is None:
         return {"status": "unknown", "saved": saved_answers(entries)}
@@ -289,6 +302,39 @@ def lookup(entries, label, options, page):
     if options and entry["answer"] not in options:
         return {"status": "not_an_option", "saved": entry["answer"], "options": options}
     return {"status": "answer", "value": entry["answer"]}
+
+
+class Bank:
+    """The answers one run sees, and where what it saves goes. A NUworks job (main tab): answers.json. An Other jobs
+    tab job: answers_other.json first, then answers.json minus its NUworks-only entries (co-op dates, term); new
+    answers go to answers_other.json, so NUworks runs never see them. An alias goes on the entry it names."""
+
+    def __init__(self, other=False):
+        self.main = answers.load()
+        self.path = config.OTHER_ANSWERS_PATH if other else config.ANSWERS_PATH
+        self.own = answers.load(self.path) if other else self.main
+        self.entries = self.own + [e for e in self.main if not answers.nuworks_only(e)] if other else self.main
+
+    def save(self, entry=None):
+        """Write the file that holds entry (no entry: the one new answers go to)."""
+        if entry is None or any(entry is e for e in self.own):
+            answers.save(self.own, self.path)
+        else:
+            answers.save(self.main)
+
+    def put(self, key, value, field_type):
+        """Save an answer in this run's own bank: fill its entry for the question if it has one (a starter with no
+        answer yet, or one marked leave blank), else add one."""
+        e = answers.find(self.own, key)
+        if e:
+            e["answer"], e["field_type"], e["leave_blank"] = value, field_type, False
+        else:
+            self.own.append(answers.new_entry(key, value, field_type))
+        self.save()
+
+    def add(self, entry):
+        self.own.append(entry)
+        self.save()
 
 
 def saved_answers(entries):
@@ -354,9 +400,10 @@ def bank(argv):
     ap.add_argument("--page", default="")
     a = ap.parse_args(argv)
     d = run_dir()
-    entries = answers.load()
     out = {}
     with state_file(os.path.join(d, "state.json")) as state:
+        b = Bank(other=state.get("tab") == "other")
+        entries = b.entries
         if a.cmd == "answer":
             out = lookup(entries, a.label, a.option, a.page or state.get("page", ""))
             if out["status"] == "answer":
@@ -366,19 +413,15 @@ def bank(argv):
                 out = {"error": f"{a.cmd} needs a value"}
             elif why := valid_answer(a.value, a.option):
                 out = {"error": why}
-            elif a.cmd == "save" and (page_always_asks(a.page) or (answers.find(entries, label_key(a.label)) or {}).get("always_ask")):
+            elif a.cmd == "save" and (answers.find(entries, label_key(a.label)) or {}).get("always_ask"):
                 out = {"error": "This question is asked every time: use once, not save."}
             else:
                 if a.cmd == "save":
                     e = answers.find(entries, label_key(a.label))
                     if e and e["answer"] and not e.get("leave_blank"):
-                        out = {"error": f"Already saved as {e['answer']!r}; edit answers.json by hand to change it."}
+                        out = {"error": f"Already saved as {e['answer']!r}; the user changes it in the answer bank."}
                     else:
-                        if e:
-                            e["answer"], e["field_type"], e["leave_blank"] = a.value, "select" if a.option else "text", False
-                        else:
-                            entries.append(answers.new_entry(label_key(a.label), a.value, "select" if a.option else "text"))
-                        answers.save(entries)
+                        b.put(label_key(a.label), a.value, "select" if a.option else "text")
                 if not out:
                     issue(state, a.label, a.value)
                     out = {"status": "answer", "value": a.value, "saved": a.cmd == "save"}
@@ -388,7 +431,7 @@ def bank(argv):
                 out = {"error": f"No saved question {a.value!r}."}
             else:
                 target.setdefault("aliases", []).append(label_key(a.label))
-                answers.save(entries)
+                b.save(target)
                 out = lookup(entries, a.label, a.option, a.page)
                 if out["status"] == "answer":
                     issue(state, a.label, out["value"])
@@ -398,8 +441,7 @@ def bank(argv):
             else:
                 e = answers.new_entry(label_key(a.label), "", "text")
                 e["leave_blank"] = True
-                entries.append(e)
-                answers.save(entries)
+                b.add(e)
                 out = {"status": "leave_blank", "saved": True}
     log(d, f"bank {a.cmd} {a.label!r} -> {out.get('status') or out.get('error')}")
     print(json.dumps(out))
@@ -452,6 +494,23 @@ def find_row(number, url_override):
     return rows, row, url
 
 
+def find_other_row(number, url_override):
+    from nuauto import sheet
+    rows = sheet.read_rows(sheet.open_other())
+    row = next((r for r in rows if r.number == number), None)
+    if row is None:
+        sys.exit(f"The {sheet.OTHER_TAB} tab has no row {number}.")
+    url, why = other_target(row, url_override)
+    if why:
+        sys.exit(f"{sheet.OTHER_TAB} row {number} ({row.company}): {why}.")
+    return rows, row, url
+
+
+OTHER_NOTE = ("This job is not on NUworks (the sheet's Other jobs tab): nothing is submitted on NUworks afterwards. "
+              "Its answer bank leaves out the NUworks co-op answers (start / end dates, co-op term): when the form "
+              "asks one, ask the user.\n")
+
+
 def answer_prefix():
     """How the agent and Claude Code's hooks run this file: [python, assist.py] from a source install, [the app,
     "_assist"] when packaged. Always two words (check_bash compares exactly these)."""
@@ -464,20 +523,26 @@ def claude_bin():
     return config.tool_path("claude") or "claude"
 
 
-def run(number, url_override):
+def run(number, url_override, other=False):
+    """other: a row of the Other jobs tab (no weekly / total cap, nothing sent to NUworks afterwards)."""
     from nuauto import browser
     from nuauto import sheet
     if not sys.stdin.isatty():
         sys.exit("nuauto assist needs a real terminal (you talk to the agent and confirm Submit).")
-    rows, row, url = find_row(number, url_override)
-    sheet.check_limits(rows)
-    log_ = browser.RunLog(f"assist_row{number}")
+    if other:
+        rows, row, url = find_other_row(number, url_override)
+        where = f"{sheet.OTHER_TAB} row {number}"
+    else:
+        rows, row, url = find_row(number, url_override)
+        sheet.check_limits(rows)
+        where = f"row {number}"
+    log_ = browser.RunLog(f"assist_{'other_' if other else ''}row{number}")
     d = log_.dir
     answer_cmd = answer_prefix()
     read_roots = [os.path.realpath(r) for r in [*config.ASSIST_READ_PATHS, config.LAPTOP_RESUME] if os.path.exists(r)]
     resume = upload_copy(config.LAPTOP_RESUME, d) if os.path.exists(config.LAPTOP_RESUME) else None
     state = {"current_url": url, "refs": {}, "issued": {}, "issued_values": [], "answer_cmd": answer_cmd,
-             "read_roots": read_roots, "resume": resume}
+             "read_roots": read_roots, "resume": resume, "tab": "other" if other else "jobs"}
     with open(os.path.join(d, "state.json"), "w") as f:
         json.dump(state, f)
     os.makedirs(config.ASSIST_PROFILE_DIR, mode=0o700, exist_ok=True)
@@ -492,40 +557,42 @@ def run(number, url_override):
             json.dump(obj, f, indent=1)
     with open(os.path.join(config.PROJECT_DIR, "prompts", "ASSIST_PROMPT.md")) as f:
         rules = f.read().replace("ANSWER ", " ".join(shlex.quote(a) for a in answer_cmd) + " ")
-    context = (f"\n\nTHIS RUN\nRow {row.number}: {row.company} | {row.title}\nPosting: {url}\n"
+    context = (f"\n\nTHIS RUN\n{where.capitalize()}: {row.company} | {row.title}\nPosting: {url}\n"
+               + (OTHER_NOTE if other else "") +
                f"Resume file (the only file you may upload): {resume or 'not found'}\n"
                "If you have no browser tools yet, they are still connecting: run the answer-bank command with "
                "just `wait` (it pauses 5 s), then look again (up to 6 times) before telling the user.\n"
                f"Resume and notes you may read (Read / Glob / Grep, nothing else): {', '.join(read_roots) or 'none'}\n"
                "Answer bank command: "
                f"{' '.join(shlex.quote(a) for a in answer_cmd)} <answer|save|once|alias|blank> ...")
-    log_.write(f"Row {row.number}: {row.company} | {row.title} -> {host(url)}")
+    log_.write(f"{where.capitalize()}: {row.company} | {row.title} -> {host(url)}")
     log_.write("Starting the agent. Sign in / upload / Submit are yours. Type /exit in the session when done.")
     cmd = [claude_bin(), "--model", "sonnet", "--strict-mcp-config", "--mcp-config", os.path.join(d, "mcp.json"),
            "--settings", os.path.join(d, "settings.json"), "--tools", "Bash", "Read", "Glob", "Grep",
            *[a for r in read_roots for a in ("--add-dir", r if os.path.isdir(r) else os.path.dirname(r))],
            "--allowedTools", f"mcp__{SERVER}", f"Bash({answer_cmd[0]} {answer_cmd[1]}:*)", "Read", "Glob", "Grep",
            "--append-system-prompt", rules + context,
-           f"Go: open the posting and fill the application for row {row.number}, following the rules."]
+           f"Go: open the posting and fill the application for {where}, following the rules."]
     try:
         subprocess.run(cmd, env={**os.environ, STATE_ENV: d}, cwd=config.STATE_DIR)
     except KeyboardInterrupt:
         pass
     try:
         while True:
-            reply = input(f"\nDid you press Submit for row {row.number} ({row.company}) and see the confirmation? "
+            reply = input(f"\nDid you press Submit for {where} ({row.company}) and see the confirmation? "
                           "[y = yes / n = no]: ").strip().lower()
             if reply in ("y", "n"):
                 break
     except (KeyboardInterrupt, EOFError):
         reply = "n"
     if reply != "y":
-        log_.write(f"Not submitted; row {row.number} stays Needs Human.")
+        log_.write(f"Not submitted; {where} stays {row.status}.")
         return
-    ws = sheet.open_worksheet()
+    ws = sheet.open_other() if other else sheet.open_worksheet()
     sheet.mark_applied_by_hand(ws, row.number, row.url, how="on the company site (nuauto assist; you pressed Submit)")
-    log_.write(f"Row {row.number} marked Applied (dated today).")
-    nuworks_side(ws, row.number)
+    log_.write(f"{where.capitalize()} marked Applied (dated today).")
+    if not other:  # an Other jobs tab job is not on NUworks: nothing more to send
+        nuworks_side(ws, row.number)
 
 
 def nuworks_side_blocked(notes):
@@ -569,6 +636,39 @@ def list_rows():
             print(f"  row {r.number:<3} {r.company[:25]:25} {why}")
 
 
+def list_other():
+    from nuauto import sheet
+    ready = [(r, *other_target(r)) for r in sheet.read_rows(sheet.open_other()) if r.status == "Approved"]
+    print(f"{sheet.OTHER_TAB} tab, Approved (nuauto assist other <row>):" if ready else
+          f"No Approved rows in the {sheet.OTHER_TAB} tab.")
+    for r, u, why in ready:
+        print(f"  row {r.number:<3} {r.company[:25]:25} {r.title[:38]:38} {host(u) if u else why}")
+
+
+def add_other(url, company, title, interactive=True):
+    """A job that is not on NUworks -> the Other jobs tab as Approved (you adding it is the go-ahead); the tab is made
+    if the sheet has none. Returns its row number. SheetError if the link is not one the agent may open, or is there.
+    interactive=False (the GUI): never opens Google's login page. (manage.add: the same for either tab.)"""
+    from nuauto import manage
+    return manage.add("other", url, company, title, interactive=interactive)
+
+
+def main_other(args, url):
+    """nuauto assist other [<row> | add <url> <company> <title>]"""
+    from nuauto import sheet
+    try:
+        if not args:
+            return list_other()
+        if len(args) == 1 and args[0].isdigit():
+            return run(int(args[0]), url, other=True)
+        if len(args) == 4 and args[0] == "add":
+            n = add_other(*args[1:])
+            return print(f"Added as {sheet.OTHER_TAB} row {n} (Approved). Start the agent: nuauto assist other {n}")
+    except sheet.SheetError as e:
+        sys.exit(str(e))
+    sys.exit(__doc__)
+
+
 def main(argv):
     args, url, ui = list(argv), None, None
     for flag in ("--url", "--ui"):
@@ -585,6 +685,8 @@ def main(argv):
         sys.exit(__doc__)
     if not args:
         return list_rows()
+    if args[0] == "other":
+        return main_other(args[1:], url)
     if len(args) == 2 and args[0] == "nuworks" and args[1].isdigit():  # retry / catch up the NUworks side
         from nuauto import apply
         from nuauto import sheet

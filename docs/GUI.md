@@ -57,11 +57,20 @@ SCREENS
                  company site or needs a cover letter / transcript becomes Needs Human (Company sites)
   Company sites  Needs Human rows for the assistant (opens `nuauto assist <row>` in a terminal window, or shows the
                  command), "I applied myself", company sites still owed (Mark done), the NUworks side to retry
+  Other jobs     the sheet's Other jobs tab (jobs not on NUworks; read fresh, no nav count): Add a job (opens Sheet on
+                 the Other jobs tab), Approved rows with Start assistant (opens `nuauto assist other <row>`), Open
+                 site, I applied myself; Applied rows; the rest. No caps there
+  Sheet          add a job by hand (manage.py): NUworks co-op or Other job, Approved or Proposed, link; a NUworks
+                 link switches the tab and fills company / title / match from your job data. Both tabs' rows with
+                 Move to the other tab (asks for the link there) and Remove (clears the row's cells: no row is
+                 renumbered). Applied rows and unresolved Submit clicks are locked; nothing moves while a run is on
   Insights       where your sheet stands (a status ring: arcs in an order checked for color-blind separation, with a
                  labeled legend), then for Your pool / Applied: median and usual pay, share in Massachusetts, closing this
                  week; an hourly-pay histogram; by state (top 5 + Other, top cities); kind of work. insights.py, also
                  `nuauto insights` in a terminal. Read-only; pay that doesn't read as $10-150/h counts as not listed
-  Answers        the answer bank as a table (exact-match rules unchanged); locked while a run uses it
+  Answers        the answer bank as a table (exact-match rules unchanged); locked while a run uses it. NUworks /
+                 Other jobs switch: the Other jobs bank (answers_other.json) is its own table; the NUworks one has a
+                 "NUworks only" column (never used for Other jobs; default on for start/end date and co-op term)
   Settings       every health check (run them now), logins, resume label, applications per week (the weekly cap), week start, setup, logs, quit
   Setup          the wizard (below); opens by itself until setup is done
   Past runs      logs/ folders: actions.log and the screenshots before and after Submit
@@ -150,11 +159,20 @@ API (JSON; all need the cookie; POSTs need X-NUauto: 1)
   GET  /api/apply            Approved rows in apply order, week, why_not, recent runs
   POST /api/action           {"kind": apply|update|login_google|login_nuworks|check_nuworks|login_claude|
                              install_firefox|install_claude|nuworks_side|assist|fix_permissions, "args"}
+                             (assist: {"row", "tab": "other"} for the Other jobs tab)
   GET  /api/task?after=N     the current task: state, new log lines, question, row, screenshot, countdown
   POST /api/answer           {"task", "id", "reply"}; POST /api/stop {"task", "force"}
-  GET  /api/company          agent / other / site / retry rows; POST /api/mark {"action": applied|site, "row", "url"}
+  GET  /api/company          agent / other / site / retry rows; POST /api/mark {"action": applied|site, "row", "url",
+                             "tab": "other" (Other jobs tab, applied only)}
+  GET  /api/other            the Other jobs tab: exists, ready (Approved), applied, rest
+  POST /api/other/add        {"url", "company", "title"} -> {"row"}: an Approved row there (the tab made if missing)
+  GET  /api/sheet            both tabs: exists, rows (each with locked: why it can't move / be removed, or null), busy
+  GET  /api/sheet/lookup?url=  the tab a link belongs in; for a NUworks job: known, company, title, match, in_pool, notes
+  POST /api/sheet            {"action": add, "tab": nuworks|other, "url", "company", "title", "status"} -> {"tab", "row"};
+                             {"action": move, "tab", "row", "url", "new_url"} -> {"tab", "row"}; {"action": remove, "tab", "row", "url"}
   GET  /api/insights         pool / applied numbers (pay, places, categories) and the sheet's statuses
-  GET  /api/answers          entries + version; POST /api/answers {"entries", "version"}
+  GET  /api/answers?bank=    entries + version (bank other: answers_other.json); POST /api/answers {"bank", "entries",
+                             "version"}. answers.json entries carry nuworks_only; leave_blank is kept while empty
   GET  /api/settings         settings (no secrets); POST /api/settings {"resume_label", "week_start", ...}
   GET  /api/setup            wizard steps; POST /api/setup {"action": ack|client_upload|client_downloads|
                              sheet_create|sheet_link|resume_pick|resume_set|labels_read|label_set|terms_read|

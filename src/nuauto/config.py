@@ -70,6 +70,8 @@ RESUME_PATH = LAPTOP_RESUME if os.path.exists(LAPTOP_RESUME) else os.path.join(L
 DATA_DIR = os.path.join(STATE_DIR, "data")   # list, triage, details, scores, ratings, pool
 WORK_DIR = os.path.join(STATE_DIR, "work")   # batch files exchanged with the Claude subagents
 ANSWERS_PATH = os.path.join(LOCAL_DIR, "answers.json")
+# The Other jobs tab's own answers (nuauto assist other): checked first, then answers.json minus its NUworks-only entries.
+OTHER_ANSWERS_PATH = os.path.join(LOCAL_DIR, "answers_other.json")
 PROFILE_PATH = os.path.join(LOCAL_DIR, "profile.json")
 # Extra hosts allowed ONLY while apply.py clicks the one-click re-login (see browser.relogin).
 SSO_HOSTS = {"shibboleth-northeastern-csm.symplicity.com", "neuidmsso.neu.edu"}

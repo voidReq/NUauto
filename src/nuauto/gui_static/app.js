@@ -388,7 +388,7 @@ function questionMenu(box, q, reply) {
 // ------------------------------------------------------------------ screens
 
 const screens = {};
-const TITLES = { home: "Today", review: "Review", apply: "Apply", company: "Company sites", insights: "Insights", answers: "Answers",
+const TITLES = { home: "Today", review: "Review", apply: "Apply", company: "Company sites", other: "Other jobs", sheet: "Sheet", insights: "Insights", answers: "Answers",
   settings: "Settings", setup: "Setup", logs: "Past runs" };
 
 // ---- Today
@@ -456,11 +456,11 @@ function todoList(items) {
   }));
 }
 
-function markRow(kind, t) {
+function markRow(kind, t, tab) {  // tab "other": a row of the sheet's Other jobs tab
   const text = kind === "site" ? `Mark the ${t.company} company-site application as done?` :
-    `Mark row ${t.row} (${t.company}) as Applied today? Only if you submitted it yourself.`;
+    `Mark ${tab === "other" ? "Other jobs " : ""}row ${t.row} (${t.company}) as Applied today? Only if you submitted it yourself.`;
   confirmBox(kind === "site" ? "Company site done?" : "You applied yourself?", text, "Yes, mark it", async () => {
-    try { await api.post("/api/mark", { action: kind, row: t.row, url: t.url }); toast("Sheet updated."); pollState(); if (S.screen && S.screen.reload) S.screen.reload(); }
+    try { await api.post("/api/mark", { action: kind, row: t.row, url: t.url, tab }); toast("Sheet updated."); pollState(); if (S.screen && S.screen.reload) S.screen.reload(); }
     catch (e) { fail(e); }
   });
 }
@@ -749,6 +749,141 @@ screens.company = async (view) => {
   return { reload };
 };
 
+// ---- Other jobs: the sheet's Other jobs tab (jobs that are not on NUworks; the same assistant, nothing sent to NUworks)
+screens.other = async (view) => {
+  async function reload() {
+    let d;
+    try { d = await api.get("/api/other"); } catch (e) { fill(view, el("div", { class: "note fail", text: e.message })); return; }
+    fill(view,
+      el("div", { class: "card", testid: "other-form" }, el("div", { class: "row between" }, el("h2", { text: "Jobs that aren't on NUworks" }),
+          el("button", { class: "btn primary", text: "Add a job", testid: "other-add",
+            onclick: () => { sessionStorage.setItem("sheetAddTab", "other"); location.hash = "#/sheet"; } })),
+        el("p", { class: "small muted", text: `They go in your sheet's "${d.tab}" tab (NUauto makes the tab the first time); your NUworks tab stays NUworks only. They don't count toward your weekly or total limit. Add, move or remove jobs on the Sheet screen.` })),
+      el("div", { class: "card" }, el("h2", { text: "Ready for the assistant" }),
+        el("p", { class: "small muted", text: "The assistant (Claude, in a terminal window) fills the application in a visible browser and uploads your resume; it asks you before anything is submitted. It answers from your Other jobs answers first, then your NUworks ones, except the NUworks-only ones (co-op dates and term: Answers). When you tell it the application went through, the row becomes Applied. Nothing is sent to NUworks." }),
+        d.ready.length ? el("ul", { class: "list" }, ...d.ready.map((r) => el("li", { testid: `other-${r.row}` },
+          el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title, el("div", { class: "small muted", text: `Row ${r.row} · ${r.host || r.why}` })),
+          el("div", { class: "row" },
+            el("button", { class: "btn small primary", text: "Start assistant", testid: `other-assist-${r.row}`, disabled: !r.target,
+              onclick: () => action("assist", { row: r.row, tab: "other" }) }),
+            r.target ? linkOut(r.target, "Open site") : null,
+            el("button", { class: "btn small", text: "I applied myself", testid: `other-mark-${r.row}`, onclick: () => markRow("applied", r, "other") }))))) :
+          el("p", { class: "empty", text: d.exists ? `Nothing Approved in the ${d.tab} tab.` : "No jobs yet. Add one with Add a job." })),
+      d.applied.length ? el("div", { class: "card", testid: "other-applied" }, el("h2", { text: "Applied" }),
+        el("ul", { class: "list" }, ...d.applied.map((r) => el("li", {}, el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title,
+          el("div", { class: "small muted", text: `Row ${r.row} · applied ${r.date}` })), el("div", { class: "row" }, linkOut(r.url, "Open job")))))) : null,
+      d.rest.length ? el("div", { class: "card" }, el("h2", { text: "Not Approved" }),
+        el("p", { class: "small muted", text: "Set a row to Approved in the sheet to use the assistant on it." }),
+        el("ul", { class: "list" }, ...d.rest.map((r) => el("li", {}, el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title,
+          el("div", { class: "small muted", text: `Row ${r.row}${r.notes ? " · " + r.notes.slice(0, 160) : ""}` })),
+          el("div", { class: "row" }, el("span", { class: "chip", text: r.status || "no status" }), linkOut(r.url, "Open job")))))) : null);
+  }
+  await reload();
+  return { reload };
+};
+
+// ---- Sheet: add a job to either tab by hand; move rows between the tabs; remove them
+screens.sheet = async (view) => {
+  const form = { tab: sessionStorage.getItem("sheetAddTab") || "nuworks", url: "", company: "", title: "", status: "Approved" };
+  sessionStorage.removeItem("sheetAddTab");
+  let d, info = null, seen = "";
+  async function reload() {
+    try { d = await api.get("/api/sheet"); } catch (e) { fill(view, el("div", { class: "note fail", text: e.message })); return; }
+    draw();
+  }
+  async function look() {  // what your job data knows about this link (NUworks links: company, title, match)
+    const url = form.url.trim();
+    if (!url || url === seen) return;
+    seen = url;
+    try { info = await api.get("/api/sheet/lookup?url=" + encodeURIComponent(url)); } catch (e) { info = null; }
+    if (info && info.tab) form.tab = info.tab;
+    if (info && info.known) { form.company = form.company || info.company; form.title = form.title || info.title; }
+    const focused = document.activeElement && document.activeElement.dataset.testid;  // keep the cursor where it went
+    draw();
+    if (focused) { const n = view.querySelector(`[data-testid="${focused}"]`); if (n) n.focus(); }
+  }
+  async function add(e) {
+    e.preventDefault();
+    try {
+      const r = await api.post("/api/sheet", { action: "add", ...form });
+      toast(`Added as row ${r.row} of the ${d.names[r.tab]} tab (${form.status}).`);
+      Object.assign(form, { url: "", company: "", title: "" });
+      info = null; seen = "";
+      pollState();
+      reload();
+    } catch (err) { fail(err); }
+  }
+  function move(tab, r) {
+    const to = tab === "nuworks" ? "other" : "nuworks";
+    let link = r.url;
+    modal((box, close) => box.append(
+      el("h2", { text: `Move to ${d.names[to]}?` }),
+      el("p", { class: "muted", text: `${r.company} · ${r.title} (row ${r.row}, ${r.status || "no status"}). Its status and notes go with it; the row here is cleared.` +
+        (to === "nuworks" ? " The NUworks tab needs the job's NUworks link." : " Other jobs needs the company's own posting (not NUworks).") }),
+      el("label", { class: "field" }, `Link in ${d.names[to]}`, el("input", { type: "url", value: link, testid: "move-url", oninput: (e) => { link = e.target.value; } })),
+      el("div", { class: "foot" }, el("span"), el("div", { class: "row" },
+        el("button", { class: "btn", text: "Cancel", onclick: close }),
+        el("button", { class: "btn primary", text: "Move", testid: "move-yes", onclick: async () => {
+          try {
+            const out = await api.post("/api/sheet", { action: "move", tab, row: r.row, url: r.url, new_url: link });
+            close(); toast(`Moved to row ${out.row} of the ${d.names[out.tab]} tab.`); pollState(); reload();
+          } catch (err) { fail(err); }
+        } })))), { label: "Move a job", testid: "move-dialog" });
+  }
+  function remove(tab, r) {
+    confirmBox("Remove this job?", `${r.company} · ${r.title} (${d.names[tab]} row ${r.row}). Its cells are cleared; the other rows keep their numbers.`,
+      "Remove", async () => {
+        try { await api.post("/api/sheet", { action: "remove", tab, row: r.row, url: r.url }); toast("Removed."); pollState(); reload(); }
+        catch (err) { fail(err); }
+      }, { danger: true });
+  }
+  function draw() {
+    const input = (k, props) => el("input", { ...props, value: form[k], oninput: (e) => { form[k] = e.target.value; } });
+    const seg = (k, opts, label) => el("div", { class: "seg", role: "group", "aria-label": label },
+      ...opts.map(([v, t]) => el("button", { type: "button", "aria-pressed": String(form[k] === v), testid: `add-${k}-${v}`, text: t,
+        onclick: () => { form[k] = v; draw(); } })));
+    const hint = !info ? (form.tab === "nuworks" ? "Paste a NUworks job link (…/students/app/jobs/detail/…): the company, title and match come from your job data when it has the job." :
+      "Paste the company's own posting (any https link that is not NUworks).") :
+      info.tab === null ? info.why :
+      info.tab === "other" ? "Not a NUworks job link: it goes in Other jobs." :
+      !info.known ? "A NUworks job your job data doesn't have yet: type the company and title." :
+      info.in_pool ? `In your pool: ${info.notes}.` : `In your job data: ${info.notes}.`;
+    const tabCard = (tab) => {
+      const t = d.tabs[tab];
+      return el("div", { class: "card", testid: `sheet-${tab}` }, el("h2", { text: `${d.names[tab]} tab` }),
+        !t.exists ? el("p", { class: "empty", text: "Not made yet: adding the first job makes it." }) :
+        !t.rows.length ? el("p", { class: "empty", text: "No jobs." }) :
+        el("ul", { class: "list" }, ...t.rows.map((r) => el("li", { testid: `sheet-${tab}-${r.row}` },
+          el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title,
+            el("div", { class: "small muted", text: `Row ${r.row}${r.date ? " · " + r.date : ""}${r.notes ? " · " + r.notes.slice(0, 140) : ""}` })),
+          el("div", { class: "row" }, el("span", { class: "chip", text: r.status || "no status" }), linkOut(r.url, "Open"),
+            el("button", { class: "btn small", text: `Move to ${tab === "nuworks" ? "Other jobs" : "NUworks"}`, testid: `move-${tab}-${r.row}`,
+              disabled: !!r.locked || d.busy, title: r.locked || (d.busy ? "A run is using the sheet" : null), onclick: () => move(tab, r) }),
+            el("button", { class: "btn small", text: "Remove", testid: `remove-${tab}-${r.row}`,
+              disabled: !!r.locked || d.busy, title: r.locked || (d.busy ? "A run is using the sheet" : null), onclick: () => remove(tab, r) }))))));
+    };
+    fill(view,
+      el("div", { class: "card", testid: "add-form" }, el("h2", { text: "Add a job" }),
+        el("form", { class: "stack", onsubmit: add },
+          el("div", { class: "row" }, seg("tab", [["nuworks", "NUworks co-op"], ["other", "Other job (not on NUworks)"]], "Which tab"),
+            seg("status", [["Approved", "Approved"], ["Proposed", "Proposed"]], "Status")),
+          el("label", { class: "field" }, "Link to the posting", input("url", { type: "url", placeholder: "https://", required: true, testid: "add-url",
+            onchange: look })),
+          el("p", { class: "small muted", testid: "add-hint", text: hint }),
+          el("div", { class: "grid2" },
+            el("label", { class: "field" }, "Company", input("company", { type: "text", testid: "add-company" })),
+            el("label", { class: "field" }, "Job title", input("title", { type: "text", testid: "add-title" }))),
+          el("p", { class: "small muted", text: form.status === "Approved" ?
+            (form.tab === "nuworks" ? "Approved NUworks jobs are submitted by Apply (your weekly limit applies)." : "Approved Other jobs are ready for the assistant (no limits there).") :
+            "Proposed: it waits in the sheet (NUworks ones show first in Review) until you approve it." }),
+          el("div", {}, el("button", { class: "btn primary", type: "submit", text: "Add", testid: "add-submit" })))),
+      el("p", { class: "small muted", text: "Applied rows can't be moved or removed (they count toward your limits). Removing clears the row's cells, so no other row changes number." }),
+      tabCard("nuworks"), tabCard("other"));
+  }
+  await reload();
+  return { reload };
+};
+
 // ---- Insights: pay, places and kinds of work in the pool / what you applied to; where the sheet stands
 const SVGNS = "http://www.w3.org/2000/svg";
 function svg(tag, attrs, ...kids) {
@@ -850,39 +985,48 @@ screens.insights = async (view) => {
 
 // ---- Answers
 screens.answers = async (view) => {
-  let data, rows = [], filter = "";
+  let data, rows = [], filter = "", bank = sessionStorage.getItem("answersBank") || "nuworks";  // or "other": the Other jobs tab's
   async function reload() {
-    try { data = await api.get("/api/answers"); } catch (e) { fill(view, el("div", { class: "note fail", text: e.message })); return; }
+    try { data = await api.get(`/api/answers?bank=${bank}`); } catch (e) { fill(view, el("div", { class: "note fail", text: e.message })); return; }
     rows = data.entries.map((e) => ({ ...e, aliases: (e.aliases || []).join(", ") }));
     draw();
   }
+  function setBank(b) { bank = b; sessionStorage.setItem("answersBank", b); filter = ""; reload(); }
   function draw() {
     const shown = rows.map((r, i) => [r, i]).filter(([r]) => !filter || (r.question + " " + r.answer + " " + r.aliases).toLowerCase().includes(filter));
     const tbody = el("tbody", {}, ...shown.map(([r, i]) => el("tr", { testid: `answer-row-${i}` },
       el("td", {}, el("input", { type: "text", value: r.question, "aria-label": "Question", oninput: (e) => { r.question = e.target.value; } })),
-      el("td", {}, el("input", { type: "text", value: r.answer, "aria-label": "Answer", disabled: r.always_ask, placeholder: r.always_ask ? "asked every time" : "",
-        oninput: (e) => { r.answer = e.target.value; } })),
+      el("td", {}, el("input", { type: "text", value: r.answer, "aria-label": "Answer", disabled: r.always_ask,
+        placeholder: r.always_ask ? "asked every time" : r.leave_blank ? "always left blank" : "", oninput: (e) => { r.answer = e.target.value; } })),
       el("td", { class: "narrow" }, el("select", { "aria-label": "Field type", onchange: (e) => { r.field_type = e.target.value; } },
         ...[["", "any"], ["text", "text"], ["select", "dropdown"]].map(([v, t]) => el("option", { value: v, text: t, selected: r.field_type === v })))),
       el("td", { class: "narrow" }, el("label", { class: "row small" }, el("input", { type: "checkbox", checked: !!r.always_ask,
         onchange: (e) => { r.always_ask = e.target.checked; draw(); } }), "always ask")),
+      bank === "nuworks" ? el("td", { class: "narrow" }, el("label", { class: "row small", title: "Never used for jobs in your Other jobs tab" },
+        el("input", { type: "checkbox", checked: !!r.nuworks_only, onchange: (e) => { r.nuworks_only = e.target.checked; } }), "NUworks only")) : null,
       el("td", {}, el("input", { type: "text", value: r.aliases, placeholder: "other wordings, comma-separated", "aria-label": "Aliases",
         oninput: (e) => { r.aliases = e.target.value; } })),
       el("td", { class: "narrow" }, el("button", { class: "btn small ghost", text: "Remove", "aria-label": `Remove ${r.question}`,
         onclick: () => { rows.splice(i, 1); draw(); } })))));
+    const seg = el("div", { class: "seg", role: "group", "aria-label": "Which answers" },
+      ...[["nuworks", "NUworks"], ["other", "Other jobs"]].map(([k, t]) =>
+        el("button", { "aria-pressed": String(bank === k), testid: `bank-${k}`, text: t, onclick: () => setBank(k) })));
     fill(view, el("div", { class: "card" },
-      el("p", { class: "small muted", text: "When a form asks a question, NUauto fills it only from here, and only on an exact match (capital letters and spaces at the ends don't matter). Always-ask entries (salary, work authorization…) are never filled: you're asked each time." }),
+      el("div", { class: "row between" }, el("h2", { text: bank === "other" ? "Answers for Other jobs" : "Your answers" }), seg),
+      el("p", { class: "small muted", text: bank === "other" ?
+        "For jobs in your sheet's Other jobs tab (not on NUworks). The assistant looks here first, then in your NUworks answers, except the ones marked NUworks only (co-op dates and term). What it saves during an Other jobs application goes here, never into your NUworks answers." :
+        "When a form asks a question, NUauto fills it only from here, and only on an exact match (capital letters and spaces at the ends don't matter). Always-ask entries (salary, work authorization…) are never filled: you're asked each time. NUworks only: never used for jobs in your Other jobs tab (they get their own answer, under Other jobs)." }),
       data.locked ? el("div", { class: "note warn", text: "A run is using the answer bank right now. You can edit when it is over." }) : null,
       el("div", { class: "row between" }, el("input", { type: "text", placeholder: "Search", value: filter, "aria-label": "Search answers",
         oninput: (e) => { filter = e.target.value.toLowerCase(); draw(); $("input[aria-label='Search answers']").focus(); } }),
-        el("div", { class: "row" }, el("button", { class: "btn", text: "Add a question", onclick: () => { rows.unshift({ question: "", answer: "", field_type: "", always_ask: false, aliases: "" }); filter = ""; draw(); } }),
+        el("div", { class: "row" }, el("button", { class: "btn", text: "Add a question", onclick: () => { rows.unshift({ question: "", answer: "", field_type: "", always_ask: false, nuworks_only: false, aliases: "" }); filter = ""; draw(); } }),
           el("button", { class: "btn primary", text: "Save", testid: "answers-save", disabled: data.locked, onclick: save }))),
-      el("table", { class: "grid" }, el("thead", {}, el("tr", {}, ...["Question", "Answer", "Type", "Always ask", "Aliases"].map((h) => el("th", { text: h })),
-        el("th", {}, el("span", { class: "sr-only", text: "Remove" })))), tbody)));
+      el("div", { class: "table-scroll" }, el("table", { class: "grid" }, el("thead", {}, el("tr", {}, ...["Question", "Answer", "Type", "Always ask", ...(bank === "nuworks" ? ["NUworks only"] : []), "Aliases"].map((h) => el("th", { text: h })),
+        el("th", {}, el("span", { class: "sr-only", text: "Remove" })))), tbody))));
   }
   async function save() {
     const entries = rows.map((r) => ({ ...r, aliases: r.aliases.split(",").map((a) => a.trim()).filter(Boolean) }));
-    try { data = await api.post("/api/answers", { entries, version: data.version }); rows = data.entries.map((e) => ({ ...e, aliases: (e.aliases || []).join(", ") })); draw(); toast("Answer bank saved."); }
+    try { data = await api.post("/api/answers", { bank, entries, version: data.version }); rows = data.entries.map((e) => ({ ...e, aliases: (e.aliases || []).join(", ") })); draw(); toast("Answer bank saved."); }
     catch (e) { fail(e); }
   }
   await reload();

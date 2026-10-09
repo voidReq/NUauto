@@ -8,6 +8,9 @@ Edit by hand with: nvim answers.json
 Rules (from CLAUDE.md): lowercase + trim the field label, EXACT match only, no fuzzy
 matching. No match -> ask in the terminal, save, reuse next time. always_ask entries
 are asked every time and never saved or auto-filled.
+
+A second bank, answers_other.json (same format), is for jobs in the sheet's Other jobs tab (nuauto assist other):
+it is checked first, then answers.json minus its NUworks-only entries (co-op dates and term: see nuworks_only).
 """
 import _thread
 import json
@@ -33,6 +36,11 @@ STARTERS = [
 ]
 
 
+# answers.json questions that hold for NUworks co-ops only, so jobs in the Other jobs tab never get them (an entry's own
+# "nuworks_only" true/false wins; the GUI's Answers screen sets it)
+NUWORKS_ONLY = {"available start date", "available end date", "co-op term"}
+
+
 class Stop(Exception):
     """The human chose to stop, or there is nobody at a terminal to ask."""
 
@@ -52,19 +60,28 @@ def new_entry(question, answer="", field_type="", always_ask=False):
     }
 
 
-def load():
-    if not os.path.exists(config.ANSWERS_PATH):
+def load(path=None):
+    """answers.json, or the bank at path (config.OTHER_ANSWERS_PATH)."""
+    path = path or config.ANSWERS_PATH
+    if not os.path.exists(path):
         return []
-    with open(config.ANSWERS_PATH) as f:
+    with open(path) as f:
         return json.load(f)
 
 
-def save(entries):
-    tmp = config.ANSWERS_PATH + ".tmp"
+def save(entries, path=None):
+    path = path or config.ANSWERS_PATH
+    tmp = path + ".tmp"
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f:
         json.dump(entries, f, indent=2)
-    os.replace(tmp, config.ANSWERS_PATH)
+    os.replace(tmp, path)
+
+
+def nuworks_only(entry):
+    """True if this answers.json entry is for NUworks co-ops only (never used for an Other jobs tab job)."""
+    flag = entry.get("nuworks_only")
+    return flag if isinstance(flag, bool) else norm(entry["question"]) in NUWORKS_ONLY
 
 
 def find(entries, label):
