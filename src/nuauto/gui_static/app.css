@@ -86,6 +86,7 @@ code, .mono { font-family: var(--mono); font-size: 12.5px; }
 .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .between { justify-content: space-between; }
 .row.end { justify-content: flex-end; }
+.row.end select { max-width: 100%; }
 .row + .card, .row + table.grid, .row + .note { margin-top: 14px; }
 .toolbar { margin-bottom: 16px; }
 .grow { flex: 1 1 16rem; min-width: 0; }

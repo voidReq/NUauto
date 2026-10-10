@@ -174,24 +174,53 @@ def row_closes(row):
     return jobs.closes(d) if d else None
 
 
-def apply_order(rows):
-    """Jobs closing within jobs.URGENT_DAYS go first, soonest first. The rest go best match first
+# The orders a run can go in (`--order`, the GUI's Sort menu on the NUworks tab): the list there IS the run's order.
+ORDERS = {"default": "closing within a week first, then score", "score": "score (match + bonuses)",
+          "match": "match %", "closes": "closing soonest", "pay": "pay per hour"}
+
+
+def apply_order(rows, order="default"):
+    """default: jobs closing within jobs.URGENT_DAYS go first, soonest first. The rest go best score first
     (pool rank: match + bonuses), since real postings often close early once they find someone.
-    Rows not in the pool go last, in sheet order."""
+    score / match / closes / pay: by that alone (best first; closes soonest first; pay = the top of the hourly range,
+    insights.hourly). Rows missing the value (not in the pool, not scored, no deadline, pay unclear) go last; ties
+    in sheet order."""
+    if order not in ORDERS:
+        raise ValueError(f"Unknown order {order!r} (one of {', '.join(ORDERS)}).")
     rank = {r["id"]: r["rank"] for r in jobs.load("pool.json", [])}
     today = date.today()
+    if order == "default":
+        def key(r):
+            day = row_closes(r)
+            if day is not None and (day - today).days <= jobs.URGENT_DAYS:
+                return (0, day, 0, r.number)
+            rk = rank.get(jobs.job_id(r.url))
+            return (1, date.max, -rk, r.number) if rk is not None else (2, date.max, 0, r.number)
+        return sorted(rows, key=key)
+    if order == "score":
+        value = lambda r: rank.get(jobs.job_id(r.url))  # noqa: E731
+    elif order == "match":
+        scores = jobs.load("scores.json", {})
+        value = lambda r: (scores.get(jobs.job_id(r.url)) or {}).get("match")  # noqa: E731
+    elif order == "closes":
+        value = lambda r: row_closes(r)  # noqa: E731
+    else:
+        from nuauto import insights
+
+        def value(r):
+            hour = insights.hourly(row_details(r).get("pay"))
+            return hour[1] if hour else None
 
     def key(r):
-        day = row_closes(r)
-        if day is not None and (day - today).days <= jobs.URGENT_DAYS:
-            return (0, day, 0, r.number)
-        rk = rank.get(jobs.job_id(r.url))
-        return (1, date.max, -rk, r.number) if rk is not None else (2, date.max, 0, r.number)
+        v = value(r)
+        if v is None:
+            return (1, 0, r.number)
+        return (0, v.toordinal() if order == "closes" else -v, r.number)  # soonest first; else best first
     return sorted(rows, key=key)
 
 
-def pick_row(rows, row_number):
-    candidates = apply_order(sheet.approved(rows))
+def pick_row(rows, row_number, order="default"):
+    candidates = apply_order(sheet.approved(rows), order)
     if row_number is not None:
         candidates = [r for r in candidates if r.number == row_number]
         if not candidates:
@@ -422,6 +451,8 @@ def refuse_unattended(ui):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("-n", type=int, metavar="N", help="apply to at most N jobs this run")
+    ap.add_argument("--order", choices=list(ORDERS), default="default",
+                    help="the order to go in: " + "; ".join(f"{k} = {v}" for k, v in ORDERS.items()).replace("%", "%%"))
     ap.add_argument("--row", type=int, help=argparse.SUPPRESS)
     ap.add_argument("--dry-run", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--ui", choices=["json"], help=argparse.SUPPRESS)  # questions as JSON lines, for nuauto gui
@@ -448,9 +479,9 @@ def main(argv=None):
             break
         print(f"Applied {sheet.week_window()[1]}: {week}/{sheet.max_per_week()}. Total: {total}/{sheet.MAX_TOTAL}.")
         if first:
-            row = pick_row(rows, args.row)
+            row = pick_row(rows, args.row, args.order)
         else:
-            left = apply_order([r for r in sheet.approved(rows) if r.number not in seen])
+            left = apply_order([r for r in sheet.approved(rows) if r.number not in seen], args.order)
             if not left:
                 print("No more Approved rows.")
                 break

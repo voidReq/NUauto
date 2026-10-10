@@ -67,6 +67,7 @@ class Task:
         self.row = self.screenshot = self.last_shot = self.wait_until = None
         self.done_rows = []
         self.state, self.code, self.stopping = "running", None, False
+        self.settling = False  # ended, its on_done (the sheet read again) not finished yet: the page still sees running
         self.started, self.ended = now(), None
         self.on_done, self.on_row = on_done, on_row
         env = {**os.environ, **(env or {}), "PYTHONUNBUFFERED": "1"}
@@ -94,13 +95,17 @@ class Task:
                 self._event(msg)
         self.code = self.proc.wait()
         self.ended, self.question, self.wait_until = now(), None, None
+        self.settling = bool(self.on_done)  # so a finished run never shows its lists from before the sheet was re-read
         self.state = "stopped" if self.stopping else "done" if self.code == 0 else "failed"
         try:
             self.proc.stdin.close()
         except OSError:
             pass
-        if self.on_done:
-            self.on_done(self)
+        try:
+            if self.on_done:
+                self.on_done(self)
+        finally:
+            self.settling = False
 
     def _event(self, msg):
         self.events.append(msg)
@@ -148,7 +153,8 @@ class Task:
 
     def view(self, after=0):
         """after: how many log lines the page already has (counted from the first line ever)."""
-        return {"id": self.id, "kind": self.kind, "label": self.label, "state": self.state, "code": self.code,
+        return {"id": self.id, "kind": self.kind, "label": self.label, "state": "running" if self.settling else self.state,
+                "code": self.code,
                 "started": self.started, "ended": self.ended, "log_total": self.total(),
                 "log": self.log[max(0, after - self.dropped):], "question": self.question,
                 "row": self.row, "done_rows": self.done_rows, "wait_until": self.wait_until,
@@ -462,23 +468,24 @@ NUWORKS_SIDE_NOT_SENT = ("NUworks side NOT submitted", "before Submit; not submi
 
 
 def facts_data():
-    """What job_facts reads, loaded once per list: the scores and the pool by job id."""
-    return jobs.load("scores.json", {}), {p["id"]: p for p in jobs.load("pool.json", [])}
+    """What job_facts reads, loaded once per list: the scores, the pool by job id, the kinds of work."""
+    return jobs.load("scores.json", {}), {p["id"]: p for p in jobs.load("pool.json", [])}, jobs.load("categories.json", {})
 
 
 def job_facts(r, data, d=None):
-    """The match %, score and pay the Apply lists show (and sort by) for a NUworks row (None when not scored / not in
-    the pool / not listed). score is the pool rank Start orders by (match + bonuses); pay_hour the top of the hourly
-    range, only when the pay reads as one (insights.hourly)."""
+    """The match %, score, pay and kind of work the Apply lists show (and sort / filter by) for a NUworks row (None
+    when not scored / not in the pool / not listed). score is the pool rank Start orders by (match + bonuses);
+    pay_hour the top of the hourly range, only when the pay reads as one (insights.hourly)."""
     from nuauto import apply, insights
-    scores, pool = data
+    scores, pool, categories = data
     d = apply.row_details(r) if d is None else d
     i = jobs.job_id(r.url)
     p = pool.get(i)
     pay = d.get("pay") or None
     hour = insights.hourly(pay)
     return {"match": (scores.get(i) or {}).get("match"), "pay": pay, "pay_hour": hour[1] if hour else None,
-            "score": p["rank"] if p else None, "score_text": jobs.rank_text(p) if p else None}
+            "score": p["rank"] if p else None, "score_text": jobs.rank_text(p) if p else None,
+            "category": p["category"] if p else categories.get(i)}
 
 
 def company_rows(rows, facts=False):
@@ -687,13 +694,16 @@ def insights_get():
     return insights.collect(APP.rows)
 
 
-def apply_list():
+def apply_list(order="default"):
+    """The Approved rows in the order a run goes (order: apply.ORDERS, the Sort menu), the week, why Start can't run."""
     from nuauto import apply
+    if order not in apply.ORDERS:
+        order = "default"
     rows = need_rows()
     week = week_info(rows)
     out = []
     data = facts_data()
-    for r in apply.apply_order(sheet.approved(rows)):
+    for r in apply.apply_order(sheet.approved(rows), order):
         d = apply.row_details(r)
         hint = jobs.external_hint(d)  # the posting may want the company's own site too
         out.append(row_view(r, **closing(r), company_site=hint, **job_facts(r, data, d)))
@@ -722,11 +732,14 @@ def act(body):
     kind = body.get("kind")
     args = body.get("args") or {}
     if kind == "apply":
+        from nuauto import apply
         why = apply_list()["why_not"]
         if why:
             raise Refused(why)
-        n, row = args.get("n"), args.get("row")
-        cmd = config.self_cmd("apply", "--ui", "json")
+        n, row, order = args.get("n"), args.get("row"), args.get("order") or "default"
+        if order not in apply.ORDERS:
+            raise Refused("Unknown order (reload the page).")
+        cmd = config.self_cmd("apply", "--ui", "json", "--order", order)
         if row not in (None, ""):  # just this one Approved row (its Apply button)
             if not str(row).isdigit() or int(row) not in {r["row"] for r in apply_list()["rows"]}:
                 raise Refused("That row is not Approved (reload the list).")
@@ -1225,7 +1238,7 @@ GET_ROUTES = {
     "/api/health": lambda q: {"checks": [c.to_dict() for c in APP.checks()], "running": sorted(APP.running_groups)},
     "/api/review": lambda q: review(q.get("mode", "approve") if q.get("mode") in ("approve", "rate") else "approve",
                                     q.get("q", "")[:200], q.get("category", "")[:40]),
-    "/api/apply": lambda q: apply_list(),
+    "/api/apply": lambda q: apply_list(q.get("order", "default")),
     "/api/insights": lambda q: insights_get(),
     "/api/company": lambda q: company(),
     "/api/task": lambda q: {"task": APP.task.view(int(q.get("after", 0) or 0)) if APP.task else None},
