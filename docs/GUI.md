@@ -61,13 +61,14 @@ SCREENS
   Apply          the weekly count and Start, the live run (below), then three tabs, each with its row count: NUworks, Company
                  sites, By hand on NUworks (the tab you picked is remembered; #/company, #/other and Today's buttons open
                  Company sites). Every NUworks row in the three tabs shows its match % (or its score, "score 105 = 75% match + 10 Boston + 20
-                 security", when bonuses add to it: Start goes by score) and pay. Each tab has a "Sort the list by" menu (remembered per
-                 tab; the view only, never Start's order or what it applies to): NUworks: Start's order (closing within a week
-                 first, then score; default), score, match %, closing soonest, pay per hour (insights.hourly; unclear pay last);
-                 Company sites / By hand: closing soonest (default), sheet order, score, match %, pay. And a "Show" kind-of-work
+                 security", when bonuses add to it: Start goes by score) and pay. NUworks tab: "Apply in this order" (remembered for the
+                 session) IS the order Start and At most go: closing within a week first, then score (default), score, match %,
+                 closing soonest, pay per hour (insights.hourly; unclear pay last). The server sorts (apply.apply_order, GET
+                 /api/apply?order=) and Start runs `nuauto apply --order <it>`. Company sites / By hand: "Sort the list by" (the view
+                 only): closing soonest (default), sheet order, score, match %, pay. And a "Show" kind-of-work
                  menu (the categories, with counts; shared by the tabs; NUworks rows only, the Other jobs card is not
-                 filtered); filtered, NUworks says "Start still goes through all N". A NUworks row keeps its number (where Start
-                 takes it) whatever the sort or filter. NUworks: Approved rows in apply order (numbered 1, 2, 3: the order Start goes), each with when it closes
+                 filtered; the view only); filtered, NUworks says "Start still goes through all N". A NUworks row's number is
+                 where Start takes it, also while filtered. NUworks: Approved rows in apply order (numbered 1, 2, 3: the order Start goes), each with when it closes
                  (due chip: amber within a week, red once past), its match % and pay, a "may also want the company's
                  site" chip when the posting says so, and its own Apply button (after a confirm: just that row, `nuauto apply --row N`); Start (optionally
                  "at most N"), the live run: current row, latest screenshot, log, next-job countdown, Stop / Force
@@ -198,7 +199,7 @@ API (JSON; all need the cookie; POSTs need X-NUauto: 1)
   POST /api/decide           {"id", "mode", "decision": approve|yes|no} -> {"row", "previous"}
   POST /api/undo             {"id", "row", "previous"}; POST /api/review/done (push ratings, homelab mode)
   GET  /api/apply            Approved rows in apply order, week, why_not, recent runs
-  POST /api/action           {"kind": apply ({"n"} or {"row"})|update|login_google|login_nuworks|check_nuworks|login_claude|
+  POST /api/action           {"kind": apply ({"n", "order"} or {"row"})|update|login_google|login_nuworks|check_nuworks|login_claude|
                              install_firefox|install_claude|nuworks_side|assist|fix_permissions, "args"}
                              (assist: {"row", "tab": "other"} for the Other jobs tab)
   GET  /api/task?after=N     the current task: state, new log lines, question, row, screenshot, countdown

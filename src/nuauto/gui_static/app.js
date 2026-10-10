@@ -795,10 +795,11 @@ function jobFacts(r) {
   return el("div", { class: "small muted", testid: "job-facts", text: [fit, r.pay ? `pay ${r.pay}` : "pay not listed"].join(" · ") });
 }
 
-// Sorting and filtering the Apply tabs' lists: only what you see; Start's order (and what it applies to) never changes.
+// Sorting and filtering the Apply tabs' lists. On the NUworks tab the sort is the order Start goes (the server sorts:
+// apply.ORDERS, `nuauto apply --order`); elsewhere it is the view only. The kind-of-work filter is the view only.
 // Rows missing the value go last, ties keep the list's own order.
 const SORTS = {
-  start: ["Start's order: closing within a week first, then score", null],
+  default: ["closing within a week first, then score", null],
   sheet: ["sheet order", null],
   score: ["score (match + bonuses)", (r) => r.score == null ? null : -r.score],
   match: ["match %", (r) => r.match == null ? null : -r.match],
@@ -824,7 +825,7 @@ screens.apply = async (view) => {
   let tab = sessionStorage.getItem("applyTab");
   if (!TABS.some(([k]) => k === tab)) tab = "nuworks";
   if (S.focus === "company") { S.focus = null; tab = "company"; }  // Today's buttons and old #/company, #/other links
-  const SORT_OPTS = { nuworks: ["start", "score", "match", "closes", "pay"], company: ["closes", "sheet", "score", "match", "pay"],
+  const SORT_OPTS = { nuworks: ["default", "score", "match", "closes", "pay"], company: ["closes", "sheet", "score", "match", "pay"],
     manual: ["closes", "sheet", "score", "match", "pay"] };
   const sortOf = (k) => { const v = sessionStorage.getItem("applySort:" + k); return SORT_OPTS[k].includes(v) ? v : SORT_OPTS[k][0]; };
   let kind = sessionStorage.getItem("applyKind") || "";  // one kind of work, or "" = all (shared by the three tabs)
@@ -837,7 +838,7 @@ screens.apply = async (view) => {
   fill(view, head, runBox, tabs, pane);
 
   async function reload() {
-    const [a, c, o] = await Promise.allSettled([api.get("/api/apply"), api.get("/api/company"), api.get("/api/other")]);
+    const [a, c, o] = await Promise.allSettled([api.get("/api/apply?order=" + sortOf("nuworks")), api.get("/api/company"), api.get("/api/other")]);
     sites = c.status === "fulfilled" ? c.value : { error: c.reason.message };
     others = o.status === "fulfilled" ? o.value : { error: o.reason.message };
     if (a.status === "rejected") { fill(pane, el("div", { class: "note fail", text: a.reason.message })); drawTabs(); return; }
@@ -862,9 +863,9 @@ screens.apply = async (view) => {
   // Sort by and Kind of work for this tab's rows (counts: this tab's NUworks rows of each kind)
   function toolbar(rows) {
     const how = sortOf(tab);
-    const sel = el("select", { testid: "apply-sort", "aria-label": "Sort the list by",
-      title: "Only changes this list. Start always goes in its own order: closing within a week first, then score.",
-      onchange: (e) => { sessionStorage.setItem("applySort:" + tab, e.target.value); drawPane(); } },
+    const sel = el("select", { testid: "apply-sort", "aria-label": tab === "nuworks" ? "Apply in this order" : "Sort the list by",
+      title: tab === "nuworks" ? "Start (and At most) goes down this list in this order." : null,
+      onchange: (e) => { sessionStorage.setItem("applySort:" + tab, e.target.value); if (tab === "nuworks") reload(); else drawPane(); } },
       ...SORT_OPTS[tab].map((k) => el("option", { value: k, text: SORTS[k][0], selected: k === how })));
     const n = {};
     rows.forEach((r) => { n[kindOf(r)] = (n[kindOf(r)] || 0) + 1; });
@@ -875,7 +876,7 @@ screens.apply = async (view) => {
       el("option", { value: "", text: `All kinds of work (${rows.length})` }),
       ...keys.map((k) => el("option", { value: k, text: `${kindLabel(k)} (${n[k] || 0})`, selected: k === kind })));
     return el("div", { class: "row end" }, el("label", { class: "small muted" }, "Show ", cat),
-      el("label", { class: "small muted" }, "Sort the list by ", sel));
+      el("label", { class: "small muted" }, tab === "nuworks" ? "Apply in this order: " : "Sort the list by ", sel));
   }
 
   function drawPane() {
@@ -896,11 +897,12 @@ screens.apply = async (view) => {
   }
 
   function nuworksCard() {
-    const rows = shown(data.rows.map((r, k) => ({ ...r, place: k + 1 })));  // place: where Start takes it
+    // already in the order Start goes (the server sorted them); place: where Start takes it
+    const rows = data.rows.map((r, k) => ({ ...r, place: k + 1 })).filter((r) => !kind || kindOf(r) === kind);
     const total = data.rows.length;
     return el("div", { class: "card" }, el("div", { class: "row between" },
         el("h2", { text: rows.length === total ? `Approved (${total})` : `Approved: ${rows.length} of ${total} shown` }),
-        rows.length !== total ? el("span", { class: "small muted", testid: "apply-filter-note", text: `Start still goes through all ${total}, in its own order.` }) : null),
+        rows.length !== total ? el("span", { class: "small muted", testid: "apply-filter-note", text: `Start still goes through all ${total}, in this order.` }) : null),
       rows.length ? el("ul", { class: "list", testid: "approved-list" }, ...rows.map((r) => el("li", { testid: `approved-${r.row}` },
         el("div", { class: "what" }, el("span", { class: "muted", text: `${r.place}. `, title: `Start applies to this one ${ordinal(r.place)}` }), el("b", { text: r.company }), " · ", r.title,
           jobFacts(r)),
@@ -968,7 +970,7 @@ screens.apply = async (view) => {
 
   async function startApply() {
     const n = atMost.value;
-    const r = await action("apply", n ? { n } : {});
+    const r = await action("apply", n ? { n, order: sortOf("nuworks") } : { order: sortOf("nuworks") });
     if (r) draw();
   }
 

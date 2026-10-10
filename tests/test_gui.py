@@ -363,20 +363,22 @@ try:
         assert page.locator("[data-testid=approved-list] [data-testid=due]").count() == 4  # each row shows its due date
         assert page.locator("[data-testid=approved-list] button[data-testid^=btn-apply-row-]").count() == 4  # one Apply each
         assert "% match" in page.inner_text("[data-testid=approved-list] [data-testid=job-facts] >> nth=0")
-        # sort by match %: only the view changes; each row keeps its number (where Start takes it)
+        # the order menu IS the order Start goes: the server sorts (apply.apply_order), the numbers follow it
         start_order = page.locator("[data-testid=approved-list] li").evaluate_all("ls => ls.map(l => l.dataset.testid)")
-        assert page.locator("[data-testid=apply-sort] option[value=start]").inner_text().startswith("Start's order: closing within a week")
+        assert page.locator("[data-testid=apply-sort] option[value=default]").inner_text().startswith("closing within a week")
+        assert "Apply in this order" in page.inner_text("[data-testid=apply-pane] .row.end")
         page.select_option("[data-testid=apply-sort]", "match")
-        page.wait_for_timeout(200)
+        by_match = ["approved-%d" % r["row"] for r in get("/api/apply?order=match")["rows"]]
+        page.wait_for_function("ids => [...document.querySelectorAll('[data-testid=approved-list] li')].map(l => l.dataset.testid).join() === ids.join()", arg=by_match)
         facts = page.locator("[data-testid=approved-list] [data-testid=job-facts]").all_inner_texts()
         found = [int(re.search(r"(\d+)% match", t).group(1)) for t in facts]
         assert found == sorted(found, reverse=True), facts
         numbers = page.locator("[data-testid=approved-list] li .what > span.muted").all_inner_texts()
-        by_id = page.locator("[data-testid=approved-list] li").evaluate_all("ls => ls.map(l => l.dataset.testid)")
-        assert [start_order[int(n.rstrip(". ")) - 1] for n in numbers] == by_id, (numbers, by_id, start_order)
-        page.select_option("[data-testid=apply-sort]", "start")
-        page.wait_for_timeout(200)
-        assert page.locator("[data-testid=approved-list] li").evaluate_all("ls => ls.map(l => l.dataset.testid)") == start_order
+        assert numbers == [f"{k}. " for k in range(1, len(numbers) + 1)] or [n.strip() for n in numbers] == [f"{k}." for k in range(1, len(numbers) + 1)], numbers
+        closes = [r["closes"] for r in get("/api/apply?order=closes")["rows"]]
+        assert [c for c in closes if c] == sorted(c for c in closes if c) and closes[:len([c for c in closes if c])] == [c for c in closes if c], closes
+        page.select_option("[data-testid=apply-sort]", "default")
+        page.wait_for_function("ids => [...document.querySelectorAll('[data-testid=approved-list] li')].map(l => l.dataset.testid).join() === ids.join()", arg=start_order)
         # one kind of work: only those rows show (Start still goes through all of them); "All" brings the rest back
         kinds = page.locator("[data-testid=apply-kind] option").evaluate_all("os => os.map(o => [o.value, o.textContent])")
         assert kinds[0][0] == "" and kinds[0][1].endswith(f"({len(start_order)})"), kinds
@@ -395,7 +397,9 @@ try:
         page.wait_for_timeout(3500)
         assert page.input_value("[data-testid=apply-n]") == "7"
         page.fill("[data-testid=apply-n]", "")
-        page.click("[data-testid=btn-start-apply]")
+        with page.expect_request(lambda r: r.url.endswith("/api/action") and r.method == "POST") as started:
+            page.click("[data-testid=btn-start-apply]")
+        assert started.value.post_data_json["args"]["order"] == "default", started.value.post_data_json  # Start sends the order shown
         page.wait_for_selector("[data-testid=question]", timeout=90000)
         assert "18 years old" in page.inner_text("[data-testid=q-label]")
         assert "Select" not in page.locator("[data-testid=question] .choices").inner_text()  # placeholder hidden

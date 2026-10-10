@@ -688,13 +688,16 @@ def insights_get():
     return insights.collect(APP.rows)
 
 
-def apply_list():
+def apply_list(order="default"):
+    """The Approved rows in the order a run goes (order: apply.ORDERS, the Sort menu), the week, why Start can't run."""
     from nuauto import apply
+    if order not in apply.ORDERS:
+        order = "default"
     rows = need_rows()
     week = week_info(rows)
     out = []
     data = facts_data()
-    for r in apply.apply_order(sheet.approved(rows)):
+    for r in apply.apply_order(sheet.approved(rows), order):
         d = apply.row_details(r)
         hint = jobs.external_hint(d)  # the posting may want the company's own site too
         out.append(row_view(r, **closing(r), company_site=hint, **job_facts(r, data, d)))
@@ -723,11 +726,14 @@ def act(body):
     kind = body.get("kind")
     args = body.get("args") or {}
     if kind == "apply":
+        from nuauto import apply
         why = apply_list()["why_not"]
         if why:
             raise Refused(why)
-        n, row = args.get("n"), args.get("row")
-        cmd = config.self_cmd("apply", "--ui", "json")
+        n, row, order = args.get("n"), args.get("row"), args.get("order") or "default"
+        if order not in apply.ORDERS:
+            raise Refused("Unknown order (reload the page).")
+        cmd = config.self_cmd("apply", "--ui", "json", "--order", order)
         if row not in (None, ""):  # just this one Approved row (its Apply button)
             if not str(row).isdigit() or int(row) not in {r["row"] for r in apply_list()["rows"]}:
                 raise Refused("That row is not Approved (reload the list).")
@@ -1226,7 +1232,7 @@ GET_ROUTES = {
     "/api/health": lambda q: {"checks": [c.to_dict() for c in APP.checks()], "running": sorted(APP.running_groups)},
     "/api/review": lambda q: review(q.get("mode", "approve") if q.get("mode") in ("approve", "rate") else "approve",
                                     q.get("q", "")[:200], q.get("category", "")[:40]),
-    "/api/apply": lambda q: apply_list(),
+    "/api/apply": lambda q: apply_list(q.get("order", "default")),
     "/api/insights": lambda q: insights_get(),
     "/api/company": lambda q: company(),
     "/api/task": lambda q: {"task": APP.task.view(int(q.get("after", 0) or 0)) if APP.task else None},

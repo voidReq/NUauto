@@ -51,7 +51,7 @@ RANKING
   no longer matches inside "Computer Vision Prototyping".
 - `nuauto approve` shows my Proposed sheet rows first (even below the pool bar, flagged; ones with no stored
   details are listed, not shown; y turns that row Approved, no new row), then pool jobs; closing within 7 days
-  first. `nuauto apply` goes closing within 7 days first, then best match. Past-deadline rows -> Needs Human. The daily run
+  first. `nuauto apply` goes closing within 7 days first, then best score (`--order score|match|closes|pay` instead; the GUI's "Apply in this order" menu). Past-deadline rows -> Needs Human. The daily run
   notifies about pool jobs closing within 3 days that aren't in the sheet.
 
 MY RATINGS (taste model)
