@@ -7,6 +7,7 @@ Apply -> a question -> submitted, Answers, Settings, Quit). No network: everythi
 import http.client
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -95,7 +96,7 @@ try:
     assert ins["pool"]["count"] == 8 and ins["pool"]["pay"]["listed"] == 7 and ins["rows"] == sum(x["count"] for x in ins["statuses"])
     assert ins["applied"]["count"] == {x["label"]: x["count"] for x in ins["statuses"]}["Applied"]
     applying = get("/api/apply")["rows"]
-    assert applying and all({"closes", "closes_text", "past", "soon", "company_site", "match", "pay"} <= set(r) for r in applying), applying
+    assert applying and all({"closes", "closes_text", "past", "soon", "company_site", "match", "pay", "pay_hour", "score", "score_text"} <= set(r) for r in applying), applying
     assert all(isinstance(r["match"], int) for r in applying) and any(r["pay"] for r in applying), applying
     post("/api/action", {"kind": "apply", "args": {"row": 1}}, expect=409)       # the header row: not an Approved row
     post("/api/action", {"kind": "apply", "args": {"row": "2; rm"}}, expect=409)
@@ -354,6 +355,19 @@ try:
         assert page.locator("[data-testid=approved-list] [data-testid=due]").count() == 4  # each row shows its due date
         assert page.locator("[data-testid=approved-list] button[data-testid^=btn-apply-row-]").count() == 4  # one Apply each
         assert "% match" in page.inner_text("[data-testid=approved-list] [data-testid=job-facts] >> nth=0")
+        # sort by match %: only the view changes; each row keeps its number (where Start takes it)
+        start_order = page.locator("[data-testid=approved-list] li").evaluate_all("ls => ls.map(l => l.dataset.testid)")
+        page.select_option("[data-testid=apply-sort]", "match")
+        page.wait_for_function("() => document.querySelector('[data-testid=apply-order-note]').textContent.startsWith('by match')")
+        facts = page.locator("[data-testid=approved-list] [data-testid=job-facts]").all_inner_texts()
+        found = [int(re.search(r"(\d+)% match", t).group(1)) for t in facts]
+        assert found == sorted(found, reverse=True), facts
+        numbers = page.locator("[data-testid=approved-list] li .what > span.muted").all_inner_texts()
+        by_id = page.locator("[data-testid=approved-list] li").evaluate_all("ls => ls.map(l => l.dataset.testid)")
+        assert [start_order[int(n.rstrip(". ")) - 1] for n in numbers] == by_id, (numbers, by_id, start_order)
+        page.select_option("[data-testid=apply-sort]", "start")
+        page.wait_for_function("() => document.querySelector('[data-testid=apply-order-note]').textContent.startsWith('in the order')")
+        assert page.locator("[data-testid=approved-list] li").evaluate_all("ls => ls.map(l => l.dataset.testid)") == start_order
         page.fill("[data-testid=apply-n]", "7")  # what you type in "At most" stays when you click elsewhere / the page redraws
         page.click("h1, #page-title")
         page.wait_for_timeout(3500)
@@ -479,6 +493,12 @@ fetch("{target}", {{method: "POST", credentials: "include", body: {json.dumps(bo
         page.click("[data-testid=add-submit]")
         page.wait_for_selector("[data-testid=sheet-other] li:has-text('Dune Optics')")
         assert page.input_value("[data-testid=add-url]") == ""
+        assert page.locator("[data-testid=sheet-nuworks]").count() == 0  # one tab at a time, like Apply
+        page.click("[data-testid=sheet-tab-nuworks]")
+        page.wait_for_selector("[data-testid=sheet-nuworks]")
+        assert page.locator("[data-testid=sheet-other]").count() == 0
+        page.click("[data-testid=sheet-tab-other]")
+        page.wait_for_selector("[data-testid=sheet-other] li:has-text('Dune Optics')")
         # a NUworks link: the tab switches and company / title come from the job data; then remove it again
         page.click("[data-testid=add-tab-other]")
         page.fill("[data-testid=add-url]", "https://northeastern-csm.symplicity.com/students/app/jobs/detail/900106")
