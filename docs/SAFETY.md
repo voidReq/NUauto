@@ -78,7 +78,8 @@ THE WINDOW (gui.py, gui_static/)
 - Only this machine, only you: 127.0.0.1, random port; a secret per start, swapped for an HttpOnly SameSite=Strict cookie; Host must name this server (DNS rebinding); every POST needs X-NUauto: 1, a JSON body and a matching Origin | gui.Handler (_host_ok, _authed, do_POST) | test_gui (security section)
 - Only the page's own files run (CSP), no framing; static files by name only; /api/file serves only .png/.log/.txt under logs/ (real paths) | gui.Handler._send/_static, gui.log_file | test_gui (path tricks)
 - Secrets never reach the page (token, cookies, webhook, client secret: "set / not set" only) | gui.settings_get, health checks | test_gui (token not in settings)
-- The real window never starts inside a Claude Code shell; agents use --demo | gui.main | test_gui
+- The real window never starts inside a Claude Code shell; agents use --demo (fake) or --view (real data, read-only) | gui.main | test_gui, test_view
+- `--view` can't change or start anything: every POST but Quit refused, no Task, no lock, no sync, answers / logs hidden | gui.VIEW (Handler.do_POST, App.start, run_group) | test_view
 - One window server at a time (a second start opens a window on the first, with a secret that can do nothing else) | gui.running_instance, /api/window | test_gui (second start)
 - Runs you watch get a visible browser (AUTO_HEADLESS cleared for apply, logins, the NUworks side) | gui.VISIBLE | no test
 - Undo of an approval only moves a still-Approved row with the same job back to Proposed; nothing is deleted | sheet.unapprove | test_demo, test_gui

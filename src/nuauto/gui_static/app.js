@@ -136,6 +136,10 @@ async function pollState() {
     S.state = await api.get("/api/state");
   } catch (e) { return; }
   renderShell();
+  // the sheet was read again (a run finished, a row was applied, another window changed it): lists show it at once
+  const sheetChanged = S.rowsAt !== undefined && S.state.rows_at !== S.rowsAt;
+  S.rowsAt = S.state.rows_at;
+  if (sheetChanged && S.screen && S.screen.refresh) S.screen.refresh();
   if (S.screen && S.screen.update) S.screen.update(S.state);
   const t = S.state.task;
   if (t && t.state === "running" && !S.taskTimer) pollTask();
@@ -235,7 +239,9 @@ function renderShell() {
     if (b) b.textContent = v ? String(v) : "";
   }
   fill($("#banner"), st.demo ? el("div", { class: "demo-banner", testid: "demo-banner" },
-    el("b", { text: "Demo mode. " }), "Nothing here is real: a fake sheet, fake NUworks pages, fake Claude. Nothing is sent anywhere.") : "");
+    el("b", { text: "Demo mode. " }), "Nothing here is real: a fake sheet, fake NUworks pages, fake Claude. Nothing is sent anywhere.") :
+    st.view ? el("div", { class: "demo-banner", testid: "view-banner" },
+      el("b", { text: "View only. " }), "This is your real data, read-only: nothing can be changed or started, and saved answers and run screenshots are hidden.") : "");
   fill($("#side-foot"), el("div", { text: `v${st.version}` + (st.mode === "homelab" ? " · homelab" : "") }));
 }
 
@@ -468,7 +474,7 @@ function markRow(kind, t, tab) {  // tab "other": a row of the sheet's Other job
 // ---- Review (approve, or rate only)
 screens.review = async (view) => {
   let mode = sessionStorage.getItem("reviewMode") || "approve";
-  let jobs = [], i = 0, card = null, history = {}, shown = 0, total = 0;
+  let jobs = [], i = 0, card = null, history = {}, shown = 0, total = 0, resumeId = null, listed = 0;
   let q = sessionStorage.getItem("reviewQ") || "", category = sessionStorage.getItem("reviewCat") || "";
   const cards = new Map();  // job id -> promise of its card (the next ones are fetched ahead)
   let queue = Promise.resolve();  // decisions are sent to the server one at a time, behind the screen
@@ -495,8 +501,11 @@ screens.review = async (view) => {
   fill(view, el("div", { class: "row between toolbar" }, seg, el("span", { class: "small muted", id: "review-pos" })),
     el("div", { class: "row toolbar" }, search, cat), body);
 
+  const listMode = () => !!q;  // a text search shows every match as a card; no search = one job at a time
+
   function setFilter(newQ, newCat) {
     if (newQ === q && newCat === category) return;
+    if (!q && newQ && jobs[i]) resumeId = jobs[i].id;  // the job you were on stays undecided; clearing the search comes back to it
     q = newQ; category = newCat;
     sessionStorage.setItem("reviewQ", q);
     sessionStorage.setItem("reviewCat", category);
@@ -520,13 +529,17 @@ screens.review = async (view) => {
   async function load() {
     fill(body, el("p", { class: "empty", text: "Loading the review list…" }));
     const params = new URLSearchParams({ mode, q, category });
-    try { const r = await api.get(`/api/review?${params}`); jobs = r.jobs; total = r.total; i = 0; cards.clear(); drawCategories(r.categories); }
-    catch (e) { fill(body, el("div", { class: "note fail", text: e.message })); return; }
+    try {
+      const r = await api.get(`/api/review?${params}`);
+      jobs = r.jobs; total = r.total; i = 0; listed = 0; cards.clear(); drawCategories(r.categories);
+      if (!q && resumeId) { i = Math.max(0, jobs.findIndex((x) => x.id === resumeId)); resumeId = null; }
+    } catch (e) { fill(body, el("div", { class: "note fail", text: e.message })); return; }
     show();
   }
 
   async function show() {
     const filtered = !!(q || category);
+    if (listMode()) return showList(filtered);
     $("#review-pos").textContent = jobs.length ? `Job ${Math.min(i + 1, jobs.length)} of ${jobs.length}${filtered ? ` (${total} without the search)` : ""} · j/k scroll` : "";
     if (!jobs.length && filtered) {
       fill(body, el("div", { class: "card", testid: "review-nomatch" }, el("h2", { text: "No jobs match" }),
@@ -551,6 +564,56 @@ screens.review = async (view) => {
     jobs.slice(i + 1, i + 3).forEach((n) => getCard(n.id).catch(() => {}));
   }
 
+  // Search results: every match as its own card with its own buttons (the job you were on is left as it was).
+  const PAGE = 8;
+  function showList(filtered) {
+    shown++;
+    $("#review-pos").textContent = jobs.length ? `${jobs.length} ${jobs.length === 1 ? "match" : "matches"} (${total} without the search) · j/k scroll` : "";
+    if (!jobs.length) {
+      fill(body, el("div", { class: "card", testid: "review-nomatch" }, el("h2", { text: "No jobs match" }),
+        el("p", { class: "muted", text: `None of the ${total} jobs to review match this search.` }),
+        el("button", { class: "btn primary", text: "Clear the search", onclick: () => { search.value = ""; setFilter("", ""); } })));
+      return;
+    }
+    const box = el("div", { class: "joblist", testid: "review-list" });
+    const more = el("div", { class: "row center" });
+    fill(body, box, more);
+    const next = () => {
+      jobs.slice(listed, listed + PAGE).forEach((j) => { const slot = el("div", { class: "slot", "data-job": j.id }); box.append(slot); drawItem(j, slot); });
+      listed = Math.min(jobs.length, listed + PAGE);
+      fill(more, listed < jobs.length ? el("button", { class: "btn", testid: "review-more", text: `Show ${Math.min(PAGE, jobs.length - listed)} more (${jobs.length - listed} left)`, onclick: next }) : "");
+    };
+    next();
+  }
+
+  async function drawItem(j, slot) {
+    const mine = history[j.id];
+    if (mine && !mine.reopen) {  // decided here: a one-line result, and a way to change your mind
+      fill(slot, el("div", { class: "card decided", testid: "list-decided" }, el("div", { class: "row between" },
+        el("div", {}, el("b", { text: j.title || "" }), el("span", { class: "muted", text: ` · ${j.company || ""}` })),
+        el("div", { class: "row" }, el("span", { class: "chip ok", text: mine.decision === "approve" ? "approved" : `you said ${mine.decision}` }),
+          el("button", { class: "btn small", text: "Change", onclick: () => { mine.reopen = true; drawItem(j, slot); } })))));
+      return;
+    }
+    fill(slot, el("div", { class: "card" }, el("p", { class: "empty", text: "Loading…" })));
+    let c;
+    try { c = await getCard(j.id); } catch (e) { fill(slot, el("div", { class: "note fail", text: e.message })); return; }
+    const b = (text, decision, cls, testid) => el("button", { class: "btn " + (cls || ""), testid, onclick: () => listDecide(j, decision, slot) }, text);
+    const card = jobCard(c, j, mine, true);
+    card.append(el("div", { class: "row inline-decide" },
+      mode === "approve" ? b("Approve", "approve", "primary", "btn-approve") : b("Would apply", "yes", "primary", "btn-yes"),
+      b(mode === "approve" ? "Not for me" : "Wouldn't", "no", "", "btn-no"),
+      el("a", { class: "btn ghost", href: c.url, target: "_blank", rel: "noopener noreferrer", text: "Open on NUworks" })));
+    fill(slot, card);
+  }
+
+  function listDecide(j, decision, slot) {
+    const entry = history[j.id];
+    if (entry) entry.reopen = false;
+    submit(j, decision, () => drawItem(j, slot));
+    drawItem(j, slot);
+  }
+
   function decideBar(j) {
     const b = (text, key, decision, cls, testid) => el("button", { class: "btn " + (cls || ""), testid,
       onclick: () => decide(decision) }, text, el("kbd", { text: key }));
@@ -562,14 +625,22 @@ screens.review = async (view) => {
   }
 
   // The next job shows at once; the sheet / ratings write happens behind it (one at a time, in order).
-  // If it fails you are taken back to that job with the error.
+  // If it fails you are taken back to that job with the error (onfail).
   function decide(decision) {
     const j = jobs[i];
     if (!j) return;
     if (decision === "skip") { i++; return show(); }
     if (decision === "back") { i = Math.max(0, i - 1); return show(); }
-    const before = history[j.id], index = i, oldRating = j.rating;
-    if (before && before.decision === "approve" && decision === "approve") { i++; return show(); }  // already in the sheet
+    const index = i;
+    submit(j, decision, () => { i = index; show(); });
+    i++;
+    show();
+  }
+
+  // Sends one decision for job j. Returns false when nothing needed sending (already approved and approved again).
+  function submit(j, decision, onfail) {
+    const before = history[j.id], oldRating = j.rating;
+    if (before && before.decision === "approve" && decision === "approve") return false;  // already in the sheet
     const entry = { decision, row: null, previous: before ? before.previous : null };
     history[j.id] = entry;
     j.rating = decision === "no" ? 0 : 1;
@@ -587,8 +658,7 @@ screens.review = async (view) => {
       entry.failed = true;
       if (before && !undone) history[j.id] = before; else delete history[j.id];
       j.rating = oldRating;
-      i = index;
-      show();
+      onfail();
       fail(e);
     });
     if (decision === "approve") {
@@ -604,8 +674,7 @@ screens.review = async (view) => {
         } catch (e) { fail(e); }
       } });
     }
-    i++;
-    show();
+    return true;
   }
 
   // vim-style scrolling like the CLI viewer: j/k line, space/b page, g/G top/bottom. Held keys scroll without easing.
@@ -630,6 +699,7 @@ screens.review = async (view) => {
     const k = e.key.toLowerCase();
     const scroll = scrollKey(e);
     if (scroll) { scroll(); e.preventDefault(); return; }
+    if (listMode()) return;  // in a list the buttons decide: y / n would not say which card
     if (k === "y") decide(mode === "approve" ? "approve" : "yes");
     else if (k === "n") decide("no");
     else if (k === "s") decide("skip");
@@ -643,7 +713,7 @@ screens.review = async (view) => {
   return { leave: () => { document.removeEventListener("keydown", keys); queue.then(() => api.post("/api/review/done", {})).catch(() => {}); } };
 };
 
-function jobCard(c, j, mine) {
+function jobCard(c, j, mine, compact) {  // compact: the posting is cut short, with a button for the rest
   const margin = c.match - c.threshold;
   const facts = [
     ["Match", el("span", {}, el("span", { class: "match " + (margin >= 15 ? "good" : "ok"), text: `${c.match}%` }),
@@ -676,45 +746,70 @@ function jobCard(c, j, mine) {
     el("div", { class: "meta", text: `${c.company} · ${c.location || "location not listed"}` }),
     el("dl", { class: "facts" }, ...facts.flatMap(([k, v]) => [el("dt", { text: k }), el("dd", {}, v)])),
     c.why ? el("div", { class: "why" }, el("b", { text: "Why: " }), c.why) : null,
+    compact ? clamped(el("div", { class: "desc" }, desc(c.description), c.qualifications.length ? [el("h3", { text: "Qualifications" }), desc(c.qualifications)] : null)) :
     el("div", { class: "desc" }, desc(c.description), c.qualifications.length ? [el("h3", { text: "Qualifications" }), desc(c.qualifications)] : null));
 }
 
-// ---- Apply
+function clamped(node) {  // a long posting cut to a few lines until you ask for all of it
+  node.classList.add("clamp");
+  const btn = el("button", { class: "btn small ghost", testid: "job-expand", text: "Show the whole posting", "aria-expanded": "false", onclick: () => {
+    const open = node.classList.toggle("clamp") === false;
+    btn.textContent = open ? "Show less" : "Show the whole posting";
+    btn.setAttribute("aria-expanded", String(open));
+  } });
+  return el("div", {}, node, btn);
+}
+
+// ---- Apply: three tabs. NUworks (the Approved rows Start works through), Company sites (the assistant, sites still
+// owed, the NUworks side to send again), and rows only you can finish on NUworks.
 screens.apply = async (view) => {
   let data = null;
   let sites = null;
-  const head = el("div"), runBox = el("div"), list = el("div"), company = el("div", { id: "company-sites" }), past = el("div");
-  fill(view, head, runBox, list, company, past);
+  const TABS = [["nuworks", "NUworks"], ["company", "Company sites"], ["manual", "By hand on NUworks"]];
+  let tab = sessionStorage.getItem("applyTab");
+  if (!TABS.some(([k]) => k === tab)) tab = "nuworks";
+  if (S.focus === "company") { S.focus = null; tab = "company"; }  // Today's buttons and old #/company links
+  let drawnRunning = null;
+  // The "At most" box is made once and moved into each redraw, so what you typed (and the focus) is never lost.
+  const atMost = el("input", { type: "number", min: "1", id: "apply-n", testid: "apply-n", "aria-label": "At most this many", placeholder: "all" });
+  const head = el("div"), runBox = el("div"), tabs = el("div", { class: "tabs", role: "tablist", "aria-label": "Apply" }),
+    pane = el("div", { role: "tabpanel", testid: "apply-pane" });
+  fill(view, head, runBox, tabs, pane);
 
   async function reload() {
     const [a, c] = await Promise.allSettled([api.get("/api/apply"), api.get("/api/company")]);
     sites = c.status === "fulfilled" ? c.value : { error: c.reason.message };
-    if (a.status === "rejected") { fill(list, el("div", { class: "note fail", text: a.reason.message })); drawSites(); return; }
+    if (a.status === "rejected") { fill(pane, el("div", { class: "note fail", text: a.reason.message })); drawTabs(); return; }
     data = a.value;
     draw();
   }
 
-  function drawSites() {
-    if (!sites) return;
-    fill(company, sites.error ? el("div", { class: "note fail", text: sites.error }) : companyCards(sites));
-  }
-
   function running() { return S.task && S.task.kind === "apply" && S.task.state === "running"; }
 
-  function draw() {
-    if (!data) return;
-    const w = data.week;
-    fill(head, el("div", { class: "card" },
-      el("div", { class: "row between" }, el("div", {},
-        el("h2", { text: w.room ? `You can apply to ${plural(w.room, "more job")} this week` : "Weekly limit reached" }),
-        el("p", { class: "small muted" }, `${w.applied} of ${w.max} ${w.label} · ${w.total} of ${w.max_total} in total` + (w.next ? ` · new week ${w.next}` : "") + " · ", el("a", { href: "#/settings", text: "change the limit" }))),
-      running() ? null : el("div", { class: "row" },
-        el("label", { class: "small muted" }, "At most ", el("input", { type: "number", min: "1", id: "apply-n", testid: "apply-n", style: null, "aria-label": "At most this many", placeholder: "all" })),
-        el("button", { class: "btn primary big", testid: "btn-start-apply", disabled: !!data.why_not || !!(S.task && S.task.state === "running"),
-          text: "Start applying", onclick: startApply }))),
-      data.why_not ? el("div", { class: "note warn", testid: "apply-why", text: data.why_not }) :
-        el("p", { class: "small muted", text: "Approved in the sheet is your go-ahead. Each job is filled and submitted in a visible Firefox window, one at a time, 30–60 s apart. Every form is screenshotted before Submit. Questions without a saved answer come up here. A job that sends you to the company's own site, or needs something only you can give (a cover letter, a transcript), stops (nothing submitted) and shows up below, under Company sites. Stop works like Ctrl+C." })));
-    fill(list, el("div", { class: "card" }, el("div", { class: "row between" }, el("h2", { text: `Approved (${data.rows.length})` }),
+  function counts() {
+    const ok = sites && !sites.error;
+    return { nuworks: data ? data.rows.length : 0, company: ok ? sites.agent.length + sites.site.length + sites.retry.length : 0, manual: ok ? sites.other.length : 0 };
+  }
+
+  function drawTabs() {
+    const n = counts();
+    fill(tabs, ...TABS.map(([k, label]) => el("button", { role: "tab", testid: `tab-${k}`, "aria-selected": String(tab === k), "aria-controls": "apply-pane",
+      onclick: () => { tab = k; sessionStorage.setItem("applyTab", k); drawTabs(); drawPane(); } },
+      label, el("span", { class: "count", text: String(n[k]) }))));
+  }
+
+  function drawPane() {
+    if (!data && tab === "nuworks") return;
+    if (tab === "nuworks") return fill(pane, nuworksCard(), pastCard());
+    if (!sites) return fill(pane, "");
+    if (sites.error) return fill(pane, el("div", { class: "note fail", text: sites.error }));
+    const cards = tab === "company" ? companyCards(sites) : manualCards(sites);
+    fill(pane, ...(cards.some(Boolean) ? cards : [el("div", { class: "card" }, el("p", { class: "empty",
+      text: tab === "company" ? "No company-site applications waiting." : "Nothing that only you can finish on NUworks." }))]));
+  }
+
+  function nuworksCard() {
+    return el("div", { class: "card" }, el("div", { class: "row between" }, el("h2", { text: `Approved (${data.rows.length})` }),
         data.rows.length > 1 ? el("span", { class: "small muted", text: "in the order Start goes: closing within a week first, then best score" }) : null),
       data.rows.length ? el("ul", { class: "list", testid: "approved-list" }, ...data.rows.map((r, k) => el("li", { testid: `approved-${r.row}` },
         el("div", { class: "what" }, el("span", { class: "muted", text: `${k + 1}. ` }), el("b", { text: r.company }), " · ", r.title,
@@ -724,12 +819,32 @@ screens.apply = async (view) => {
           dueChip(r), linkOut(r.url, "Open"),
           el("button", { class: "btn small", testid: `btn-apply-row-${r.row}`, disabled: !!data.why_not || !!(S.task && S.task.state === "running"),
             text: "Apply", title: "Apply to just this job now", onclick: () => applyRow(r) }))))) :
-        el("p", { class: "empty", text: "Nothing approved yet. Approve jobs in Review." })));
-    fill(past, data.history.length ? el("div", { class: "card" }, el("div", { class: "row between" }, el("h2", { text: "Recent runs here" }),
+        el("p", { class: "empty", text: "Nothing approved yet. Approve jobs in Review." }));
+  }
+
+  function pastCard() {
+    return data.history.length ? el("div", { class: "card" }, el("div", { class: "row between" }, el("h2", { text: "Recent runs here" }),
       el("a", { href: "#/logs", class: "btn small ghost", text: "All logs and screenshots" })),
       el("ul", { class: "list" }, ...data.history.map((t) => el("li", {}, el("div", { class: "what" }, el("b", { text: t.label }), " · ",
-        el("span", { class: "muted", text: `${t.state} · ${ago(t.started)}` })))))) : "");
-    drawSites();
+        el("span", { class: "muted", text: `${t.state} · ${ago(t.started)}` })))))) : "";
+  }
+
+  function draw() {
+    if (!data) return;
+    drawnRunning = running();
+    const w = data.week;
+    fill(head, el("div", { class: "card" },
+      el("div", { class: "row between" }, el("div", {},
+        el("h2", { text: w.room ? `You can apply to ${plural(w.room, "more job")} this week` : "Weekly limit reached" }),
+        el("p", { class: "small muted" }, `${w.applied} of ${w.max} ${w.label} · ${w.total} of ${w.max_total} in total` + (w.next ? ` · new week ${w.next}` : "") + " · ", el("a", { href: "#/settings", text: "change the limit" }))),
+      drawnRunning ? null : el("div", { class: "row" },
+        el("label", { class: "small muted" }, "At most ", atMost),
+        el("button", { class: "btn primary big", testid: "btn-start-apply", disabled: !!data.why_not || !!(S.task && S.task.state === "running"),
+          text: "Start applying", onclick: startApply }))),
+      data.why_not ? el("div", { class: "note warn", testid: "apply-why", text: data.why_not }) :
+        el("p", { class: "small muted", text: "Approved in the sheet is your go-ahead. Each job is filled and submitted in a visible Firefox window, one at a time, 30–60 s apart. Every form is screenshotted before Submit. Questions without a saved answer come up here. A job that sends you to the company's own site, or needs something only you can give (a cover letter, a transcript), stops (nothing submitted) and shows up under the Company sites and By hand tabs. Stop works like Ctrl+C." })));
+    drawTabs();
+    drawPane();
     drawRun();
   }
 
@@ -740,7 +855,7 @@ screens.apply = async (view) => {
     const now = Date.now() / 1000;
     const waiting = live && t.wait_until && t.wait_until > now;
     fill(runBox, el("div", { class: "card", testid: "apply-run" },
-      el("div", { class: "row between" }, el("div", { class: "row" }, live ? el("span", { class: "spinner" }) : null,
+      el("div", { class: "row between runtop" }, el("div", { class: "row" }, live ? el("span", { class: "spinner" }) : null,
         el("h2", { text: live ? (waiting ? `Next job in ${Math.ceil(t.wait_until - now)} s` : "Applying…") : `Last run: ${t.state}` })),
         live ? el("div", { class: "row" }, el("button", { class: "btn danger", testid: "btn-stop", text: "Stop", onclick: () => stopTask(t) }),
           el("button", { class: "btn ghost small", text: "Force stop", title: "Only if Stop does nothing", onclick: () =>
@@ -763,18 +878,20 @@ screens.apply = async (view) => {
   }
 
   async function startApply() {
-    const n = ($("#apply-n") || {}).value;
+    const n = atMost.value;
     const r = await action("apply", n ? { n } : {});
     if (r) draw();
   }
 
   await reload();
-  if (S.focus === "company") { S.focus = null; company.scrollIntoView({ block: "start" }); }
-  return { task: () => { drawRun(); if (S.task && S.task.state !== "running") reload(); }, update: () => { if (!running()) draw(); }, reload };
+  if (S.focus === "company") S.focus = null;
+  // refresh: the sheet changed (a run finished, a row was applied, something was done elsewhere): read the lists again
+  return { task: () => { drawRun(); if (S.task && S.task.state !== "running") reload(); },
+    update: () => { if (running() !== drawnRunning) draw(); }, refresh: reload, reload };
 };
 
-// ---- Company sites (a part of the Apply screen): Needs Human rows for the assistant, company sites still owed,
-// the NUworks side to send again, and rows only you can finish on NUworks. Only the sections that have rows show.
+// ---- Company sites (a tab of the Apply screen): Needs Human rows for the assistant, company sites still owed, and
+// the NUworks side to send again. Only the sections that have rows show.
 function companyCards(d) {
   return [
     d.agent.length ? el("div", { class: "card", testid: "company-agent" }, el("h2", { text: "Company sites: ready for the assistant" }),
@@ -794,10 +911,14 @@ function companyCards(d) {
         el("div", { class: "small muted", text: r.notes.slice(-160) })), el("div", { class: "row" }, linkOut(r.url, "Open job"),
         el("button", { class: "btn small primary", text: "Submit on NUworks too", testid: `retry-btn-${r.row}`,
           onclick: () => confirmBox("Submit on NUworks too?", `${r.company} · ${r.title} is Applied on the company site. This submits the same job on NUworks.`,
-            "Submit on NUworks", () => action("nuworks_side", { row: r.row })) })))))) : null,
-    d.other.length ? el("div", { class: "card" }, el("h2", { text: "Needs you on NUworks" }),
-      el("ul", { class: "list" }, ...d.other.map((r) => el("li", {}, el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title,
-        el("div", { class: "small muted", text: r.notes || r.why })), el("div", { class: "row" }, dueChip(r), linkOut(r.url, "Open job")))))) : null];
+            "Submit on NUworks", () => action("nuworks_side", { row: r.row })) }))))))  : null];
+}
+
+// ---- By hand on NUworks (a tab of the Apply screen): rows only you can finish there (a cover letter, a transcript...)
+function manualCards(d) {
+  return [d.other.length ? el("div", { class: "card", testid: "manual-nuworks" }, el("h2", { text: "Needs you on NUworks" }),
+    el("ul", { class: "list" }, ...d.other.map((r) => el("li", {}, el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title,
+      el("div", { class: "small muted", text: r.notes || r.why })), el("div", { class: "row" }, dueChip(r), linkOut(r.url, "Open job")))))) : null];
 }
 
 // ---- Other jobs: the sheet's Other jobs tab (jobs that are not on NUworks; the same assistant, nothing sent to NUworks)
@@ -830,7 +951,7 @@ screens.other = async (view) => {
           el("div", { class: "row" }, el("span", { class: "chip", text: r.status || "no status" }), linkOut(r.url, "Open job")))))) : null);
   }
   await reload();
-  return { reload };
+  return { reload, refresh: reload };
 };
 
 // ---- Sheet: add a job to either tab by hand; move rows between the tabs; remove them

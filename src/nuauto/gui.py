@@ -3,6 +3,8 @@
   nuauto gui                      open it (starting it again just opens another window on the running one)
   nuauto gui --demo [--demo-state a,b]
                                   everything fake (demo.py) in a temp folder: for trying it out, and for agents
+  nuauto gui --view               READ-ONLY on your real data, for agents (and a quick look): no window, no lock file,
+                                  the server refuses every action (see VIEW), answers and run screenshots are hidden
   options: --port N (default: any free port), --no-open (print the URL instead of opening a window),
            --browser (a normal browser tab instead of an app window),
            --screenshots DIR (demo only: every screen, light and dark, wide and narrow, saved as PNGs; then quits)
@@ -14,7 +16,8 @@ How it is safe to run:
 - Long or browser work runs as the same `nuauto ...` commands, one at a time, in child processes (Task). Their
   questions come over answers.JsonIO and show as dialogs; Stop sends SIGINT to the child (the KeyboardInterrupt
   path Ctrl+C takes). If this process dies, the child's stdin closes and it stops the same way.
-- Real mode refuses to start inside a Claude Code shell (CLAUDECODE): agents use --demo.
+- Real mode refuses to start inside a Claude Code shell (CLAUDECODE): agents use --demo (fake data) or --view
+  (real data, read-only).
 """
 import hmac
 import json
@@ -57,7 +60,7 @@ class Task:
     """One `nuauto ...` child process. Plain output lines are its log; answers.JsonIO lines are questions and
     progress events. Reads stdout in a thread; answer() and stop() are called from request threads."""
 
-    def __init__(self, kind, label, cmd, browser, background=False, env=None, on_done=None):
+    def __init__(self, kind, label, cmd, browser, background=False, env=None, on_done=None, on_row=None):
         self.id = secrets.token_hex(4)
         self.kind, self.label, self.cmd, self.browser, self.background = kind, label, cmd, browser, background
         self.log, self.events, self.question, self.dropped = [], [], None, 0
@@ -65,7 +68,7 @@ class Task:
         self.done_rows = []
         self.state, self.code, self.stopping = "running", None, False
         self.started, self.ended = now(), None
-        self.on_done = on_done
+        self.on_done, self.on_row = on_done, on_row
         env = {**os.environ, **(env or {}), "PYTHONUNBUFFERED": "1"}
         self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                      text=True, bufsize=1, env=env, cwd=config.STATE_DIR, start_new_session=True)
@@ -107,6 +110,8 @@ class Task:
             self.row, self.screenshot, self.wait_until = msg, None, None
         elif kind == "row_done":
             self.done_rows.append(msg)
+            if self.on_row:
+                self.on_row()
         elif kind == "screenshot":
             self.screenshot = self.last_shot = msg.get("path")
         elif kind == "wait":
@@ -172,7 +177,7 @@ class App:
         self.next_run = {}         # group -> time
         self.notified = {}         # check id -> (status, time) of the last desktop notification
         self.first_round_done = False
-        self.rows, self.rows_at, self.rows_error = None, 0, None
+        self.rows, self.rows_at, self.rows_error, self.rows_try_at = None, 0, None, 0
         self.queue = {}            # job id -> pool entry, from the last review queue
         self.last_request = now()
         self.stopping = False
@@ -181,6 +186,8 @@ class App:
     # ---- tasks
 
     def start(self, kind, label, cmd, browser=True, background=False, env=None, on_done=None):
+        if VIEW:  # no child process of any kind: nothing runs, nothing is sent
+            raise Refused(VIEW_MESSAGE)
         with self.lock:
             current = self.task if self.task and self.task.state == "running" else None
             if current and not background:
@@ -201,7 +208,8 @@ class App:
             if holder:
                 raise Busy(f"The NUworks browser is in use by another nuauto run ({holder.get('what')}, "
                            f"pid {holder.get('pid')}). Try again when it is done.")
-            task = Task(kind, label, cmd, browser, background, env, on_done=self._done(on_done))
+            task = Task(kind, label, cmd, browser, background, env, on_done=self._done(on_done),
+                        on_row=None if background else self.refresh_soon)
             if background:
                 self.background = task
             else:
@@ -237,6 +245,17 @@ class App:
         if force or self.rows is None or now() - self.rows_at >= 60:
             self.run_group("sheet")
 
+    def refresh_soon(self, max_age=0):
+        """Read the sheet again in the background when the rows are older than max_age seconds, so the lists and counts
+        follow changes made elsewhere (a row finished in a run, an assistant in a terminal, the sheet itself). A failed
+        read is not tried again for 30 s."""
+        if self.rows is None or "sheet" in self.running_groups:
+            return
+        if now() - max(self.rows_at, self.rows_try_at) < max(max_age, 1):
+            return
+        self.rows_try_at = now()
+        threading.Thread(target=self.refresh_rows, kwargs={"force": True}, daemon=True).start()
+
     # ---- health
 
     GROUPS = {  # group -> (check names, seconds between runs, first run after)
@@ -252,6 +271,8 @@ class App:
     }
 
     def run_group(self, group):
+        if VIEW and group not in VIEW_GROUPS:
+            return
         if group == "nuworks":
             return self._nuworks_check()
         with self.lock:
@@ -341,7 +362,7 @@ class App:
 
     def notify_changes(self):
         """A desktop notification when a check turns bad (not for what was already bad at start)."""
-        if not self.first_round_done:
+        if not self.first_round_done or VIEW:
             return
         for c in self.checks():
             last = self.notified.get(c.id)
@@ -355,10 +376,11 @@ class App:
 
     def monitor(self):
         start = now()
-        for group, (_, _, delay) in self.GROUPS.items():
-            self.next_run[group] = start + delay
+        groups = [g for g in self.GROUPS if not VIEW or g in VIEW_GROUPS]
+        for group in groups:
+            self.next_run[group] = start + self.GROUPS[group][2]
         while not self.stopping:
-            for group in list(self.GROUPS):
+            for group in groups:
                 if now() >= self.next_run.get(group, 0) and group not in self.running_groups:
                     self.next_run[group] = now() + self.GROUPS[group][1]
                     threading.Thread(target=self.run_group, args=(group,), daemon=True).start()
@@ -374,7 +396,7 @@ class App:
 
     def run_now(self, groups):
         for g in groups:
-            if g in self.GROUPS:
+            if g in self.GROUPS and (not VIEW or g in VIEW_GROUPS):
                 threading.Thread(target=self.run_group, args=(g,), daemon=True).start()
 
     def quit(self):
@@ -388,9 +410,12 @@ class App:
                     t.proc.wait(timeout=20)
                 except subprocess.TimeoutExpired:
                     t.stop(force=True)
-        remove_lock()
+        if not VIEW:
+            remove_lock()
         threading.Thread(target=SERVER.shutdown, daemon=True).start()
         try:
+            if VIEW:
+                raise RuntimeError  # no windows of its own: never close the real GUI's
             window.close_all()  # Quit from the page: NUauto's own windows close too
         except Exception:
             pass
@@ -493,9 +518,9 @@ def state():
     sheet_id = cfg.get("sheet_id") or ""
     task = APP.task
     return {
-        "demo": config.DEMO, "version": __import__("nuauto").__version__,
+        "demo": config.DEMO, "view": VIEW, "version": __import__("nuauto").__version__,
         "mode": "homelab" if config.HAS_SERVER else "local", "setup_needed": setup_needed(),
-        "rows_loaded": rows is not None, "rows_error": APP.rows_error, "week": week_info(rows),
+        "rows_loaded": rows is not None, "rows_at": APP.rows_at, "rows_error": APP.rows_error, "week": week_info(rows),
         "counts": {"review": len(todo), "approved": len(approved), "company": len(agent) + len(retry), "site": len(site),
                    "apply": len(approved) + len(agent) + len(retry),  # the Apply menu item: its rows + Company sites
                    "needs_human": len(agent) + len(other)},
@@ -913,6 +938,8 @@ def answers_get(bank="nuworks"):
     entries = answers.load(path)
     if bank != "other":
         entries = [{**e, "nuworks_only": answers.nuworks_only(e)} for e in entries]
+    if VIEW:  # your saved answers are personal (address, phone...): the table shows, the values don't
+        entries = [{**e, "answer": "(hidden in view-only mode)" if e.get("answer") else "", "aliases": []} for e in entries]
     try:
         version = os.path.getmtime(path)
     except OSError:
@@ -1160,8 +1187,17 @@ class NotFound(Exception):
     pass
 
 
+# `nuauto gui --view`: the real sheet and job data, read-only. Nothing can be changed or started: every POST except
+# these is refused by the server (so a button, or a route added later, can't act), the monitor runs only the
+# read-only checks, there is no window, no lock file, no homelab sync, no desktop notification.
+VIEW = False
+VIEW_POSTS = {"/api/quit"}
+VIEW_GROUPS = ("quick", "sheet")
+VIEW_MESSAGE = "View-only mode: nothing can be changed or started here."
+
+
 GET_ROUTES = {
-    "/api/state": lambda q: state(),
+    "/api/state": lambda q: (APP.refresh_soon(30), state())[1],
     "/api/health": lambda q: {"checks": [c.to_dict() for c in APP.checks()], "running": sorted(APP.running_groups)},
     "/api/review": lambda q: review(q.get("mode", "approve") if q.get("mode") in ("approve", "rate") else "approve",
                                     q.get("q", "")[:200], q.get("category", "")[:40]),
@@ -1254,6 +1290,8 @@ class Handler(BaseHTTPRequestHandler):
         if u.path.startswith("/static/"):
             return self._static(u.path[len("/static/"):])
         if u.path == "/api/file":
+            if VIEW:  # screenshots of filled forms and run logs hold personal details
+                return self._error(403, "Run logs and screenshots are hidden in view-only mode.")
             try:
                 path = log_file(q.get("path"))
             except NotFound:
@@ -1291,6 +1329,8 @@ class Handler(BaseHTTPRequestHandler):
         if not self._host_ok():
             return self._error(403, "wrong host")
         u = urlparse(self.path)
+        if VIEW and u.path not in VIEW_POSTS:
+            return self._error(403, VIEW_MESSAGE)
         if u.path == "/api/window":  # a second `nuauto gui` asks this one to open a window
             if hmac.compare_digest(self.headers.get("X-NUauto-Open", "").encode(), APP.open_secret.encode()):
                 window.another(start_url(), APP.window_kind, APP.quit)
@@ -1435,28 +1475,32 @@ def start_demo(argv):
 
 
 def main(argv):
+    global VIEW
     argv = list(argv)
     if "--demo" in argv and not config.DEMO:
         return start_demo(argv)
     if config.IS_SERVER:
         sys.exit("nuauto gui runs on your laptop, not the homelab.")
-    if os.environ.get("CLAUDECODE") and not config.DEMO:
+    VIEW = "--view" in argv
+    if VIEW and config.DEMO:
+        sys.exit("--view is for your real data; --demo is already fake. Use one of them.")
+    if os.environ.get("CLAUDECODE") and not config.DEMO and not VIEW:
         sys.exit("The real NUauto window never starts inside a Claude Code session (it can submit applications). "
-                 "Start it yourself from your apps menu or a normal terminal; agents use `nuauto gui --demo`.")
+                 "Agents use `nuauto gui --demo` (fake data) or `nuauto gui --view` (your real data, read-only).")
     port = 0
     if "--port" in argv:
         i = argv.index("--port")
         if i + 1 >= len(argv) or not argv[i + 1].isdigit():
             sys.exit(__doc__)
         port = int(argv[i + 1])
-    no_open = "--no-open" in argv
+    no_open = "--no-open" in argv or VIEW  # a view has no window of its own: it prints its URL
     shots = None
     if "--screenshots" in argv:
         i = argv.index("--screenshots")
         if not config.DEMO or i + 1 >= len(argv):
             sys.exit("--screenshots DIR works only with --demo.")
         shots, no_open = os.path.abspath(argv[i + 1]), True
-    lock = running_instance()
+    lock = None if VIEW else running_instance()  # a view never touches the running GUI's lock
     if lock and not port:
         if no_open:
             sys.exit(f"NUauto is already running (pid {lock['pid']}). Use its window, or quit it first.")
@@ -1467,12 +1511,13 @@ def main(argv):
     SERVER = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     SERVER.daemon_threads = True
     APP.port = SERVER.server_address[1]
-    write_lock()
+    if not VIEW:
+        write_lock()
     threading.Thread(target=APP.monitor, daemon=True).start()
-    if config.HAS_SERVER:
+    if config.HAS_SERVER and not VIEW:  # a view copies and changes no files
         threading.Thread(target=pull_loop, daemon=True).start()
     url = start_url()
-    print(json.dumps({"url": url, "port": APP.port, "demo": config.DEMO, "state_dir": config.STATE_DIR}), flush=True)
+    print(json.dumps({"url": url, "port": APP.port, "demo": config.DEMO, "view": VIEW, "state_dir": config.STATE_DIR}), flush=True)
     served = threading.Thread(target=SERVER.serve_forever, kwargs={"poll_interval": 0.5}, daemon=True)
     served.start()  # the main thread is for the window (macOS needs it there)
     if shots:
@@ -1501,7 +1546,8 @@ def main(argv):
         APP.quit()
         served.join(timeout=30)
     finally:
-        remove_lock()
+        if not VIEW:
+            remove_lock()
 
 
 if __name__ == "__main__":

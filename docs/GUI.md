@@ -54,18 +54,25 @@ SCREENS
                  Rate only mode: yes/no ratings for the taste model, nothing in the sheet.
                  Search box (words or "quoted phrases", all must appear, any case, in title, company, place, kind of
                  work, tag, skills, description, qualifications) and a kind-of-work menu narrow the list; the order
-                 inside stays the same. Esc clears the search.
-  Apply          Approved rows in apply order (numbered 1, 2, 3: the order Start goes), each with when it closes
+                 inside stays the same. Esc clears the search. A text search shows every match as its own card (8 at a
+                 time, "Show more"; the posting cut short, "Show the whole posting"), each with its own Approve / Not for
+                 me buttons (y / n keys are off there; a decided card turns into one line with Change). The job you were on
+                 is left undecided; clearing the search comes back to it. A kind-of-work choice alone stays one job at a time.
+  Apply          the weekly count and Start, the live run (below), then three tabs, each with its row count: NUworks, Company
+                 sites, By hand on NUworks (the tab you picked is remembered; #/company and Today's buttons open Company
+                 sites). NUworks: Approved rows in apply order (numbered 1, 2, 3: the order Start goes), each with when it closes
                  (due chip: amber within a week, red once past), its match % and pay, a "may also want the company's
                  site" chip when the posting says so, and its own Apply button (after a confirm: just that row, `nuauto apply --row N`); Start (optionally
                  "at most N"), the live run: current row, latest screenshot, log, next-job countdown, Stop / Force
                  stop; question dialogs; recent runs. Start tries every row on its own; one that sends you to a
                  company site or needs a cover letter / transcript becomes Needs Human (nothing submitted) and shows
-                 up below, under Company sites (since 2026-10-09 a part of Apply; #/company opens it there; the menu
-                 count is Approved + the assistant's rows + retries; each part shows only when it has rows):
-                 Needs Human rows for the assistant (opens `nuauto assist <row>` in a terminal window, or shows the
-                 command), "I applied myself", company sites still owed (Mark done), the NUworks side to retry,
-                 rows only you can finish on NUworks
+                 in the other tabs (since 2026-10-09 Company sites is a part of Apply; the menu count is Approved + the
+                 assistant's rows + retries). Company sites tab: Needs Human rows for the assistant (opens
+                 `nuauto assist <row>` in a terminal window, or shows the command), "I applied myself", company sites still
+                 owed (Mark done), the NUworks side to retry. By hand on NUworks tab: rows only you can finish there.
+                 The lists follow the sheet by themselves: /api/state carries rows_at (when the sheet was last read), the
+                 server reads it again after every finished row and run and when it is 30 s old, and the open screen
+                 reloads its lists when rows_at changes (no closing and reopening). "At most" keeps what you typed.
   Other jobs     the sheet's Other jobs tab (jobs not on NUworks; read fresh, no nav count): Add a job (opens Sheet on
                  the Other jobs tab), Approved rows with Start assistant (opens `nuauto assist other <row>`), Open
                  site, I applied myself; Applied rows; the rest. No caps there
@@ -128,7 +135,7 @@ SAFETY MODEL (details and tests: docs/SAFETY.md)
 - The page never receives a secret (token, cookies, webhook, client secret): only "set / not set".
 - Runs: `nuauto apply --ui json` / `nuauto assist nuworks <row> --ui json` work only as a child of the running GUI
   (its pid in local/gui.lock) and never inside a Claude Code shell (CLAUDECODE). The real GUI refuses to start
-  there too: agents use --demo. Apply, logins and the NUworks side always get a visible browser (AUTO_HEADLESS
+  there too: agents use --demo (fake) or --view (real data, read-only, below). Apply, logins and the NUworks side always get a visible browser (AUTO_HEADLESS
   cleared). Approved in the sheet stays the only go-ahead; caps unchanged.
 - Questions (answers.JsonIO): one JSON line per question on the child's stdout ("::nuauto:: " + JSON), the
   answer as one JSON line on its stdin. The same rules as typing: an option must be one of the choices, blank
@@ -154,7 +161,18 @@ DEMO MODE (demo.py) AND TESTING WITH AGENTS
   missing; approve, apply with a question, the fake sheet), in its own temp folder; exit 0 = this install works.
 - Demo runs nobody watches use a hidden browser: with NUAUTO_DEMO_HEADLESS=1 (tests and the self-test set it) or no
   screen (CI, containers). Real runs always open a visible browser.
-- Agents: only ever --demo. Never start the real GUI, never click Start in a real one.
+- Agents: only ever --demo or --view. Never start the real GUI (no --view), never click Start in a real one.
+
+VIEW MODE (`nuauto gui --view`; gui.VIEW; added 2026-10-09 so an agent can look at your real screens)
+- Your real sheet and job data, read-only. Allowed inside a Claude Code shell (the real GUI is not). Prints its URL like
+  --no-open (no window); open it in Playwright. Quit: POST /api/quit or Ctrl+C.
+- Enforced by the server, not the page: every POST except /api/quit is refused (403 "View-only mode"), so no button
+  and no route added later can act; Task start is refused too (no child process of any kind); only the quick and
+  sheet checks run (no hidden NUworks browser, no Claude call, no Discord, no ssh, no desktop notification); no
+  lock file (a running GUI's is never touched or asked for a window); no homelab pull. Banner: "View only".
+- Hidden: saved answer values (/api/answers shows the questions only) and run logs / screenshots (/api/file 403).
+  Job data, the sheet rows, the settings (host names, sheet id) and past-run names are shown.
+- Test: tests/test_view.py.
 - Tests (in `nuauto test`): test_gui.py (security rules, API, single instance, the main flows in headless
   Firefox), test_setup.py (each wizard step's checks, then the wizard end to end), test_demo.py (the real apply.py
   on the fake pages: Ctrl+C and GUI-gone stops, cap refusal, NUworks re-login states), test_health.py.

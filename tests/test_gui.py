@@ -309,6 +309,19 @@ try:
         page.wait_for_selector("[data-testid=review-nomatch]")
         page.click("[data-testid=review-nomatch] button")
         page.wait_for_selector("[data-testid=job-card]")
+        # a search with hits shows every match as its own card (buttons on each); clearing it comes back to the job you were on
+        first_title = page.inner_text("[data-testid=job-title]")
+        first_company = page.inner_text("[data-testid=job-card] .meta").split(" · ")[0]
+        hits = get("/api/review?mode=approve&q=" + urllib.parse.quote(f'"{first_company}"'))["jobs"]
+        page.fill("[data-testid=review-search]", f'"{first_company}"')
+        page.wait_for_selector("[data-testid=review-list] [data-testid=job-card]")
+        assert page.locator("[data-testid=review-list] .slot").count() == min(len(hits), 8)
+        page.wait_for_function("n => document.querySelectorAll('[data-testid=review-list] [data-testid=btn-approve]').length === n", arg=min(len(hits), 8))
+        assert page.locator("[data-testid=review-list] [data-testid=job-expand]").count() == min(len(hits), 8)  # long postings are cut short
+        page.fill("[data-testid=review-search]", "")
+        page.wait_for_selector("[data-testid=review-list]", state="detached")
+        page.wait_for_selector("[data-testid=job-card]")
+        assert page.inner_text("[data-testid=job-title]") == first_title
         title = page.inner_text("[data-testid=job-title]")
         approved_company = page.inner_text("[data-testid=job-card] .meta").split(" · ")[0]
         page.click("[data-testid=btn-approve]")
@@ -324,14 +337,26 @@ try:
 
         page.evaluate("location.hash = '#/company'")  # Company sites is a part of Apply now: old links land there
         page.wait_for_function("() => location.hash === '#/apply'")
-        page.wait_for_selector("[data-testid=company-agent] li:has-text('Iron Valley Medical')")
+        page.wait_for_selector("[data-testid=company-agent] li:has-text('Iron Valley Medical')")  # lands on the Company sites tab
+        assert page.get_attribute("[data-testid=tab-company]", "aria-selected") == "true"
         assert page.locator("[data-testid=nav-company]").count() == 0
-        page.click("[data-testid=nav-apply]")
+        page.click("[data-testid=tab-manual]")  # rows only you can finish on NUworks
+        if get("/api/company")["other"]:
+            page.wait_for_selector("[data-testid=manual-nuworks]")
+        else:
+            page.wait_for_selector("[data-testid=apply-pane] .empty")
+        assert page.locator("[data-testid=approved-list]").count() == 0 and page.locator("[data-testid=company-agent]").count() == 0
+        page.click("[data-testid=tab-nuworks]")
         page.wait_for_selector("[data-testid=btn-start-apply]:not([disabled])")
         assert page.locator("[data-testid=approved-list] li").count() == 4
         assert page.locator("[data-testid=approved-list] [data-testid=due]").count() == 4  # each row shows its due date
         assert page.locator("[data-testid=approved-list] button[data-testid^=btn-apply-row-]").count() == 4  # one Apply each
         assert "% match" in page.inner_text("[data-testid=approved-facts] >> nth=0")
+        page.fill("[data-testid=apply-n]", "7")  # what you type in "At most" stays when you click elsewhere / the page redraws
+        page.click("h1, #page-title")
+        page.wait_for_timeout(3500)
+        assert page.input_value("[data-testid=apply-n]") == "7"
+        page.fill("[data-testid=apply-n]", "")
         page.click("[data-testid=btn-start-apply]")
         page.wait_for_selector("[data-testid=question]", timeout=90000)
         assert "18 years old" in page.inner_text("[data-testid=q-label]")
@@ -341,6 +366,8 @@ try:
                                "document.querySelector('[data-testid=q-menu-u]')", timeout=120000)
         assert page.locator("[data-testid=q-menu-u]").count() == 0, "unexpected: NUworks' confirmation was not seen"
         assert page.locator("[data-testid=apply-shot]").count() == 1
+        # the finished rows leave the Approved list by themselves (no reopening): Applied / Needs Human rows are not Approved
+        page.wait_for_function("() => !document.querySelector('[data-testid=approved-list]')", timeout=20000)
         rows = {r[1]: r[3] for r in json.load(open(os.path.join(STATE, "local", "demo_sheet_DEMO-SHEET.json")))["rows"][1:]}
         assert rows["Harbor Embedded"] == rows["Lumen Security"] == rows[approved_company] == "Applied", rows
         # Cobalt was approved, then undone (API part above): it is a Proposed row again, so Review showed it first and
@@ -350,7 +377,9 @@ try:
         assert sum(r[1] == "Cobalt Systems" for r in all_rows) == 1, all_rows
         assert rows["Quarry Hardware"] == "Needs Human", rows
         # the external job stopped (nothing submitted) and now waits on the same page, ready for the assistant
+        page.click("[data-testid=tab-company]")
         page.wait_for_selector("[data-testid=company-agent] li:has-text('Quarry Hardware') button:has-text('Start assistant')")
+        assert page.locator("[data-testid=approved-list]").count() == 0  # not on this tab
 
         # another site on this machine (another port: same site to the browser, so the cookie IS sent) tries to change
         # the sheet three ways. All must fail: no X-NUauto header / no JSON / a CORS preflight the server never allows.
@@ -398,6 +427,7 @@ fetch("{target}", {{method: "POST", credentials: "include", body: {json.dumps(bo
         evil.shutdown()
 
         page.click("[data-testid=nav-apply]")
+        page.click("[data-testid=tab-company]")
         page.wait_for_selector("[data-testid=company-10]")
         assert page.locator("[data-testid=company-10] [data-testid=due]").count() == 1  # due date on the company-site row
         page.click("[data-testid=nav-home]")
