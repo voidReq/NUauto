@@ -394,7 +394,7 @@ function questionMenu(box, q, reply) {
 // ------------------------------------------------------------------ screens
 
 const screens = {};
-const TITLES = { home: "Today", review: "Review", apply: "Apply", other: "Other jobs", sheet: "Sheet", insights: "Insights", answers: "Answers",
+const TITLES = { home: "Today", review: "Review", apply: "Apply", sheet: "Sheet", insights: "Insights", answers: "Answers",
   settings: "Settings", setup: "Setup", logs: "Past runs" };
 
 // ---- Today
@@ -760,15 +760,21 @@ function clamped(node) {  // a long posting cut to a few lines until you ask for
   return el("div", {}, node, btn);
 }
 
-// ---- Apply: three tabs. NUworks (the Approved rows Start works through), Company sites (the assistant, sites still
-// owed, the NUworks side to send again), and rows only you can finish on NUworks.
+// The match % and pay a NUworks row shows in the Apply lists.
+function jobFacts(r) {
+  return el("div", { class: "small muted", testid: "job-facts", text: [r.match != null ? `${r.match}% match` : "match not scored",
+    r.pay ? `pay ${r.pay}` : "pay not listed"].join(" · ") });
+}
+
+// ---- Apply: three tabs. NUworks (the Approved rows Start works through), Company sites (the assistant, Other jobs,
+// sites still owed, the NUworks side to send again), and rows only you can finish on NUworks.
 screens.apply = async (view) => {
   let data = null;
-  let sites = null;
+  let sites = null, others = null;
   const TABS = [["nuworks", "NUworks"], ["company", "Company sites"], ["manual", "By hand on NUworks"]];
   let tab = sessionStorage.getItem("applyTab");
   if (!TABS.some(([k]) => k === tab)) tab = "nuworks";
-  if (S.focus === "company") { S.focus = null; tab = "company"; }  // Today's buttons and old #/company links
+  if (S.focus === "company") { S.focus = null; tab = "company"; }  // Today's buttons and old #/company, #/other links
   let drawnRunning = null;
   // The "At most" box is made once and moved into each redraw, so what you typed (and the focus) is never lost.
   const atMost = el("input", { type: "number", min: "1", id: "apply-n", testid: "apply-n", "aria-label": "At most this many", placeholder: "all" });
@@ -777,8 +783,9 @@ screens.apply = async (view) => {
   fill(view, head, runBox, tabs, pane);
 
   async function reload() {
-    const [a, c] = await Promise.allSettled([api.get("/api/apply"), api.get("/api/company")]);
+    const [a, c, o] = await Promise.allSettled([api.get("/api/apply"), api.get("/api/company"), api.get("/api/other")]);
     sites = c.status === "fulfilled" ? c.value : { error: c.reason.message };
+    others = o.status === "fulfilled" ? o.value : { error: o.reason.message };
     if (a.status === "rejected") { fill(pane, el("div", { class: "note fail", text: a.reason.message })); drawTabs(); return; }
     data = a.value;
     draw();
@@ -788,7 +795,7 @@ screens.apply = async (view) => {
 
   function counts() {
     const ok = sites && !sites.error;
-    return { nuworks: data ? data.rows.length : 0, company: ok ? sites.agent.length + sites.site.length + sites.retry.length : 0, manual: ok ? sites.other.length : 0 };
+    return { nuworks: data ? data.rows.length : 0, company: (ok ? sites.agent.length + sites.site.length + sites.retry.length : 0) + (others && others.ready ? others.ready.length : 0), manual: ok ? sites.other.length : 0 };
   }
 
   function drawTabs() {
@@ -803,9 +810,9 @@ screens.apply = async (view) => {
     if (tab === "nuworks") return fill(pane, nuworksCard(), pastCard());
     if (!sites) return fill(pane, "");
     if (sites.error) return fill(pane, el("div", { class: "note fail", text: sites.error }));
-    const cards = tab === "company" ? companyCards(sites) : manualCards(sites);
+    const cards = tab === "company" ? companyCards(sites).concat([otherCard(others)]) : manualCards(sites);
     fill(pane, ...(cards.some(Boolean) ? cards : [el("div", { class: "card" }, el("p", { class: "empty",
-      text: tab === "company" ? "No company-site applications waiting." : "Nothing that only you can finish on NUworks." }))]));
+      text: "Nothing that only you can finish on NUworks." }))]));
   }
 
   function nuworksCard() {
@@ -813,8 +820,7 @@ screens.apply = async (view) => {
         data.rows.length > 1 ? el("span", { class: "small muted", text: "in the order Start goes: closing within a week first, then best score" }) : null),
       data.rows.length ? el("ul", { class: "list", testid: "approved-list" }, ...data.rows.map((r, k) => el("li", { testid: `approved-${r.row}` },
         el("div", { class: "what" }, el("span", { class: "muted", text: `${k + 1}. ` }), el("b", { text: r.company }), " · ", r.title,
-          el("div", { class: "small muted", testid: "approved-facts", text: [r.match != null ? `${r.match}% match` : "match not scored",
-            r.pay ? `pay ${r.pay}` : "pay not listed"].join(" · ") })),
+          jobFacts(r)),
         el("div", { class: "row" }, r.company_site ? el("span", { class: "chip", text: "may also want the company's site", title: r.company_site }) : null,
           dueChip(r), linkOut(r.url, "Open"),
           el("button", { class: "btn small", testid: `btn-apply-row-${r.row}`, disabled: !!data.why_not || !!(S.task && S.task.state === "running"),
@@ -891,24 +897,24 @@ screens.apply = async (view) => {
 };
 
 // ---- Company sites (a tab of the Apply screen): Needs Human rows for the assistant, company sites still owed, and
-// the NUworks side to send again. Only the sections that have rows show.
+// the NUworks side to send again (only the sections that have rows show); then Other jobs (always shown).
 function companyCards(d) {
   return [
     d.agent.length ? el("div", { class: "card", testid: "company-agent" }, el("h2", { text: "Company sites: ready for the assistant" }),
       el("p", { class: "small muted", text: "Jobs that send you to the company's own site. The assistant (Claude, in a terminal window) fills the application in a visible browser; it asks you before anything is submitted. You sign in, solve captchas and approve Submit." }),
       el("ul", { class: "list" }, ...d.agent.map((r) => el("li", { testid: `company-${r.row}` },
-        el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title, el("div", { class: "small muted", text: r.host })),
+        el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title, jobFacts(r), el("div", { class: "small muted", text: r.host })),
         el("div", { class: "row" }, dueChip(r), el("button", { class: "btn small primary", text: "Start assistant", testid: `assist-${r.row}`, onclick: () => action("assist", { row: r.row }) }),
           linkOut(r.target, "Open site"),
           el("button", { class: "btn small", text: "I applied myself", onclick: () => markRow("applied", r) })))))) : null,
     d.site.length ? el("div", { class: "card" }, el("h2", { text: "Submitted on NUworks; the company site still wants you" }),
       el("ul", { class: "list" }, ...d.site.map((r) => el("li", { testid: `site-${r.row}` }, el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title,
-        el("div", { class: "small muted", text: r.notes.slice(0, 160) })), el("div", { class: "row" }, dueChip(r), linkOut(r.url, "Open job"),
+        jobFacts(r), el("div", { class: "small muted", text: r.notes.slice(0, 160) })), el("div", { class: "row" }, dueChip(r), linkOut(r.url, "Open job"),
         el("button", { class: "btn small", text: "Mark done", onclick: () => markRow("site", r) })))))) : null,
     d.retry.length ? el("div", { class: "card" }, el("h2", { text: "Company site done; the NUworks side did not go out" }),
       el("p", { class: "small muted", text: "Submits the same job on NUworks too, with the usual NUworks checks (a visible browser; questions come up here)." }),
       el("ul", { class: "list" }, ...d.retry.map((r) => el("li", { testid: `retry-${r.row}` }, el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title,
-        el("div", { class: "small muted", text: r.notes.slice(-160) })), el("div", { class: "row" }, linkOut(r.url, "Open job"),
+        jobFacts(r), el("div", { class: "small muted", text: r.notes.slice(-160) })), el("div", { class: "row" }, linkOut(r.url, "Open job"),
         el("button", { class: "btn small primary", text: "Submit on NUworks too", testid: `retry-btn-${r.row}`,
           onclick: () => confirmBox("Submit on NUworks too?", `${r.company} · ${r.title} is Applied on the company site. This submits the same job on NUworks.`,
             "Submit on NUworks", () => action("nuworks_side", { row: r.row })) }))))))  : null];
@@ -918,41 +924,28 @@ function companyCards(d) {
 function manualCards(d) {
   return [d.other.length ? el("div", { class: "card", testid: "manual-nuworks" }, el("h2", { text: "Needs you on NUworks" }),
     el("ul", { class: "list" }, ...d.other.map((r) => el("li", {}, el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title,
-      el("div", { class: "small muted", text: r.notes || r.why })), el("div", { class: "row" }, dueChip(r), linkOut(r.url, "Open job")))))) : null];
+      jobFacts(r), el("div", { class: "small muted", text: r.notes || r.why })), el("div", { class: "row" }, dueChip(r), linkOut(r.url, "Open job")))))) : null];
 }
 
-// ---- Other jobs: the sheet's Other jobs tab (jobs that are not on NUworks; the same assistant, nothing sent to NUworks)
-screens.other = async (view) => {
-  async function reload() {
-    let d;
-    try { d = await api.get("/api/other"); } catch (e) { fill(view, el("div", { class: "note fail", text: e.message })); return; }
-    fill(view,
-      el("div", { class: "card", testid: "other-form" }, el("div", { class: "row between" }, el("h2", { text: "Jobs that aren't on NUworks" }),
-          el("button", { class: "btn primary", text: "Add a job", testid: "other-add",
-            onclick: () => { sessionStorage.setItem("sheetAddTab", "other"); location.hash = "#/sheet"; } })),
-        el("p", { class: "small muted", text: `They go in your sheet's "${d.tab}" tab (NUauto makes the tab the first time); your NUworks tab stays NUworks only. They don't count toward your weekly or total limit. Add, move or remove jobs on the Sheet screen.` })),
-      el("div", { class: "card" }, el("h2", { text: "Ready for the assistant" }),
-        el("p", { class: "small muted", text: "The assistant (Claude, in a terminal window) fills the application in a visible browser and uploads your resume; it asks you before anything is submitted. It answers from your Other jobs answers first, then your NUworks ones, except the NUworks-only ones (co-op dates and term: Answers). When you tell it the application went through, the row becomes Applied. Nothing is sent to NUworks." }),
-        d.ready.length ? el("ul", { class: "list" }, ...d.ready.map((r) => el("li", { testid: `other-${r.row}` },
-          el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title, el("div", { class: "small muted", text: `Row ${r.row} · ${r.host || r.why}` })),
-          el("div", { class: "row" },
-            el("button", { class: "btn small primary", text: "Start assistant", testid: `other-assist-${r.row}`, disabled: !r.target,
-              onclick: () => action("assist", { row: r.row, tab: "other" }) }),
-            r.target ? linkOut(r.target, "Open site") : null,
-            el("button", { class: "btn small", text: "I applied myself", testid: `other-mark-${r.row}`, onclick: () => markRow("applied", r, "other") }))))) :
-          el("p", { class: "empty", text: d.exists ? `Nothing Approved in the ${d.tab} tab.` : "No jobs yet. Add one with Add a job." })),
-      d.applied.length ? el("div", { class: "card", testid: "other-applied" }, el("h2", { text: "Applied" }),
-        el("ul", { class: "list" }, ...d.applied.map((r) => el("li", {}, el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title,
-          el("div", { class: "small muted", text: `Row ${r.row} · applied ${r.date}` })), el("div", { class: "row" }, linkOut(r.url, "Open job")))))) : null,
-      d.rest.length ? el("div", { class: "card" }, el("h2", { text: "Not Approved" }),
-        el("p", { class: "small muted", text: "Set a row to Approved in the sheet to use the assistant on it." }),
-        el("ul", { class: "list" }, ...d.rest.map((r) => el("li", {}, el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title,
-          el("div", { class: "small muted", text: `Row ${r.row}${r.notes ? " · " + r.notes.slice(0, 160) : ""}` })),
-          el("div", { class: "row" }, el("span", { class: "chip", text: r.status || "no status" }), linkOut(r.url, "Open job")))))) : null);
-  }
-  await reload();
-  return { reload, refresh: reload };
-};
+// ---- Other jobs (a card in Company sites): the Approved rows of the sheet's Other jobs tab, jobs that are not on
+// NUworks (the same assistant; nothing is sent to NUworks). Their Applied and other rows are on the Sheet screen.
+function otherCard(d) {
+  if (!d) return null;
+  const head = el("div", { class: "row between" }, el("h2", { text: "Other jobs (not on NUworks)" }),
+    el("button", { class: "btn small", text: "Add a job", testid: "other-add",
+      onclick: () => { sessionStorage.setItem("sheetAddTab", "other"); location.hash = "#/sheet"; } }));
+  if (d.error) return el("div", { class: "card", testid: "other-jobs" }, head, el("div", { class: "note fail", text: d.error }));
+  return el("div", { class: "card", testid: "other-jobs" }, head,
+    el("p", { class: "small muted", text: `Approved rows of your sheet's "${d.tab}" tab; no weekly or total limit. The assistant answers from your Other jobs answers first, then your NUworks ones (not the NUworks-only ones: co-op dates and term). When you tell it the application went through, the row becomes Applied; nothing is sent to NUworks. Applied and other rows: the Sheet screen.` }),
+    d.ready.length ? el("ul", { class: "list" }, ...d.ready.map((r) => el("li", { testid: `other-${r.row}` },
+      el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title, el("div", { class: "small muted", text: r.host || r.why })),
+      el("div", { class: "row" },
+        el("button", { class: "btn small primary", text: "Start assistant", testid: `other-assist-${r.row}`, disabled: !r.target,
+          onclick: () => action("assist", { row: r.row, tab: "other" }) }),
+        r.target ? linkOut(r.target, "Open site") : null,
+        el("button", { class: "btn small", text: "I applied myself", testid: `other-mark-${r.row}`, onclick: () => markRow("applied", r, "other") }))))) :
+      el("p", { class: "empty", text: d.exists ? `Nothing Approved in the ${d.tab} tab.` : "No jobs yet. Add one with Add a job." }));
+}
 
 // ---- Sheet: add a job to either tab by hand; move rows between the tabs; remove them
 screens.sheet = async (view) => {
@@ -1295,7 +1288,7 @@ screens.setup = async (view) => {
 
 async function route() {
   let name = (location.hash.replace(/^#\/?/, "").split("?")[0]) || "home";
-  if (name === "company") {  // Company sites is a part of Apply now (old links and Today's buttons land there)
+  if (name === "company" || name === "other") {  // Company sites (Other jobs is in it) is a part of Apply now
     S.focus = "company";
     history.replaceState(null, "", "#/apply");
     name = "apply";
