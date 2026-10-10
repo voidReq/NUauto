@@ -461,23 +461,35 @@ def closing(r):
 NUWORKS_SIDE_NOT_SENT = ("NUworks side NOT submitted", "before Submit; not submitted")
 
 
-def company_rows(rows):
+def job_facts(r, scores, d=None):
+    """The match % and pay the Apply lists show for a NUworks row (None when not scored / not listed)."""
+    from nuauto import apply
+    d = apply.row_details(r) if d is None else d
+    return {"match": (scores.get(jobs.job_id(r.url)) or {}).get("match"), "pay": d.get("pay") or None}
+
+
+def company_rows(rows, facts=False):
     """agent: Needs Human rows for the assistant; other: Needs Human rows only you can finish; site: Applied rows
-    whose company site still wants you; retry: Applied rows whose NUworks side did not go out (nuauto assist nuworks)."""
+    whose company site still wants you; retry: Applied rows whose NUworks side did not go out (nuauto assist nuworks).
+    facts: each row also gets its match % and pay (the Apply tabs; the menu counts skip reading them)."""
     from nuauto import assist
+    scores = jobs.load("scores.json", {}) if facts else None
+
+    def view(r, **extra):
+        return row_view(r, **closing(r), **(job_facts(r, scores) if facts else {}), **extra)
     agent, other, site, retry = [], [], [], []
     for r in rows or []:
         if r.status == "Needs Human":
             url, why = assist.assist_target(r.notes)
             if url:
-                agent.append(row_view(r, **closing(r), target=url, host=urlparse(url).hostname or url))
+                agent.append(view(r, target=url, host=urlparse(url).hostname or url))
             else:
-                other.append(row_view(r, **closing(r), why=why))
+                other.append(view(r, why=why))
         elif r.status == "Applied" and r.notes.startswith(sheet.SITE_MARK):
-            site.append(row_view(r, **closing(r)))
+            site.append(view(r))
         elif r.status == "Applied" and any(m in r.notes for m in NUWORKS_SIDE_NOT_SENT) \
                 and assist.nuworks_side_blocked(r.notes) is None:
-            retry.append(row_view(r, **closing(r)))
+            retry.append(view(r))
     return agent, other, site, retry
 
 
@@ -671,8 +683,7 @@ def apply_list():
     for r in apply.apply_order(sheet.approved(rows)):
         d = apply.row_details(r)
         hint = jobs.external_hint(d)  # the posting may want the company's own site too
-        match = (scores.get(jobs.job_id(r.url)) or {}).get("match")
-        out.append(row_view(r, **closing(r), company_site=hint, match=match, pay=d.get("pay") or None))
+        out.append(row_view(r, **closing(r), company_site=hint, **job_facts(r, scores, d)))
     why = None
     if not out:
         why = "Nothing is Approved. Approve jobs in Review first."
@@ -787,7 +798,7 @@ def stop(body):
 
 def company():
     rows = need_rows()
-    agent, other, site, retry = company_rows(rows)
+    agent, other, site, retry = company_rows(rows, facts=True)
     return {"agent": agent, "other": other, "site": site, "retry": retry}
 
 
@@ -1423,7 +1434,7 @@ def ask_instance_to_open(lock):
         return False
 
 
-SCREENS = ["home", "review", "apply", "other", "sheet", "insights", "answers", "settings", "setup", "logs"]
+SCREENS = ["home", "review", "apply", "sheet", "insights", "answers", "settings", "setup", "logs"]
 
 
 def screenshots(folder, url):

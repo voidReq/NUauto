@@ -59,8 +59,8 @@ SCREENS
                  me buttons (y / n keys are off there; a decided card turns into one line with Change). The job you were on
                  is left undecided; clearing the search comes back to it. A kind-of-work choice alone stays one job at a time.
   Apply          the weekly count and Start, the live run (below), then three tabs, each with its row count: NUworks, Company
-                 sites, By hand on NUworks (the tab you picked is remembered; #/company and Today's buttons open Company
-                 sites). NUworks: Approved rows in apply order (numbered 1, 2, 3: the order Start goes), each with when it closes
+                 sites, By hand on NUworks (the tab you picked is remembered; #/company, #/other and Today's buttons open
+                 Company sites). Every NUworks row in the three tabs shows its match % and pay. NUworks: Approved rows in apply order (numbered 1, 2, 3: the order Start goes), each with when it closes
                  (due chip: amber within a week, red once past), its match % and pay, a "may also want the company's
                  site" chip when the posting says so, and its own Apply button (after a confirm: just that row, `nuauto apply --row N`); Start (optionally
                  "at most N"), the live run: current row, latest screenshot, log, next-job countdown, Stop / Force
@@ -69,13 +69,13 @@ SCREENS
                  in the other tabs (since 2026-10-09 Company sites is a part of Apply; the menu count is Approved + the
                  assistant's rows + retries). Company sites tab: Needs Human rows for the assistant (opens
                  `nuauto assist <row>` in a terminal window, or shows the command), "I applied myself", company sites still
-                 owed (Mark done), the NUworks side to retry. By hand on NUworks tab: rows only you can finish there.
+                 owed (Mark done), the NUworks side to retry, then the Other jobs card: the sheet's Other jobs tab's
+                 Approved rows (read fresh; counted in the tab, not the menu), Start assistant (opens `nuauto assist other
+                 <row>`), Open site, I applied myself, Add a job (opens Sheet on the Other jobs tab). No caps there; their
+                 Applied and other rows are on the Sheet screen. (A screen of its own until 2026-10-09.) By hand on NUworks tab: rows only you can finish there.
                  The lists follow the sheet by themselves: /api/state carries rows_at (when the sheet was last read), the
                  server reads it again after every finished row and run and when it is 30 s old, and the open screen
                  reloads its lists when rows_at changes (no closing and reopening). "At most" keeps what you typed.
-  Other jobs     the sheet's Other jobs tab (jobs not on NUworks; read fresh, no nav count): Add a job (opens Sheet on
-                 the Other jobs tab), Approved rows with Start assistant (opens `nuauto assist other <row>`), Open
-                 site, I applied myself; Applied rows; the rest. No caps there
   Sheet          add a job by hand (manage.py): NUworks co-op or Other job, Approved or Proposed, link; a NUworks
                  link switches the tab and fills company / title / match from your job data. Both tabs' rows with
                  Move to the other tab (asks for the link there) and Remove (clears the row's cells: no row is

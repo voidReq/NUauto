@@ -184,8 +184,8 @@ COMPANY-SITE AGENT (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`;
 - Other jobs (added 2026-10-07): `nuauto assist other <row>` runs the same agent, rules and hooks on an Approved
   row of the Other jobs tab (its URL column; https, never NUworks: assist.other_target), with the layered answer
   bank (ANSWER BANK). After /exit, y = Applied (dated today, no cap), and nothing is sent to NUworks; n = stays
-  Approved. Log: logs/<stamp>_assist_other_row<N>/. GUI: the Other jobs screen (Start assistant, I applied
-  myself; Add a job opens the Sheet screen). Not yet run for real.
+  Approved. Log: logs/<stamp>_assist_other_row<N>/. GUI: the Other jobs card in Apply > Company sites (Start
+  assistant, I applied myself; Add a job opens the Sheet screen; since 2026-10-09 no screen of its own). Not yet run for real.
 - Proven: a first application end to end (2026-10-05, stricter version). The "ask before Submit" hook
   prompt is proven in an interactive session; a full run with the relaxed rules is not yet.
 

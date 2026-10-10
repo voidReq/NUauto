@@ -339,7 +339,9 @@ try:
         page.wait_for_function("() => location.hash === '#/apply'")
         page.wait_for_selector("[data-testid=company-agent] li:has-text('Iron Valley Medical')")  # lands on the Company sites tab
         assert page.get_attribute("[data-testid=tab-company]", "aria-selected") == "true"
-        assert page.locator("[data-testid=nav-company]").count() == 0
+        assert page.locator("[data-testid=nav-company]").count() == 0 and page.locator("[data-testid=nav-other]").count() == 0
+        assert "match" in page.inner_text("[data-testid=company-agent] [data-testid=job-facts] >> nth=0")  # match / pay there too
+        page.wait_for_selector("[data-testid=other-jobs]")  # Other jobs is a card in Company sites
         page.click("[data-testid=tab-manual]")  # rows only you can finish on NUworks
         if get("/api/company")["other"]:
             page.wait_for_selector("[data-testid=manual-nuworks]")
@@ -351,7 +353,7 @@ try:
         assert page.locator("[data-testid=approved-list] li").count() == 4
         assert page.locator("[data-testid=approved-list] [data-testid=due]").count() == 4  # each row shows its due date
         assert page.locator("[data-testid=approved-list] button[data-testid^=btn-apply-row-]").count() == 4  # one Apply each
-        assert "% match" in page.inner_text("[data-testid=approved-facts] >> nth=0")
+        assert "% match" in page.inner_text("[data-testid=approved-list] [data-testid=job-facts] >> nth=0")
         page.fill("[data-testid=apply-n]", "7")  # what you type in "At most" stays when you click elsewhere / the page redraws
         page.click("h1, #page-title")
         page.wait_for_timeout(3500)
@@ -464,8 +466,10 @@ fetch("{target}", {{method: "POST", credentials: "include", body: {json.dumps(bo
         assert page.locator("thead th", has_text="NUworks only").count() == 0
         page.click("[data-testid=bank-nuworks]")
         page.wait_for_selector("[data-testid=bank-nuworks][aria-pressed=true]")
-        # Other jobs: Add a job opens the Sheet screen on the Other jobs tab; the job shows up ready for the assistant
-        page.click("[data-testid=nav-other]")
+        # Other jobs (in Apply > Company sites; old #/other links land there): Add a job opens the Sheet screen on the
+        # Other jobs tab; the job shows up ready for the assistant
+        page.evaluate("location.hash = '#/other'")
+        page.wait_for_function("() => location.hash === '#/apply'")
         page.wait_for_selector("[data-testid=other-2]")
         page.click("[data-testid=other-add]")
         page.wait_for_selector("[data-testid=add-tab-other][aria-pressed=true]")
@@ -489,7 +493,8 @@ fetch("{target}", {{method: "POST", credentials: "include", body: {json.dumps(bo
         item.locator("button:has-text('Remove')").click()
         page.click("[data-testid=confirm-yes]")
         item.wait_for(state="detached")
-        page.click("[data-testid=nav-other]")
+        page.click("[data-testid=nav-apply]")
+        page.click("[data-testid=tab-company]")
         dune = page.locator("li:has-text('Dune Optics')")
         dune.wait_for()
         dune.locator("button:has-text('Start assistant')").click()

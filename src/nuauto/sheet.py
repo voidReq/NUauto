@@ -182,7 +182,7 @@ def open_other(interactive=True, create=False):
         return sh.worksheet(OTHER_TAB)
     except gspread.exceptions.WorksheetNotFound:
         if not create:
-            raise NoOtherTab(f"No {OTHER_TAB!r} tab yet: add a job to it (NUauto's Other jobs screen, or "
+            raise NoOtherTab(f"No {OTHER_TAB!r} tab yet: add a job to it (NUauto's Sheet screen, or "
                              "nuauto assist other add <url> <company> <title>).")
     from nuauto import setup_sheet
     ws = sh.add_worksheet(title=OTHER_TAB, rows=setup_sheet.LAST_ROW, cols=len(HEADERS))
