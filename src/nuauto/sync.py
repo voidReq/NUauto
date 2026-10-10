@@ -19,7 +19,7 @@ RSYNC = ["rsync", "-a", "-e", " ".join(SSH)]
 REMOTE = f"{config.SERVER}:{config.SERVER_DIR}"
 # Pushed with rsync -R, so paths keep their folders (src/nuauto/, prompts/, docs/...). The docs go too, so agents
 # there read current ones. The homelab installs the package once (uv pip install -e .); code changes need no reinstall.
-PACKAGE = ["__init__.py", "__main__.py", "cli.py", "config.py", "sheet.py", "jobs.py", "daily.py", "browser.py",
+PACKAGE = ["__init__.py", "__main__.py", "cli.py", "config.py", "sheet.py", "jobs.py", "fields.py", "daily.py", "browser.py",
            "apply.py", "answers.py", "inspect_form.py", "setup_sheet.py", "sync.py", "web.py", "doctor.py", "assist.py",
            "health.py", "demo.py", "gui.py", "onboard.py", "window.py", "window_gtk.py", "selftest.py", "deploy.py", "insights.py",
            "manage.py"]

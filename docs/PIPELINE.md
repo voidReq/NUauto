@@ -34,7 +34,25 @@ the next year up = threshold_above + a "<year>+" flag, two or more up = dropped.
   graduation 2027/2028, title says other term, no first-time co-ops?, vague posting.
 - Description sent to the scorer is capped at 15000 chars.
 
-RANKING
+WHAT YOU STUDY (fields.py, added 2026-10-10; preferences "field" and "categories")
+- The kinds of work jobs are sorted into are a preference: [{key, label, description}], "other" always last. The setup
+  wizard's "What do you study?" fills in a field's list (and its triage text, major words, bonuses); each stays
+  editable. CATEGORY_PROMPT.md gets the list as {{categories}} ({{first_category}} in its example); with the
+  engineering field (the default, = my original settings) it renders byte-identical to the old prompt.
+- Which set of kinds a job was sorted into: data/category_sets.json {id: fingerprint of the keys}. A job sorted under
+  another set (you changed field or the list's keys) counts as uncategorized and is sorted again on the next update
+  (about one Claude call per 120 jobs). Jobs from before this file count as the engineering set. Changing only a
+  name or description does not re-sort.
+- Triage the same way: each decision records which triage text it was made with ("by" in triage.json, a hash of
+  student / keep_roles / drop_roles). A job dropped under other text is triaged again (a new student's first update
+  runs before setup's preferences step, with the engineering defaults); kept jobs stay kept; decisions from before
+  "by" count as made with the current text (nothing re-triaged for an existing setup).
+- Saving preferences in the GUI rebuilds the pool at once (and pushes them to the homelab in homelab mode); jobs in
+  kinds you no longer have show as "not sorted yet" until the next update sorts them.
+- Rating rotation (RATE_ORDER), Insights labels, the GUI's labels and the terminal viewer's colors (the biggest
+  bonus red, other bonuses green, rank_last dim) come from the list.
+
+RANKING (my settings: the engineering field)
 - Cybersecurity is the top priority. Every scored job gets a category (CATEGORY_PROMPT.md).
   Security roles need 60% to enter (junior-only still 90%).
 - Pool entry uses the RAW resume match (Boston +10 is ranking only).

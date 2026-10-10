@@ -27,6 +27,7 @@ from datetime import date
 from urllib.parse import urlparse
 
 from nuauto import config
+from nuauto import fields
 from nuauto import health
 from nuauto import jobs
 
@@ -278,6 +279,35 @@ def resume_preview(path):
 
 # ---------------------------------------------------------------- step: preferences
 
+def check_categories(given):
+    """The kinds of work: 2 to 25 of {key, label, description}; keys are lowercase words (letters, digits, _), labels
+    and keys unique; "other" is always there (added at the end when missing). A key may be left out: it comes from
+    the label."""
+    if not isinstance(given, list) or not 1 <= len(given) <= 25 or not all(isinstance(c, dict) for c in given):
+        raise Refused("Kinds of work: up to 25 of them.")
+    out = []
+    for c in given:
+        label = " ".join(str(c.get("label", "")).split())
+        desc = str(c.get("description", "")).strip()  # as given: the built-in ones keep their line breaks
+        key = str(c.get("key") or "").strip() or re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_")[:30]
+        if not label and not desc:
+            continue  # an empty row
+        if not label or len(label) > 40:
+            raise Refused("Kinds of work: each needs a name (up to 40 characters).")
+        if not re.fullmatch(r"[a-z][a-z0-9_]{0,29}", key) or key == "uncategorized":
+            raise Refused(f"{label}: a name that starts with a letter, please.")
+        if not desc or len(desc) > 600 or "{{" in desc:
+            raise Refused(f"{label}: say in a line what counts as this kind of work (up to 600 characters, no {{{{).")
+        if key in (x["key"] for x in out) or label.lower() in (x["label"].lower() for x in out):
+            raise Refused(f"Kinds of work: {label} is there twice.")
+        out.append({"key": key, "label": label, "description": desc})
+    if "other" not in (c["key"] for c in out):
+        out.append({"key": "other", "label": "Other", "description": "anything else."})
+    if len(out) < 2:
+        raise Refused("Kinds of work: at least one besides Other.")
+    return out
+
+
 def check_prefs(p):
     """The preferences form, validated into the shape jobs.PREFS uses."""
     if not isinstance(p, dict):
@@ -320,9 +350,15 @@ def check_prefs(p):
         raise Refused("Home state: two letters (MA), or empty.")
     out["home_state"], out["home_label"] = state, (str(p.get("home_label", "")).strip() or state)[:30]
     out["home_bonus"] = num("home_bonus", 0, 50)
+    field = p.get("field") or "engineering"
+    if field not in fields.FIELDS:
+        raise Refused(f"What you study: one of {', '.join(f['label'] for f in fields.FIELDS.values())}.")
+    out["field"] = field
+    out["categories"] = check_categories(p.get("categories"))
+    keys = [c["key"] for c in out["categories"]]
     for key, lo, hi in (("category_bonus", -50, 50), ("category_threshold", 0, 100)):
         given = p.get(key) or {}
-        if not isinstance(given, dict) or any(c not in jobs.CATEGORIES for c in given):
+        if not isinstance(given, dict) or any(c not in keys for c in given):
             raise Refused(f"{key.replace('_', ' ')}: unknown category.")
         out[key] = {}
         for c, v in given.items():
@@ -361,7 +397,7 @@ def check_prefs(p):
             raise Refused(f"{name}: between -50 and 50 points.")
         out["tags"].append({"name": name, "bonus": bonus, "phrases": phrases})
     last = p.get("rank_last") or []
-    if not isinstance(last, list) or any(c not in jobs.CATEGORIES for c in last):
+    if not isinstance(last, list) or any(c not in keys for c in last):
         raise Refused("Rank last: unknown category.")
     out["rank_last"] = last
     for key in jobs.PROMPT_FIELDS:
@@ -634,7 +670,8 @@ def steps(checks):
         labels_error=found.get("labels_error"))
     prefs = cfg.get("preferences")
     add("preferences", "What you are looking for", bool(prefs), "Your term, year and major; Claude's description of you.",
-        prefs={**jobs.DEFAULTS, **(prefs or {})}, years=jobs.YEARS, categories=sorted(jobs.CATEGORIES),
+        prefs={**jobs.DEFAULTS, **(prefs or {})}, years=jobs.YEARS,
+        fields={k: {"label": f["label"], **fields.preset(k)} for k, f in fields.FIELDS.items()},
         terms=found.get("terms"), terms_error=found.get("terms_error"), using_defaults=not prefs)
     kind = scheduler_kind()
     add("extras", "Notifications, automatic updates, app icon", False, "Optional.", optional=True,
@@ -655,15 +692,16 @@ def remember(**data):
     write_json(ONBOARD_PATH, found)
 
 
-def a_job_url():
-    """A NUworks job to open the Apply popup of: the best pool job that applies on NUworks itself."""
+def a_job_urls(limit=4):
+    """NUworks jobs to open the Apply popup of, best first: pool jobs that apply on NUworks itself; then jobs with
+    details that don't point to the company's site; then any listed job (a new student's pool can be empty: the first
+    update ran before they said what they study). The read tries them in turn until one has the Resume dropdown."""
     pool = jobs.load("pool.json", [])
-    plain = [r for r in pool if "apply on company site too?" not in r.get("flags", [])]
-    for r in plain + pool:
-        return jobs.job_url(r["id"])
+    ids = [r["id"] for r in pool if "apply on company site too?" not in r.get("flags", [])] + [r["id"] for r in pool]
+    ids += [i for i, d in jobs.load_details().items() if not jobs.external_hint(d)] + list(jobs.load("list.json", {}))
     if config.DEMO:
-        return jobs.job_url("900101")
-    return None
+        ids.append("900101")
+    return [jobs.job_url(i) for i in dict.fromkeys(ids)][:limit]
 
 
 def read_resume_labels():
@@ -674,8 +712,8 @@ def read_resume_labels():
     from nuauto import apply
     from nuauto import browser
     from nuauto.inspect_form import FIELDS_JS
-    url = a_job_url()
-    if url is None:
+    urls = a_job_urls()
+    if not urls:
         return remember(labels=None, labels_error="No job to open yet: check for new jobs first (Today), then try again.")
     log = health.MemoryLog()
     labels, error = None, None
@@ -685,24 +723,29 @@ def read_resume_labels():
             blocked = []
             browser.install_domain_lock(context, log, blocked)
             page = context.pages[0] if context.pages else context.new_page()
-            if not browser.goto_logged_in(page, context, url, log):
-                error = "Not logged in to NUworks: log in first (the button above)."
-            else:
+            for url in urls:  # until one job's popup has the Resume dropdown
+                blocked.clear()
+                if not browser.goto_logged_in(page, context, url, log):
+                    error = "Not logged in to NUworks: log in first (the button above)."
+                    break
                 btn = page.get_by_role("button", name=apply.APPLY_NAME)
                 if btn.count() != 1:
                     error = "That job has no Apply button; try again after the next update."
+                    continue
+                btn.click(timeout=10000)
+                browser.pause(page, 2, 3)
+                dialog = page.get_by_role("dialog")
+                found = [f for f in dialog.evaluate(FIELDS_JS) if apply.is_resume(f)] if dialog.count() == 1 else []
+                if len(found) != 1 or blocked:
+                    error = "That job's Apply popup has no Resume dropdown (it may send you elsewhere)."
                 else:
-                    btn.click(timeout=10000)
-                    browser.pause(page, 2, 3)
-                    dialog = page.get_by_role("dialog")
-                    found = [f for f in dialog.evaluate(FIELDS_JS) if apply.is_resume(f)] if dialog.count() == 1 else []
-                    if len(found) != 1 or blocked:
-                        error = "That job's Apply popup has no Resume dropdown (it may send you elsewhere)."
-                    else:
-                        labels = [o.strip() for o in found[0]["options"] if o.strip() and o.strip() != "Select a resume"]
-                    cancel = dialog.get_by_role("button", name="Cancel")
-                    if cancel.count() == 1:
-                        cancel.click()
+                    labels = [o.strip() for o in found[0]["options"] if o.strip() and o.strip() != "Select a resume"]
+                    error = None
+                cancel = dialog.get_by_role("button", name="Cancel")
+                if cancel.count() == 1:
+                    cancel.click()
+                if labels:
+                    break
         except Exception as e:
             error = f"Could not read NUworks ({type(e).__name__})."
         finally:

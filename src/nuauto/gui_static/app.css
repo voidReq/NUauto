@@ -145,6 +145,7 @@ label.field span.muted { font-weight: 400; }
 .seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); overflow: hidden; }
 .seg button { font: inherit; font-weight: 600; border: 0; background: var(--surface); color: var(--muted); padding: 6px 14px; cursor: pointer; }
 .seg button[aria-pressed=true] { background: var(--accent-soft); color: var(--accent); }
+.seg.wrap { display: flex; flex-wrap: wrap; width: fit-content; max-width: 100%; }
 
 /* review: one job card */
 .card.job h2 { font-size: 22px; margin-bottom: 4px; }
@@ -268,3 +269,4 @@ details summary { cursor: pointer; font-weight: 600; margin: 8px 0; }
 .vb-col { display: flex; align-items: flex-end; border-bottom: 1px solid var(--border-strong); }
 .vb-bar { display: block; width: 100%; background: var(--accent); border-radius: 4px 4px 0 0; }
 .vb-label { font-size: 12px; color: var(--muted); padding-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+table.grid input[type=number] { width: 90px; }

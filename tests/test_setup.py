@@ -19,6 +19,7 @@ from playwright.sync_api import sync_playwright  # noqa: E402
 from nuauto import config  # noqa: E402
 from nuauto import demo  # noqa: E402
 from nuauto import jobs  # noqa: E402
+from nuauto import fields  # noqa: E402
 from nuauto import onboard  # noqa: E402
 from nuauto import sheet  # noqa: E402
 
@@ -103,10 +104,60 @@ assert onboard.check_prefs({**jobs.DEFAULTS, "major_words": "Computer Science, ,
 assert onboard.check_prefs({**jobs.DEFAULTS, "tags": [{"name": " cars ", "bonus": "7", "phrases": "automotive, , EV"},
                                                     {"name": "", "bonus": "", "phrases": ""}]})["tags"] == \
     [{"name": "cars", "bonus": 7, "phrases": ["automotive", "EV"]}]
+# what you study: every field's starting values pass the checks and fill both prompts completely
+for key in fields.FIELDS:
+    got = onboard.check_prefs({**jobs.DEFAULTS, **fields.preset(key), "field": key})
+    assert got["field"] == key and got["categories"][-1]["key"] == "other", key
+    assert [c["key"] for c in got["categories"]] == [c["key"] for c in fields.FIELDS[key]["categories"]], key
+    jobs.set_prefs(got)
+    for name in ("TRIAGE_PROMPT.md", "CATEGORY_PROMPT.md"):
+        text = open(jobs.render_prompt(name)).read()
+        assert "{{" not in text and (name != "CATEGORY_PROMPT.md" or all(f"`{c}`" in text for c in jobs.CATEGORIES)), (key, name)
+    assert jobs.RATE_ORDER[-1] == "uncategorized" and set(jobs.RATE_ORDER) == set(jobs.CATEGORIES) | {"uncategorized"}
+    assert jobs.category_label(jobs.CATEGORIES[0]) == fields.FIELDS[key]["categories"][0]["label"]
+jobs.set_prefs(None)
+assert jobs.CATEGORIES[0] == "security" and jobs.RATE_ORDER[-2:] == ["fullstack_web", "uncategorized"]
+# kinds of work you write yourself: a key from the name, Other added, each one checked
+mine = onboard.check_prefs({**jobs.DEFAULTS, "category_bonus": {}, "category_threshold": {}, "rank_last": [],
+                            "categories": [{"label": "Data Journalism!", "description": "newsroom data work"}, {"label": "", "description": ""}]})
+assert mine["categories"] == [{"key": "data_journalism", "label": "Data Journalism!", "description": "newsroom data work"},
+                              {"key": "other", "label": "Other", "description": "anything else."}], mine["categories"]
+for cats, needle in (([{"label": "A", "description": "x"}, {"label": "a", "description": "y"}], "twice"),
+                     ([{"label": "A", "description": ""}], "say in a line"),
+                     ([{"label": "123", "description": "x"}], "starts with a letter"),
+                     ([{"label": "A", "description": "use {{student}}"}], "say in a line"),
+                     ([], "up to 25"), ("nope", "up to 25")):
+    refused(lambda: onboard.check_prefs({**jobs.DEFAULTS, "category_bonus": {}, "category_threshold": {}, "rank_last": [],
+                                         "categories": cats}), needle)
+refused(lambda: onboard.check_prefs({**jobs.DEFAULTS, "field": "astrology"}), "What you study")
+refused(lambda: onboard.check_prefs({**jobs.DEFAULTS, **fields.preset("business"), "category_bonus": {"security": 5}}), "unknown category")
+# a job sorted into another set of kinds (before you changed field) counts as not sorted: it is sorted again
+cats, sets = {"a": "security", "b": "finance", "c": "finance"}, {"c": fields.fingerprint(fields.FIELDS["business"]["categories"])}
+assert [jobs.job_category(cats, sets, i) for i in "abc"] == ["security", "uncategorized", "uncategorized"]  # engineering
+jobs.set_prefs({**fields.preset("business"), "field": "business"})
+assert [jobs.job_category(cats, sets, i) for i in "abc"] == ["uncategorized", "uncategorized", "finance"]
+jobs.set_prefs(None)
 onboard.save_config({"preferences": {**clean, "class_year": "junior", "term": "2027 - Fall"}})
 assert jobs.MY_YEAR == 2 and jobs.TERM_TEXT == "fall 2027" and json.load(open(config.LOCAL_CONFIG_PATH))["preferences"]["class_year"] == "junior"
 onboard.save_config({"preferences": None})
 jobs.set_prefs(None)
+# a job dropped by the first triage (an update before you said what you study: the engineering defaults) is triaged
+# again once the triage text changes; kept ones and decisions from before "by" was recorded stay
+eng = jobs.triage_set()
+triage = {"a": {"keep": False, "by": eng}, "b": {"keep": True, "by": eng}, "c": {"keep": False}}
+assert [jobs.needs_triage(triage, i) for i in "abcd"] == [False, False, False, True]
+jobs.set_prefs({**fields.preset("health"), "field": "health"})
+assert jobs.triage_set() != eng and [jobs.needs_triage(triage, i) for i in "abcd"] == [True, False, False, True]
+jobs.set_prefs(None)
+# the resume-label read needs one NUworks job: the pool's best; with no pool (a new student's can be empty), any job
+# with details that applies on NUworks, then any listed one (demo mode adds its own job last)
+demo_job = [jobs.job_url("900101")]
+jobs.save("list.json", {"l1": {}, "l2": {}})
+assert onboard.a_job_urls() == [jobs.job_url("l1"), jobs.job_url("l2")] + demo_job
+jobs.save("pool.json", [{"id": "p1", "flags": ["apply on company site too?"]}, {"id": "p2", "flags": []}])
+assert onboard.a_job_urls()[:3] == [jobs.job_url("p2"), jobs.job_url("p1"), jobs.job_url("l1")]
+os.remove(jobs.path("pool.json")); os.remove(jobs.path("list.json"))
+assert onboard.a_job_urls() == demo_job
 
 # the term list: found wherever it sits in NUworks' JSON, sorted, non-terms ignored
 found = onboard.find_terms({"a": [{"_id": "x1", "_label": "2027 - Spring"}, {"_id": "j", "_label": "Co-op"}],
@@ -202,7 +253,29 @@ try:
         page.wait_for_selector("[data-testid=pref-term-select]", timeout=60000)
         page.select_option("[data-testid=pref-term-select]", label="2027 - Fall")
         page.select_option("[data-testid=pref-class_year]", "junior")
-        page.click("details summary")  # fine-tuning: a new tag, the wearables one removed
+        # what you study: a first setup picks it before saving; Business fills in its starting values (term, year and
+        # tags stay; no confirm, nothing of yours to replace yet); its kinds of work show
+        assert page.locator("[data-testid=pref-field] [aria-pressed=true]").count() == 0
+        page.wait_for_selector("[data-testid=prefs-defaults]")
+        page.click("[data-testid=pref-save]")
+        page.wait_for_selector("[data-testid=toast].error:has-text('Pick what you study first')")
+        assert "done" not in (page.get_attribute("[data-testid=step-preferences]", "class") or "")
+        page.click("[data-testid=pref-field-business]")
+        page.wait_for_selector("[data-testid=pref-field-business][aria-pressed=true]")
+        page.wait_for_selector("[data-testid=prefs-picked]")
+        page.click("[data-testid=pref-field-health]")  # switching again asks first: Cancel keeps Business
+        page.click(".modal button:has-text('Cancel'), [role=dialog] button:has-text('Cancel')")
+        assert page.get_attribute("[data-testid=pref-field-business]", "aria-pressed") == "true"
+        assert "D'Amore-McKim" in page.input_value("[data-testid=pref-student]")
+        assert page.input_value("[data-testid=pref-class_year]") == "junior"
+        page.click("[data-testid=pref-kinds-box] summary")
+        assert page.locator("[data-testid=pref-kinds] [aria-label='Kind of work']").first.input_value() == "Finance"
+        page.click("[data-testid=pref-kind-add]")
+        new = page.locator("[data-testid=pref-kinds] tr").nth(-2)  # added above Other
+        new.locator("[aria-label='Kind of work']").fill("Real estate")
+        new.locator("textarea").fill("property management, real estate finance and development.")
+        new.locator("[aria-label='Real estate bonus'], [aria-label=' bonus']").first.fill("5")
+        page.click("summary:has-text('Fine-tuning')")  # fine-tuning: a new tag, the wearables one removed
         assert page.locator("[data-testid=pref-tags] tr").nth(1).locator("[aria-label='Tag name']").input_value() == "wearables"
         page.locator("[data-testid=pref-tags] tr").nth(1).get_by_text("Remove").click()
         page.click("[data-testid=pref-tag-add]")
@@ -223,6 +296,9 @@ try:
     assert cfg["preferences"]["term"] == "2027 - Fall" and cfg["preferences"]["class_year"] == "junior"
     assert cfg["preferences"]["term_id"] == "demo00000000000000000000fall2027"
     assert [t["name"] for t in cfg["preferences"]["tags"]] == ["AR/XR", "cars"]
+    keys = [c["key"] for c in cfg["preferences"]["categories"]]
+    assert cfg["preferences"]["field"] == "business" and keys[0] == "finance" and keys[-2:] == ["real_estate", "other"], keys
+    assert cfg["preferences"]["category_bonus"] == {"real_estate": 5}, cfg["preferences"]["category_bonus"]
     assert cfg["preferences"]["tags"][1] == {"name": "cars", "bonus": 7, "phrases": ["automotive", "EV"]}
     assert json.load(open(config.PROFILE_PATH))["resume_label"] == demo.RESUME_LABEL
     assert mode(client_path) == 0o600 and mode(config.LOCAL_DIR) == 0o700
