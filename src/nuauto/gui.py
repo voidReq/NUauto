@@ -486,6 +486,7 @@ def job_facts(r, data, d=None):
     pay = d.get("pay") or None
     hour = insights.hourly(pay)
     cat = p["category"] if p else categories.get(i)
+    cat = cat if cat in jobs.CATEGORIES else None  # not sorted into your current kinds yet
     return {"match": (scores.get(i) or {}).get("match"), "pay": pay, "pay_hour": hour[1] if hour else None,
             "score": p["rank"] if p else None, "score_text": jobs.rank_text(p) if p else None,
             "category": cat, "category_label": jobs.category_label(cat) if cat else None}
@@ -1198,6 +1199,10 @@ def setup_post(body):
             APP.run_now(["quick"])
         elif a == "prefs_save":
             onboard.save_config({"preferences": onboard.check_prefs(body.get("prefs"))})
+            # the pool at once by the new preferences (bars, bonuses, kinds of work: jobs sorted into kinds you no longer
+            # have show as not sorted yet until the next update sorts them), as the update's pool step builds it
+            jobs.save("pool.json", jobs.build_pool())
+            review_done()  # homelab mode: the homelab's next update uses them too
         elif a == "discord_save":
             onboard.save_webhook(body.get("url"))
             APP.run_now(["discord"])

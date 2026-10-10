@@ -692,15 +692,16 @@ def remember(**data):
     write_json(ONBOARD_PATH, found)
 
 
-def a_job_url():
-    """A NUworks job to open the Apply popup of: the best pool job that applies on NUworks itself."""
+def a_job_urls(limit=4):
+    """NUworks jobs to open the Apply popup of, best first: pool jobs that apply on NUworks itself; then jobs with
+    details that don't point to the company's site; then any listed job (a new student's pool can be empty: the first
+    update ran before they said what they study). The read tries them in turn until one has the Resume dropdown."""
     pool = jobs.load("pool.json", [])
-    plain = [r for r in pool if "apply on company site too?" not in r.get("flags", [])]
-    for r in plain + pool:
-        return jobs.job_url(r["id"])
+    ids = [r["id"] for r in pool if "apply on company site too?" not in r.get("flags", [])] + [r["id"] for r in pool]
+    ids += [i for i, d in jobs.load_details().items() if not jobs.external_hint(d)] + list(jobs.load("list.json", {}))
     if config.DEMO:
-        return jobs.job_url("900101")
-    return None
+        ids.append("900101")
+    return [jobs.job_url(i) for i in dict.fromkeys(ids)][:limit]
 
 
 def read_resume_labels():
@@ -711,8 +712,8 @@ def read_resume_labels():
     from nuauto import apply
     from nuauto import browser
     from nuauto.inspect_form import FIELDS_JS
-    url = a_job_url()
-    if url is None:
+    urls = a_job_urls()
+    if not urls:
         return remember(labels=None, labels_error="No job to open yet: check for new jobs first (Today), then try again.")
     log = health.MemoryLog()
     labels, error = None, None
@@ -722,24 +723,29 @@ def read_resume_labels():
             blocked = []
             browser.install_domain_lock(context, log, blocked)
             page = context.pages[0] if context.pages else context.new_page()
-            if not browser.goto_logged_in(page, context, url, log):
-                error = "Not logged in to NUworks: log in first (the button above)."
-            else:
+            for url in urls:  # until one job's popup has the Resume dropdown
+                blocked.clear()
+                if not browser.goto_logged_in(page, context, url, log):
+                    error = "Not logged in to NUworks: log in first (the button above)."
+                    break
                 btn = page.get_by_role("button", name=apply.APPLY_NAME)
                 if btn.count() != 1:
                     error = "That job has no Apply button; try again after the next update."
+                    continue
+                btn.click(timeout=10000)
+                browser.pause(page, 2, 3)
+                dialog = page.get_by_role("dialog")
+                found = [f for f in dialog.evaluate(FIELDS_JS) if apply.is_resume(f)] if dialog.count() == 1 else []
+                if len(found) != 1 or blocked:
+                    error = "That job's Apply popup has no Resume dropdown (it may send you elsewhere)."
                 else:
-                    btn.click(timeout=10000)
-                    browser.pause(page, 2, 3)
-                    dialog = page.get_by_role("dialog")
-                    found = [f for f in dialog.evaluate(FIELDS_JS) if apply.is_resume(f)] if dialog.count() == 1 else []
-                    if len(found) != 1 or blocked:
-                        error = "That job's Apply popup has no Resume dropdown (it may send you elsewhere)."
-                    else:
-                        labels = [o.strip() for o in found[0]["options"] if o.strip() and o.strip() != "Select a resume"]
-                    cancel = dialog.get_by_role("button", name="Cancel")
-                    if cancel.count() == 1:
-                        cancel.click()
+                    labels = [o.strip() for o in found[0]["options"] if o.strip() and o.strip() != "Select a resume"]
+                    error = None
+                cancel = dialog.get_by_role("button", name="Cancel")
+                if cancel.count() == 1:
+                    cancel.click()
+                if labels:
+                    break
         except Exception as e:
             error = f"Could not read NUworks ({type(e).__name__})."
         finally:

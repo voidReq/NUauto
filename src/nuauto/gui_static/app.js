@@ -808,7 +808,7 @@ const SORTS = {
 };
 const NO_KIND = "-";  // the kind-of-work filter's key for rows not sorted into one yet
 const kindOf = (r) => r.category || NO_KIND;
-const kindLabel = (k, rows) => k === NO_KIND ? "kind not known yet" :
+const kindLabel = (k, rows) => k === NO_KIND ? "not sorted yet" :
   ((rows || []).find((r) => r.category === k) || {}).category_label || k.replace(/_/g, " ");
 function sortRows(rows, how) {
   const key = SORTS[how] && SORTS[how][1];

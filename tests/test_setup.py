@@ -141,6 +141,23 @@ onboard.save_config({"preferences": {**clean, "class_year": "junior", "term": "2
 assert jobs.MY_YEAR == 2 and jobs.TERM_TEXT == "fall 2027" and json.load(open(config.LOCAL_CONFIG_PATH))["preferences"]["class_year"] == "junior"
 onboard.save_config({"preferences": None})
 jobs.set_prefs(None)
+# a job dropped by the first triage (an update before you said what you study: the engineering defaults) is triaged
+# again once the triage text changes; kept ones and decisions from before "by" was recorded stay
+eng = jobs.triage_set()
+triage = {"a": {"keep": False, "by": eng}, "b": {"keep": True, "by": eng}, "c": {"keep": False}}
+assert [jobs.needs_triage(triage, i) for i in "abcd"] == [False, False, False, True]
+jobs.set_prefs({**fields.preset("health"), "field": "health"})
+assert jobs.triage_set() != eng and [jobs.needs_triage(triage, i) for i in "abcd"] == [True, False, False, True]
+jobs.set_prefs(None)
+# the resume-label read needs one NUworks job: the pool's best; with no pool (a new student's can be empty), any job
+# with details that applies on NUworks, then any listed one (demo mode adds its own job last)
+demo_job = [jobs.job_url("900101")]
+jobs.save("list.json", {"l1": {}, "l2": {}})
+assert onboard.a_job_urls() == [jobs.job_url("l1"), jobs.job_url("l2")] + demo_job
+jobs.save("pool.json", [{"id": "p1", "flags": ["apply on company site too?"]}, {"id": "p2", "flags": []}])
+assert onboard.a_job_urls()[:3] == [jobs.job_url("p2"), jobs.job_url("p1"), jobs.job_url("l1")]
+os.remove(jobs.path("pool.json")); os.remove(jobs.path("list.json"))
+assert onboard.a_job_urls() == demo_job
 
 # the term list: found wherever it sits in NUworks' JSON, sorted, non-terms ignored
 found = onboard.find_terms({"a": [{"_id": "x1", "_label": "2027 - Spring"}, {"_id": "j", "_label": "Co-op"}],
@@ -236,10 +253,19 @@ try:
         page.wait_for_selector("[data-testid=pref-term-select]", timeout=60000)
         page.select_option("[data-testid=pref-term-select]", label="2027 - Fall")
         page.select_option("[data-testid=pref-class_year]", "junior")
-        # what you study: Business fills in its starting values (term, year and tags stay); its kinds of work show
+        # what you study: a first setup picks it before saving; Business fills in its starting values (term, year and
+        # tags stay; no confirm, nothing of yours to replace yet); its kinds of work show
+        assert page.locator("[data-testid=pref-field] [aria-pressed=true]").count() == 0
+        page.wait_for_selector("[data-testid=prefs-defaults]")
+        page.click("[data-testid=pref-save]")
+        page.wait_for_selector("[data-testid=toast].error:has-text('Pick what you study first')")
+        assert "done" not in (page.get_attribute("[data-testid=step-preferences]", "class") or "")
         page.click("[data-testid=pref-field-business]")
-        page.click("[data-testid=confirm-yes]")
         page.wait_for_selector("[data-testid=pref-field-business][aria-pressed=true]")
+        page.wait_for_selector("[data-testid=prefs-picked]")
+        page.click("[data-testid=pref-field-health]")  # switching again asks first: Cancel keeps Business
+        page.click(".modal button:has-text('Cancel'), [role=dialog] button:has-text('Cancel')")
+        assert page.get_attribute("[data-testid=pref-field-business]", "aria-pressed") == "true"
         assert "D'Amore-McKim" in page.input_value("[data-testid=pref-student]")
         assert page.input_value("[data-testid=pref-class_year]") == "junior"
         page.click("[data-testid=pref-kinds-box] summary")

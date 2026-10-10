@@ -156,6 +156,8 @@ set_categories()
 
 def category_label(key):
     """What screens call a kind of work ("uncategorized": not sorted yet)."""
+    if key == "uncategorized":
+        return "not sorted yet"
     return next((c["label"] for c in PREFS["categories"] if c["key"] == key), (key or "").replace("_", " "))
 CAT_BATCH = 120
 
@@ -444,9 +446,23 @@ def render_prompt(name):
 
 # ---------------------------------------------------------------- 2. triage
 
+def triage_set():
+    """Which triage text (who you are, the roles to keep / drop) a decision was made with: a short hash."""
+    import hashlib
+    return hashlib.sha256("\n".join(str(PREFS[k]) for k in PROMPT_FIELDS).encode()).hexdigest()[:12]
+
+
+def needs_triage(triage, i):
+    """Not triaged yet, or dropped under other triage text (e.g. the engineering defaults, before a new student picked
+    what they study in setup): triaged again. Kept jobs stay kept; decisions from before this was recorded stay."""
+    t = triage.get(i)
+    return t is None or (not t.get("keep") and t.get("by", triage_set()) != triage_set())
+
+
 def cmd_triage_export():
     jobs, triage = load("list.json", {}), load("triage.json", {})
-    todo = [{k: j[k] for k in ("id", "title", "company", "location", "snippet")} for i, j in jobs.items() if i not in triage]
+    todo = [{k: j[k] for k in ("id", "title", "company", "location", "snippet")} for i, j in jobs.items()
+            if needs_triage(triage, i)]
     if not todo:
         print("Nothing to triage.")
         return []
@@ -462,7 +478,8 @@ def cmd_triage_import():
     if problems or bad:
         sys.exit("Not imported:\n  " + "\n  ".join(problems + ([f"{len(bad)} rows without a true/false keep"] if bad else [])))
     triage = load("triage.json", {})
-    triage.update({i: {"keep": r["keep"], "why": str(r.get("why", ""))[:200]} for i, r in results.items()})
+    by = triage_set()
+    triage.update({i: {"keep": r["keep"], "why": str(r.get("why", ""))[:200], "by": by} for i, r in results.items()})
     save("triage.json", triage)
     kept = sum(r["keep"] for r in results.values())
     print(f"Imported {len(results)} triage decisions: {kept} kept, {len(results) - kept} dropped.")

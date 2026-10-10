@@ -119,7 +119,10 @@ SETUP WIZARD (onboard.py + gui_static/setup.js; each step checks itself)
                ranking bonus, lower bar, always last; add / remove; Other always there, last). Then term (NUworks' own
                list, read-only; onboard.find_terms looks for terms anywhere in that JSON), year, graduation year,
                thresholds, home state, tags -> local_config.json "preferences" (docs/PIPELINE.md). onboard.check_prefs
-               checks it all (check_categories: keys from the names, unique, Other added).
+               checks it all (check_categories: keys from the names, unique, Other added). A first setup has no
+               field picked and Save asks for one. Saving rebuilds the pool (homelab mode: pushes). The resume-label
+               read (nuworks step) tries up to 4 jobs (onboard.a_job_urls: pool, then jobs with details, then any
+               listed job), so it works before the pool has anything for you.
   extras       Discord webhook (checked with a GET, posts nothing until you press Test), automatic updates
                (local mode: systemd user timer / launchd agent at 08:00 and 18:00), app icon
 

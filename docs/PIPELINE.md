@@ -43,6 +43,12 @@ WHAT YOU STUDY (fields.py, added 2026-10-10; preferences "field" and "categories
   another set (you changed field or the list's keys) counts as uncategorized and is sorted again on the next update
   (about one Claude call per 120 jobs). Jobs from before this file count as the engineering set. Changing only a
   name or description does not re-sort.
+- Triage the same way: each decision records which triage text it was made with ("by" in triage.json, a hash of
+  student / keep_roles / drop_roles). A job dropped under other text is triaged again (a new student's first update
+  runs before setup's preferences step, with the engineering defaults); kept jobs stay kept; decisions from before
+  "by" count as made with the current text (nothing re-triaged for an existing setup).
+- Saving preferences in the GUI rebuilds the pool at once (and pushes them to the homelab in homelab mode); jobs in
+  kinds you no longer have show as "not sorted yet" until the next update sorts them.
 - Rating rotation (RATE_ORDER), Insights labels, the GUI's labels and the terminal viewer's colors (the biggest
   bonus red, other bonuses green, rank_last dim) come from the list.
 

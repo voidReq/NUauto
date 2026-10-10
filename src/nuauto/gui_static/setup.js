@@ -155,7 +155,8 @@
     preferences(s, redraw) {
       // p: the form's values. Picking what you study fills in that field's starting values (onboard: fields.preset)
       // and draws the step again from p; nothing is saved until Save.
-      const p = { ...s.data.prefs, field: s.data.prefs.field || "engineering" };
+      // a first setup picks what you study before anything is saved (the defaults are one engineering student's)
+      const p = { ...s.data.prefs, field: s.data.using_defaults ? null : s.data.prefs.field || "engineering" };
       const FIELDS = s.data.fields;
       const box = el("div", { class: "stack" });
       let f = {}, year, kinds = [], tagRows = [];
@@ -175,17 +176,20 @@
           tags: tagRows.map((r) => ({ name: r.name.value, bonus: r.bonus.value, phrases: r.phrases.value })) };
       }
 
+      function use(key) {
+        const now = collect();  // what you typed stays (the tags' phrases back to lists, as draw takes them)
+        now.tags = now.tags.map((t) => ({ ...t, phrases: t.phrases.split(",").map((x) => x.trim()).filter(Boolean) }));
+        Object.assign(p, now, FIELDS[key], { field: key });
+        delete p.label;
+        draw();
+      }
+
       function pick(key) {
         if (key === p.field) return;
+        if (!p.field) return use(key);  // a first setup: nothing of yours to replace yet
         confirmBox(`Use the ${FIELDS[key].label} starting values?`, "This fills in: about you, the roles that fit and that don't, " +
           "the words in your major's name, and the kinds of work jobs are sorted into (with their bonuses). Your term, year, " +
-          "match bars, home state and tags stay. You can change all of it before you save.", "Fill them in", () => {
-            const now = collect();  // what you typed stays (the tags' phrases back to lists, as draw takes them)
-            now.tags = now.tags.map((t) => ({ ...t, phrases: t.phrases.split(",").map((x) => x.trim()).filter(Boolean) }));
-            Object.assign(p, now, FIELDS[key], { field: key });
-            delete p.label;
-            draw();
-          });
+          "match bars, home state and tags stay. You can change all of it before you save.", "Fill them in", () => use(key));
       }
 
       function draw() {
@@ -228,6 +232,7 @@
         };
         (p.tags || []).forEach((t) => addTag(t));
         const save = async () => {
+          if (!p.field) { toast("Pick what you study first (at the top).", { error: true }); study.scrollIntoView({ block: "center" }); return; }
           if (await post({ action: "prefs_save", prefs: collect() }, "Preferences saved.")) redraw();
         };
         const field = (label, help, node) => el("label", { class: "field" }, label, help ? el("span", { class: "muted small", text: help }) : null, node);
@@ -235,7 +240,8 @@
           ...Object.entries(FIELDS).map(([k, x]) => el("button", { type: "button", "aria-pressed": String(p.field === k), testid: `pref-field-${k}`,
             text: x.label, onclick: () => pick(k) })));
         fill(box,
-          s.data.using_defaults ? el("div", { class: "note warn", testid: "prefs-defaults", text: "These are NUauto's original settings (a 2nd-year ECE student aiming at Spring 2027, with security and embedded roles first). Pick what you study, make them yours, then Save." }) : null,
+          s.data.using_defaults && !p.field ? el("div", { class: "note warn", testid: "prefs-defaults", text: "Start with what you study: it fills in the rest with starting values for your field. Then make them yours and Save." }) :
+            s.data.using_defaults ? el("div", { class: "note", testid: "prefs-picked", text: `Starting values for ${FIELDS[p.field].label}. Check each one (the term, your year, about you), then Save.` }) : null,
           field("What do you study?", "Fills in starting values for the rest (you can change them): who you are and the roles for Claude, the words in your major's name, and the kinds of work.", study),
           el("div", { class: "grid2" },
             el("div", { class: "stack" },
