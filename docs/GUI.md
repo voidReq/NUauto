@@ -112,9 +112,14 @@ SETUP WIZARD (onboard.py + gui_static/setup.js; each step checks itself)
   resume       native file dialog (osascript / zenity / kdialog) or a path; the PDF must have text
   nuworks      login (Firefox window; you type nothing into NUauto), then the resume label read from one job's
                real Apply popup (read-only: opens it, reads the Resume dropdown, Cancel)
-  preferences  term (NUworks' own list, read-only; onboard.find_terms looks for terms anywhere in that JSON),
-               year, graduation year, major words, Claude's description of you, thresholds, priorities, tags
-               -> local_config.json "preferences" (docs/PIPELINE.md)
+  preferences  what you study first (fields.py: Engineering or CS, Business, Health sciences or nursing, Natural
+               sciences or math, Social sciences or humanities, Arts, media or design): picking one fills in that
+               field's starting values (after a confirm; term, year, bars, home state and tags stay): Claude's
+               description of you, the roles to keep / drop, major words, and the kinds of work (name, what counts,
+               ranking bonus, lower bar, always last; add / remove; Other always there, last). Then term (NUworks' own
+               list, read-only; onboard.find_terms looks for terms anywhere in that JSON), year, graduation year,
+               thresholds, home state, tags -> local_config.json "preferences" (docs/PIPELINE.md). onboard.check_prefs
+               checks it all (check_categories: keys from the names, unique, Other added).
   extras       Discord webhook (checked with a GET, posts nothing until you press Test), automatic updates
                (local mode: systemd user timer / launchd agent at 08:00 and 18:00), app icon
 

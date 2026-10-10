@@ -3,7 +3,7 @@
 "use strict";
 
 (function () {
-  const { el, api, action, toast, fail, S, pollState, pollHealth, linkOut } = window.NUauto;
+  const { el, fill, api, action, toast, fail, confirmBox, S, pollState, pollHealth, linkOut } = window.NUauto;
   let open = null;  // the step shown open (default: the first one not done)
 
   function chip(status) {
@@ -153,76 +153,123 @@
     },
 
     preferences(s, redraw) {
-      const p = s.data.prefs;
-      const f = {};
-      const input = (key, attrs = {}) => (f[key] = el("input", { type: "text", value: p[key] ?? "", "aria-label": key, testid: `pref-${key}`, ...attrs }));
-      const area = (key) => (f[key] = el("textarea", { rows: "4", "aria-label": key, testid: `pref-${key}` }, String(p[key] || "")));
-      const terms = s.data.terms || [];
-      const termSel = terms.length ? el("select", { testid: "pref-term-select", "aria-label": "Term", onchange: (e) => {
-        const t = terms.find((x) => x.id === e.target.value); if (t) { f.term.value = t.label; f.term_id.value = t.id; } } },
-        el("option", { value: "", text: "Choose your co-op term…" }), ...terms.map((t) => el("option", { value: t.id, text: t.label, selected: t.id === p.term_id }))) : null;
-      const year = (f.class_year = el("select", { testid: "pref-class_year", "aria-label": "Your year" },
-        ...s.data.years.map((y) => el("option", { value: y, text: y[0].toUpperCase() + y.slice(1), selected: y === p.class_year }))));
-      const cats = s.data.categories;
-      const bonus = {}, bar = {}, last = {};
-      const catRows = cats.map((c) => el("tr", {}, el("td", { text: c.replace("_", " ") }),
-        el("td", {}, (bonus[c] = el("input", { type: "number", value: p.category_bonus[c] ?? "", placeholder: "0", "aria-label": `${c} bonus` }))),
-        el("td", {}, (bar[c] = el("input", { type: "number", value: p.category_threshold[c] ?? "", placeholder: "usual", "aria-label": `${c} lower bar` }))),
-        el("td", {}, (last[c] = el("input", { type: "checkbox", checked: p.rank_last.includes(c), "aria-label": `${c} rank last` })))));
-      const tagRows = [];
-      const tagBody = el("tbody", { testid: "pref-tags" });
-      const addTag = (t = { name: "", bonus: "", phrases: [] }) => {
-        const row = { name: el("input", { type: "text", value: t.name, placeholder: "name", "aria-label": "Tag name" }),
-          bonus: el("input", { type: "number", value: t.bonus, placeholder: "0", "aria-label": "Tag bonus" }),
-          phrases: el("textarea", { rows: "3", placeholder: "automotive, EV", "aria-label": "Tag phrases" }, t.phrases.join(", ")) };
-        const tr = el("tr", {}, el("td", { class: "tagname" }, row.name), el("td", { class: "wide" }, row.phrases), el("td", {}, row.bonus),
-          el("td", { class: "narrow" }, el("button", { class: "btn small", text: "Remove", onclick: () => { tagRows.splice(tagRows.indexOf(row), 1); tr.remove(); } })));
-        tagRows.push(row);
-        tagBody.append(tr);
-      };
-      (p.tags || []).forEach((t) => addTag(t));
-      const save = async () => {
-        const prefs = { term: f.term.value, term_id: f.term_id.value, class_year: year.value, threshold: f.threshold.value,
+      // p: the form's values. Picking what you study fills in that field's starting values (onboard: fields.preset)
+      // and draws the step again from p; nothing is saved until Save.
+      const p = { ...s.data.prefs, field: s.data.prefs.field || "engineering" };
+      const FIELDS = s.data.fields;
+      const box = el("div", { class: "stack" });
+      let f = {}, year, kinds = [], tagRows = [];
+      const slug = (t) => t.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 30);
+      const keyOf = (k) => k.key || slug(k.label.value);
+
+      function collect() {  // the form, as check_prefs takes it
+        const live = kinds.filter((k) => k.label.value.trim() || k.desc.value.trim());
+        return { field: p.field, term: f.term.value, term_id: f.term_id.value, class_year: year.value, threshold: f.threshold.value,
           threshold_above: f.threshold_above.value, grad_year: f.grad_year.value, major_words: f.major_words.value,
           home_state: f.home_state.value, home_label: f.home_label.value, home_bonus: f.home_bonus.value,
           student: f.student.value, keep_roles: f.keep_roles.value, drop_roles: f.drop_roles.value,
-          category_bonus: Object.fromEntries(cats.filter((c) => bonus[c].value !== "").map((c) => [c, bonus[c].value])),
-          category_threshold: Object.fromEntries(cats.filter((c) => bar[c].value !== "").map((c) => [c, bar[c].value])),
-          rank_last: cats.filter((c) => last[c].checked),
+          categories: live.map((k) => ({ key: keyOf(k), label: k.label.value, description: k.desc.value })),
+          category_bonus: Object.fromEntries(live.filter((k) => k.bonus.value !== "").map((k) => [keyOf(k), k.bonus.value])),
+          category_threshold: Object.fromEntries(live.filter((k) => k.bar.value !== "").map((k) => [keyOf(k), k.bar.value])),
+          rank_last: live.filter((k) => k.last.checked).map(keyOf),
           tags: tagRows.map((r) => ({ name: r.name.value, bonus: r.bonus.value, phrases: r.phrases.value })) };
-        if (await post({ action: "prefs_save", prefs }, "Preferences saved.")) redraw();
-      };
-      const field = (label, help, node) => el("label", { class: "field" }, label, help ? el("span", { class: "muted small", text: help }) : null, node);
-      return [
-        s.data.using_defaults ? el("div", { class: "note warn", testid: "prefs-defaults", text: "These are NUauto's original settings (a 2nd-year ECE student aiming at Spring 2027, with security and embedded roles first). Make them yours, then Save." }) : null,
-        el("div", { class: "grid2" },
-          el("div", { class: "stack" },
-            field("Co-op term", "As NUworks names it.", el("div", { class: "stack" }, termSel, el("div", { class: "row" }, input("term", { placeholder: "2027 - Spring" }),
-              el("button", { class: "btn small", text: "Read the list from NUworks", testid: "pref-terms-read",
-                onclick: () => post({ action: "terms_read" }).then((r) => { if (r && r.task) { S.task = r.task; S.taskLog = []; S.taskAfter = 0; pollState(); } }) })))),
-            s.data.terms_error ? el("div", { class: "note warn small", text: s.data.terms_error }) : null,
-            field("Term ID", "NUworks' ID for that term (filled in when you pick from the list).", input("term_id")),
-            field("Your year", "", year),
-            field("Graduation year", "", input("grad_year", { type: "number" })),
-            field("Words in your major's name", "Comma-separated. A job for majors without them is flagged, not dropped.",
-              (f.major_words = el("input", { type: "text", value: (p.major_words || []).join(", "), testid: "pref-major_words", "aria-label": "Major words" })))),
-          el("div", { class: "stack" },
-            field("About you, for Claude", "Year, major, interests: one or two sentences.", area("student")),
-            field("Roles that fit you", "Claude keeps these in its first pass.", area("keep_roles")),
-            field("Roles that clearly don't", "Claude drops only these.", area("drop_roles")))),
-        el("div", { class: "row" }, field("Match needed", "% for jobs open to your year", input("threshold", { type: "number" })),
-          field("…for the year above yours", "% (two years up: dropped)", input("threshold_above", { type: "number" }))),
-        el("details", {}, el("summary", { text: "Fine-tuning: home state, priorities, tags" }),
-          el("div", { class: "row" }, field("Home state", "2 letters", input("home_state")), field("Its name", "shown in notes", input("home_label")),
-            field("Ranking bonus", "points", input("home_bonus", { type: "number" }))),
-          el("table", { class: "grid" }, el("thead", {}, el("tr", {}, ...["Category", "Ranking bonus", "Lower match bar", "Always last"].map((h) => el("th", { text: h })))),
-            el("tbody", {}, ...catRows)),
-          el("p", { class: "small muted", text: "Tags: extra ranking points when any of a tag's phrases is in the job (whole words, any case). A job gets only the first tag that matches, from the top." }),
-          el("table", { class: "grid" }, el("thead", {}, el("tr", {}, ...["Tag", "Phrases (comma-separated)", "Ranking bonus", ""].map((h) => el("th", { text: h })))),
-            tagBody),
-          el("div", { class: "row" }, el("button", { class: "btn small", text: "Add a tag", testid: "pref-tag-add", onclick: () => addTag() }))),
-        el("div", { class: "row" }, el("button", { class: "btn primary", text: "Save preferences", testid: "pref-save", onclick: save })),
-      ];
+      }
+
+      function pick(key) {
+        if (key === p.field) return;
+        confirmBox(`Use the ${FIELDS[key].label} starting values?`, "This fills in: about you, the roles that fit and that don't, " +
+          "the words in your major's name, and the kinds of work jobs are sorted into (with their bonuses). Your term, year, " +
+          "match bars, home state and tags stay. You can change all of it before you save.", "Fill them in", () => {
+            const now = collect();  // what you typed stays (the tags' phrases back to lists, as draw takes them)
+            now.tags = now.tags.map((t) => ({ ...t, phrases: t.phrases.split(",").map((x) => x.trim()).filter(Boolean) }));
+            Object.assign(p, now, FIELDS[key], { field: key });
+            delete p.label;
+            draw();
+          });
+      }
+
+      function draw() {
+        f = {}; kinds = []; tagRows = [];
+        const input = (key, attrs = {}) => (f[key] = el("input", { type: "text", value: p[key] ?? "", "aria-label": key, testid: `pref-${key}`, ...attrs }));
+        const area = (key) => (f[key] = el("textarea", { rows: "4", "aria-label": key, testid: `pref-${key}` }, String(p[key] || "")));
+        const terms = s.data.terms || [];
+        const termSel = terms.length ? el("select", { testid: "pref-term-select", "aria-label": "Term", onchange: (e) => {
+          const t = terms.find((x) => x.id === e.target.value); if (t) { f.term.value = t.label; f.term_id.value = t.id; } } },
+          el("option", { value: "", text: "Choose your co-op term…" }), ...terms.map((t) => el("option", { value: t.id, text: t.label, selected: t.id === p.term_id }))) : null;
+        year = el("select", { testid: "pref-class_year", "aria-label": "Your year" },
+          ...s.data.years.map((y) => el("option", { value: y, text: y[0].toUpperCase() + y.slice(1), selected: y === p.class_year })));
+        // the kinds of work: name, what counts (Claude reads it), bonus, lower bar, always last
+        const kindBody = el("tbody", { testid: "pref-kinds" });
+        const addKind = (c = { key: "", label: "", description: "" }) => {
+          const other = c.key === "other";
+          const k = { key: c.key, label: el("input", { type: "text", value: c.label, placeholder: "name", "aria-label": "Kind of work", disabled: other }),
+            desc: el("textarea", { rows: "2", "aria-label": `What counts as ${c.label || "this kind"}`, placeholder: "what counts: the roles, in a line" }, c.description),
+            bonus: el("input", { type: "number", value: p.category_bonus[c.key] ?? "", placeholder: "0", "aria-label": `${c.label} bonus` }),
+            bar: el("input", { type: "number", value: p.category_threshold[c.key] ?? "", placeholder: "usual", "aria-label": `${c.label} lower bar` }),
+            last: el("input", { type: "checkbox", checked: (p.rank_last || []).includes(c.key), "aria-label": `${c.label} rank last` }) };
+          const tr = el("tr", {}, el("td", { class: "tagname" }, k.label), el("td", { class: "wide" }, k.desc), el("td", {}, k.bonus), el("td", {}, k.bar),
+            el("td", { class: "narrow" }, k.last), el("td", { class: "narrow" }, other ? null :
+              el("button", { class: "btn small", text: "Remove", onclick: () => { kinds.splice(kinds.indexOf(k), 1); tr.remove(); } })));
+          k.tr = tr;
+          const last = kinds.find((x) => x.key === "other");  // Other stays at the end
+          if (last && !other) { kinds.splice(kinds.indexOf(last), 0, k); kindBody.insertBefore(tr, last.tr); } else { kinds.push(k); kindBody.append(tr); }
+        };
+        (p.categories || []).forEach((c) => addKind(c));
+        if (!(p.categories || []).some((c) => c.key === "other")) addKind({ key: "other", label: "Other", description: "anything else." });
+        const tagBody = el("tbody", { testid: "pref-tags" });
+        const addTag = (t = { name: "", bonus: "", phrases: [] }) => {
+          const row = { name: el("input", { type: "text", value: t.name, placeholder: "name", "aria-label": "Tag name" }),
+            bonus: el("input", { type: "number", value: t.bonus, placeholder: "0", "aria-label": "Tag bonus" }),
+            phrases: el("textarea", { rows: "3", placeholder: "automotive, EV", "aria-label": "Tag phrases" }, t.phrases.join(", ")) };
+          const tr = el("tr", {}, el("td", { class: "tagname" }, row.name), el("td", { class: "wide" }, row.phrases), el("td", {}, row.bonus),
+            el("td", { class: "narrow" }, el("button", { class: "btn small", text: "Remove", onclick: () => { tagRows.splice(tagRows.indexOf(row), 1); tr.remove(); } })));
+          tagRows.push(row);
+          tagBody.append(tr);
+        };
+        (p.tags || []).forEach((t) => addTag(t));
+        const save = async () => {
+          if (await post({ action: "prefs_save", prefs: collect() }, "Preferences saved.")) redraw();
+        };
+        const field = (label, help, node) => el("label", { class: "field" }, label, help ? el("span", { class: "muted small", text: help }) : null, node);
+        const study = el("div", { class: "seg wrap", role: "group", "aria-label": "What you study", testid: "pref-field" },
+          ...Object.entries(FIELDS).map(([k, x]) => el("button", { type: "button", "aria-pressed": String(p.field === k), testid: `pref-field-${k}`,
+            text: x.label, onclick: () => pick(k) })));
+        fill(box,
+          s.data.using_defaults ? el("div", { class: "note warn", testid: "prefs-defaults", text: "These are NUauto's original settings (a 2nd-year ECE student aiming at Spring 2027, with security and embedded roles first). Pick what you study, make them yours, then Save." }) : null,
+          field("What do you study?", "Fills in starting values for the rest (you can change them): who you are and the roles for Claude, the words in your major's name, and the kinds of work.", study),
+          el("div", { class: "grid2" },
+            el("div", { class: "stack" },
+              field("Co-op term", "As NUworks names it.", el("div", { class: "stack" }, termSel, el("div", { class: "row" }, input("term", { placeholder: "2027 - Spring" }),
+                el("button", { class: "btn small", text: "Read the list from NUworks", testid: "pref-terms-read",
+                  onclick: () => post({ action: "terms_read" }).then((r) => { if (r && r.task) { S.task = r.task; S.taskLog = []; S.taskAfter = 0; pollState(); } }) })))),
+              s.data.terms_error ? el("div", { class: "note warn small", text: s.data.terms_error }) : null,
+              field("Term ID", "NUworks' ID for that term (filled in when you pick from the list).", input("term_id")),
+              field("Your year", "", year),
+              field("Graduation year", "", input("grad_year", { type: "number" })),
+              field("Words in your major's name", "Comma-separated. A job for majors without them is flagged, not dropped.",
+                (f.major_words = el("input", { type: "text", value: (p.major_words || []).join(", "), testid: "pref-major_words", "aria-label": "Major words" })))),
+            el("div", { class: "stack" },
+              field("About you, for Claude", "Year, major, interests: one or two sentences.", area("student")),
+              field("Roles that fit you", "Claude keeps these in its first pass.", area("keep_roles")),
+              field("Roles that clearly don't", "Claude drops only these.", area("drop_roles")))),
+          el("div", { class: "row" }, field("Match needed", "% for jobs open to your year", input("threshold", { type: "number" })),
+            field("…for the year above yours", "% (two years up: dropped)", input("threshold_above", { type: "number" }))),
+          el("details", { testid: "pref-kinds-box" }, el("summary", { text: `Kinds of work: ${(p.categories || []).map((c) => c.label).join(", ")}` }),
+            el("p", { class: "small muted", text: "Claude sorts every job into one of these (Review and Apply can show one kind at a time). Change the list and the jobs are sorted again on the next update. A ranking bonus moves that kind up; a lower match bar lets more of it into your pool; always last keeps it in the pool but at the end." }),
+            el("div", { class: "table-scroll" }, el("table", { class: "grid" }, el("thead", {}, el("tr", {}, ...["Kind of work", "What counts (Claude reads this)", "Ranking bonus", "Lower match bar", "Always last", ""].map((h) => el("th", { text: h })))),
+              kindBody)),
+            el("div", { class: "row" }, el("button", { class: "btn small", text: "Add a kind of work", testid: "pref-kind-add", onclick: () => addKind() }))),
+          el("details", {}, el("summary", { text: "Fine-tuning: home state, tags" }),
+            el("div", { class: "row" }, field("Home state", "2 letters", input("home_state")), field("Its name", "shown in notes", input("home_label")),
+              field("Ranking bonus", "points", input("home_bonus", { type: "number" }))),
+            el("p", { class: "small muted", text: "Tags: extra ranking points when any of a tag's phrases is in the job (whole words, any case). A job gets only the first tag that matches, from the top." }),
+            el("table", { class: "grid" }, el("thead", {}, el("tr", {}, ...["Tag", "Phrases (comma-separated)", "Ranking bonus", ""].map((h) => el("th", { text: h })))),
+              tagBody),
+            el("div", { class: "row" }, el("button", { class: "btn small", text: "Add a tag", testid: "pref-tag-add", onclick: () => addTag() }))),
+          el("div", { class: "row" }, el("button", { class: "btn primary", text: "Save preferences", testid: "pref-save", onclick: save })));
+      }
+      draw();
+      return [box];
     },
 
     extras(s, redraw) {

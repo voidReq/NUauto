@@ -14,9 +14,6 @@ from datetime import date
 
 from nuauto import jobs
 
-CATEGORY_LABELS = {"security": "Security", "embedded": "Embedded", "hardware": "Hardware", "systems": "Systems",
-                   "robotics_test": "Robotics / test", "software": "Software", "data_ml": "Data / ML", "it": "IT",
-                   "fullstack_web": "Web / full-stack", "other": "Other"}
 PAY_BUCKETS = [(0, 20, "< $20"), (20, 25, "$20–25"), (25, 30, "$25–30"), (30, 35, "$30–35"),
                (35, 40, "$35–40"), (40, 1e9, "$40+")]
 HOURS_PER_YEAR = 2080
@@ -88,7 +85,7 @@ def group(entries, today):
         places[STATES[state] if state else label] += 1
         if state:
             cities[f"{label}, {state}"] += 1
-    cats = Counter(CATEGORY_LABELS.get(c, "Other") for _, c in entries if c)
+    cats = Counter(jobs.category_label(c) if c in jobs.CATEGORIES else jobs.category_label("other") for _, c in entries if c)
     closing = [jobs.closes(d) for d, _ in entries if d]
     week = sum(1 for c in closing if c and 0 <= (c - today).days <= 7)
     return {

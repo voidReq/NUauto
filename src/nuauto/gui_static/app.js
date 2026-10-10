@@ -767,7 +767,7 @@ function jobCard(c, j, mine, compact) {  // compact: the posting is cut short, w
     return out;
   };
   return el("article", { class: "card job", testid: "job-card", "data-job": c.id },
-    el("div", { class: "row between" }, el("div", { class: "row" }, el("span", { class: "chip accent", text: c.category.replace("_", " ") }),
+    el("div", { class: "row between" }, el("div", { class: "row" }, el("span", { class: "chip accent", text: c.category_label || c.category.replace("_", " ") }),
       c.tag ? el("span", { class: "chip", text: c.tag }) : null, j.soon ? el("span", { class: "chip warn", text: "closing soon" }) : null,
       mine ? el("span", { class: "chip ok", text: mine.decision === "approve" ? `approved · row ${mine.row}` : `you said ${mine.decision}` }) :
         j.rating === 1 ? el("span", { class: "chip ok", text: "rated yes" }) : j.rating === 0 ? el("span", { class: "chip", text: "rated no" }) : null)),
@@ -808,7 +808,8 @@ const SORTS = {
 };
 const NO_KIND = "-";  // the kind-of-work filter's key for rows not sorted into one yet
 const kindOf = (r) => r.category || NO_KIND;
-const kindLabel = (k) => k === NO_KIND ? "kind not known yet" : k.replace(/_/g, " ");
+const kindLabel = (k, rows) => k === NO_KIND ? "kind not known yet" :
+  ((rows || []).find((r) => r.category === k) || {}).category_label || k.replace(/_/g, " ");
 function sortRows(rows, how) {
   const key = SORTS[how] && SORTS[how][1];
   if (!key) return rows;
@@ -874,7 +875,7 @@ screens.apply = async (view) => {
     const cat = el("select", { testid: "apply-kind", "aria-label": "Kind of work",
       onchange: (e) => { kind = e.target.value; sessionStorage.setItem("applyKind", kind); drawPane(); } },
       el("option", { value: "", text: `All kinds of work (${rows.length})` }),
-      ...keys.map((k) => el("option", { value: k, text: `${kindLabel(k)} (${n[k] || 0})`, selected: k === kind })));
+      ...keys.map((k) => el("option", { value: k, text: `${kindLabel(k, rows)} (${n[k] || 0})`, selected: k === kind })));
     return el("div", { class: "row end" }, el("label", { class: "small muted" }, "Show ", cat),
       el("label", { class: "small muted" }, tab === "nuworks" ? "Apply in this order: " : "Sort the list by ", sel));
   }
@@ -1406,7 +1407,7 @@ async function route() {
 }
 
 window.addEventListener("hashchange", route);
-window.NUauto = { el, api, action, toast, fail, modal, confirmBox, S, pollState, pollHealth, linkOut, plural, ago };
+window.NUauto = { el, fill, api, action, toast, fail, modal, confirmBox, S, pollState, pollHealth, linkOut, plural, ago };
 
 (async function start() {
   await pollState();

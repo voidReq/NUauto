@@ -29,6 +29,7 @@ from datetime import date
 from urllib.parse import urlparse
 
 from nuauto import config
+from nuauto import fields
 from nuauto import sheet
 
 HOST = "https://northeastern-csm.symplicity.com"
@@ -36,16 +37,20 @@ HOST = "https://northeastern-csm.symplicity.com"
 # Your preferences: local_config.json "preferences" (the GUI's setup wizard writes them). A missing key uses the
 # default below. The defaults are this project's original settings (decided 2026-10-02), so a setup without
 # preferences works exactly as before.
+_ENG = fields.FIELDS["engineering"]  # what you study (fields.py): the original settings are the engineering ones
 DEFAULTS = {
+    "field": "engineering",                         # what you study (fields.FIELDS): the wizard's starting values
     "term": "2027 - Spring",                        # your co-op term, as NUworks names it
     "term_id": "d13c36bce4531e63c56c9b58b90dbb71",  # its el_work_term id (from /api/v2/jobs/filters/students)
     "class_year": "sophomore",                      # yours: freshman, sophomore, junior or senior
     "threshold": 65,           # match % needed when the job is open to your year (or names no year)
     "threshold_above": 90,     # ...when its lowest year is the one after yours (two or more years up: dropped)
-    "category_threshold": {"security": 60},  # a lower bar for roles you care most about (not for "above your year")
-    "major_words": ["college of engineering", "electrical"],  # a targeted major without these words: flagged
+    "category_threshold": _ENG["category_threshold"],  # a lower bar for roles you care most about (not "above your year")
+    "major_words": _ENG["major_words"],  # a targeted major without these words: flagged
     "home_state": "MA", "home_label": "Boston", "home_bonus": 10,  # ranking only (not for getting into the pool)
-    "category_bonus": {"security": 20, "embedded": 15, "hardware": 10, "systems": 10, "robotics_test": 10},  # ranking
+    "category_bonus": _ENG["category_bonus"],  # ranking
+    # the kinds of work Claude sorts jobs into (prompts/CATEGORY_PROMPT.md): key, label, description; "other" always
+    "categories": _ENG["categories"],
     # ranking only: a tag is given when any of its phrases is anywhere in the job (job_tag); the first tag that matches
     # wins (one per job, not added up)
     "tags": [{"name": "AR/XR", "bonus": 5, "phrases": [
@@ -53,19 +58,12 @@ DEFAULTS = {
                  "smart glasses", "smartglasses", "head mounted", "HMD", "spatial computing", "hololens", "vision pro",
                  "meta quest"]},
              {"name": "wearables", "bonus": 3, "phrases": ["wearable", "wearables"]}],
-    "rank_last": ["fullstack_web"],             # categories that stay in the pool but always rank last
+    "rank_last": _ENG["rank_last"],             # categories that stay in the pool but always rank last
     "grad_year": 2029,                          # flags postings that mention graduating in the 4 years before
     # for Claude's triage (prompts/TRIAGE_PROMPT.md): who you are, the roles that fit, the ones that clearly don't
-    "student": "2nd-year Electrical & Computer Engineering (math minor). Interests sit at\n"
-               "intersections of embedded systems, hardware, software, security/pentesting,\n"
-               "networking/Linux, robotics/controls, AR/VR, computer architecture.",
-    "keep_roles": "software, firmware/embedded, electrical/computer/hardware engineering,\n"
-                  "  test/validation, security/IT/networking, robotics/controls, data/ML, R&D,\n"
-                  "  technical product or technical operations, lab/automation engineering, etc.",
-    "drop_roles": "accounting, finance,\n"
-                  "  marketing, sales, HR, nursing/clinical, pharmacy, law, purely biology/chemistry lab\n"
-                  "  work, pure mechanical/civil design with no electrical/software side, teaching,\n"
-                  "  hospitality.",
+    "student": _ENG["student"],
+    "keep_roles": _ENG["keep_roles"],
+    "drop_roles": _ENG["drop_roles"],
 }
 PREFS = {**DEFAULTS, **(config.LOCAL.get("preferences") or {})}
 YEARS = ["freshman", "sophomore", "junior", "senior"]
@@ -93,6 +91,7 @@ def set_prefs(prefs):
     TERM_TEXT, OTHER_TERM = term_patterns(PREFS["term"])
     GRAD_YEARS = grad_pattern()
     TAGS = tag_patterns(PREFS["tags"])
+    set_categories()
 
 
 SEASONS = ["spring", "summer", "fall", "autumn", "winter"]
@@ -141,8 +140,23 @@ def tag_bonus(tag):
     return next((t["bonus"] for t in PREFS["tags"] if t["name"] == tag), 0)
 
 
-CATEGORIES = {"security", "embedded", "hardware", "systems", "robotics_test", "fullstack_web",
-              "software", "data_ml", "it", "other"}
+def set_categories():
+    """CATEGORIES: your kinds of work (keys, in your order). CATEGORY_SET: which set that is (a job sorted into another
+    set is sorted again). RATE_ORDER: the rating rotation, your order with the rank_last ones after the rest
+    (engineering: security, embedded, hardware, systems, robotics_test, software, data_ml, it, other, fullstack_web)."""
+    global CATEGORIES, CATEGORY_SET, RATE_ORDER
+    CATEGORIES = [c["key"] for c in PREFS["categories"]]
+    CATEGORY_SET = fields.fingerprint(PREFS["categories"])
+    RATE_ORDER = ([c for c in CATEGORIES if c not in PREFS["rank_last"]] + [c for c in CATEGORIES if c in PREFS["rank_last"]]
+                  + ["uncategorized"])
+
+
+set_categories()
+
+
+def category_label(key):
+    """What screens call a kind of work ("uncategorized": not sorted yet)."""
+    return next((c["label"] for c in PREFS["categories"] if c["key"] == key), (key or "").replace("_", " "))
 CAT_BATCH = 120
 
 # a title naming another term even though NUworks tags the job with yours
@@ -419,6 +433,8 @@ def render_prompt(name):
         text = f.read()
     for key in PROMPT_FIELDS:
         text = text.replace("{{" + key + "}}", str(PREFS[key]))
+    text = text.replace("{{categories}}", fields.render_categories(PREFS["categories"]))
+    text = text.replace("{{first_category}}", CATEGORIES[0])
     os.makedirs(config.WORK_DIR, exist_ok=True)
     out = os.path.join(config.WORK_DIR, name)
     with open(out, "w") as f:
@@ -661,11 +677,22 @@ def cmd_score_import():
 
 # ---------------------------------------------------------------- 4b. category
 
+def categorized(cats, sets, i):
+    """Whether job i is sorted into one of your current kinds of work (sorted under another set of kinds, e.g.
+    before you changed field: no). Jobs sorted before sets were recorded were sorted into the engineering kinds."""
+    return cats.get(i) in CATEGORIES and sets.get(i, fields.ENGINEERING) == CATEGORY_SET
+
+
+def job_category(cats, sets, i):
+    return cats[i] if categorized(cats, sets, i) else "uncategorized"
+
+
 def cmd_cat_export():
     details, scores, cats = load_details(), load("scores.json", {}), load("categories.json", {})
+    sets = load("category_sets.json", {})
     todo = [{"id": i, "title": d["title"], "company": d["company"], "function": d["function"],
              "skills": d["skills"], "excerpt": d["description"][:600]}
-            for i, d in details.items() if i in scores and i not in cats]
+            for i, d in details.items() if i in scores and not categorized(cats, sets, i)]
     if not todo:
         print("Nothing to categorize.")
         return []
@@ -679,9 +706,11 @@ def cmd_cat_import():
     bad = [i for i, r in results.items() if r.get("category") not in CATEGORIES]
     if problems or bad:
         sys.exit("Not imported:\n  " + "\n  ".join(problems + ([f"{len(bad)} rows with a category not in {sorted(CATEGORIES)}"] if bad else [])))
-    cats = load("categories.json", {})
+    cats, sets = load("categories.json", {}), load("category_sets.json", {})
     cats.update({i: r["category"] for i, r in results.items()})
+    sets.update({i: CATEGORY_SET for i in results})
     save("categories.json", cats)
+    save("category_sets.json", sets)
     from collections import Counter
     print(f"Imported {len(results)} categories: {dict(Counter(r['category'] for r in results.values()).most_common())}")
 
@@ -774,13 +803,13 @@ def pool_entry(i, d, score, cat, threshold, flags):
 
 def build_pool():
     details, scores, still_listed = load_details(), load("scores.json", {}), load("list.json", {})
-    cats = load("categories.json", {})
+    cats, sets = load("categories.json", {}), load("category_sets.json", {})
     liked = {i for i, r in load("ratings.json", {}).items() if r.get("label") == 1}
     pool = []
     for i, d in details.items():
         if i not in scores or i not in still_listed:
             continue
-        cat = cats.get(i, "uncategorized")
+        cat = job_category(cats, sets, i)
         keep, threshold, flags = pool_entry_rules(d, scores[i], cat)
         if not keep:
             continue
@@ -797,7 +826,7 @@ def build_pool():
 def proposed_entries(rows, details):
     """Proposed sheet rows as pool-shaped entries (with "row"), for the approve queue: you put them there on purpose,
     so they show even below the pool bar (the flags say so). Returns (entries, rows_without_details_or_score)."""
-    scores, cats = load("scores.json", {}), load("categories.json", {})
+    scores, cats, sets = load("scores.json", {}), load("categories.json", {}), load("category_sets.json", {})
     entries, missing = [], []
     for r in rows:
         if r.status != "Proposed":
@@ -806,7 +835,7 @@ def proposed_entries(rows, details):
         if i not in details or i not in scores:
             missing.append(r)
             continue
-        d, cat = details[i], cats.get(i, "uncategorized")
+        d, cat = details[i], job_category(cats, sets, i)
         keep, threshold, flags = pool_entry_rules(d, scores[i], cat)
         if not keep:
             threshold = PREFS["threshold"]
@@ -889,8 +918,6 @@ def show(r, d):
     print("  " + d["description"][:500].replace("\n", " ") + ("..." if len(d["description"]) > 500 else ""))
 
 
-RATE_ORDER = ["security", "embedded", "hardware", "systems", "robotics_test", "software",
-              "data_ml", "it", "other", "fullstack_web", "uncategorized"]
 
 
 def rating_order(pool):
@@ -1038,8 +1065,11 @@ def rate_viewer(todo, details, ratings, approved=None, urgent=()):
         for k, (n, col) in enumerate(names.items(), 1):
             curses.init_pair(k, col, bg)
             pair[n] = curses.color_pair(k)
-        cat_color = {"security": pair["red"], "embedded": pair["green"], "hardware": pair["green"],
-                     "systems": pair["green"], "robotics_test": pair["green"], "fullstack_web": curses.A_DIM}
+        # the biggest bonus red, other bonuses green, rank_last dim (engineering: security red; embedded, hardware,
+        # systems, robotics_test green; fullstack_web dim)
+        top = max(PREFS["category_bonus"].values(), default=0)
+        cat_color = {c: pair["red"] if b == top else pair["green"] for c, b in PREFS["category_bonus"].items() if b > 0}
+        cat_color.update({c: curses.A_DIM for c in PREFS["rank_last"]})
         st = {"title": curses.A_BOLD | pair["yellow"], "company": pair["cyan"] | curses.A_BOLD,
               "dim": curses.A_DIM, "label": curses.A_BOLD, "text": curses.A_NORMAL, "why": pair["cyan"],
               "good": pair["green"] | curses.A_BOLD, "ok": pair["yellow"] | curses.A_BOLD,
@@ -1172,7 +1202,8 @@ def job_view(r, d, today=None):
     """One pool job for the GUI's Review card: what job_lines shows in the terminal, as data."""
     day = closes(d)
     return {"id": r["id"], "url": job_url(r["id"]), "title": r["title"], "company": r["company"],
-            "location": d["location"], "category": r["category"], "tag": r.get("tag"), "match": r["match"],
+            "location": d["location"], "category": r["category"], "category_label": category_label(r["category"]),
+            "tag": r.get("tag"), "match": r["match"],
             "threshold": r["threshold"], "score": rank_text(r), "taste": r.get("taste"),
             "pay": d["pay"],
             "closes": day.isoformat() if day else None, "closes_text": closes_text(day, today),

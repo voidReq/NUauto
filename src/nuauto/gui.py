@@ -469,7 +469,9 @@ NUWORKS_SIDE_NOT_SENT = ("NUworks side NOT submitted", "before Submit; not submi
 
 def facts_data():
     """What job_facts reads, loaded once per list: the scores, the pool by job id, the kinds of work."""
-    return jobs.load("scores.json", {}), {p["id"]: p for p in jobs.load("pool.json", [])}, jobs.load("categories.json", {})
+    cats, sets = jobs.load("categories.json", {}), jobs.load("category_sets.json", {})
+    known = {i: c for i, c in cats.items() if jobs.categorized(cats, sets, i)}  # sorted into your current kinds
+    return jobs.load("scores.json", {}), {p["id"]: p for p in jobs.load("pool.json", [])}, known
 
 
 def job_facts(r, data, d=None):
@@ -483,9 +485,10 @@ def job_facts(r, data, d=None):
     p = pool.get(i)
     pay = d.get("pay") or None
     hour = insights.hourly(pay)
+    cat = p["category"] if p else categories.get(i)
     return {"match": (scores.get(i) or {}).get("match"), "pay": pay, "pay_hour": hour[1] if hour else None,
             "score": p["rank"] if p else None, "score_text": jobs.rank_text(p) if p else None,
-            "category": p["category"] if p else categories.get(i)}
+            "category": cat, "category_label": jobs.category_label(cat) if cat else None}
 
 
 def company_rows(rows, facts=False):
@@ -587,12 +590,13 @@ def review(mode, q="", category=""):
         day = jobs.closes(d)
         why = "rate" if mode == "rate" else "urgent" if r["id"] in urgent_ids else "proposed" if "row" in r else "pool"
         out.append({"id": r["id"], "title": r["title"], "company": r["company"], "category": r["category"],
+                    "category_label": jobs.category_label(r["category"]),
                     "order": jobs.order_text(r, why),
                     "match": r["match"], "closes_text": jobs.closes_text(day),
                     "soon": day is not None and (day - date.today()).days <= jobs.URGENT_DAYS,
                     "rating": (ratings.get(r["id"]) or {}).get("label")})
     return {"jobs": out, "urgent": [r["id"] for r in urgent], "mode": mode, "total": len(todo),
-            "categories": [{"key": k, "label": k.replace("_", " "), "count": counts[k]}
+            "categories": [{"key": k, "label": jobs.category_label(k), "count": counts[k]}
                            for k in sorted(counts, key=lambda k: (-counts[k], k))]}
 
 
