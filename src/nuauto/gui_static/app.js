@@ -117,6 +117,7 @@ function linkOut(url, text) {
 }
 
 function plural(n, word) { return `${n} ${word}${n === 1 ? "" : "s"}`; }
+function ordinal(n) { const t = n % 100, s = ["th", "st", "nd", "rd"][(t - 20) % 10] || ["th", "st", "nd", "rd"][t] || "th"; return n + s; }
 
 function gone(msg) {
   if (S.gone) return;
@@ -256,16 +257,44 @@ function renderHealth() {
     return el("button", { class: `dot ${c.status}`, testid: `health-${id}`, title: c.detail, "aria-label": `${c.title}: ${c.detail}`,
       onclick: (e) => { e.stopPropagation(); healthPopover(c); } }, el("i"), el("span", { text: c.title }));
   });
+  const pop = strip.querySelector(".popover");  // an open chip popover stays open (and updates itself)
   fill(strip, ...dots);
+  if (pop) strip.append(pop);
 }
+
+// The check groups (gui.App.GROUPS) a status chip's Check now runs again
+const RECHECK = { google: ["quick", "sheet"], sheet: ["sheet"], nuworks: ["quick", "nuworks"], claude: ["claude"], homelab: ["homelab"] };
 
 function healthPopover(c) {
   document.querySelectorAll(".popover").forEach((p) => p.remove());
-  const pop = el("div", { class: "popover", testid: "health-popover" },
-    el("div", { class: "row between" }, el("h2", { text: c.title }), el("span", { class: `chip ${c.status}`, text: SHORT[c.status] || c.status })),
-    el("p", { text: c.detail }),
-    el("div", { class: "row" }, fixButton(c, "btn small primary"),
-      el("a", { href: "#/settings", class: "btn small ghost", text: "All checks", onclick: () => pop.remove() })));
+  const pop = el("div", { class: "popover", testid: "health-popover" });
+  const groups = RECHECK[c.id] || [];
+  let checking = groups.some((g) => (S.healthRunning || []).includes(g));
+  function draw() {
+    const now = S.checks.find((x) => x.id === c.id) || c;
+    fill(pop, el("div", { class: "row between" }, el("h2", { text: now.title }),
+        el("span", { class: `chip ${now.status}`, text: checking ? "Checking…" : SHORT[now.status] || now.status })),
+      el("p", { text: now.detail }),
+      el("div", { class: "row" }, fixButton(now, "btn small primary"),
+        groups.length && !(S.state && S.state.view) ? el("button", { class: "btn small", testid: `recheck-${c.id}`, disabled: checking,
+          text: checking ? "Checking…" : "Check now", onclick: recheck }) : null,
+        el("a", { href: "#/settings", class: "btn small ghost", text: "All checks", onclick: () => pop.remove() })));
+  }
+  async function recheck(e) {
+    e.stopPropagation();
+    checking = true; draw();
+    try { await api.post("/api/health/run", { groups }); } catch (err) { checking = false; draw(); fail(err); return; }
+    const until = Date.now() + 180000;  // the NUworks check opens a hidden browser: it can take a minute or two
+    await new Promise((r) => setTimeout(r, 800));
+    while (pop.isConnected && Date.now() < until) {
+      await pollHealth();
+      if (!groups.some((g) => (S.healthRunning || []).includes(g))) break;
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+    checking = false;
+    if (pop.isConnected) draw();
+  }
+  draw();
   $("#health").append(pop);
   const off = (e) => { if (!pop.contains(e.target)) { pop.remove(); document.removeEventListener("click", off); } };
   setTimeout(() => document.addEventListener("click", off), 0);
@@ -766,16 +795,19 @@ function jobFacts(r) {
   return el("div", { class: "small muted", testid: "job-facts", text: [fit, r.pay ? `pay ${r.pay}` : "pay not listed"].join(" · ") });
 }
 
-// Sorting the Apply tabs' lists (only what you see; Start's order never changes). Rows missing the value go last,
-// ties keep the list's own order.
+// Sorting and filtering the Apply tabs' lists: only what you see; Start's order (and what it applies to) never changes.
+// Rows missing the value go last, ties keep the list's own order.
 const SORTS = {
-  start: ["the order Start goes", null],
+  start: ["Start's order: closing within a week first, then score", null],
   sheet: ["sheet order", null],
   score: ["score (match + bonuses)", (r) => r.score == null ? null : -r.score],
   match: ["match %", (r) => r.match == null ? null : -r.match],
   closes: ["closing soonest", (r) => r.closes || null],
   pay: ["pay (per hour)", (r) => r.pay_hour == null ? null : -r.pay_hour],
 };
+const NO_KIND = "-";  // the kind-of-work filter's key for rows not sorted into one yet
+const kindOf = (r) => r.category || NO_KIND;
+const kindLabel = (k) => k === NO_KIND ? "kind not known yet" : k.replace(/_/g, " ");
 function sortRows(rows, how) {
   const key = SORTS[how] && SORTS[how][1];
   if (!key) return rows;
@@ -795,6 +827,8 @@ screens.apply = async (view) => {
   const SORT_OPTS = { nuworks: ["start", "score", "match", "closes", "pay"], company: ["closes", "sheet", "score", "match", "pay"],
     manual: ["closes", "sheet", "score", "match", "pay"] };
   const sortOf = (k) => { const v = sessionStorage.getItem("applySort:" + k); return SORT_OPTS[k].includes(v) ? v : SORT_OPTS[k][0]; };
+  let kind = sessionStorage.getItem("applyKind") || "";  // one kind of work, or "" = all (shared by the three tabs)
+  const shown = (rows) => sortRows(kind ? rows.filter((r) => kindOf(r) === kind) : rows, sortOf(tab));
   let drawnRunning = null;
   // The "At most" box is made once and moved into each redraw, so what you typed (and the focus) is never lost.
   const atMost = el("input", { type: "number", min: "1", id: "apply-n", testid: "apply-n", "aria-label": "At most this many", placeholder: "all" });
@@ -825,42 +859,56 @@ screens.apply = async (view) => {
       label, el("span", { class: "count", text: String(n[k]) }))));
   }
 
-  function sortBar() {
+  // Sort by and Kind of work for this tab's rows (counts: this tab's NUworks rows of each kind)
+  function toolbar(rows) {
     const how = sortOf(tab);
-    const sel = el("select", { testid: "apply-sort", "aria-label": "Sort by", onchange: (e) => {
-      sessionStorage.setItem("applySort:" + tab, e.target.value); drawPane(); } },
+    const sel = el("select", { testid: "apply-sort", "aria-label": "Sort the list by",
+      title: "Only changes this list. Start always goes in its own order: closing within a week first, then score.",
+      onchange: (e) => { sessionStorage.setItem("applySort:" + tab, e.target.value); drawPane(); } },
       ...SORT_OPTS[tab].map((k) => el("option", { value: k, text: SORTS[k][0], selected: k === how })));
-    return el("div", { class: "row end" }, el("label", { class: "small muted" }, "Sort by ", sel));
+    const n = {};
+    rows.forEach((r) => { n[kindOf(r)] = (n[kindOf(r)] || 0) + 1; });
+    const keys = Object.keys(n).sort((a, b) => n[b] - n[a] || a.localeCompare(b));
+    if (kind && !n[kind]) keys.push(kind);
+    const cat = el("select", { testid: "apply-kind", "aria-label": "Kind of work",
+      onchange: (e) => { kind = e.target.value; sessionStorage.setItem("applyKind", kind); drawPane(); } },
+      el("option", { value: "", text: `All kinds of work (${rows.length})` }),
+      ...keys.map((k) => el("option", { value: k, text: `${kindLabel(k)} (${n[k] || 0})`, selected: k === kind })));
+    return el("div", { class: "row end" }, el("label", { class: "small muted" }, "Show ", cat),
+      el("label", { class: "small muted" }, "Sort the list by ", sel));
   }
 
   function drawPane() {
     if (!data && tab === "nuworks") return;
-    if (tab === "nuworks") return fill(pane, sortBar(), nuworksCard(), pastCard());
+    if (tab === "nuworks") return fill(pane, toolbar(data.rows), nuworksCard(), pastCard());
     if (!sites) return fill(pane, "");
     if (sites.error) return fill(pane, el("div", { class: "note fail", text: sites.error }));
-    const how = sortOf(tab);
-    const sorted = { ...sites, agent: sortRows(sites.agent, how), site: sortRows(sites.site, how), retry: sortRows(sites.retry, how),
-      other: sortRows(sites.other, how) };
+    const lists = tab === "company" ? ["agent", "site", "retry"] : ["other"];
+    const sorted = { ...sites };
+    lists.forEach((k) => { sorted[k] = shown(sites[k]); });
+    const all = lists.flatMap((k) => sites[k]);
+    const hidden = all.length - lists.reduce((n, k) => n + sorted[k].length, 0);
     const cards = tab === "company" ? companyCards(sorted).concat([otherCard(others)]) : manualCards(sorted);
-    fill(pane, ...(cards.some(Boolean) ? [sortBar(), ...cards] : [el("div", { class: "card" }, el("p", { class: "empty",
-      text: "Nothing that only you can finish on NUworks." }))]));
+    const note = hidden ? el("p", { class: "small muted", testid: "apply-hidden",
+      text: `${plural(hidden, "row")} of other kinds of work not shown.` }) : null;
+    fill(pane, ...(cards.some(Boolean) ? [all.length ? toolbar(all) : null, note, ...cards] : [all.length ? toolbar(all) : null, note,
+      el("div", { class: "card" }, el("p", { class: "empty", text: hidden ? "Nothing of this kind of work here." : "Nothing that only you can finish on NUworks." }))]));
   }
 
   function nuworksCard() {
-    const how = sortOf("nuworks");
-    const rows = sortRows(data.rows.map((r, k) => ({ ...r, place: k + 1 })), how);  // place: where Start takes it
-    return el("div", { class: "card" }, el("div", { class: "row between" }, el("h2", { text: `Approved (${data.rows.length})` }),
-        data.rows.length > 1 ? el("span", { class: "small muted", testid: "apply-order-note", text: how === "start" ?
-          "in the order Start goes: closing within a week first, then best score" :
-          `by ${SORTS[how][0]}; the numbers are the order Start goes (closing within a week first, then best score)` }) : null),
+    const rows = shown(data.rows.map((r, k) => ({ ...r, place: k + 1 })));  // place: where Start takes it
+    const total = data.rows.length;
+    return el("div", { class: "card" }, el("div", { class: "row between" },
+        el("h2", { text: rows.length === total ? `Approved (${total})` : `Approved: ${rows.length} of ${total} shown` }),
+        rows.length !== total ? el("span", { class: "small muted", testid: "apply-filter-note", text: `Start still goes through all ${total}, in its own order.` }) : null),
       rows.length ? el("ul", { class: "list", testid: "approved-list" }, ...rows.map((r) => el("li", { testid: `approved-${r.row}` },
-        el("div", { class: "what" }, el("span", { class: "muted", text: `${r.place}. ` }), el("b", { text: r.company }), " · ", r.title,
+        el("div", { class: "what" }, el("span", { class: "muted", text: `${r.place}. `, title: `Start applies to this one ${ordinal(r.place)}` }), el("b", { text: r.company }), " · ", r.title,
           jobFacts(r)),
         el("div", { class: "row" }, r.company_site ? el("span", { class: "chip", text: "may also want the company's site", title: r.company_site }) : null,
           dueChip(r), linkOut(r.url, "Open"),
           el("button", { class: "btn small", testid: `btn-apply-row-${r.row}`, disabled: !!data.why_not || !!(S.task && S.task.state === "running"),
             text: "Apply", title: "Apply to just this job now", onclick: () => applyRow(r) }))))) :
-        el("p", { class: "empty", text: "Nothing approved yet. Approve jobs in Review." }));
+        el("p", { class: "empty", text: total ? "None of this kind of work." : "Nothing approved yet. Approve jobs in Review." }));
   }
 
   function pastCard() {

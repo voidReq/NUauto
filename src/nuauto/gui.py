@@ -462,23 +462,24 @@ NUWORKS_SIDE_NOT_SENT = ("NUworks side NOT submitted", "before Submit; not submi
 
 
 def facts_data():
-    """What job_facts reads, loaded once per list: the scores and the pool by job id."""
-    return jobs.load("scores.json", {}), {p["id"]: p for p in jobs.load("pool.json", [])}
+    """What job_facts reads, loaded once per list: the scores, the pool by job id, the kinds of work."""
+    return jobs.load("scores.json", {}), {p["id"]: p for p in jobs.load("pool.json", [])}, jobs.load("categories.json", {})
 
 
 def job_facts(r, data, d=None):
-    """The match %, score and pay the Apply lists show (and sort by) for a NUworks row (None when not scored / not in
-    the pool / not listed). score is the pool rank Start orders by (match + bonuses); pay_hour the top of the hourly
-    range, only when the pay reads as one (insights.hourly)."""
+    """The match %, score, pay and kind of work the Apply lists show (and sort / filter by) for a NUworks row (None
+    when not scored / not in the pool / not listed). score is the pool rank Start orders by (match + bonuses);
+    pay_hour the top of the hourly range, only when the pay reads as one (insights.hourly)."""
     from nuauto import apply, insights
-    scores, pool = data
+    scores, pool, categories = data
     d = apply.row_details(r) if d is None else d
     i = jobs.job_id(r.url)
     p = pool.get(i)
     pay = d.get("pay") or None
     hour = insights.hourly(pay)
     return {"match": (scores.get(i) or {}).get("match"), "pay": pay, "pay_hour": hour[1] if hour else None,
-            "score": p["rank"] if p else None, "score_text": jobs.rank_text(p) if p else None}
+            "score": p["rank"] if p else None, "score_text": jobs.rank_text(p) if p else None,
+            "category": p["category"] if p else categories.get(i)}
 
 
 def company_rows(rows, facts=False):

@@ -61,10 +61,13 @@ SCREENS
   Apply          the weekly count and Start, the live run (below), then three tabs, each with its row count: NUworks, Company
                  sites, By hand on NUworks (the tab you picked is remembered; #/company, #/other and Today's buttons open
                  Company sites). Every NUworks row in the three tabs shows its match % (or its score, "score 105 = 75% match + 10 Boston + 20
-                 security", when bonuses add to it: Start goes by score) and pay. Each tab has a Sort by menu (remembered per tab;
-                 the view only, never Start's order): NUworks: the order Start goes (default), score, match %, closing soonest,
-                 pay per hour (insights.hourly; unclear pay last); Company sites / By hand: closing soonest (default), sheet
-                 order, score, match %, pay. A NUworks row keeps its number (where Start takes it) whatever the sort. NUworks: Approved rows in apply order (numbered 1, 2, 3: the order Start goes), each with when it closes
+                 security", when bonuses add to it: Start goes by score) and pay. Each tab has a "Sort the list by" menu (remembered per
+                 tab; the view only, never Start's order or what it applies to): NUworks: Start's order (closing within a week
+                 first, then score; default), score, match %, closing soonest, pay per hour (insights.hourly; unclear pay last);
+                 Company sites / By hand: closing soonest (default), sheet order, score, match %, pay. And a "Show" kind-of-work
+                 menu (the categories, with counts; shared by the tabs; NUworks rows only, the Other jobs card is not
+                 filtered); filtered, NUworks says "Start still goes through all N". A NUworks row keeps its number (where Start
+                 takes it) whatever the sort or filter. NUworks: Approved rows in apply order (numbered 1, 2, 3: the order Start goes), each with when it closes
                  (due chip: amber within a week, red once past), its match % and pay, a "may also want the company's
                  site" chip when the posting says so, and its own Apply button (after a confirm: just that row, `nuauto apply --row N`); Start (optionally
                  "at most N"), the live run: current row, latest screenshot, log, next-job countdown, Stop / Force
@@ -128,6 +131,9 @@ HEALTH (health.py; the same checks `nuauto doctor` prints, `nuauto doctor --json
   discord   GET the webhook (posts nothing)                                    6 h
   homelab   doctor's homelab checks over ssh (homelab mode only)               15 min
   updates   age of the last scan (data/scans.json)                             every minute
+- The status chips at the top (Google, Sheet, NUworks, Claude Code, Homelab): click one for its detail, its fix button
+  and Check now (runs that check's groups again, gui.App.GROUPS: google quick + sheet, nuworks quick + nuworks, the
+  others their own; "Checking…" until done, the result shows in place). Not in view mode.
 - Checks never open a login page, show a secret or change the sheet. A check turning bad (after the first
   round) sends a desktop notification (notify-send / osascript; none in demo mode).
 - When the GUI is closed, the scheduled update (homelab, or the laptop's timer) covers it: daily.py warns about the

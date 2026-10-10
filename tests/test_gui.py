@@ -303,6 +303,14 @@ try:
         body = page.inner_text("body")
         assert "null" not in body and "undefined" not in body and "Demo mode" in body
         page.wait_for_selector("[data-testid=health-google].ok")
+        # a status chip: its popover's Check now runs that check again and shows the new result in place
+        page.click("[data-testid=health-sheet]")
+        page.click("[data-testid=recheck-sheet]")
+        page.wait_for_selector("[data-testid=recheck-sheet]:not([disabled])", timeout=30000)
+        assert page.locator("[data-testid=health-popover]").count() == 1
+        page.keyboard.press("Escape")
+        page.click("h1, #page-title")
+        page.wait_for_selector("[data-testid=health-popover]", state="detached")
 
         page.click("[data-testid=nav-review]")
         page.wait_for_selector("[data-testid=job-card]")
@@ -357,8 +365,9 @@ try:
         assert "% match" in page.inner_text("[data-testid=approved-list] [data-testid=job-facts] >> nth=0")
         # sort by match %: only the view changes; each row keeps its number (where Start takes it)
         start_order = page.locator("[data-testid=approved-list] li").evaluate_all("ls => ls.map(l => l.dataset.testid)")
+        assert page.locator("[data-testid=apply-sort] option[value=start]").inner_text().startswith("Start's order: closing within a week")
         page.select_option("[data-testid=apply-sort]", "match")
-        page.wait_for_function("() => document.querySelector('[data-testid=apply-order-note]').textContent.startsWith('by match')")
+        page.wait_for_timeout(200)
         facts = page.locator("[data-testid=approved-list] [data-testid=job-facts]").all_inner_texts()
         found = [int(re.search(r"(\d+)% match", t).group(1)) for t in facts]
         assert found == sorted(found, reverse=True), facts
@@ -366,8 +375,21 @@ try:
         by_id = page.locator("[data-testid=approved-list] li").evaluate_all("ls => ls.map(l => l.dataset.testid)")
         assert [start_order[int(n.rstrip(". ")) - 1] for n in numbers] == by_id, (numbers, by_id, start_order)
         page.select_option("[data-testid=apply-sort]", "start")
-        page.wait_for_function("() => document.querySelector('[data-testid=apply-order-note]').textContent.startsWith('in the order')")
+        page.wait_for_timeout(200)
         assert page.locator("[data-testid=approved-list] li").evaluate_all("ls => ls.map(l => l.dataset.testid)") == start_order
+        # one kind of work: only those rows show (Start still goes through all of them); "All" brings the rest back
+        kinds = page.locator("[data-testid=apply-kind] option").evaluate_all("os => os.map(o => [o.value, o.textContent])")
+        assert kinds[0][0] == "" and kinds[0][1].endswith(f"({len(start_order)})"), kinds
+        first = kinds[1][0]
+        want = int(re.search(r"\((\d+)\)$", kinds[1][1]).group(1))
+        page.select_option("[data-testid=apply-kind]", first)
+        page.wait_for_timeout(200)
+        assert page.locator("[data-testid=approved-list] li").count() == want
+        if want < len(start_order):
+            assert "Start still goes through all" in page.inner_text("[data-testid=apply-filter-note]")
+        page.select_option("[data-testid=apply-kind]", "")
+        page.wait_for_timeout(200)
+        assert page.locator("[data-testid=approved-list] li").count() == len(start_order)
         page.fill("[data-testid=apply-n]", "7")  # what you type in "At most" stays when you click elsewhere / the page redraws
         page.click("h1, #page-title")
         page.wait_for_timeout(3500)
