@@ -60,7 +60,11 @@ SCREENS
                  is left undecided; clearing the search comes back to it. A kind-of-work choice alone stays one job at a time.
   Apply          the weekly count and Start, the live run (below), then three tabs, each with its row count: NUworks, Company
                  sites, By hand on NUworks (the tab you picked is remembered; #/company, #/other and Today's buttons open
-                 Company sites). Every NUworks row in the three tabs shows its match % and pay. NUworks: Approved rows in apply order (numbered 1, 2, 3: the order Start goes), each with when it closes
+                 Company sites). Every NUworks row in the three tabs shows its match % (or its score, "score 105 = 75% match + 10 Boston + 20
+                 security", when bonuses add to it: Start goes by score) and pay. Each tab has a Sort by menu (remembered per tab;
+                 the view only, never Start's order): NUworks: the order Start goes (default), score, match %, closing soonest,
+                 pay per hour (insights.hourly; unclear pay last); Company sites / By hand: closing soonest (default), sheet
+                 order, score, match %, pay. A NUworks row keeps its number (where Start takes it) whatever the sort. NUworks: Approved rows in apply order (numbered 1, 2, 3: the order Start goes), each with when it closes
                  (due chip: amber within a week, red once past), its match % and pay, a "may also want the company's
                  site" chip when the posting says so, and its own Apply button (after a confirm: just that row, `nuauto apply --row N`); Start (optionally
                  "at most N"), the live run: current row, latest screenshot, log, next-job countdown, Stop / Force
@@ -77,7 +81,9 @@ SCREENS
                  server reads it again after every finished row and run and when it is 30 s old, and the open screen
                  reloads its lists when rows_at changes (no closing and reopening). "At most" keeps what you typed.
   Sheet          add a job by hand (manage.py): NUworks co-op or Other job, Approved or Proposed, link; a NUworks
-                 link switches the tab and fills company / title / match from your job data. Both tabs' rows with
+                 link switches the tab and fills company / title / match from your job data. Below it the sheet's two tabs as
+                 tabs (NUworks, Other jobs, each with its row count; remembered; adding a job shows the tab it went to; Apply's
+                 Add a job opens Other jobs). Each tab's rows with
                  Move to the other tab (asks for the link there) and Remove (clears the row's cells: no row is
                  renumbered). Applied rows are never removed and never leave the NUworks tab (an Applied Other job may move
                  to NUworks: there it counts toward the limits); unresolved Submit clicks are locked; nothing moves while a run is on

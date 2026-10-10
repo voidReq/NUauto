@@ -760,10 +760,27 @@ function clamped(node) {  // a long posting cut to a few lines until you ask for
   return el("div", {}, node, btn);
 }
 
-// The match % and pay a NUworks row shows in the Apply lists.
+// The match % (or the score Start orders by, when bonuses add to it) and pay a NUworks row shows in the Apply lists.
 function jobFacts(r) {
-  return el("div", { class: "small muted", testid: "job-facts", text: [r.match != null ? `${r.match}% match` : "match not scored",
-    r.pay ? `pay ${r.pay}` : "pay not listed"].join(" · ") });
+  const fit = r.score != null && r.score !== r.match ? `score ${r.score_text}` : r.match != null ? `${r.match}% match` : "match not scored";
+  return el("div", { class: "small muted", testid: "job-facts", text: [fit, r.pay ? `pay ${r.pay}` : "pay not listed"].join(" · ") });
+}
+
+// Sorting the Apply tabs' lists (only what you see; Start's order never changes). Rows missing the value go last,
+// ties keep the list's own order.
+const SORTS = {
+  start: ["the order Start goes", null],
+  sheet: ["sheet order", null],
+  score: ["score (match + bonuses)", (r) => r.score == null ? null : -r.score],
+  match: ["match %", (r) => r.match == null ? null : -r.match],
+  closes: ["closing soonest", (r) => r.closes || null],
+  pay: ["pay (per hour)", (r) => r.pay_hour == null ? null : -r.pay_hour],
+};
+function sortRows(rows, how) {
+  const key = SORTS[how] && SORTS[how][1];
+  if (!key) return rows;
+  return rows.map((r, i) => [key(r), i, r]).sort((a, b) => (a[0] === null) - (b[0] === null) ||
+    (a[0] === null ? 0 : a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0) || a[1] - b[1]).map((x) => x[2]);
 }
 
 // ---- Apply: three tabs. NUworks (the Approved rows Start works through), Company sites (the assistant, Other jobs,
@@ -775,6 +792,9 @@ screens.apply = async (view) => {
   let tab = sessionStorage.getItem("applyTab");
   if (!TABS.some(([k]) => k === tab)) tab = "nuworks";
   if (S.focus === "company") { S.focus = null; tab = "company"; }  // Today's buttons and old #/company, #/other links
+  const SORT_OPTS = { nuworks: ["start", "score", "match", "closes", "pay"], company: ["closes", "sheet", "score", "match", "pay"],
+    manual: ["closes", "sheet", "score", "match", "pay"] };
+  const sortOf = (k) => { const v = sessionStorage.getItem("applySort:" + k); return SORT_OPTS[k].includes(v) ? v : SORT_OPTS[k][0]; };
   let drawnRunning = null;
   // The "At most" box is made once and moved into each redraw, so what you typed (and the focus) is never lost.
   const atMost = el("input", { type: "number", min: "1", id: "apply-n", testid: "apply-n", "aria-label": "At most this many", placeholder: "all" });
@@ -805,21 +825,36 @@ screens.apply = async (view) => {
       label, el("span", { class: "count", text: String(n[k]) }))));
   }
 
+  function sortBar() {
+    const how = sortOf(tab);
+    const sel = el("select", { testid: "apply-sort", "aria-label": "Sort by", onchange: (e) => {
+      sessionStorage.setItem("applySort:" + tab, e.target.value); drawPane(); } },
+      ...SORT_OPTS[tab].map((k) => el("option", { value: k, text: SORTS[k][0], selected: k === how })));
+    return el("div", { class: "row end" }, el("label", { class: "small muted" }, "Sort by ", sel));
+  }
+
   function drawPane() {
     if (!data && tab === "nuworks") return;
-    if (tab === "nuworks") return fill(pane, nuworksCard(), pastCard());
+    if (tab === "nuworks") return fill(pane, sortBar(), nuworksCard(), pastCard());
     if (!sites) return fill(pane, "");
     if (sites.error) return fill(pane, el("div", { class: "note fail", text: sites.error }));
-    const cards = tab === "company" ? companyCards(sites).concat([otherCard(others)]) : manualCards(sites);
-    fill(pane, ...(cards.some(Boolean) ? cards : [el("div", { class: "card" }, el("p", { class: "empty",
+    const how = sortOf(tab);
+    const sorted = { ...sites, agent: sortRows(sites.agent, how), site: sortRows(sites.site, how), retry: sortRows(sites.retry, how),
+      other: sortRows(sites.other, how) };
+    const cards = tab === "company" ? companyCards(sorted).concat([otherCard(others)]) : manualCards(sorted);
+    fill(pane, ...(cards.some(Boolean) ? [sortBar(), ...cards] : [el("div", { class: "card" }, el("p", { class: "empty",
       text: "Nothing that only you can finish on NUworks." }))]));
   }
 
   function nuworksCard() {
+    const how = sortOf("nuworks");
+    const rows = sortRows(data.rows.map((r, k) => ({ ...r, place: k + 1 })), how);  // place: where Start takes it
     return el("div", { class: "card" }, el("div", { class: "row between" }, el("h2", { text: `Approved (${data.rows.length})` }),
-        data.rows.length > 1 ? el("span", { class: "small muted", text: "in the order Start goes: closing within a week first, then best score" }) : null),
-      data.rows.length ? el("ul", { class: "list", testid: "approved-list" }, ...data.rows.map((r, k) => el("li", { testid: `approved-${r.row}` },
-        el("div", { class: "what" }, el("span", { class: "muted", text: `${k + 1}. ` }), el("b", { text: r.company }), " · ", r.title,
+        data.rows.length > 1 ? el("span", { class: "small muted", testid: "apply-order-note", text: how === "start" ?
+          "in the order Start goes: closing within a week first, then best score" :
+          `by ${SORTS[how][0]}; the numbers are the order Start goes (closing within a week first, then best score)` }) : null),
+      rows.length ? el("ul", { class: "list", testid: "approved-list" }, ...rows.map((r) => el("li", { testid: `approved-${r.row}` },
+        el("div", { class: "what" }, el("span", { class: "muted", text: `${r.place}. ` }), el("b", { text: r.company }), " · ", r.title,
           jobFacts(r)),
         el("div", { class: "row" }, r.company_site ? el("span", { class: "chip", text: "may also want the company's site", title: r.company_site }) : null,
           dueChip(r), linkOut(r.url, "Open"),
@@ -947,10 +982,14 @@ function otherCard(d) {
       el("p", { class: "empty", text: d.exists ? `Nothing Approved in the ${d.tab} tab.` : "No jobs yet. Add one with Add a job." }));
 }
 
-// ---- Sheet: add a job to either tab by hand; move rows between the tabs; remove them
+// ---- Sheet: add a job to either tab by hand; then the two tabs (NUworks, Other jobs) as tabs, like Apply's: move rows
+// between them; remove them
 screens.sheet = async (view) => {
-  const form = { tab: sessionStorage.getItem("sheetAddTab") || "nuworks", url: "", company: "", title: "", status: "Approved" };
+  const asked = sessionStorage.getItem("sheetAddTab");  // Apply's "Add a job" (Other jobs)
+  const form = { tab: asked || "nuworks", url: "", company: "", title: "", status: "Approved" };
   sessionStorage.removeItem("sheetAddTab");
+  let shown = asked || sessionStorage.getItem("sheetTab");  // the tab whose rows show
+  if (shown !== "nuworks" && shown !== "other") shown = "nuworks";
   let d, info = null, seen = "";
   async function reload() {
     try { d = await api.get("/api/sheet"); } catch (e) { fill(view, el("div", { class: "note fail", text: e.message })); return; }
@@ -973,6 +1012,7 @@ screens.sheet = async (view) => {
       const r = await api.post("/api/sheet", { action: "add", ...form });
       toast(`Added as row ${r.row} of the ${d.names[r.tab]} tab (${form.status}).`);
       Object.assign(form, { url: "", company: "", title: "" });
+      shown = r.tab; sessionStorage.setItem("sheetTab", shown);
       info = null; seen = "";
       pollState();
       reload();
@@ -1016,9 +1056,14 @@ screens.sheet = async (view) => {
       info.tab === "other" ? "Not a NUworks job link: it goes in Other jobs." :
       !info.known ? "A NUworks job your job data doesn't have yet: type the company and title." :
       info.in_pool ? `In your pool: ${info.notes}.` : `In your job data: ${info.notes}.`;
+    const count = (tab) => d.tabs[tab].rows.length;
+    const tabs = el("div", { class: "tabs", role: "tablist", "aria-label": "Sheet tabs" },
+      ...["nuworks", "other"].map((k) => el("button", { role: "tab", testid: `sheet-tab-${k}`, "aria-selected": String(shown === k),
+        "aria-controls": "sheet-pane", onclick: () => { shown = k; sessionStorage.setItem("sheetTab", k); draw(); } },
+        d.names[k], el("span", { class: "count", text: String(count(k)) }))));
     const tabCard = (tab) => {
       const t = d.tabs[tab];
-      return el("div", { class: "card", testid: `sheet-${tab}` }, el("h2", { text: `${d.names[tab]} tab` }),
+      return el("div", { class: "card", testid: `sheet-${tab}` }, el("h2", { text: `${d.names[tab]} (${t.rows.length})` }),
         !t.exists ? el("p", { class: "empty", text: "Not made yet: adding the first job makes it." }) :
         !t.rows.length ? el("p", { class: "empty", text: "No jobs." }) :
         el("ul", { class: "list" }, ...t.rows.map((r) => el("li", { testid: `sheet-${tab}-${r.row}` },
@@ -1045,8 +1090,10 @@ screens.sheet = async (view) => {
             (form.tab === "nuworks" ? "Approved NUworks jobs are submitted by Apply (your weekly limit applies)." : "Approved Other jobs are ready for the assistant (no limits there).") :
             "Proposed: it waits in the sheet (NUworks ones show first in Review) until you approve it." }),
           el("div", {}, el("button", { class: "btn primary", type: "submit", text: "Add", testid: "add-submit" })))),
-      el("p", { class: "small muted", text: "Applied rows can't be removed, and NUworks ones can't be moved (they count toward your limits); an Applied Other job can move to NUworks. Removing clears the row's cells, so no other row changes number." }),
-      tabCard("nuworks"), tabCard("other"));
+      tabs,
+      el("div", { role: "tabpanel", id: "sheet-pane", testid: "sheet-pane" },
+        el("p", { class: "small muted", text: "Applied rows can't be removed, and NUworks ones can't be moved (they count toward your limits); an Applied Other job can move to NUworks. Removing clears the row's cells, so no other row changes number." }),
+        tabCard(shown)));
   }
   await reload();
   return { reload };

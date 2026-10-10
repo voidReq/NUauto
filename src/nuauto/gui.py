@@ -461,11 +461,24 @@ def closing(r):
 NUWORKS_SIDE_NOT_SENT = ("NUworks side NOT submitted", "before Submit; not submitted")
 
 
-def job_facts(r, scores, d=None):
-    """The match % and pay the Apply lists show for a NUworks row (None when not scored / not listed)."""
-    from nuauto import apply
+def facts_data():
+    """What job_facts reads, loaded once per list: the scores and the pool by job id."""
+    return jobs.load("scores.json", {}), {p["id"]: p for p in jobs.load("pool.json", [])}
+
+
+def job_facts(r, data, d=None):
+    """The match %, score and pay the Apply lists show (and sort by) for a NUworks row (None when not scored / not in
+    the pool / not listed). score is the pool rank Start orders by (match + bonuses); pay_hour the top of the hourly
+    range, only when the pay reads as one (insights.hourly)."""
+    from nuauto import apply, insights
+    scores, pool = data
     d = apply.row_details(r) if d is None else d
-    return {"match": (scores.get(jobs.job_id(r.url)) or {}).get("match"), "pay": d.get("pay") or None}
+    i = jobs.job_id(r.url)
+    p = pool.get(i)
+    pay = d.get("pay") or None
+    hour = insights.hourly(pay)
+    return {"match": (scores.get(i) or {}).get("match"), "pay": pay, "pay_hour": hour[1] if hour else None,
+            "score": p["rank"] if p else None, "score_text": jobs.rank_text(p) if p else None}
 
 
 def company_rows(rows, facts=False):
@@ -473,10 +486,10 @@ def company_rows(rows, facts=False):
     whose company site still wants you; retry: Applied rows whose NUworks side did not go out (nuauto assist nuworks).
     facts: each row also gets its match % and pay (the Apply tabs; the menu counts skip reading them)."""
     from nuauto import assist
-    scores = jobs.load("scores.json", {}) if facts else None
+    data = facts_data() if facts else None
 
     def view(r, **extra):
-        return row_view(r, **closing(r), **(job_facts(r, scores) if facts else {}), **extra)
+        return row_view(r, **closing(r), **(job_facts(r, data) if facts else {}), **extra)
     agent, other, site, retry = [], [], [], []
     for r in rows or []:
         if r.status == "Needs Human":
@@ -679,11 +692,11 @@ def apply_list():
     rows = need_rows()
     week = week_info(rows)
     out = []
-    scores = jobs.load("scores.json", {})
+    data = facts_data()
     for r in apply.apply_order(sheet.approved(rows)):
         d = apply.row_details(r)
         hint = jobs.external_hint(d)  # the posting may want the company's own site too
-        out.append(row_view(r, **closing(r), company_site=hint, **job_facts(r, scores, d)))
+        out.append(row_view(r, **closing(r), company_site=hint, **job_facts(r, data, d)))
     why = None
     if not out:
         why = "Nothing is Approved. Approve jobs in Review first."
