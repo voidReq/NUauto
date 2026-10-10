@@ -34,7 +34,7 @@ nuauto test        # runs every tests/test_*.py
   `.venv/bin/python tests/test_sheet.py`. Browser tests use headless Firefox on local pages or demo mode.
 - **The GUI:** try changes with `nuauto gui --demo` (fake sheet, fake NUworks, fake Claude); see every screen with
   `nuauto gui --demo --screenshots DIR`. Text from the server goes into the page with textContent only. How it
-  fits together: `docs/GUI.md`. Agents never start the real GUI.
+  fits together: `docs/GUI.md`. Agents never start the real GUI (`nuauto gui --demo` or the read-only `--view` only).
 - **The packaged app:** `sh packaging/build.sh`, then `packaging/build/venv/bin/python packaging/smoke.py <app>`;
   on other distributions: `sh packaging/distros.sh <AppImage>` (podman or docker).
   Code that starts NUauto itself uses `config.self_cmd` / `config.self_exe` (never `python -m` or a file path), and

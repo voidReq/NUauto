@@ -239,7 +239,9 @@ function renderShell() {
     if (b) b.textContent = v ? String(v) : "";
   }
   fill($("#banner"), st.demo ? el("div", { class: "demo-banner", testid: "demo-banner" },
-    el("b", { text: "Demo mode. " }), "Nothing here is real: a fake sheet, fake NUworks pages, fake Claude. Nothing is sent anywhere.") : "");
+    el("b", { text: "Demo mode. " }), "Nothing here is real: a fake sheet, fake NUworks pages, fake Claude. Nothing is sent anywhere.") :
+    st.view ? el("div", { class: "demo-banner", testid: "view-banner" },
+      el("b", { text: "View only. " }), "This is your real data, read-only: nothing can be changed or started, and saved answers and run screenshots are hidden.") : "");
   fill($("#side-foot"), el("div", { text: `v${st.version}` + (st.mode === "homelab" ? " · homelab" : "") }));
 }
 

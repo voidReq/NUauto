@@ -135,7 +135,7 @@ SAFETY MODEL (details and tests: docs/SAFETY.md)
 - The page never receives a secret (token, cookies, webhook, client secret): only "set / not set".
 - Runs: `nuauto apply --ui json` / `nuauto assist nuworks <row> --ui json` work only as a child of the running GUI
   (its pid in local/gui.lock) and never inside a Claude Code shell (CLAUDECODE). The real GUI refuses to start
-  there too: agents use --demo. Apply, logins and the NUworks side always get a visible browser (AUTO_HEADLESS
+  there too: agents use --demo (fake) or --view (real data, read-only, below). Apply, logins and the NUworks side always get a visible browser (AUTO_HEADLESS
   cleared). Approved in the sheet stays the only go-ahead; caps unchanged.
 - Questions (answers.JsonIO): one JSON line per question on the child's stdout ("::nuauto:: " + JSON), the
   answer as one JSON line on its stdin. The same rules as typing: an option must be one of the choices, blank
@@ -161,7 +161,18 @@ DEMO MODE (demo.py) AND TESTING WITH AGENTS
   missing; approve, apply with a question, the fake sheet), in its own temp folder; exit 0 = this install works.
 - Demo runs nobody watches use a hidden browser: with NUAUTO_DEMO_HEADLESS=1 (tests and the self-test set it) or no
   screen (CI, containers). Real runs always open a visible browser.
-- Agents: only ever --demo. Never start the real GUI, never click Start in a real one.
+- Agents: only ever --demo or --view. Never start the real GUI (no --view), never click Start in a real one.
+
+VIEW MODE (`nuauto gui --view`; gui.VIEW; added 2026-10-09 so an agent can look at your real screens)
+- Your real sheet and job data, read-only. Allowed inside a Claude Code shell (the real GUI is not). Prints its URL like
+  --no-open (no window); open it in Playwright. Quit: POST /api/quit or Ctrl+C.
+- Enforced by the server, not the page: every POST except /api/quit is refused (403 "View-only mode"), so no button
+  and no route added later can act; Task start is refused too (no child process of any kind); only the quick and
+  sheet checks run (no hidden NUworks browser, no Claude call, no Discord, no ssh, no desktop notification); no
+  lock file (a running GUI's is never touched or asked for a window); no homelab pull. Banner: "View only".
+- Hidden: saved answer values (/api/answers shows the questions only) and run logs / screenshots (/api/file 403).
+  Job data, the sheet rows, the settings (host names, sheet id) and past-run names are shown.
+- Test: tests/test_view.py.
 - Tests (in `nuauto test`): test_gui.py (security rules, API, single instance, the main flows in headless
   Firefox), test_setup.py (each wizard step's checks, then the wizard end to end), test_demo.py (the real apply.py
   on the fake pages: Ctrl+C and GUI-gone stops, cap refusal, NUworks re-login states), test_health.py.

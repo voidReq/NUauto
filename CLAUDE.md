@@ -140,8 +140,12 @@ GUI (`nuauto gui`, gui.py + gui_static/ + onboard.py + health.py + demo.py; adde
   secrets never reach the page. Long or browser work runs as the same `nuauto ...` commands in child
   processes, one at a time; their questions come over answers.JsonIO as dialogs (same rules as typing).
 - Agents: only `nuauto gui --demo` (fake sheet, fake NUworks pages, fake Claude, temp folder; nothing real
-  can be read or sent). Never start the real GUI or click Start in one; the real GUI refuses to start
-  inside a Claude Code shell anyway. Screens for review: `nuauto gui --demo --screenshots DIR`.
+  can be read or sent) or `nuauto gui --view` (added 2026-10-09 on my request, so an agent can see my real screens
+  to test: my real sheet and job data, READ-ONLY. gui.VIEW: the server refuses every POST but Quit, no child
+  process can start, only the sheet and file checks run, no window, no lock file, no homelab sync; my saved
+  answers and run logs / screenshots are hidden. Start it with --no-open --port 0 and open the printed URL in
+  Playwright). Never start the real GUI (no --view) or click Start in one; it refuses to start inside a Claude Code
+  shell anyway. Screens for review: `nuauto gui --demo --screenshots DIR`.
 - Setup wizard (onboard.py): each step checks itself; preferences go in local_config.json "preferences"
   (jobs.DEFAULTS = my original settings). Health checks (health.py) never open a login page.
 - Its own window (window.py): macOS pywebview; Linux the system python3's GTK + WebKitGTK (window_gtk.py); else a
@@ -239,7 +243,7 @@ SECRETS (in local/), never print, log or copy their contents: token.json, sessio
 client_secret.json, discord_webhook.txt, web_secret.txt
 
 COMMANDS (installed in .venv; no activation needed)
-nuauto gui             # the window (setup, review, apply, health); --demo: everything fake (agents: only this)
+nuauto gui             # the window (setup, review, apply, health); --demo: everything fake; --view: my real data, read-only (agents: only these two)
 nuauto approve         # viewer: my Proposed rows first, then best unrated jobs: y = Approved in the sheet, n = no, s skip
 nuauto apply [-n 3]    # submit every Approved row (30-60s between); real terminal (or the GUI) only
 nuauto rate            # taste training viewer (keys in docs/PIPELINE.md)
@@ -270,7 +274,7 @@ Ubuntu and macOS. tests/test_sync.py fails if a new module or prompt isn't in sy
 reach the homelab). test_web.py covers the public Mark-done links (signatures; GET never
 changes the sheet). test_browser.py covers the domain lock and the profile lock. test_assist.py covers the
 company-site agent's guard. test_insights.py covers the Insights numbers (pay parsing, folding, no guessing). test_deploy.py runs deploy.py on a throwaway git repo (copy, web restart only when needed, undo on failure). test_demo.py runs the real apply.py on demo mode's fake pages (stops, cap, re-login).
-test_gui.py covers the GUI server's security and flows; test_setup.py the wizard; test_health.py the checks;
+test_gui.py covers the GUI server's security and flows; test_view.py the read-only `--view` mode; test_setup.py the wizard; test_health.py the checks;
 test_window.py the packaged-app plumbing (self_cmd, the assistant's command, the window choice, clean env).
 
 ENVIRONMENT / STYLE
