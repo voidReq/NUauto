@@ -67,6 +67,7 @@ class Task:
         self.row = self.screenshot = self.last_shot = self.wait_until = None
         self.done_rows = []
         self.state, self.code, self.stopping = "running", None, False
+        self.settling = False  # ended, its on_done (the sheet read again) not finished yet: the page still sees running
         self.started, self.ended = now(), None
         self.on_done, self.on_row = on_done, on_row
         env = {**os.environ, **(env or {}), "PYTHONUNBUFFERED": "1"}
@@ -94,13 +95,17 @@ class Task:
                 self._event(msg)
         self.code = self.proc.wait()
         self.ended, self.question, self.wait_until = now(), None, None
+        self.settling = bool(self.on_done)  # so a finished run never shows its lists from before the sheet was re-read
         self.state = "stopped" if self.stopping else "done" if self.code == 0 else "failed"
         try:
             self.proc.stdin.close()
         except OSError:
             pass
-        if self.on_done:
-            self.on_done(self)
+        try:
+            if self.on_done:
+                self.on_done(self)
+        finally:
+            self.settling = False
 
     def _event(self, msg):
         self.events.append(msg)
@@ -148,7 +153,8 @@ class Task:
 
     def view(self, after=0):
         """after: how many log lines the page already has (counted from the first line ever)."""
-        return {"id": self.id, "kind": self.kind, "label": self.label, "state": self.state, "code": self.code,
+        return {"id": self.id, "kind": self.kind, "label": self.label, "state": "running" if self.settling else self.state,
+                "code": self.code,
                 "started": self.started, "ended": self.ended, "log_total": self.total(),
                 "log": self.log[max(0, after - self.dropped):], "question": self.question,
                 "row": self.row, "done_rows": self.done_rows, "wait_until": self.wait_until,
