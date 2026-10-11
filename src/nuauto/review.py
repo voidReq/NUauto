@@ -239,20 +239,20 @@ def hook_alive(pid):
     """True while the guard's hook that asked is still waiting (that process, still the hook). No pid: assume so."""
     if not pid:
         return True
-    try:
-        with open(f"/proc/{int(pid)}/cmdline", "rb") as f:
-            argv = f.read().split(b"\0")
-        return b"hook" in argv and b"pre" in argv
-    except FileNotFoundError:
-        return False
-    except OSError:  # no /proc (not Linux): only whether the process is there
+    if os.path.isdir("/proc/self"):  # Linux (the homelab): that process, and still the hook
         try:
-            os.kill(int(pid), 0)
-            return True
-        except ProcessLookupError:
-            return False
+            with open(f"/proc/{int(pid)}/cmdline", "rb") as f:
+                argv = f.read().split(b"\0")
+            return b"hook" in argv and b"pre" in argv
         except OSError:
-            return True
+            return False
+    try:  # no /proc (macOS): only whether the process is there
+        os.kill(int(pid), 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
 
 
 def answer_approval(s, approval_id, decision, by, note=""):

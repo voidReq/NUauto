@@ -1389,7 +1389,8 @@ try:
     try:
         time.sleep(0.2)
         assert review.hook_alive(live_hook.pid) is True and review.hook_alive(None) is True and review.hook_alive(0) is True
-        assert review.hook_alive(os.getpid()) is False and review.hook_alive(other_proc.pid) is False
+        if os.path.isdir("/proc/self"):  # Linux (the homelab) can tell the hook from another process; macOS only sees it runs
+            assert review.hook_alive(os.getpid()) is False and review.hook_alive(other_proc.pid) is False
         assert review.hook_alive(gone_proc.pid) is False
         typed2, real_type2 = [], review.type_into
         review.type_into = lambda sess, text_: typed2.append(text_)
