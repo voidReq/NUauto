@@ -108,4 +108,77 @@ assert r.returncode and "Could not read" in r.stderr
 r = subprocess.run(cli, capture_output=True, text=True, env=env)
 assert r.returncode == 0 and "yours (imported)" in r.stdout and "pw-" not in r.stdout   # the list: never a password
 
+# straight into Bitwarden (`bw`, a stand-in here that keeps a fake vault): only NUauto's logins not there yet, in the
+# folder; never yours; one already there is not added twice; locked = refused; no password on any command line
+fakebin = os.path.join(config.STATE_DIR, "fakebin")
+os.makedirs(fakebin)
+vault, calls = os.path.join(config.STATE_DIR, "vault.json"), os.path.join(config.STATE_DIR, "bw_calls.txt")
+json.dump({"status": "unlocked", "folders": [], "items": []}, open(vault, "w"))
+open(os.path.join(fakebin, "bw"), "w").write(f"""#!{sys.executable}
+import base64, json, sys, uuid
+args = [a for a in sys.argv[1:] if a != "--nointeraction"]
+open({calls!r}, "a").write(json.dumps(sys.argv[1:]) + "\\n")
+v = json.load(open({vault!r}))
+def save(): json.dump(v, open({vault!r}, "w"))
+if args == ["status"]: print(json.dumps({{"status": v["status"]}}))
+elif v["status"] != "unlocked": sys.exit("Vault is locked.")
+elif args == ["sync"]: print("Syncing complete.")
+elif args == ["list", "folders"]: print(json.dumps(v["folders"]))
+elif args == ["create", "folder"]:
+    f = {{**json.loads(base64.b64decode(sys.stdin.read())), "id": str(uuid.uuid4())}}; v["folders"].append(f); save(); print(json.dumps(f))
+elif args[:3] == ["list", "items", "--folderid"]: print(json.dumps([i for i in v["items"] if i["folderId"] == args[3]]))
+elif args == ["create", "item"]:
+    it = json.loads(base64.b64decode(sys.stdin.read())); v["items"].append(it); save(); print(json.dumps(it))
+else: sys.exit("unknown " + " ".join(args))
+""")
+os.chmod(os.path.join(fakebin, "bw"), 0o755)
+real_path = os.environ["PATH"]
+os.environ["PATH"] = fakebin + os.pathsep + real_path
+try:
+    with A.locked() as data:  # one NUauto made earlier and already exported by file: not again
+        data["old.example.com"] = {"site": "old.example.com", "url": "https://old.example.com/", "email": "e", "password": "pw-old",
+                                   "company": "Old", "created": "2026-10-01T10:00", "jobs": [], "exported": "2026-10-02"}
+        data["wd1.myworkdaysite.com/other"]["exported"] = False                       # (the file export above took it)
+    A.password_for("new.example.com", A.NEW, company="New Co")                     # a new one NUauto just made
+    with A.locked() as data:
+        todo = sorted(k for k, a in data.items() if not a.get("own") and not a.get("exported"))
+    added, skipped = A.to_bitwarden()
+    assert sorted(added) == todo and skipped == [] and todo, (added, todo)
+    v = json.load(open(vault))
+    assert [f["name"] for f in v["folders"]] == [A.FOLDER] and len(v["items"]) == len(todo)
+    assert all(i["folderId"] == v["folders"][0]["id"] for i in v["items"])
+    pws = {i["login"]["password"] for i in v["items"]}
+    assert not pws & {"pw-wf", "pw-acme", "pw-amz", "pw-old"}                         # never yours, never one exported
+    other_item = next(i for i in v["items"] if "myworkdaysite" in i["login"]["uris"][0]["uri"])  # (a regex: dots escaped)
+    assert other_item["login"]["uris"][0]["match"] == A.BITWARDEN_REGEX_MATCH and "recruiting/other" in other_item["login"]["uris"][0]["uri"]
+    assert all(json.load(open(A.PATH))[k]["exported"] for k in todo)                  # marked: not again
+    assert A.to_bitwarden() == ([], [])                                               # nothing new
+    # exported flags lost (e.g. an older copy merged in): the vault has them, so nothing is added twice
+    with A.locked() as data:
+        for k in todo:
+            data[k]["exported"] = False
+    added, skipped = A.to_bitwarden()
+    assert added == [] and sorted(skipped) == todo and len(json.load(open(vault))["items"]) == len(todo)
+    log = open(calls).read()
+    assert all(p not in log for p in pws | {"pw-wf", "pw-amz"})                       # passwords only ever on stdin
+    # locked, or no bw at all: refused, nothing marked
+    v = json.load(open(vault)); v["status"] = "locked"; json.dump(v, open(vault, "w"))
+    try:
+        A.to_bitwarden()
+        raise AssertionError("exported into a locked vault")
+    except A.BitwardenError as e:
+        assert "unlock" in str(e)
+    os.environ["PATH"] = "/nonexistent"
+    real_tool = config.tool_path
+    config.tool_path = lambda name: None
+    try:
+        A.to_bitwarden()
+        raise AssertionError("no bw, no error")
+    except A.BitwardenError as e:
+        assert "not installed" in str(e)
+    finally:
+        config.tool_path = real_tool
+finally:
+    os.environ["PATH"] = real_path
+
 print("All accounts checks passed.")

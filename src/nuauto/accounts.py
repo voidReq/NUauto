@@ -8,6 +8,10 @@ for that site only (assist.py). Kept in local/accounts.json (mode 600, never syn
                                      ~/Downloads/nuauto-logins-<date>.json). Import it in Bitwarden: the web vault,
                                      Tools > Import data > "Bitwarden (json)". Then delete the file.
   nuauto accounts export --all       every login again (e.g. into another password manager's copy)
+  nuauto accounts export --bitwarden straight into your Bitwarden vault, no file: the logins not there yet, through
+                                     Bitwarden's command line (`bw`, which you unlock yourself first:
+                                     export BW_SESSION=$(bw unlock --raw)), in the folder "NUauto job sites"; one
+                                     already there is not added twice. With a homelab, both machines' logins.
   nuauto accounts import <file>|- --only <site> [--only <site>...]
                                      YOUR OWN logins from Bitwarden, for sites where you have an account already (your
                                      Workday ones, Amazon jobs...): only the logins whose address contains one of the
@@ -18,12 +22,15 @@ for that site only (assist.py). Kept in local/accounts.json (mode 600, never syn
 
 The account email: local_config.json "accounts_email" (else your answer bank's email).
 """
+import base64
 import fcntl
 import json
 import os
 import re
 import secrets
+import shutil
 import string
+import subprocess
 import sys
 import uuid
 from contextlib import contextmanager
@@ -208,19 +215,88 @@ def passwords(hosts):
     return sorted(found, key=len, reverse=True)
 
 
+BITWARDEN_REGEX_MATCH = 4   # Bitwarden's URI match "Regular expression": a company's own path on a shared Workday host
+
+
+def bitwarden_uri(a):
+    """Where Bitwarden offers this login: its host; on a host companies share by path, only under that company's path."""
+    h, _, tenant = a["site"].partition("/")
+    if tenant:
+        return {"match": BITWARDEN_REGEX_MATCH,
+                "uri": f"^https://{re.escape(h)}/([a-z]{{2}}-[A-Za-z]{{2}}/)?recruiting/{re.escape(tenant)}(/|$)"}
+    return {"match": BITWARDEN_HOST_MATCH, "uri": a["url"]}
+
+
+def bitwarden_item(a, folder):
+    """One login as a Bitwarden item (its .json import format, and `bw create item`)."""
+    jobs = "\n".join(f"- {j.get('title') or 'job'}: {j['url']} ({j.get('date', '')})" for j in a.get("jobs", []))
+    return {"organizationId": None, "folderId": folder, "type": 1, "reprompt": 0,
+            "name": f"{a.get('company') or a['site']} (job site)", "favorite": False, "fields": [], "collectionIds": None,
+            "notes": f"Made by NUauto on {a['created'][:10]} for job applications on {a['site']}." + (f"\nJobs:\n{jobs}" if jobs else ""),
+            "login": {"uris": [bitwarden_uri(a)], "username": a["email"], "password": a["password"], "totp": None}}
+
+
 def bitwarden(accounts):
     """Bitwarden's .json import format: a folder, and one login item per site (matched on that site's host only)."""
     folder = str(uuid.uuid4())
-    items = []
-    for a in accounts:
-        jobs = "\n".join(f"- {j.get('title') or 'job'}: {j['url']} ({j.get('date', '')})" for j in a.get("jobs", []))
-        items.append({
-            "id": str(uuid.uuid4()), "organizationId": None, "folderId": folder, "type": 1, "reprompt": 0,
-            "name": f"{a.get('company') or a['site']} (job site)", "favorite": False, "fields": [], "collectionIds": None,
-            "notes": f"Made by NUauto on {a['created'][:10]} for job applications on {a['site']}." + (f"\nJobs:\n{jobs}" if jobs else ""),
-            "login": {"uris": [{"match": BITWARDEN_HOST_MATCH, "uri": a["url"]}], "username": a["email"],
-                      "password": a["password"], "totp": None}})
+    items = [{"id": str(uuid.uuid4()), **bitwarden_item(a, folder)} for a in accounts]
     return {"encrypted": False, "folders": [{"id": folder, "name": FOLDER}], "items": items}
+
+
+class BitwardenError(Exception):
+    """Bitwarden's command line is missing, locked, or refused (the message says what to do)."""
+
+
+def _bw(*args, stdin=None):
+    """Bitwarden's command line (`bw`), with your BW_SESSION; its output, or BitwardenError. Never prints it."""
+    exe = shutil.which("bw") or config.tool_path("bw")
+    if not exe:
+        raise BitwardenError("Bitwarden's command line is not installed: npm install -g @bitwarden/cli, then bw login")
+    try:
+        r = subprocess.run([exe, *args, "--nointeraction"], input=stdin, capture_output=True, text=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        raise BitwardenError(f"bw {args[0]} did not answer in 2 minutes") from None
+    if r.returncode:
+        raise BitwardenError(f"bw {args[0]}: {(r.stderr or r.stdout).strip()[:200] or 'failed'}")
+    return r.stdout
+
+
+def to_bitwarden():
+    """Put the logins NUauto made that are not in Bitwarden yet straight into your vault (no file), in FOLDER: (added,
+    already there). Yours (imported from there) never. Needs `bw` unlocked by you (BW_SESSION): NUauto never sees your
+    master password. The accounts lock is not held while bw talks to Bitwarden's server."""
+    try:
+        status = json.loads(_bw("status")).get("status")
+    except ValueError:
+        status = None
+    if status != "unlocked":
+        raise BitwardenError("Bitwarden is " + (status or "not readable") + ": unlock it in this terminal first "
+                             "(export BW_SESSION=$(bw unlock --raw)), then run this again")
+    _bw("sync")
+    folders = json.loads(_bw("list", "folders"))
+    fid = next((f["id"] for f in folders if f.get("name") == FOLDER), None)
+    if not fid:
+        fid = json.loads(_bw("create", "folder", stdin=base64.b64encode(json.dumps({"name": FOLDER}).encode()).decode()))["id"]
+    there = set()
+    for it in json.loads(_bw("list", "items", "--folderid", fid)):
+        login = it.get("login") or {}
+        for u in login.get("uris") or []:
+            there.add((str(u.get("uri") or ""), login.get("username") or ""))
+    with locked() as data:
+        todo = [dict(a) for a in data.values() if not a.get("own") and not a.get("exported")]
+    added, skipped = [], []
+    for a in todo:
+        item = bitwarden_item(a, fid)
+        if (item["login"]["uris"][0]["uri"], a["email"]) in there:
+            skipped.append(a["site"])
+            continue
+        _bw("create", "item", stdin=base64.b64encode(json.dumps(item).encode()).decode())  # stdin: never in argv
+        added.append(a["site"])
+    with locked() as data:
+        for key in added + skipped:
+            if key in data:
+                data[key]["exported"] = date.today().isoformat()
+    return added, skipped
 
 
 def export(path=None, every=False):
@@ -337,6 +413,23 @@ def main(argv):
               "them and never makes an account on those sites." + (f"\nNow delete the export file: rm {src}"
                                                                   if src != "-" else ""))
         return
+    if argv[:2] == ["export", "--bitwarden"] and len(argv) == 2:
+        from nuauto import sync
+        laptop = config.REMOTE_ASSIST and not config.IS_SERVER
+        if laptop:
+            sync.share()  # the logins the homelab's assistant made too
+        try:
+            added, skipped = to_bitwarden()
+        except BitwardenError as e:
+            sys.exit(str(e))
+        if laptop:
+            sync.share()  # the homelab's copy learns they are in Bitwarden now
+        for key in added:
+            print(f"  added   {key}")
+        for key in skipped:
+            print(f"  already there  {key}")
+        return print(f"{len(added)} login{'s' if len(added) != 1 else ''} added to Bitwarden (folder {FOLDER!r})"
+                     + (f", {len(skipped)} were there already" if skipped else "") + ". No file was written.")
     if argv[0] == "export" and len(argv) <= 3:
         rest = [a for a in argv[1:] if a != "--all"]
         path, n = export(rest[0] if rest else None, every="--all" in argv)

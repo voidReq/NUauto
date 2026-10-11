@@ -225,7 +225,10 @@ COMPANY-SITE AGENT (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`;
   import <file>|- --only <text>` takes only the Bitwarden logins whose address has that text (best: `bw list items
   --search myworkday | nuauto accounts import - --only myworkday`, no whole-vault export); saved "own" in accounts.json
   (they replace one NUauto made there), used with {{PASSWORD}} and the email they hold, never a new account on that
-  site, never exported back. Sites: the host; on Workday's shared hosts (wd1.myworkdaysite.com/.../recruiting/<company>)
+  site, never exported back. `nuauto accounts export --bitwarden` (my request, 2026-10-11) puts the logins NUauto made
+  and Bitwarden doesn't have yet straight into my vault with `bw` (I unlock it: BW_SESSION; NUauto never sees my master
+  password; passwords only on bw's stdin; folder "NUauto job sites"; one already there not added twice; with a homelab
+  both machines' logins). Sites: the host; on Workday's shared hosts (wd1.myworkdaysite.com/.../recruiting/<company>)
   host/<company>; my own login on another domain counts for the whole domain (account.amazon.jobs = amazon.jobs).
 - Sign-in pages (added 2026-10-10, my call): a sign-in / create-account page's own "Submit" doesn't ask (the latest
   snapshot has a password box and only account boxes: assist.sign_in_page); any question on the page, or "Apply" /
@@ -350,6 +353,7 @@ nuauto selftest        # is this install OK? demo mode end to end in a hidden br
 nuauto assist [<row>]  # company-site agent for a Needs Human row; asks me before any Submit
 nuauto accounts [export [<file>] [--all]]   # the job-site logins the agent made (no passwords shown); Bitwarden's import file
 nuauto accounts import <file>|- --only <text>   # my own logins from Bitwarden for those sites (bw list items --search ...)
+nuauto accounts export --bitwarden              # NUauto's new logins straight into my vault (bw unlocked by me; no file)
 nuauto review pair [<name>] | devices | unpair <name>   # the homelab assistant's review page: pair my phone (docs/REMOTE.md)
 nuauto review demo                                      # that page with made-up sessions, locally (agents: look at it with this)
 nuauto assist queue | start <nuworks|other> <row>      # (homelab) the assistant's queue / start one row's session in tmux
