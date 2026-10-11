@@ -990,4 +990,58 @@ finally:
     gui.VIEW, config.DEMO, config.REMOTE_ASSIST, config.IS_SERVER = real_flags
     threading.excepthook = threading.__excepthook__
 
+# ---- the GUI's Homelab assistants card: the review page's address, Pair this computer, the browser tool's screenshots
+real_flags = (gui.VIEW, config.DEMO, config.REMOTE_ASSIST, config.IS_SERVER)
+real_local = config.LOCAL
+real_pair = review.pair_link_from_homelab
+try:
+    config.LOCAL = {**config.LOCAL, "web_listen_host": "100.64.0.9"}
+    config.REMOTE_ASSIST, config.IS_SERVER, config.DEMO, gui.VIEW = True, False, False, False
+    assert gui.homelab_review() == f"http://100.64.0.9:{review.PORT}"           # (an earlier part moved the port)
+    for flags in ((True, False, True, False), (False, True, True, False), (False, False, False, False), (False, False, True, True)):
+        gui.VIEW, config.DEMO, config.REMOTE_ASSIST, config.IS_SERVER = flags
+        assert gui.homelab_review() is None, flags                         # view, demo, off, or the homelab itself
+        try:
+            gui.act({"kind": "review_pair", "args": {}})
+            raise AssertionError("paired while off")
+        except gui.Refused:
+            pass
+    gui.VIEW, config.DEMO, config.REMOTE_ASSIST, config.IS_SERVER = False, False, True, False
+    review.pair_link_from_homelab = lambda name: "http://100.64.0.9:8766/pair?c=abc_123"
+    act = gui.act
+    assert act({"kind": "review_pair", "args": {}}) == {"url": "http://100.64.0.9:8766/pair?c=abc_123"}
+    review.pair_link_from_homelab = lambda name: None
+    try:
+        act({"kind": "review_pair", "args": {}})
+        raise AssertionError("no link, no error")
+    except gui.Refused as e:
+        assert "pairing link" in str(e)
+finally:
+    gui.VIEW, config.DEMO, config.REMOTE_ASSIST, config.IS_SERVER = real_flags
+    config.LOCAL, review.pair_link_from_homelab = real_local, real_pair
+
+# pair_link_from_homelab reads the link out of `nuauto review pair` over ssh (faked); nothing else counts
+real_run = subprocess.run
+try:
+    subprocess.run = lambda argv, **kw: subprocess.CompletedProcess(argv, 0, "Open this on the device to pair (once...):\n"
+                                                                     "  http://100.64.0.9:8766/pair?c=Zz9-_x\n", "")
+    assert review.pair_link_from_homelab("this computer") == "http://100.64.0.9:8766/pair?c=Zz9-_x"
+    subprocess.run = lambda argv, **kw: subprocess.CompletedProcess(argv, 1, "", "refused")
+    assert review.pair_link_from_homelab("x") is None
+    subprocess.run = lambda argv, **kw: subprocess.CompletedProcess(argv, 0, "no link here", "")
+    assert review.pair_link_from_homelab("x") is None
+    subprocess.run = lambda argv, **kw: (_ for _ in ()).throw(subprocess.TimeoutExpired(argv, 30))
+    assert review.pair_link_from_homelab("x") is None
+finally:
+    subprocess.run = real_run
+
+# Past runs lists the browser tool's screenshots (now in <run>/browser/), not its snapshots or the resume copy
+run_d = os.path.join(config.LOGS_DIR, "20990101-000000_assist_other_row9")
+os.makedirs(os.path.join(run_d, "browser", "upload"), exist_ok=True)
+for f in ("actions.log", "state.json", "browser/page-1.png", "browser/page.md", "browser/upload/Resume.pdf"):
+    open(os.path.join(run_d, f), "w").write("x")
+listed = next(r for r in gui.logs()["runs"] if r["name"] == os.path.basename(run_d))["files"]
+assert listed == ["actions.log", "browser/page-1.png"], listed
+assert gui.log_file(os.path.join(run_d, "browser", "page-1.png")).endswith("page-1.png")
+
 print("All remote checks passed.")

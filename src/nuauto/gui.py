@@ -897,6 +897,14 @@ def act(body):
         health.fix_permissions()
         APP.run_now(["quick"])
         return {}
+    elif kind == "review_pair":  # Pair this computer: a one-time link from the homelab, opened here (you press Pair)
+        if not homelab_review():
+            raise Refused("The homelab assistant is off (remote_assist in local_config.json).")
+        from nuauto import review
+        link = review.pair_link_from_homelab("this computer")
+        if not link:
+            raise Refused("The homelab could not be asked for a pairing link (is it reachable?).")
+        return {"url": link}
     else:
         raise Refused(f"Unknown action {kind!r}.")
     return {"task": task.view()}
@@ -954,7 +962,18 @@ def assistants():
     """The assistant sessions running now (assist.sessions: slot, row, tab, company, host, since) and how many may;
     homelab: the homelab's own sessions (remote_assist), so a row it works on offers no Start here."""
     from nuauto import assist
-    return {"sessions": assist.sessions(), "slots": assist.slots(), "homelab": homelab_assistants()}
+    return {"sessions": assist.sessions(), "slots": assist.slots(), "homelab": homelab_assistants(),
+            "homelab_review": homelab_review()}
+
+
+def homelab_review():
+    """The homelab assistant's review page (review.py), for the Homelab assistants card; None when there is none to
+    show (no remote_assist, view or demo mode)."""
+    if VIEW or config.DEMO or not config.REMOTE_ASSIST or config.IS_SERVER:
+        return None
+    from nuauto import review
+    url = review.page_url()
+    return url.rstrip("/") if url.startswith("http") else None
 
 
 HOMELAB_EVERY = 60  # seconds between reads of the homelab's sessions (ssh, in the background)
@@ -1196,6 +1215,9 @@ def logs():
             path = os.path.join(config.LOGS_DIR, name)
             if os.path.isdir(path):
                 files = sorted(os.listdir(path))
+                shots = os.path.join(path, "browser")  # the assistant's browser tool keeps its screenshots there
+                files += sorted(f"browser/{f}" for f in (os.listdir(shots) if os.path.isdir(shots) else [])
+                                if f.endswith(".png"))
                 out.append({"name": name, "files": [f for f in files if f.endswith((".png", ".log", ".json", ".txt"))
                                                     and f not in ("mcp.json", "settings.json", "state.json")]})
     return {"runs": out}

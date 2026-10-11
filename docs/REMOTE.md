@@ -134,6 +134,22 @@ PORTS (homelab; slot n = 1..3)
   stopped by the next run in that slot). The browser tool's own files (downloads, snapshots, the resume copy) are in
   the run folder's browser/, apart from the guard's (a page can't plant a Submit answer there).
 
+FROM THE LAPTOP'S GUI (Apply > Company sites, only with remote_assist)
+- A Homelab assistants card: the homelab's sessions and what each waits for, Open its page (the review page in your
+  browser), Open the review page, Pair this computer (asks the homelab for a one-time link over ssh and opens it in
+  your browser: press Pair). The page itself can't live inside NUauto's window (it refuses frames, and its cookie
+  belongs to the browser that paired), so it opens in your browser.
+- Without a homelab (local mode, the packaged app) none of this exists: NUauto works on the laptop alone as before.
+
+PROVEN FOR REAL (2026-10-11, a practice run on the homelab: a side install of the branch, demo mode's fake identity
+and sheet, Selenium's public test form)
+- The virtual screen and the browser view (Xvfb + x11vnc + noVNC over Tailscale), its real start/stop test there.
+- A whole session: Sonnet filled the form in Playwright's Firefox on the virtual screen, its end list answered from a
+  phone on the review page (replies typed into its tmux pane), the Submit asked on the page and approved from the
+  phone 18 s later, then End session and "Did it go through?" Yes: the fake sheet row Applied, the queue's record
+  "approved, y", the screen stopped by itself.
+- Pairing a phone (a link opened from Discord pairs Discord's in-app or incognito browser only: copy it into the
+  phone's own browser).
 NOT YET PROVEN FOR REAL
-- Everything here: the virtual screen and view on the homelab, a session there, the merge against real files, the
-  review page on a phone, tmux typing into a real Claude Code session.
+- The queue starting sessions by itself (nuauto-assist.timer), a laptop claim over ssh, the merge on your real answer
+  banks and logins, a real application on the homelab, the GUI's Homelab assistants card.

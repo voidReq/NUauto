@@ -612,6 +612,19 @@ def serve():
     ThreadingHTTPServer((listen_host(), PORT), Handler).serve_forever()
 
 
+def pair_link_from_homelab(name):
+    """(laptop) A one-time pairing link made on the homelab (`nuauto review pair` there over ssh), or None."""
+    from nuauto import sync
+    cmd = sync.SSH + [config.SERVER, f"cd {shlex.quote(config.SERVER_DIR)} && .venv/bin/nuauto review pair "
+                      + shlex.quote(name)]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    links = re.findall(r"https?://\S+/pair\?c=[A-Za-z0-9_-]+", r.stdout)
+    return links[-1] if r.returncode == 0 and links else None
+
+
 # ---------- demo: the page with made-up sessions, on this computer (for looking at it; nothing real) ----------
 
 DEMO_SESSIONS = [
