@@ -303,7 +303,9 @@ img{max-width:100%;border:1px solid #ccc;border-radius:.3rem}.dim{color:#777;fon
 @media (prefers-color-scheme:dark){body{background:#151515;color:#eee}.card{background:#1f1f1f;border-color:#333}
 pre{background:#262626}.chip{background:#333}.ok{color:#4ac26b}.approve{background:#5a1f1d}.waiting{background:#4d3f0d}.finish{background:#1e4227}a{color:#7ab4ff}}"""
 
-POLL_JS = """// A tapped button shows it is working until the next page loads (its name/value still goes with the form).
+POLL_JS = """// Back to a page the browser kept in memory (its buttons greyed by a tap): load it fresh instead, so they work.
+window.addEventListener("pageshow", (e) => { if (e.persisted) location.reload(); });
+// A tapped button shows it is working until the next page loads (its name/value still goes with the form).
 document.addEventListener("submit", (e) => {
   const f = e.target, b = e.submitter;
   if (f.dataset.sent) { e.preventDefault(); return; }  // a second tap while the first is on its way
