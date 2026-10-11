@@ -82,15 +82,16 @@ def open_tab(tab, interactive=True, create=False):
     return sheet.open_other(interactive, create=create) if tab == "other" else sheet.open_worksheet(interactive)
 
 
-def add(tab, url, company="", title="", status="Approved", interactive=True):
-    """A job added by hand -> that tab (the Other jobs tab is made if missing). Returns its row number.
-    SheetError if the link does not belong in that tab or is already in the sheet."""
+def add(tab, url, company="", title="", status="Approved", interactive=True, notes=""):
+    """A job added by hand (or approved in Review: an internship, intern.approve) -> that tab (the Other jobs tab is
+    made if missing). Returns its row number. SheetError if the link does not belong in that tab or is already in the
+    sheet. notes: the Notes cell of an Other jobs row (a NUworks row's notes come from your job data)."""
     if status not in ADD_STATUSES:
         raise sheet.SheetError(f"Added jobs are {' or '.join(ADD_STATUSES)}, not {status!r}.")
     url, why = check_url(tab, url)
     if why:
         raise sheet.SheetError(why[0].upper() + why[1:] + ".")
-    company, title, notes = str(company or "").strip(), str(title or "").strip(), ""
+    company, title, notes = str(company or "").strip(), str(title or "").strip(), str(notes or "").strip()
     if tab == "nuworks":
         info = lookup(url)
         company, title = company or info.get("company", ""), title or info.get("title", "")

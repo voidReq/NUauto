@@ -3,7 +3,7 @@
 Needs "deploy_from_git": true in local_config.json (then the laptop stops pushing code: sync.push). The repo is
 public, so nothing here needs a login. Each run:
   1. asks GitHub for main's commit; the same one as the last deploy = nothing to do
-  2. waits while the update (`nuauto daily`) is running; the next run tries again
+  2. waits while an update (`nuauto daily`, `nuauto intern update`) is running; the next run tries again
   3. fetches the commit, unpacks it into work/deploy/stage and imports the modules the homelab runs from there:
      a broken commit never reaches the live files (Discord says so once; the old code keeps running)
   4. copies the changed files over the live ones (the old ones are kept, to undo), reinstalls if pyproject.toml
@@ -29,7 +29,8 @@ UNIT_SRC = "deploy/systemd"
 # nuauto-web keeps the code it started with: restart it when one of these changed (doctor warns about the same list).
 WEB_CODE = ["src/nuauto/web.py", "src/nuauto/config.py", "src/nuauto/sheet.py", "src/nuauto/jobs.py"]
 # Imported from the new code before anything is copied (the modules the homelab runs; not the GUI's).
-MODULES = ["cli", "config", "sheet", "jobs", "daily", "web", "doctor", "sync", "deploy", "browser", "health"]
+MODULES = ["cli", "config", "sheet", "jobs", "daily", "web", "doctor", "sync", "deploy", "browser", "health", "intern",
+           "postings"]
 UNIT_DIR = os.path.expanduser("~/.config/systemd/user")
 STATE_PATH = os.path.join(config.LOCAL_DIR, "deployed.json")
 LOG_PATH = os.path.join(config.LOGS_DIR, "deploy.log")
@@ -66,7 +67,7 @@ class Deploy:
         return subprocess.run(["systemctl", "--user", *args], capture_output=True, text=True, timeout=120)
 
     def update_running(self):
-        return subprocess.run(["pgrep", "-f", "nuauto daily"], capture_output=True).returncode == 0
+        return subprocess.run(["pgrep", "-f", "nuauto (daily|intern update)"], capture_output=True).returncode == 0
 
     def install_deps(self):
         uv = shutil.which("uv") or os.path.expanduser("~/.local/bin/uv")

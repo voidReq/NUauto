@@ -389,8 +389,10 @@ def write_batches(kind, items, size):
     return files
 
 
-def read_outputs(kind):
-    """Read every <kind>_out_*.json and check it answers exactly the ids of the matching input."""
+def read_outputs(kind, lenient=False):
+    """Read every <kind>_out_*.json and check it answers exactly the ids of the matching input. lenient (the
+    internships' big batches): a file that misses or garbles a few ids still gives its other rows; only rows whose id
+    is one of its input's count."""
     results, problems = {}, []
     for fin in sorted(glob.glob(os.path.join(config.WORK_DIR, f"{kind}_in_*.json"))):
         fout = fin.replace("_in_", "_out_")
@@ -405,12 +407,16 @@ def read_outputs(kind):
         except json.JSONDecodeError as e:
             problems.append(f"{os.path.basename(fout)} is not valid JSON: {e}")
             continue
+        if lenient:
+            rows = [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
         got = {r.get("id") for r in rows}
         if got != want:
             problems.append(f"{os.path.basename(fout)}: {len(want - got)} ids missing, {len(got - want)} unexpected")
-            continue
+            if not lenient:
+                continue
         for r in rows:
-            results[r["id"]] = r
+            if not lenient or r.get("id") in want:
+                results[r["id"]] = r
     return results, problems
 
 
@@ -428,13 +434,15 @@ def resume_text():
 PROMPT_FIELDS = ("student", "keep_roles", "drop_roles")  # {{name}} in prompts/*.md, filled from PREFS
 
 
-def render_prompt(name):
+def render_prompt(name, extra=None):
     """prompts/<name> with your preferences filled in, written to work/<name> for Claude to read. Returns its path.
-    With the default preferences the text is exactly the original prompt."""
+    With the default preferences the text is exactly the original prompt. extra: more {{name}} values (intern.py)."""
     with open(os.path.join(config.PROJECT_DIR, "prompts", name)) as f:
         text = f.read()
     for key in PROMPT_FIELDS:
         text = text.replace("{{" + key + "}}", str(PREFS[key]))
+    for key, value in (extra or {}).items():
+        text = text.replace("{{" + key + "}}", str(value))
     text = text.replace("{{categories}}", fields.render_categories(PREFS["categories"]))
     text = text.replace("{{first_category}}", CATEGORIES[0])
     os.makedirs(config.WORK_DIR, exist_ok=True)
@@ -1020,9 +1028,11 @@ def job_lines(r, d, width):
     day = closes(d)
     soon = day is not None and (day - date.today()).days <= URGENT_DAYS
     labeled("Closes", closes_text(day), "flag" if soon else "dim")
-    hint = external_hint(d)
+    hint = external_hint(d) if d.get("source") != "simplify" else None  # an internship IS on the company's site
     if hint:
         labeled("Apply", "ALSO ON COMPANY SITE? \"" + hint + "\"", "flag")
+    if d.get("source") == "simplify":
+        labeled("Posting", d.get("url", ""), "dim")
     shown = [f for f in r["flags"] if f != "apply on company site too?"]  # the Apply line already says it
     if shown:
         labeled("Flags", " · ".join(shown), "flag")
@@ -1151,8 +1161,8 @@ def rate_viewer(todo, details, ratings, approved=None, urgent=()):
                 i, top = i + 1, 0
             elif c == ord("u"):  # back one job; y/n there replaces the earlier answer
                 i, top = max(0, i - 1), 0
-            elif c == ord("o"):
-                open_url(job_url(r["id"]))
+            elif c == ord("o"):  # an internship (intern.py) has its posting's own link
+                open_url(details[r["id"]].get("url") or job_url(r["id"]))
             elif c == ord("q"):
                 return
 
@@ -1218,7 +1228,7 @@ def text_blocks(text):
 def job_view(r, d, today=None):
     """One pool job for the GUI's Review card: what job_lines shows in the terminal, as data."""
     day = closes(d)
-    return {"id": r["id"], "url": job_url(r["id"]), "title": r["title"], "company": r["company"],
+    return {"id": r["id"], "url": d.get("url") or job_url(r["id"]), "title": r["title"], "company": r["company"],
             "location": d["location"], "category": r["category"], "category_label": category_label(r["category"]),
             "tag": r.get("tag"), "match": r["match"],
             "threshold": r["threshold"], "score": rank_text(r), "taste": r.get("taste"),

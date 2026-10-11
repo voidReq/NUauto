@@ -1,0 +1,10 @@
+[Unit]
+Description=NUauto: Summer internships (Simplify's list) every 2 hours
+
+[Timer]
+OnCalendar=*-*-* 00/2:40:00 America/New_York
+RandomizedDelaySec=10m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

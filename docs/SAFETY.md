@@ -3,6 +3,13 @@ SAFETY: every guardrail, where the code enforces it, which test covers it
 Format: rule | enforced in (src/nuauto/) | test. "no test" = nothing in tests/ exercises it.
 Paths below are in src/nuauto/ unless a folder is given.
 
+BATCH CLAUDE (daily.run_claude: triage, score, category for NUworks and internships)
+- Runs in work/, reads and edits only there (Read(./**), Edit(./**); never a bare Write, which allows every path);
+  no shell, web or MCP tools; -p refuses anything else. The batches hold web text (postings, Simplify's list) | daily.run_claude |
+  test_daily (the command); a real call: writes in work/ work, /tmp and /etc refused (2026-10-10, by hand)
+- Internship imports keep the good rows (a mis-copied id or a failed batch is retried next run; nothing usable stops
+  the step) | jobs.read_outputs(lenient), intern.take | test_intern
+
 APPLYING (apply.py, sheet.py)
 - Only Approved rows are acted on | apply.pick_row, sheet.approved; set_status refuses a row that is not Approved | test_sheet (approved filter, refusals)
 - Weekly cap (fixed weeks from local_config week_start, else the last 7 days) | sheet.max_per_week() (default MAX_PER_WEEK = 11; local_config "max_per_week" 1-30, anything else = 11; Settings in the GUI), sheet.week_window, sheet.check_limits; apply.main checks before every row | test_sheet (7-day edge, limit refuses, the setting's bounds), test_gui (settings refuse bad values), test_demo (a run refuses up front)
@@ -44,16 +51,53 @@ BROWSER (browser.py, config.py)
 - Only one process on browser_profile/ (apply, the update, login, the GUI's NUworks check) | browser.lock_profile (flock on local/browser_profile.lock, from launch to close; a failed launch releases it); the GUI's background check gives way to your runs | test_browser (profile lock)
 
 COMPANY-SITE AGENT (assist.py, prompts/ASSIST_PROMPT.md)
+- Side by side: at most assist.slots() (3) sessions; one per row and one per job site at a time (locks held by the
+  launcher for the whole run, freed if it dies); each slot its own browser profile | assist.take_slot, take_site,
+  run (row lock), slot_profile | test_assist (slots, sites, a slot held by another process), test_gui (the rows say so)
+- No answer lost between sessions: every answer-bank command and the Answers screen's save hold local/answers.lock
+  (the screen's version check and save are one step) | assist.bank, gui.answers_put | test_assist (8 writers at once;
+  without the lock they lose answers)
 - Submit-type click asks the user in the terminal first | assist.decide (SUBMIT_RE on the element name) -> hook "ask" | test_assist
+- Except a sign-in or create-account page's own "Submit" / "Confirm": the latest snapshot has a password box and only
+  account boxes (email, user name, password; tick boxes and bot traps aside): no application can go out there. Any
+  other box on the page (a question), or another name ("Apply", "Submit Application"), still asks | assist.sign_in_page |
+  test_assist (Workday's real sign-in markup)
+- Never types into a bot trap ("for robots only", "leave blank": filling it marks you as a bot) | assist.decide | test_assist
 - Enter key and type(submit=true) ask first | assist.decide (ENTER_KEYS, browser_type) | test_assist
+- Except on a sign-in page (assist.sign_in_page) or the job's own posting before anything is filled in (assist.posting_page:
+  the row's link, a language part like /en-US/ aside, no form boxes on it but a job search box): there Enter, and the
+  posting's own "Apply" / "Apply now", don't ask (they open the application). The catch, accepted 2026-10-10: a site with
+  one-click apply from a saved profile could submit there | assist.posting_page, same_posting | test_assist (Workday's real
+  posting markup)
+- On a Workday site, Enter in a box doesn't ask: the box has the focus in the latest snapshot ([active]), or it is the
+  box typed into with submit=true. Workday's pages aren't HTML forms (no submit on Enter) and its final Submit is a
+  button on a review page with no boxes; Enter with the focus on a button, or on any other site, asks | assist.workday,
+  decide (browser_press_key, browser_type) | test_assist
+- A button or link with no name but its text (`button [ref=e9]: Submit`, as Workday writes some) is checked by that text
+  (before 2026-10-10 such a button had no name, so a final Submit written that way would not have asked) | assist.parse_refs | test_assist
 - Element names come only from the latest full snapshot; page-changing actions clear refs; unknown ref = deny | assist.update_after, assist.parse_refs, decide (browser_click) | test_assist
 - Unnamed fields take the label text above them, from the page | assist.parse_refs | test_assist
-- Password fields: no typing or filling | assist.decide (browser_type, browser_fill_form) | test_assist
+- Password fields: only {{NEW_PASSWORD}} / {{PASSWORD}}, alone, into a field the latest snapshot names a password (never
+  the agent's description), not with submit=true, never on an identity provider or Northeastern (accounts.never); the
+  guard types the site's own password (updatedInput, "allow") and the agent never sees it | assist.password_check,
+  decide, fill, hook | test_assist
+- One random password per site (Workday tenant, iCIMS site...), made by NUauto, kept in local/accounts.json (600, under a
+  lock, never synced); {{PASSWORD}} where NUauto has no login = deny | accounts.password_for, make_password | test_assist
+- The browser tool's reply ("Ran Playwright code" echoes typed text) is cleaned of those passwords before the agent sees
+  it (updatedToolOutput), and in logs/<run>/last_response.json; actions.log records the placeholder | assist.redact, hook
+  (post) | test_assist (the hook's output and the files); a real session: see GAPS
+- Bitwarden export: mode 600, logins matched on their own host only | accounts.export, bitwarden | test_assist
 - No page scripts; only tools in assist.TOOLS | assist.decide | test_assist
 - Navigation only to http(s) | assist.decide | test_assist
 - Uploads: only the run's copy of the resume (logs/<run>/upload/, resolved path) | assist.decide (browser_file_upload) | test_assist
 - Bash: only the answer-bank command (answer|save|once|alias|blank|wait), no shell operators | assist.check_bash | test_assist
 - Read/Glob/Grep only inside the resume and local_config.json assist_read_paths; symlinks resolved | assist.check_read, assist.under | test_assist
+- Never read inside them: NUauto's local/ folders (this one and any checkout's, found at start), .ssh/.gnupg/.git/...,
+  key / token / cookie / password / .env files; Grep may not search a folder holding a local/ | assist.secret_path,
+  protected_dirs, check_read | test_assist
+- WebSearch / WebFetch allowed (read-only lookups), logged | assist.decide (WEB_TOOLS) | test_assist
+- A guard that fails or times out (60 s) blocks the action: the hooks' "onFailure": "block" (Claude Code 2.1.295+) |
+  assist.session | test_assist (the settings it writes)
 - Saved/once answers: one line, max 300 chars, must equal an option; already-saved answers are not overwritten; always_ask / voluntary pages are never saved | assist.valid_answer, assist.bank | test_assist
 - Voluntary / EEO pages always ask the user | assist.page_always_asks, assist.lookup | test_assist
 - Unknown label: the agent gets the saved answers to infer from (not always_ask, not leave-blank), then aliases the label; anything else it asks | assist.lookup, assist.saved_answers | test_assist (what is handed out); the inference itself is prompt-only
@@ -111,3 +155,11 @@ GAPS (policy or prompt only, or weaker than the rules read)
 - local/ being mode 700 is not enforced in code (only the profile dir and the two secret files get chmod).
 - "Check NUworks' terms of use before running against the real site" is a human to-do (docs/STATUS.md OPEN), not enforced.
 - Reading answers.json / profile.json / token files is protected only by file permissions and by the assist read-limits; nothing scrubs logs/ (screenshots can show personal data; logs/ is gitignored).
+- Assist: Grep's own file choice is ripgrep's (hidden and gitignored files skipped by default): a secret in an ordinary
+  file inside the notes folders could reach the agent through Grep. Read refuses secret-looking names; Grep only
+  refuses folders that hold a local/. The agent can reach any web page (WebFetch, the browser), so what it reads can
+  leave: keep notes folders free of secrets.
+- Assist passwords: Claude Code's own session log (~/.claude/projects/) and telemetry may keep the browser tool's
+  original reply; the guard cleans what the agent sees and NUauto's logs. Playwright MCP's page dumps (logs/<run>/
+  page-*.yml) hold snapshots, which do not show password values. A site that shows the password in a visible box
+  after typing would show it to the agent.

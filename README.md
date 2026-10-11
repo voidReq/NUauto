@@ -17,6 +17,11 @@ before it submits anything. The same agent works on jobs that aren't on NUworks:
 Other jobs tab (the Sheet screen, or `nuauto sheet add other <url> <company> <title>`), then `nuauto assist other <row>`.
 The Sheet screen (or `nuauto sheet add|move|remove`) also adds NUworks co-ops by hand and moves or removes rows.
 
+Summer internships too, if you want them: with `"internships": {}` in your settings file (`local/local_config.json`),
+NUauto follows [SimplifyJobs' Summer 2027 list](https://github.com/SimplifyJobs/Summer2027-Internships), reads each
+posting from the company's own job site, and scores and ranks them like the co-ops. Review has a switch for them;
+approved ones go in the Other jobs tab (no weekly cap), and the agent applies on the company's site.
+
 ## Install
 
 You need a NUworks account, a Google account, and [Claude Code](https://claude.com/claude-code) (a Claude

@@ -129,15 +129,19 @@ def client(interactive=True):
             raise NotLoggedIn("No Google token on the homelab. Log in on the laptop; the next nuauto command syncs it.")
         if not interactive:
             raise NotLoggedIn("Not logged in to Google yet.")
+    # Google allows about 60 sheet reads a minute: a burst (approving several jobs, two assistants starting) waits and
+    # tries again (2, 4, 8... s, up to about 2 minutes) instead of failing.
     if not interactive:
         from google.oauth2.credentials import Credentials
         config.lock_token()
-        return gspread.Client(auth=Credentials.from_authorized_user_file(config.TOKEN_PATH))
+        return gspread.Client(auth=Credentials.from_authorized_user_file(config.TOKEN_PATH),
+                              http_client=gspread.BackOffHTTPClient)
     fresh = not os.path.exists(config.TOKEN_PATH)  # gspread will open the browser for a Google login
     gc = gspread.oauth(
         scopes=config.WRITE_SCOPES,
         credentials_filename=config.find_client_json(),
         authorized_user_filename=config.TOKEN_PATH,
+        http_client=gspread.BackOffHTTPClient,
     )
     config.lock_token()
     if fresh:

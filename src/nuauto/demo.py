@@ -329,6 +329,81 @@ def _url(i):
     return f"{HOST}/students/app/jobs/detail/{i}"
 
 
+# Internships (intern.py), as Simplify's list has them: (n, company, title, places, Simplify's category, match,
+# who may apply, kind of work). match None: a posting no way could read (Review shows it last, unscored).
+INTERNSHIPS = [
+    (1, "Harbor Embedded", "Firmware Engineering Intern", ["Boston, MA"], "Hardware", 82, "ok", "embedded"),
+    (2, "Lumen Security", "Security Engineering Intern", ["Cambridge, MA", "NYC"], "Software", 74, "ok", "security"),
+    (3, "Cobalt Systems", "Systems Software Intern", ["Austin, TX"], "Software", 88, "one_year_up", "systems"),
+    (4, "Quarry Hardware", "Hardware Validation Intern", ["San Jose, CA"], "Hardware", 69, "ok", "hardware"),
+    (5, "Beacon Web Studio", "Frontend Engineering Intern", ["Remote in USA"], "Software", 71, "ok", "fullstack_web"),
+    (6, "Pine Robotics", "Robotics Software Intern", ["Pittsburgh, PA"], "Software", None, None, None),
+]
+INTERN_DESCRIPTION = """About the internship
+{company} is hiring a {title} for twelve weeks this summer.
+What you'll do:
+- Build and test {what} with our engineers
+- Present what you built at the end of the summer
+What we're looking for:
+- Coursework or projects in {skills}
+- Rising juniors and seniors pursuing a Bachelor's degree
+Pay: $38 - $46 per hour"""
+
+
+def intern_raw(today):
+    """INTERNSHIPS as Simplify's listings.json has them (what the fake `nuauto intern update` reads)."""
+    import calendar
+    out = []
+    for n, company, title, places, cat, *_ in INTERNSHIPS:
+        posted = calendar.timegm((today - timedelta(days=3 * n + 1)).timetuple())
+        out.append({"source": "Simplify", "id": f"00000000-0000-4000-8000-{n:012d}", "company_name": company,
+                    "title": title, "locations": places, "category": cat, "terms": ["Summer 2027"], "active": True,
+                    "is_visible": True, "url": f"https://jobs.example-ats.com/{company.split()[0].lower()}/{4100 + n}",
+                    "date_posted": posted, "date_updated": posted, "sponsorship": "Other", "degrees": ["Bachelor's"],
+                    "company_url": ""})
+    return out
+
+
+def intern_setup(today):
+    """The internship pool's data: listings, three... read and scored, one posting that could not be read."""
+    from nuauto import intern
+    from nuauto import jobs
+    raw = intern_raw(today)
+    listings, _, _ = intern.merge({}, raw, today)
+    intern.save("demo_listings.json", raw)
+    by_url = {x["url"]: x for x in listings.values()}
+    posts, triage, scores, cats, failed = {}, {}, {}, {}, {}
+    for (n, company, title, places, cat, match, year_req, kind), sim in zip(INTERNSHIPS, raw):
+        x = by_url[sim["url"]]
+        triage[x["id"]] = {"keep": True, "fit": "high" if n < 4 else "medium", "why": "demo", "by": jobs.triage_set()}
+        if match is None:
+            failed[x["id"]] = {"tries": intern.TRIES, "last": today.isoformat(), "why": "page: no posting text (demo)"}
+            continue
+        text = INTERN_DESCRIPTION.format(company=company, title=title, what=title.replace(" Intern", "").lower(),
+                                         skills="C, Python and Linux")
+        posts[x["url"]] = text
+        d = intern.details_of(x, {"how": "demo", "description": text, "location": "", "pay": "$38-$46 per hour",
+                                  "deadline": None, "closed": False}, today)
+        intern.save(f"details/{x['id']}.json", d)
+        scores[x["id"]] = {"match": match, "year_req": year_req, "met": ["C", "Python"], "partial": ["testing"],
+                           "missing": ["industry tools", "a previous internship"],
+                           "why": f"Projects in C and Python fit most of the {title.lower()} work.",
+                           "year_text": "Rising seniors pursuing a Bachelor's degree" if year_req == "one_year_up" else "",
+                           "scored": today.isoformat()}
+        cats[x["id"]] = kind
+    intern.save("listings.json", listings)
+    intern.save("demo_postings.json", posts)
+    intern.save("triage.json", triage)
+    intern.save("scores.json", scores)
+    intern.save("categories.json", cats)
+    intern.save("category_sets.json", {i: jobs.CATEGORY_SET for i in cats})
+    intern.save("failed.json", failed)
+    intern.save_pool(today)
+    from datetime import datetime
+    intern.save("scans.json", [{"time": (datetime.now() - timedelta(hours=1)).isoformat(timespec="minutes"),
+                                "listed": len(raw), "pool": len(scores)}])
+
+
 def setup(state_names=()):
     """Fill the (empty) demo folder. state_names: see the module docstring."""
     _need_demo()
@@ -354,7 +429,7 @@ def setup(state_names=()):
         _write(_path("demo_sheet_DEMO-SHEET.json"), {"title": "NUauto jobs (demo)", "rows": []})
         return
     _write(config.LOCAL_CONFIG_PATH, {**base, "sheet_id": SHEET_ID, "resume_path": resume, "tos_ack": today.isoformat(),
-                                      "preferences": dict(jobs.DEFAULTS)}, mode=0o644)
+                                      "preferences": dict(jobs.DEFAULTS), "internships": {}}, mode=0o644)
     _write(config.PROFILE_PATH, {"resume_label": RESUME_LABEL})
     _write(_path("client_secret.json"), {"installed": {"client_id": "demo.apps.googleusercontent.com",
                                                        "client_secret": "demo", "redirect_uris": ["http://localhost"]}})
@@ -394,6 +469,7 @@ def setup(state_names=()):
     from datetime import datetime
     jobs.save("scans.json", [{"time": (datetime.now() - timedelta(hours=2)).isoformat(timespec="minutes"), "listed": 12,
                               "pool": 3}])
+    intern_setup(today)
 
     # the sheet
     from nuauto import sheet

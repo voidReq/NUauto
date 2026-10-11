@@ -42,7 +42,8 @@ it as a GitHub release on every v* tag)
   (podman or docker: Ubuntu 22.04 and 24.04, Debian 12, Fedora, Arch; logs in packaging/build/distros/).
 
 SCREENS
-  Today          health problems with fix buttons, this week's count, next steps, what only you can do (each item with
+  Today          health problems with fix buttons, this week's count, next steps (with "Review N internships" when
+                 internships are on and some wait: it opens Review on that list), what only you can do (each item with
                  its due date, soonest first; same in Apply's Company sites part)
   Review         one pool job at a time. Approve mode: Approve (y) adds it to the sheet as Approved at once
                  (or, for one of your Proposed rows, which Review shows first, turns that row Approved);
@@ -52,6 +53,16 @@ SCREENS
                  sent behind the screen (the next job shows at once; a failed write brings you back to that job).
                  Undo puts the row back to Proposed; Not for me (n) rates it no; Skip (s); Back (u); Open (o).
                  Rate only mode: yes/no ratings for the taste model, nothing in the sheet.
+                 Source switch, only when internships are on ("internships" in local_config.json, intern.py): "NUworks
+                 co-ops" / "<term> internships" (Simplify's list; the postings are on the companies' own sites). Remembered
+                 for the session (default co-ops; Today's "Review N internships" picks the internships, its co-op button the
+                 co-ops); changing it reloads the list. Everything above works the same on the internships, except: Approve
+                 adds an Approved row to the sheet's Other jobs tab (apply there from Apply > Company sites; no weekly cap),
+                 and Undo puts it back to Proposed there; a job whose Other jobs row is Proposed shows first, flagged
+                 "already Proposed (Other jobs row N)", and Approve turns that row Approved; the button says "Open posting";
+                 cards add Posted and, when the posting says so, Who can apply; a posting that could not be read comes last
+                 with no match ("not scored", Why says what failed: judge it from its link). When the list is done it points
+                 to Apply > Company sites.
                  Search box (words or "quoted phrases", all must appear, any case, in title, company, place, kind of
                  work, tag, skills, description, qualifications) and a kind-of-work menu narrow the list; the order
                  inside stays the same. Esc clears the search. A text search shows every match as its own card (8 at a
@@ -75,7 +86,9 @@ SCREENS
                  stop; question dialogs; recent runs. Start tries every row on its own; one that sends you to a
                  company site or needs a cover letter / transcript becomes Needs Human (nothing submitted) and shows
                  in the other tabs (since 2026-10-09 Company sites is a part of Apply; the menu count is Approved + the
-                 assistant's rows + retries). Company sites tab: Needs Human rows for the assistant (opens
+                 assistant's rows + retries). Company sites tab (assistants side by side, up to 3: a row with one
+                 running shows "assistant running (slot N)" instead of Start; "N of 3 assistants running"; it follows
+                 /api/state assistants): Needs Human rows for the assistant (opens
                  `nuauto assist <row>` in a terminal window, or shows the command), "I applied myself", company sites still
                  owed (Mark done), the NUworks side to retry, then the Other jobs card: the sheet's Other jobs tab's
                  Approved rows (read fresh; counted in the tab, not the menu), Start assistant (opens `nuauto assist other
@@ -98,7 +111,10 @@ SCREENS
   Answers        the answer bank as a table (exact-match rules unchanged); locked while a run uses it. NUworks /
                  Other jobs switch: the Other jobs bank (answers_other.json) is its own table; the NUworks one has a
                  "NUworks only" column (never used for Other jobs; default on for start/end date and co-op term)
-  Settings       every health check (run them now), logins, resume label, applications per week (the weekly cap), week start, setup, logs, quit
+  Settings       every health check (run them now), logins, resume label, applications per week (the weekly cap), week start;
+                 the company-site assistant: account email, effort (low / medium / high), the folders it may read, its job-site
+                 logins (how many; Export for Bitwarden: the import file in ~/Downloads, mode 600, and how to import it); setup,
+                 logs, quit
   Setup          the wizard (below); opens by itself until setup is done
   Past runs      logs/ folders: actions.log and the screenshots before and after Submit
 
@@ -177,7 +193,8 @@ DEMO MODE (demo.py) AND TESTING WITH AGENTS
   nuworks-password, cap-reached. `python -m nuauto.demo state <name> on|off` flips one while it runs.
 - `--no-open --port 0`: prints one JSON line {"url", "port", "demo", "state_dir"} when ready; open the url (it
   carries the secret) in Playwright. Everything on screen has a JSON API (below); key controls have data-testid.
-- `nuauto gui --demo --screenshots DIR`: every screen, light/dark, wide/narrow, as PNGs; then it quits.
+- `nuauto gui --demo --screenshots DIR`: every screen, light/dark, wide/narrow, as PNGs (plus Review's internship list:
+  review-intern, review-intern-unread, review-intern-list); then it quits.
 - `nuauto selftest` (also Settings > Run a self-test): the whole demo flow in a hidden browser (Firefox installed if
   missing; approve, apply with a question, the fake sheet), in its own temp folder; exit 0 = this install works.
 - Demo runs nobody watches use a hidden browser: with NUAUTO_DEMO_HEADLESS=1 (tests and the self-test set it) or no
@@ -195,26 +212,33 @@ VIEW MODE (`nuauto gui --view`; gui.VIEW; added 2026-10-09 so an agent can look 
   Job data, the sheet rows, the settings (host names, sheet id) and past-run names are shown.
 - Test: tests/test_view.py.
 - Tests (in `nuauto test`): test_gui.py (security rules, API, single instance, the main flows in headless
-  Firefox), test_setup.py (each wizard step's checks, then the wizard end to end), test_demo.py (the real apply.py
+  Firefox, Review's internship list: approve / undo / the unreadable one / internships off), test_setup.py (each wizard step's checks, then the wizard end to end), test_demo.py (the real apply.py
   on the fake pages: Ctrl+C and GUI-gone stops, cap refusal, NUworks re-login states), test_health.py.
 - CI: .github/workflows/tests.yml runs `nuauto test` on Ubuntu and macOS.
 
 API (JSON; all need the cookie; POSTs need X-NUauto: 1)
-  GET  /api/state            counts, week, to-do, last scan, setup_needed, the current task
+  GET  /api/state            counts, week, to-do, last scan, setup_needed, the current task; internships {on, term,
+                             review: how many wait for Review}
   GET  /api/health           the checks; POST /api/health/run {"groups": [...]}
-  GET  /api/review?mode=&q=&category=   the review queue (q / category narrow it; total, categories = the whole
-                             queue); GET /api/job/<id> one card
-  POST /api/decide           {"id", "mode", "decision": approve|yes|no} -> {"row", "previous"}
-  POST /api/undo             {"id", "row", "previous"}; POST /api/review/done (push ratings, homelab mode)
+  GET  /api/review?mode=&q=&category=&source=   the review queue (q / category narrow it; total, categories = the whole
+                             queue; source=intern: the internships, else the co-ops; the reply says "source"; an internship
+                             that could not be read has match null and comes last); GET /api/job/<id> one card (an
+                             internship's adds source "simplify", url = the posting, posted_text, year_text, unread)
+  POST /api/decide           {"id", "mode", "decision": approve|yes|no} -> {"row", "previous"}; an internship's approve adds
+                             "tab": "other" (its row is in the Other jobs tab)
+  POST /api/undo             {"id", "row", "previous"} (an internship also needs "tab": "other": its row goes back to
+                             Proposed in the Other jobs tab); POST /api/review/done (push ratings, homelab mode)
   GET  /api/apply            Approved rows in apply order, week, why_not, recent runs
   POST /api/action           {"kind": apply ({"n", "order"} or {"row"})|update|login_google|login_nuworks|check_nuworks|login_claude|
                              install_firefox|install_claude|nuworks_side|assist|fix_permissions, "args"}
                              (assist: {"row", "tab": "other"} for the Other jobs tab)
   GET  /api/task?after=N     the current task: state, new log lines, question, row, screenshot, countdown
   POST /api/answer           {"task", "id", "reply"}; POST /api/stop {"task", "force"}
-  GET  /api/company          agent / other / site / retry rows; POST /api/mark {"action": applied|site, "row", "url",
+  GET  /api/company          agent / other / site / retry rows, sessions (the assistants running now: slot, row, tab,
+                             company, host, since) and slots (how many may); POST /api/mark {"action": applied|site, "row", "url",
                              "tab": "other" (Other jobs tab, applied only)}
-  GET  /api/other            the Other jobs tab: exists, ready (Approved), applied, rest
+  GET  /api/other            the Other jobs tab: exists, ready (Approved; an internship with its match, score, pay, posted),
+                             applied, rest, sessions, slots
   POST /api/other/add        {"url", "company", "title"} -> {"row"}: an Approved row there (the tab made if missing)
   GET  /api/sheet            both tabs: exists, rows (each with locked: why it can't move / be removed, or null), busy
   GET  /api/sheet/lookup?url=  the tab a link belongs in; for a NUworks job: known, company, title, match, in_pool, notes
@@ -223,7 +247,9 @@ API (JSON; all need the cookie; POSTs need X-NUauto: 1)
   GET  /api/insights         pool / applied numbers (pay, places, categories) and the sheet's statuses
   GET  /api/answers?bank=    entries + version (bank other: answers_other.json); POST /api/answers {"bank", "entries",
                              "version"}. answers.json entries carry nuworks_only; leave_blank is kept while empty
-  GET  /api/settings         settings (no secrets); POST /api/settings {"resume_label", "week_start", ...}
+  GET  /api/settings         settings (no secrets; logins: {sites, new}, never a password); POST /api/settings {"resume_label",
+                             "week_start", "max_per_week", "accounts_email", "assist_effort", "assist_read_paths"}
+  POST /api/logins/export    Bitwarden's import file of the logins not exported yet ({"every": true}: all) -> {"path", "count"}
   GET  /api/setup            wizard steps; POST /api/setup {"action": ack|client_upload|client_downloads|
                              sheet_create|sheet_link|resume_pick|resume_set|labels_read|label_set|terms_read|
                              prefs_save|discord_save|discord_test|discord_remove|schedule_on|schedule_off|launcher}

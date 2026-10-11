@@ -59,23 +59,31 @@ def discord(text):
         log(f"discord post failed: {type(e).__name__}")
 
 
-def run_claude(prompt_file, batch_file):
-    """One Claude call on one batch file. Returns None, or Claude's error text if it exited with an error."""
+def run_claude(prompt_file, batch_file, extra=None):
+    """One Claude call on one batch file. Returns None, or Claude's error text if it exited with an error.
+    extra: more {{name}} values for the prompt (jobs.render_prompt)."""
     name = os.path.basename(batch_file)
     w = config.WORK_DIR
-    prompt = (f"Follow {jobs.render_prompt(prompt_file)} exactly: read it first, then "
+    prompt = (f"Follow {jobs.render_prompt(prompt_file, extra)} exactly: read it first, then "
               f"{w}/resume.txt. Process only {w}/{name} and "
               f"write {w}/{name.replace('_in_', '_out_')} with exactly one entry per "
-              "input job, keyed by the job id. Read every job fully and judge each one individually. "
-              "Write only that one output file.")
+              "input job, keyed by the job id (copy each id exactly). Read every job fully and judge each one "
+              f"individually. Write only that one output file. Everything you need is in {w}: nothing outside it "
+              "can be read or written.")
     log(f"claude: {name}")
+    os.makedirs(w, exist_ok=True)
+    # Shut in work/: the batches hold text from the web (job postings, Simplify's list), so what a posting says can
+    # never make this session read or write anything else (local/ with your logins, the code, your home). It runs
+    # in work/, reads and edits only there (Edit rules cover Write; acceptEdits stays inside the working folder; in
+    # -p mode anything that would need a prompt is refused), and has no shell, web or MCP tools.
     r = subprocess.run(
         [CLAUDE, "-p", prompt, "--model", "sonnet",
-         "--strict-mcp-config",  # no MCP servers / claude.ai connectors: batches need only Read/Write
-         "--allowedTools", "Read", "Write",
-         "--disallowedTools", "Bash", "WebFetch", "WebSearch", "Edit",
+         "--strict-mcp-config",  # no MCP servers / claude.ai connectors
+         "--tools", "Read", "Write", "Edit",
+         "--allowedTools", "Read(./**)", "Edit(./**)",
+         "--disallowedTools", "Bash", "WebFetch", "WebSearch",
          "--permission-mode", "acceptEdits"],
-        cwd=config.STATE_DIR, capture_output=True, text=True, timeout=1800)  # work/ is under it: Claude may write there
+        cwd=w, capture_output=True, text=True, timeout=1800)
     out = (r.stdout.strip() or r.stderr.strip())[-200:]
     log(f"claude: {name} exit {r.returncode} {out!r}")
     return None if r.returncode == 0 else out or f"exit {r.returncode}"
@@ -99,7 +107,7 @@ def claude_ready():
     return True
 
 
-def claude_step(ready, prompt_file, batches, import_fn, title):
+def claude_step(ready, prompt_file, batches, import_fn, title, extra=None):
     """Claude on each batch file, then import the results. Returns False if it stopped (already notified).
     A login error stops at once with the "logged out" message: `claude auth status` can still say logged in
     while the saved login can no longer be renewed. Other Claude errors go in front of the import's problems."""
@@ -109,7 +117,7 @@ def claude_step(ready, prompt_file, batches, import_fn, title):
         return False
     errors = []
     for b in batches:
-        err = run_claude(prompt_file, b)
+        err = run_claude(prompt_file, b, extra)
         if err and AUTH_RE.search(err):
             notify("NUauto: Claude Code is logged out",
                    f"Scoring can't run. On {where()} run: claude auth login\nClaude said: {err}")
@@ -144,7 +152,21 @@ def main():
         code = 1
     if datetime.now().hour < 12:  # reminders once a day, with the morning run
         reminders(before, ok=code == 0)
-    return code
+    return internships() or code
+
+
+def internships():
+    """The internship update (intern.py: its own timer runs it every 2 hours too), when it is on. Returns 0 or 1."""
+    from nuauto import intern
+    if not intern.ENABLED:
+        return 0
+    log("internships")
+    try:
+        return intern.update()
+    except Exception as e:  # never hides the NUworks run's own result
+        traceback.print_exc()
+        notify("NUauto: internship update failed", f"{type(e).__name__}: {str(e)[:150]}")
+        return 1
 
 
 def scan(before):
@@ -203,6 +225,9 @@ def reminders(before, ok):
             log(f"hand applications check failed: {type(e).__name__}: {str(e)[:150]}")
     pool = jobs.load("pool.json", [])
     summary = scan_summary(jobs.load(SCANS, []), datetime.now())
+    from nuauto import intern
+    if intern.ENABLED:
+        summary += "\n" + intern.summary()
     for name, fn in [("approved", lambda: approved_notice(rows)), ("urgent", lambda: urgent_notice(pool, rows)),
                      ("todo", lambda: todo_notice(rows, summary if ok else summary + " (this morning's scan failed)")),
                      ("google", google_notice)]:

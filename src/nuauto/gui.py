@@ -19,6 +19,7 @@ How it is safe to run:
 - Real mode refuses to start inside a Claude Code shell (CLAUDECODE): agents use --demo (fake data) or --view
   (real data, read-only).
 """
+import fcntl
 import hmac
 import json
 import mimetypes
@@ -185,6 +186,9 @@ class App:
         self.first_round_done = False
         self.rows, self.rows_at, self.rows_error, self.rows_try_at = None, 0, None, 0
         self.queue = {}            # job id -> pool entry, from the last review queue
+        self.other_urls = None     # the Other jobs tab's links (not Proposed), as last read: the internship count
+        self.other_at = 0          # when they were last asked for
+        self.other_cache = None    # (when, rows) of the Other jobs tab, for the internship Review (gui.other_rows)
         self.last_request = now()
         self.stopping = False
         self.window_kind = "none"  # "mac" / "gtk" (NUauto's own window), "app" / "tab" (a browser), "none"
@@ -528,6 +532,21 @@ def review_counts(rows):
     return todo, soon
 
 
+def intern_count():
+    """Cheap count for the menu: internships in Review (the pool and the ones that could not be read) that are not in
+    the Other jobs tab and not rated no. The tab's links are read in the background (at start, then every 10 minutes;
+    each internship Review and decision updates them too)."""
+    from nuauto import intern
+    if not intern.ENABLED:
+        return 0
+    if now() - APP.other_at > (600 if APP.other_urls is not None else 60):
+        APP.other_at = now()
+        threading.Thread(target=read_other_quietly, daemon=True).start()
+    ratings, seen = jobs.load("ratings.json", {}), APP.other_urls or set()
+    return sum(1 for r in intern.load("pool.json", []) + intern.load("unread.json", [])
+               if r["url"] not in seen and ratings.get(r["id"], {}).get("label") != 0)
+
+
 def setup_needed():
     """From the files only (the page asks every few seconds); the Setup screen checks each step for real."""
     cfg = read_local()
@@ -553,8 +572,12 @@ def state():
     cfg = read_local()
     sheet_id = cfg.get("sheet_id") or ""
     task = APP.task
+    from nuauto import intern
     return {
         "demo": config.DEMO, "view": VIEW, "version": __import__("nuauto").__version__,
+        "internships": {"on": intern.ENABLED, "term": intern.TERM, "review": intern_count()},
+        # which assistant sessions run now (the open Apply screen reloads its lists when this changes)
+        "assistants": ",".join(f"{s.get('tab')}-{s.get('row')}:{s.get('slot')}" for s in assistants()["sessions"]),
         "mode": "homelab" if config.HAS_SERVER else "local", "setup_needed": setup_needed(),
         "rows_loaded": rows is not None, "rows_at": APP.rows_at, "rows_error": APP.rows_error, "week": week_info(rows),
         "counts": {"review": len(todo), "approved": len(approved), "company": len(agent) + len(retry), "site": len(site),
@@ -572,12 +595,53 @@ def state():
     }
 
 
-def review(mode, q="", category=""):
+OTHER_ROWS_FOR = 30  # seconds the internship Review reuses the Other jobs tab's rows (it asks on every search)
+
+
+def other_rows(fresh=True):
+    """The Other jobs tab's rows ([] before the tab exists); remembers its links for the menu's count. fresh=False:
+    the rows read in the last OTHER_ROWS_FOR seconds will do (each read costs Google quota: about 60 a minute; every
+    change NUauto makes to the tab forgets them)."""
+    from nuauto import intern
+    if not fresh and APP.other_cache and now() - APP.other_cache[0] < OTHER_ROWS_FOR:
+        return APP.other_cache[1]
+    try:
+        rows = sheet.read_rows(worksheet(other=True))
+    except NoOtherTab:
+        rows = []
+    APP.other_urls = intern.sheet_urls(rows)
+    APP.other_cache = (now(), rows)
+    return rows
+
+
+def other_changed():
+    """NUauto changed the Other jobs tab: the next internship Review reads it again."""
+    APP.other_cache = None
+
+
+def read_other_quietly():
+    """other_rows in the background (for the count): a sheet that can't be read now is tried again later."""
+    try:
+        other_rows()
+    except Exception:
+        pass
+
+
+def review(mode, q="", category="", source="nuworks"):
     """The review queue; q (words or "quoted phrases", all must appear) and category narrow what is shown.
-    Decisions work on any job of the whole queue."""
+    Decisions work on any job of the whole queue. source "intern": the internships (intern.py), whose Approve adds a
+    row to the Other jobs tab."""
     rows = need_rows()
-    details, ratings = jobs.load_details(), jobs.load("ratings.json", {})
-    todo, urgent = jobs.review_queue(mode, details, ratings, rows)
+    ratings = jobs.load("ratings.json", {})
+    if source == "intern":
+        from nuauto import intern
+        if not intern.ENABLED:
+            raise Refused('Internships are off (add "internships": {} to local/local_config.json).')
+        todo, urgent = intern.review_queue(mode, ratings, other_rows(fresh=False), rows)
+        details = {r["id"]: intern.details_for(r) for r in todo}
+    else:
+        details = jobs.load_details()
+        todo, urgent = jobs.review_queue(mode, details, ratings, rows)
     APP.queue = {r["id"]: r for r in todo}
     counts = {}
     for r in todo:
@@ -590,13 +654,16 @@ def review(mode, q="", category=""):
         d = details[r["id"]]
         day = jobs.closes(d)
         why = "rate" if mode == "rate" else "urgent" if r["id"] in urgent_ids else "proposed" if "row" in r else "pool"
+        order = ("the posting could not be read: these come after the scored ones" if r.get("unread")
+                 else "your Proposed row in the Other jobs tab (these come next)" if why == "proposed" and source == "intern"
+                 else jobs.order_text(r, why))
         out.append({"id": r["id"], "title": r["title"], "company": r["company"], "category": r["category"],
                     "category_label": jobs.category_label(r["category"]),
-                    "order": jobs.order_text(r, why),
+                    "order": order,
                     "match": r["match"], "closes_text": jobs.closes_text(day),
                     "soon": day is not None and (day - date.today()).days <= jobs.URGENT_DAYS,
                     "rating": (ratings.get(r["id"]) or {}).get("label")})
-    return {"jobs": out, "urgent": [r["id"] for r in urgent], "mode": mode, "total": len(todo),
+    return {"jobs": out, "urgent": [r["id"] for r in urgent], "mode": mode, "source": source, "total": len(todo),
             "categories": [{"key": k, "label": jobs.category_label(k), "count": counts[k]}
                            for k in sorted(counts, key=lambda k: (-counts[k], k))]}
 
@@ -604,7 +671,11 @@ def review(mode, q="", category=""):
 def job(job_id):
     if not re.fullmatch(r"[A-Za-z0-9]{1,64}", job_id):
         raise NotFound()
-    r = APP.queue.get(job_id) or next((x for x in jobs.load("pool.json", []) if x["id"] == job_id), None)
+    r = APP.queue.get(job_id)
+    if r is not None and r.get("source") == "simplify":  # an internship
+        from nuauto import intern
+        return intern.job_view(r, intern.details_for(r))
+    r = r or next((x for x in jobs.load("pool.json", []) if x["id"] == job_id), None)
     details = os.path.join(config.DATA_DIR, "details", f"{job_id}.json")
     if r is None or not os.path.exists(details):
         raise NotFound()
@@ -647,7 +718,17 @@ def decide(body):
     ratings = jobs.load("ratings.json", {})
     previous = ratings.get(job_id)
     out = {"previous": previous}
-    if decision == "approve":
+    if decision == "approve" and r.get("source") == "simplify":  # an internship: the Other jobs tab
+        from nuauto import intern
+        try:
+            out["row"], out["tab"] = intern.approve(r, interactive=False), "other"
+        except sheet.NotLoggedIn as e:
+            raise Refused(f"{e} Log in to Google first (Settings, or the Google dot at the top).")
+        except sheet.SheetError as e:
+            raise Refused(str(e))
+        APP.other_urls = (APP.other_urls or set()) | {r["url"]}
+        other_changed()
+    elif decision == "approve":
         ws = worksheet()
         if r.get("row"):  # one of your Proposed rows: that row becomes Approved
             try:
@@ -665,7 +746,19 @@ def decide(body):
 
 def undo(body):
     job_id, previous = str(body.get("id", "")), body.get("previous")
-    if body.get("row"):
+    if body.get("row") and body.get("tab") == "other":  # an internship's row in the Other jobs tab: back to Proposed
+        from nuauto import intern
+        # its link from the listings, not the review list: an approved job leaves the list at the next reload
+        listing = intern.load("listings.json", {}).get(job_id) if re.fullmatch(r"s[0-9a-z]{1,40}", job_id) else None
+        if listing is None:
+            raise Refused("That internship is not in your listings any more.")
+        try:
+            sheet.unapprove(worksheet(other=True), int(body["row"]), listing["url"])
+        except (sheet.SheetError, ValueError) as e:
+            raise Refused(str(e))
+        (APP.other_urls or set()).discard(listing["url"])
+        other_changed()
+    elif body.get("row"):
         ws = worksheet()
         try:
             sheet.unapprove(ws, int(body["row"]), jobs.job_url(job_id))
@@ -830,7 +923,7 @@ def stop(body):
 def company():
     rows = need_rows()
     agent, other, site, retry = company_rows(rows, facts=True)
-    return {"agent": agent, "other": other, "site": site, "retry": retry}
+    return {"agent": agent, "other": other, "site": site, "retry": retry, **assistants()}
 
 
 def mark(body):
@@ -846,32 +939,63 @@ def mark(body):
             sheet.mark_applied_by_hand(ws, int(row), url, how="by hand (marked in NUauto)")
     except sheet.SheetError as e:
         raise Refused(str(e))
-    if not other:
+    if other:
+        other_changed()
+    else:
         APP.refresh_rows(force=True)
     return {}
 
 
 # ---------------------------------------------------------------- other jobs (the sheet's Other jobs tab)
 
-def other_list():
-    """The Other jobs tab, read fresh: ready (Approved: for the assistant), applied (newest first), the rest.
-    exists is False until the first job is added (that makes the tab)."""
+def assistants():
+    """The assistant sessions running now (assist.sessions: slot, row, tab, company, host, since) and how many may."""
     from nuauto import assist
+    return {"sessions": assist.sessions(), "slots": assist.slots()}
+
+
+def intern_facts(urls):
+    """For the Other jobs card: the match %, score and pay (from intern.py's data) of the internships among these links."""
+    from nuauto import insights
+    from nuauto import intern
+    if not intern.ENABLED or not urls:
+        return {}
+    listings, scores = intern.load("listings.json", {}), intern.load("scores.json", {})
+    pool = {r["id"]: r for r in intern.load("pool.json", [])}
+    out = {}
+    for i, x in listings.items():
+        s, p = scores.get(i), pool.get(i)
+        if s is None or x["url"] not in urls:
+            continue
+        pay = (intern.load(f"details/{i}.json", None) or {}).get("pay") or None
+        hour = insights.hourly(pay)
+        out[x["url"]] = {"match": s["match"], "score": p["rank"] if p else None, "score_text": jobs.rank_text(p) if p else None,
+                         "pay": pay, "pay_hour": hour[1] if hour else None, "posted_text": intern.posted_text(x)}
+    return out
+
+
+def other_list():
+    """The Other jobs tab, read fresh: ready (Approved: for the assistant), applied (newest first), the rest; the
+    assistant sessions running now. exists is False until the first job is added (that makes the tab)."""
+    from nuauto import assist
+    from nuauto import intern
     try:
         rows = sheet.read_rows(worksheet(other=True))
     except NoOtherTab:
-        return {"exists": False, "tab": sheet.OTHER_TAB, "ready": [], "applied": [], "rest": []}
+        return {"exists": False, "tab": sheet.OTHER_TAB, "ready": [], "applied": [], "rest": [], **assistants()}
+    facts = intern_facts({intern.clean_url(r.url) for r in rows if r.status == "Approved"})
     ready, applied, rest = [], [], []
     for r in rows:
         if r.status == "Approved":
             url, why = assist.other_target(r)
-            ready.append(row_view(r, target=url, host=urlparse(url).hostname if url else None, why=why))
+            ready.append(row_view(r, target=url, host=urlparse(url).hostname if url else None, why=why,
+                                  **facts.get(intern.clean_url(r.url), {})))
         elif r.status == "Applied":
             applied.append(row_view(r))
         else:
             rest.append(row_view(r))
     applied.sort(key=lambda x: x["date"], reverse=True)
-    return {"exists": True, "tab": sheet.OTHER_TAB, "ready": ready, "applied": applied, "rest": rest}
+    return {"exists": True, "tab": sheet.OTHER_TAB, "ready": ready, "applied": applied, "rest": rest, **assistants()}
 
 
 def other_add(body):
@@ -879,7 +1003,9 @@ def other_add(body):
     from nuauto import assist
     fields = [str(body.get(k) or "") for k in ("url", "company", "title")]
     try:
-        return {"row": assist.add_other(*fields, interactive=False)}
+        out = {"row": assist.add_other(*fields, interactive=False)}
+        other_changed()
+        return out
     except sheet.NotLoggedIn as e:
         raise Refused(f"{e} Log in to Google first (Settings, or the Google dot at the top).")
     except sheet.SheetError as e:
@@ -934,6 +1060,7 @@ def sheet_change(body):
     except sheet.SheetError as e:
         raise Refused(str(e))
     APP.refresh_rows(force=True)
+    other_changed()
     return out
 
 
@@ -999,8 +1126,6 @@ def answers_put(body):
     bank = "other" if body.get("bank") == "other" else "nuworks"
     if bank == "nuworks" and running("apply", "nuworks_side"):
         raise Refused("A run is using the answer bank. Edit it when the run is over.")
-    if body.get("version") != answers_get(bank)["version"]:
-        raise Refused("The answer bank changed since you opened it (a run saved an answer). Reload, then edit again.")
     entries = body.get("entries")
     if not isinstance(entries, list):
         raise Refused("Expected a list of entries.")
@@ -1025,7 +1150,14 @@ def answers_put(body):
         if bank == "nuworks" and bool(e.get("nuworks_only")) != (q in answers.NUWORKS_ONLY):
             entry["nuworks_only"] = bool(e.get("nuworks_only"))  # only when it differs from the default list
         clean.append(entry)
-    answers.save(clean, bank_path(bank))
+    # the assistants' answer-bank commands hold this lock while they save (assist.bank): the version check and the
+    # save are one step, so an answer an assistant saves meanwhile is never overwritten
+    os.makedirs(config.LOCAL_DIR, mode=0o700, exist_ok=True)
+    with open(os.path.join(config.LOCAL_DIR, "answers.lock"), "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if body.get("version") != answers_get(bank)["version"]:
+            raise Refused("The answer bank changed since you opened it (a run saved an answer). Reload, then edit again.")
+        answers.save(clean, bank_path(bank))
     return answers_get(bank)
 
 
@@ -1053,7 +1185,30 @@ def log_file(path):
 # ---------------------------------------------------------------- settings
 
 PUBLIC_SETTINGS = ["sheet_id", "resume_path", "week_start", "max_per_week", "assist_read_paths", "server_hostname", "server_ssh",
-                   "server_dir", "web_base_url", "web_listen_host", "tos_ack"]
+                   "server_dir", "web_base_url", "web_listen_host", "tos_ack", "accounts_email", "assist_effort"]
+EFFORTS = ("low", "medium", "high")  # the assistant's effort choices on the Settings screen (assist.effort)
+
+
+def logins_summary():
+    """The sites the assistant made a login on: how many, how many not exported to a password manager yet. Never a
+    password, never the file's content."""
+    from nuauto import accounts
+    try:
+        with open(accounts.PATH) as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        data = {}
+    return {"sites": len(data), "new": sum(1 for a in data.values() if not a.get("exported"))}
+
+
+def logins_export(body):
+    """Bitwarden's import file of the logins not exported yet (every: all of them), in ~/Downloads, mode 600."""
+    from nuauto import accounts
+    demo_path = os.path.join(config.STATE_DIR, f"nuauto-logins-{date.today():%Y-%m-%d}.json")  # demo: never ~/Downloads
+    path, n = accounts.export(demo_path if config.DEMO else None, every=bool(body.get("every")))
+    if not n:
+        raise Refused("No new logins to export.")
+    return {"path": path, "count": n, "logins": logins_summary()}
 
 
 def settings_get():
@@ -1063,7 +1218,8 @@ def settings_get():
             "resume_label": health.resume_label(), "discord": os.path.exists(config.DISCORD_WEBHOOK_PATH),
             "client_json": health.client_json_found(), "google_login": os.path.exists(config.TOKEN_PATH),
             "tools": {name: config.tool_path(name) for name in ("claude", "npx")},
-            "paths": {"state": config.STATE_DIR, "logs": config.LOGS_DIR}, "demo": config.DEMO}
+            "paths": {"state": config.STATE_DIR, "logs": config.LOGS_DIR}, "demo": config.DEMO,
+            "efforts": list(EFFORTS), "logins": logins_summary()}
 
 
 def write_local(updates):
@@ -1117,6 +1273,15 @@ def settings_put(body):
         if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
             raise Refused("Expected a list of folders.")
         updates["assist_read_paths"] = [p.strip() for p in paths if p.strip()]
+    if "accounts_email" in body:
+        email = str(body["accounts_email"] or "").strip()
+        if email and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+            raise Refused("The account email doesn't look like an email address.")
+        updates["accounts_email"] = email
+    if "assist_effort" in body:
+        if body["assist_effort"] not in EFFORTS:
+            raise Refused(f"The assistant's effort is one of {', '.join(EFFORTS)}.")
+        updates["assist_effort"] = body["assist_effort"]
     if updates:
         write_local(updates)
     APP.run_now(["quick"])
@@ -1246,7 +1411,8 @@ GET_ROUTES = {
     "/api/state": lambda q: (APP.refresh_soon(30), state())[1],
     "/api/health": lambda q: {"checks": [c.to_dict() for c in APP.checks()], "running": sorted(APP.running_groups)},
     "/api/review": lambda q: review(q.get("mode", "approve") if q.get("mode") in ("approve", "rate") else "approve",
-                                    q.get("q", "")[:200], q.get("category", "")[:40]),
+                                    q.get("q", "")[:200], q.get("category", "")[:40],
+                                    "intern" if q.get("source") == "intern" else "nuworks"),
     "/api/apply": lambda q: apply_list(q.get("order", "default")),
     "/api/insights": lambda q: insights_get(),
     "/api/company": lambda q: company(),
@@ -1271,6 +1437,7 @@ POST_ROUTES = {
     "/api/sheet": sheet_change,
     "/api/answers": answers_put,
     "/api/settings": settings_put,
+    "/api/logins/export": logins_export,
     "/api/setup": setup_post,
     "/api/health/run": lambda body: APP.run_now(body.get("groups") or ["quick", "sheet", "claude"]) or {},
     "/api/quit": lambda body: (threading.Timer(0.3, APP.quit).start(), {})[1],
@@ -1471,13 +1638,44 @@ def ask_instance_to_open(lock):
 
 SCREENS = ["home", "review", "apply", "sheet", "insights", "answers", "settings", "setup", "logs"]
 
+# Review's internship list (when internships are on), as extra pictures: the first card, the one whose posting could not
+# be read (a kind-of-work choice that holds only it), and a search (every match as its own card). Each is made by
+# setting what the screen remembers (sessionStorage), then opening it again.
+REVIEW_INTERN_SHOTS = [("review-intern", {}), ("review-intern-unread", {"reviewCat": "uncategorized"}),
+                       ("review-intern-list", {"reviewQ": "intern"})]
+
+
+def review_intern_shots(page, base, folder, scheme, label):
+    """The extra Review pictures of one browser; returns how many it made (0: internships are off)."""
+    from playwright.sync_api import TimeoutError as PlaywrightTimeout
+    if not page.evaluate("Boolean(window.NUauto.S.state && window.NUauto.S.state.internships "
+                         "&& window.NUauto.S.state.internships.on)"):
+        return 0
+    made = 0
+    for name, store in REVIEW_INTERN_SHOTS:
+        page.evaluate("([source, store]) => { sessionStorage.clear(); sessionStorage.setItem('reviewSource', source);"
+                      " for (const [k, v] of Object.entries(store)) sessionStorage.setItem(k, v); }", ["intern", store])
+        page.goto(f"{base}/#/home")
+        page.goto(f"{base}/#/review")
+        try:
+            page.wait_for_selector("[data-testid=job-card]", timeout=20000)
+        except PlaywrightTimeout:  # e.g. the demo has no such job any more: no picture, the rest still come
+            continue
+        page.wait_for_timeout(800)
+        page.screenshot(path=os.path.join(folder, f"{name}-{scheme}-{label}.png"), full_page=True)
+        made += 1
+    page.evaluate("sessionStorage.clear()")
+    return made
+
 
 def screenshots(folder, url):
-    """Every screen in headless Firefox, light and dark, desktop and phone width: <screen>-<scheme>-<width>.png.
-    For reviewing the design (agents too). Demo mode only, so no real data ends up in a picture."""
+    """Every screen in headless Firefox, light and dark, desktop and phone width: <screen>-<scheme>-<width>.png,
+    plus Review's internship list (review-intern*). For reviewing the design (agents too). Demo mode only, so no real
+    data ends up in a picture."""
     from playwright.sync_api import sync_playwright
     os.makedirs(folder, exist_ok=True)
     base = url.split("/?")[0]
+    count = 0
     with sync_playwright() as p:
         b = p.firefox.launch(headless=True)
         for scheme in ("light", "dark"):
@@ -1489,9 +1687,11 @@ def screenshots(folder, url):
                     page.goto(f"{base}/#/{name}")
                     page.wait_for_timeout(1500)
                     page.screenshot(path=os.path.join(folder, f"{name}-{scheme}-{label}.png"), full_page=True)
+                    count += 1
+                count += review_intern_shots(page, base, folder, scheme, label)
                 ctx.close()
         b.close()
-    print(json.dumps({"screenshots": folder, "count": len(SCREENS) * 4}), flush=True)
+    print(json.dumps({"screenshots": folder, "count": count}), flush=True)
 
 
 def pull_loop():
