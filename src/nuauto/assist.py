@@ -663,6 +663,14 @@ def _lock(path, info=None):
     return f
 
 
+def _relabel(f, info):
+    """Rewrite what a held lock file says (sessions() reads it)."""
+    f.seek(0)
+    f.truncate()
+    f.write(json.dumps(info))
+    f.flush()
+
+
 def take_slot(info):
     """(slot number, its lock) for a new session, or (None, None) when every slot is in use."""
     for n in range(1, slots() + 1):
@@ -678,7 +686,8 @@ def take_site(url):
 
 
 def sessions():
-    """The assistant sessions running now: [{"slot", "row", "tab", "company", "host", "since", "pid"}] (lock files
+    """The assistant sessions running now: [{"slot", "row", "tab", "company", "host", "since", "pid", "run", and
+    "attention": {"kind": "waiting" | "approve", "since"} while it waits for you}] (lock files
     held by a live session; a crashed one's lock is free again)."""
     out = []
     for n in range(1, SLOTS + 1):
@@ -693,9 +702,15 @@ def sessions():
             except BlockingIOError:
                 pass
             try:
-                out.append(json.loads(f.read() or "{}"))
+                info = json.loads(f.read() or "{}")
             except ValueError:
-                out.append({"slot": n})
+                info = {"slot": n}
+            try:
+                with open(os.path.join(info.get("run") or "", ATTENTION)) as a:
+                    info["attention"] = {k: v for k, v in json.load(a).items() if k in ("kind", "since", "said")}
+            except (OSError, ValueError):
+                pass
+            out.append(info)
     return out
 
 
@@ -955,6 +970,7 @@ def hook(kind):
         with open(os.path.join(d, "last_response.json"), "w") as f:  # for debugging the guard (local log folder)
             json.dump(response, f)
         update_after(state, tool, "\n".join(strings(response)))
+        clear_attention(d)
         if changed:
             print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": response,
                                                      "updatedMCPToolOutput": response}}))
@@ -968,6 +984,72 @@ def hook_main(kind):
     except Exception as e:  # a crashing guard must block, never allow
         print(f"Guard error ({type(e).__name__}); blocked.", file=sys.stderr)
         sys.exit(2)
+
+
+# ---------- "needs you": when a session waits for you (Claude Code's own Stop / Notification / UserPromptSubmit hooks) ----------
+
+ATTENTION = "attention.json"  # in the run folder while the session waits for you; sessions() and the GUI read it
+REMIND = 60  # seconds: the same news is not shown twice within this
+
+
+def clear_attention(d):
+    try:
+        os.remove(os.path.join(d, ATTENTION))
+    except OSError:
+        pass
+
+
+def attention_text(kind, where, company, message=""):
+    """(title, body) of the desktop notification."""
+    title = f"NUauto: {company or 'assistant'}"
+    if kind == "approve":
+        return title, f"Approve or decline in its terminal window ({where}): it wants to submit or press Enter."
+    return title, f"The assistant is waiting for you in its terminal window ({where})" + (f": {message}" if message else ".")
+
+
+def attention_main(kind):
+    """Claude Code's hooks call this: stop (its turn ended: it waits for your reply), notification (a permission question,
+    e.g. a Submit to approve; idle reminders are left out), clear (you answered). Writes the run folder's attention.json
+    and shows a desktop notification. Never fails and prints nothing (a Stop hook's output could change the turn)."""
+    import time
+    try:
+        d = os.environ.get(STATE_ENV)
+        if not d or not os.path.isdir(d):
+            return
+        try:
+            data = json.load(sys.stdin)
+        except ValueError:
+            data = {}
+        if kind == "clear":
+            return clear_attention(d)
+        if kind == "notification":
+            text = f"{data.get('notification_type', '')} {data.get('message', '')}".lower()
+            if "permission" not in text:
+                return  # "waiting for your input" reminders: the stop notification already said so
+            kind = "approve"
+        else:
+            kind = "waiting"
+        said = (data.get("last_assistant_message") or "").strip().splitlines()
+        said = said[0][:100] if said and kind == "waiting" else ""  # its first line: a question, or the end list
+        with open(os.path.join(d, "state.json")) as f:
+            st = json.load(f)
+        path = os.path.join(d, ATTENTION)
+        try:
+            with open(path) as f:
+                old = json.load(f)
+        except (OSError, ValueError):
+            old = {}
+        now = time.time()
+        with open(path, "w") as f:
+            json.dump({"kind": kind, "since": old.get("since") if old.get("kind") == kind else now, "time": now,
+                       "said": said}, f)
+        log(d, f"needs you: {kind}")
+        if old.get("kind") == kind and now - old.get("time", 0) < REMIND:
+            return
+        from nuauto import health
+        health.desktop_notify(*attention_text(kind, st.get("where", ""), st.get("company", ""), said))
+    except Exception:  # a notification is never worth breaking the session for
+        return
 
 
 # ---------- launcher (nuauto assist) ----------
@@ -1098,9 +1180,15 @@ def session(d, answer_cmd, read_roots, profile, prompt, where):
     mcp = {"mcpServers": {SERVER: {"command": "npx", "args": [MCP_PACKAGE, "--user-data-dir", profile, "--output-dir", d]}}}
     hook_cmd = " ".join(shlex.quote(a) for a in answer_cmd) + " hook"
     guard = lambda kind: [{"type": "command", "command": f"{hook_cmd} {kind}", "timeout": 60, "onFailure": "block"}]  # noqa: E731
+    # "needs you": Claude Code's own events (never the agent): its turn ended (it waits for your reply), or it shows a
+    # permission question (a Submit to approve); and you answered. Never blocking, never failing a turn.
+    note = lambda kind: [{"type": "command", "command": f"{' '.join(shlex.quote(a) for a in answer_cmd)} attention {kind}",  # noqa: E731
+                          "timeout": 10}]
     settings = {"hooks": {
         "PreToolUse": [{"matcher": f"mcp__{SERVER}__.*|Bash|Read|Glob|Grep|WebSearch|WebFetch", "hooks": guard("pre")}],
-        "PostToolUse": [{"matcher": f"mcp__{SERVER}__.*", "hooks": guard("post")}]}}
+        "PostToolUse": [{"matcher": f"mcp__{SERVER}__.*", "hooks": guard("post")}],
+        "Stop": [{"hooks": note("stop")}], "Notification": [{"hooks": note("notification")}],
+        "UserPromptSubmit": [{"hooks": note("clear")}]}}
     for name, obj in (("mcp.json", mcp), ("settings.json", settings)):
         with open(os.path.join(d, name), "w") as f:
             json.dump(obj, f, indent=1)
@@ -1146,6 +1234,8 @@ def run(number, url_override, other=False):
                  "once). Start this one when it is done.")
     log_ = browser.RunLog(f"assist_{'other_' if other else ''}row{number}")
     d = log_.dir
+    _relabel(slot_lock, {"row": number, "tab": tab, "company": row.company, "host": host(url), "slot": slot,
+                         "pid": os.getpid(), "run": d, "since": __import__("datetime").datetime.now().isoformat(timespec="minutes")})
     answer_cmd = answer_prefix()
     read_roots = [os.path.realpath(r) for r in [*config.ASSIST_READ_PATHS, *config.ASSIST_WRITEUPS, config.LAPTOP_RESUME]
                   if os.path.exists(r)]
@@ -1155,7 +1245,7 @@ def run(number, url_override, other=False):
              "read_roots": read_roots, "protected": protected_dirs(read_roots),
              "resume_src": os.path.realpath(config.LAPTOP_RESUME), "resume": resume, "tab": "other" if other else "jobs",
              "company": row.company, "job_title": row.title, "job_url": url, "password_sites": [],
-             "guesses": {}, "typed": {}, "account_email": accounts.account_email() or ""}
+             "guesses": {}, "typed": {}, "account_email": accounts.account_email() or "", "where": where}
     with open(os.path.join(d, "state.json"), "w") as f:
         json.dump(state, f)
     profile = slot_profile(slot)
@@ -1300,6 +1390,8 @@ def cli(argv):
     """This file's command line: `hook pre|post` (Claude Code's hooks), the answer-bank commands, else main()."""
     if argv[:1] == ["hook"] and argv[1:2] in (["pre"], ["post"]):
         hook_main(argv[1])
+    elif argv[:1] == ["attention"] and argv[1:2] in (["stop"], ["notification"], ["clear"]):
+        attention_main(argv[1])
     elif argv[:1] and argv[0] in BASH_COMMANDS:
         bank(argv)
     else:

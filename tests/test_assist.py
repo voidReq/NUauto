@@ -675,6 +675,9 @@ for kind in ("PreToolUse", "PostToolUse"):
     h = settings["hooks"][kind][0]["hooks"][0]
     assert h["onFailure"] == "block" and h["timeout"] == 60 and h["command"].endswith(" hook " + ("pre" if kind == "PreToolUse" else "post"))
 assert settings["hooks"]["PreToolUse"][0]["matcher"].endswith("|WebSearch|WebFetch")
+for kind, arg in (("Stop", "stop"), ("Notification", "notification"), ("UserPromptSubmit", "clear")):  # "needs you"
+    h = settings["hooks"][kind][0]["hooks"][0]
+    assert h["command"].endswith(" attention " + arg) and h["timeout"] == 10 and "onFailure" not in h, (kind, h)
 assert json.load(open(os.path.join(d2, "mcp.json")))["mcpServers"]["browser"]["args"][:3] == \
     [assist.MCP_PACKAGE, "--user-data-dir", "/tmp/profile-x"]
 assert cmd[-1] == "Go: open the posting and fill the application for Other jobs row 3, following the rules."
@@ -806,5 +809,62 @@ assert "writeups" not in assist.context_text("row 3", type("R", (), {"company": 
                                              False, RESUME, [tmp], ANSWER_CMD).split("Resume and notes")[1].split("\n")[1]
 rules = assist.rules_text(ANSWER_CMD)
 assert "THE END LIST" in rules and f"{' '.join(ANSWER_CMD)} guesses" in rules and "ANSWER " not in rules
+
+# "needs you" (2026-10-11): Claude Code's Stop hook (its turn ended: it waits for your reply) and its permission
+# notifications (a Submit to approve) write the run's attention.json and show a desktop notification; you answering
+# (UserPromptSubmit) or a finished browser call clears it; idle reminders are left out; the same news only once a minute
+from nuauto import health  # noqa: E402
+shown = []
+health.desktop_notify = lambda title, body="": shown.append((title, body))
+d = tempfile.mkdtemp()
+with open(os.path.join(d, "state.json"), "w") as f:
+    json.dump({**fresh(), "company": "Acme", "where": "Other jobs row 7", "password_sites": []}, f)
+os.environ[assist.STATE_ENV] = d
+ATT = os.path.join(d, assist.ATTENTION)
+
+
+def attention(kind, data):
+    real_in, sys.stdin = sys.stdin, io.StringIO(json.dumps(data))
+    out, sys.stdout = sys.stdout, io.StringIO()
+    try:
+        assist.attention_main(kind)
+        return sys.stdout.getvalue()
+    finally:
+        sys.stdin, sys.stdout = real_in, out
+
+
+assert attention("stop", {"hook_event_name": "Stop"}) == ""  # prints nothing: a Stop hook's output could change the turn
+assert json.load(open(ATT))["kind"] == "waiting"
+assert shown == [("NUauto: Acme", "The assistant is waiting for you in its terminal window (Other jobs row 7).")], shown
+attention("stop", {})
+assert len(shown) == 1                                           # the same news within a minute: once
+attention("notification", {"message": "Claude is waiting for your input", "notification_type": "idle_prompt"})
+assert len(shown) == 1 and json.load(open(ATT))["kind"] == "waiting"
+attention("notification", {"message": "Claude needs your permission to use mcp__browser__browser_click",
+                           "notification_type": "permission_prompt"})
+assert json.load(open(ATT))["kind"] == "approve" and shown[-1][1].startswith("Approve or decline in its terminal window")
+attention("clear", {"prompt": "all ok"})
+assert not os.path.exists(ATT)                                   # you answered
+attention("stop", {"last_assistant_message": "Please confirm these guesses:\n1. Graduation = May 2029"})
+assert shown[-1][1] == "The assistant is waiting for you in its terminal window (Other jobs row 7): Please confirm these guesses:"
+assert json.load(open(ATT))["said"] == "Please confirm these guesses:"
+attention("clear", {})
+attention("stop", {})
+run_hook("post", {"tool_name": B + "browser_snapshot", "tool_response": [{"type": "text", "text": SNAP}]})
+assert not os.path.exists(ATT)                                   # it is working again
+attention("stop", {})
+# the GUI (and later a phone or Discord view) reads it from the running sessions
+holder = subprocess.Popen([sys.executable, "-c", f"""
+import fcntl, json, time
+f = open({os.path.join(config.LOCAL_DIR, 'assist_slot3.lock')!r}, "a+"); fcntl.flock(f, fcntl.LOCK_EX); f.seek(0); f.truncate()
+f.write(json.dumps({{"slot": 3, "row": 7, "tab": "other", "run": {d!r}}})); f.flush(); print("held", flush=True); time.sleep(30)"""],
+    stdout=subprocess.PIPE, text=True)
+assert holder.stdout.readline().strip() == "held"
+running = assist.sessions()
+assert [(x["slot"], x["attention"]["kind"]) for x in running] == [(3, "waiting")], running
+holder.kill()
+holder.wait()
+os.environ.pop(assist.STATE_ENV)
+assert attention("stop", {}) == ""                               # outside a session: nothing, no error
 
 print("All assist (agent guard) checks passed.")

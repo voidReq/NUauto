@@ -87,7 +87,8 @@ SCREENS
                  company site or needs a cover letter / transcript becomes Needs Human (nothing submitted) and shows
                  in the other tabs (since 2026-10-09 Company sites is a part of Apply; the menu count is Approved + the
                  assistant's rows + retries). Company sites tab (assistants side by side, up to 3: a row with one
-                 running shows "assistant running (slot N)" instead of Start; "N of 3 assistants running"; it follows
+                 running shows "assistant running (slot N)" instead of Start, or "assistant waiting for you" / "approve in its window"
+                 while it waits for you (assist.sessions attention; a desktop notification says so too); "N of 3 assistants running"; it follows
                  /api/state assistants): Needs Human rows for the assistant (opens
                  `nuauto assist <row>` in a terminal window, or shows the command), "I applied myself", company sites still
                  owed (Mark done), the NUworks side to retry, then the Other jobs card: the sheet's Other jobs tab's
@@ -236,7 +237,8 @@ API (JSON; all need the cookie; POSTs need X-NUauto: 1)
   GET  /api/task?after=N     the current task: state, new log lines, question, row, screenshot, countdown
   POST /api/answer           {"task", "id", "reply"}; POST /api/stop {"task", "force"}
   GET  /api/company          agent / other / site / retry rows, sessions (the assistants running now: slot, row, tab,
-                             company, host, since) and slots (how many may); POST /api/mark {"action": applied|site, "row", "url",
+                             company, host, since, attention: {kind waiting|approve, since, said} while it waits for you)
+                             and slots (how many may); POST /api/mark {"action": applied|site, "row", "url",
                              "tab": "other" (Other jobs tab, applied only)}
   GET  /api/other            the Other jobs tab: exists, ready (Approved; an internship with its match, score, pay, posted),
                              applied, rest, sessions, slots

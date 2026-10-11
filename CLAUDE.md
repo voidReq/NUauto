@@ -240,6 +240,12 @@ COMPANY-SITE AGENT (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`;
   and a job-site lock (one session per site: two could make the same account at once); all held until its run ends.
   Answer-bank commands and the Answers screen's save hold local/answers.lock (no answer lost between sessions). The
   GUI's Company sites shows which rows have one running (assist.sessions).
+- Needs you (added 2026-10-11, my request): when a session waits for me (its turn ended: a question, the end list) or
+  shows a permission question (a Submit to approve), a desktop notification says so, with the agent's first line;
+  the GUI's chip says "waiting for you" / "approve in its window". Claude Code's own Stop / Notification /
+  UserPromptSubmit hooks (`assist.py attention`; the agent can't call it) write the run folder's attention.json,
+  cleared when I answer or a browser call finishes; it never blocks or changes a turn. Idle reminders are left out.
+  The same record is what a phone or Discord view would read later.
 - Other jobs (added 2026-10-07): `nuauto assist other <row>` runs the same agent, rules and hooks on an Approved
   row of the Other jobs tab (its URL column; https, never NUworks: assist.other_target), with the layered answer
   bank (ANSWER BANK). After /exit, y = Applied (dated today, no cap), and nothing is sent to NUworks; n = stays

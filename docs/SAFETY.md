@@ -51,6 +51,7 @@ BROWSER (browser.py, config.py)
 - Only one process on browser_profile/ (apply, the update, login, the GUI's NUworks check) | browser.lock_profile (flock on local/browser_profile.lock, from launch to close; a failed launch releases it); the GUI's background check gives way to your runs | test_browser (profile lock)
 
 COMPANY-SITE AGENT (assist.py, prompts/ASSIST_PROMPT.md)
+- Needs you: Claude Code's Stop / Notification / UserPromptSubmit hooks only write the run's attention.json and show a desktop notification; they never answer, block or change a turn (no output, always exit 0), and the agent can't run them (not an answer-bank command) | assist.attention_main | test_assist; the hooks' real inputs checked in Claude Code 2.1.296
 - Side by side: at most assist.slots() (3) sessions; one per row and one per job site at a time (locks held by the
   launcher for the whole run, freed if it dies); each slot its own browser profile | assist.take_slot, take_site,
   run (row lock), slot_profile | test_assist (slots, sites, a slot held by another process), test_gui (the rows say so)
