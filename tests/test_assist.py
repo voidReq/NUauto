@@ -1395,7 +1395,10 @@ try:
         typed2, real_type2 = [], review.type_into
         review.type_into = lambda sess, text_: typed2.append(text_)
         try:
-            for pid_, passes in ((gone_proc.pid, True), (os.getpid(), True), (live_hook.pid, False), (None, False)):
+            cases = ((gone_proc.pid, True), (os.getpid(), True), (live_hook.pid, False), (None, False))
+            if not os.path.isdir("/proc/self"):  # macOS can't tell another live process from the hook: that case is Linux's
+                cases = tuple(c for c in cases if c[0] != os.getpid())
+            for pid_, passes in cases:
                 rr = new_run()
                 aa = {"id": "q9", "what": "click 'Submit'", "url": tgt["url"], "waiting": True, "since": time.time(), "fp": tgt["fp"],
                       "why": "w", **({"pid": pid_} if pid_ is not None else {})}
