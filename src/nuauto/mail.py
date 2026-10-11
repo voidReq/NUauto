@@ -187,6 +187,22 @@ def session():
     return AuthorizedSession(creds)
 
 
+def account(s):
+    """The Gmail address this login reads (Gmail's profile: nothing from any message)."""
+    r = s.get(f"{API}/profile", timeout=20)
+    r.raise_for_status()
+    return (r.json().get("emailAddress") or "").lower()
+
+
+def check_account(s):
+    """The login must read the inbox the job-site accounts use (local_config.json "accounts_email"): NoAccess if not."""
+    want, got = (accounts.account_email() or "").lower(), account(s)
+    if want and got != want:
+        raise NoAccess(f"the Gmail login is for {got}, but the job-site accounts use {want}: run nuauto login gmail "
+                       f"and pick {want}")
+    return got
+
+
 def _save(creds):
     fd = os.open(TOKEN, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f:
@@ -221,6 +237,7 @@ def lookup(site_host, company, job_host="", want="", used=(), wait=WAIT, s=None,
     if why:
         return {"status": "refused", "why": why}
     s = s or session()
+    check_account(s)
     deadline = time.time() + wait
     while True:
         found = pick(recent(s), site_host, company, job_host, want, used)
@@ -233,13 +250,20 @@ def login():
     """Google's read-only Gmail permission, with your own OAuth client (the one the Sheets login uses): opens the
     browser. Lasts 7 days while the Google Cloud app is in Testing mode."""
     from google_auth_oauthlib.flow import InstalledAppFlow
+    from google.auth.transport.requests import AuthorizedSession
+    want = (accounts.account_email() or "").lower()
+    print(f"Log in as {want} (the job-site accounts' email)." if want else "Log in with the Gmail the job sites email.")
     flow = InstalledAppFlow.from_client_secrets_file(config.find_client_json(), SCOPES)
-    creds = flow.run_local_server(port=0, open_browser=True)
+    creds = flow.run_local_server(port=0, open_browser=True, **({"login_hint": want} if want else {}))  # Google picks it
+    got = account(AuthorizedSession(creds))
+    if want and got != want:
+        raise SystemExit(f"That was {got}, but the job-site accounts use {want}: nothing saved. Run nuauto login gmail "
+                         f"again and pick {want} (if Google blocks it, add it as a test user on your OAuth consent screen).")
     os.makedirs(config.LOCAL_DIR, mode=0o700, exist_ok=True)
     _save(creds)
     with open(LOGIN_DATE, "w") as f:
         f.write(date.today().isoformat() + "\n")
-    print("Gmail login done (read-only). The assistant can now read the codes and links job sites email you.")
+    print(f"Gmail login done for {got} (read-only). The assistant can now read the codes and links job sites email you.")
 
 
 def days_left():
@@ -256,9 +280,7 @@ def main(argv):
     if argv == ["check"]:  # is the login there and working? (reads nothing from any message)
         try:
             s = session()
-            r = s.get(f"{API}/profile", timeout=20)
-            r.raise_for_status()
-            return print(json.dumps({"ok": True, "days_left": days_left()}))
+            return print(json.dumps({"ok": True, "account": check_account(s), "days_left": days_left()}))
         except NoAccess as e:
             return print(json.dumps({"ok": False, "why": str(e)}))
     raise SystemExit(__doc__)

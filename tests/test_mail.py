@@ -112,10 +112,12 @@ class Resp:
 
 
 class FakeGmail:
-    def __init__(self, rounds):
-        self.rounds, self.calls, self.queries = rounds, 0, []
+    def __init__(self, rounds, address="jobs@example.com"):
+        self.rounds, self.calls, self.queries, self.address = rounds, 0, [], address
 
     def get(self, url, params=None, timeout=None):
+        if url.endswith("/profile"):
+            return Resp({"emailAddress": self.address, "messagesTotal": 9})
         if url.endswith("/messages"):
             self.queries.append(params["q"])
             batch = self.rounds[min(self.calls, len(self.rounds) - 1)]
@@ -132,6 +134,17 @@ assert got["status"] == "code" and got["code"] == "482913" and slept == [mail.PO
 assert "after:" in fake.queries[0] and "-in:trash" in fake.queries[0] and "-in:sent" in fake.queries[0]
 assert int(fake.queries[0].split("after:")[1].split()[0]) >= int(time.time() - mail.WINDOW - 5)
 assert mail.lookup("accounts.google.com", "Acme", s=fake)["status"] == "refused"  # never an identity provider's code
+# the login must read the inbox the job-site accounts use: another Gmail is refused, before any message is read
+real_email = mail.accounts.account_email
+mail.accounts.account_email = lambda: "Jobs@Example.com"
+assert mail.check_account(FakeGmail([[]])) == "jobs@example.com"
+wrong = FakeGmail([[ORACLE]], address="someone.else@example.com")
+try:
+    mail.lookup("acme.taleo.net", "Acme", s=wrong, wait=0)
+    raise AssertionError("read the wrong inbox")
+except mail.NoAccess as e:
+    assert "someone.else@example.com" in str(e) and "jobs@example.com" in str(e) and wrong.queries == []
+mail.accounts.account_email = real_email
 assert mail.lookup("neuidmsso.neu.edu", "Acme", s=fake)["status"] == "refused"
 # no login: NoAccess (the agent asks the user)
 assert not mail.ready()
