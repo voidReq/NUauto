@@ -7,7 +7,8 @@
   nuauto update          check NUworks for new jobs now (on the homelab if you have one, then syncs)
   nuauto status          sheet counts, weekly limit, Approved rows
   nuauto login           log in to NUworks by hand (and copies the session to the homelab, if any)
-  nuauto login google    fresh Google Sheets login (needed every 7 days; Discord reminds you)
+  nuauto login google    fresh Google Sheets login (needed every 7 days; Discord reminds you); renews the Gmail one too
+  nuauto login gmail     read-only Gmail login, so the assistant can read the codes and links job sites email you
   nuauto assist          company-site applications: list rows / `<row>` starts the agent (asks before Submit)
   nuauto test            run all offline tests (no network, no sheet, no browser)
   nuauto doctor          health check of this machine (and the homelab + Mark-done page, if any; read-only)
@@ -78,7 +79,7 @@ def main():
         return run_tool(cmd, rest)
     laptop = config.HAS_SERVER and not config.IS_SERVER  # a laptop that syncs with a homelab
     if cmd not in COMMANDS or \
-            (rest and cmd not in ("apply", "assist", "gui", "doctor") and not (cmd == "login" and rest == ["google"])):
+            (rest and cmd not in ("apply", "assist", "gui", "doctor") and not (cmd == "login" and rest in (["google"], ["gmail"]))):
         sys.exit(__doc__)
     if cmd == "test":  # every tests/test_*.py, 4 at a time (each uses its own temp folder); output in order
         import glob
@@ -141,10 +142,19 @@ def main():
             from nuauto import assist
             assist.main(rest)
         elif cmd == "login" and rest == ["google"]:
+            from nuauto import mail
             from nuauto import sheet
             sheet.google_login()
+            if mail.ready() and not config.IS_SERVER:  # the Gmail login (if you made one) lasts 7 days too: renew it
+                print("Now the Gmail login (read-only), which also lasts 7 days...")
+                mail.login()
             if laptop:
                 sync.push()
+        elif cmd == "login" and rest == ["gmail"]:
+            if config.IS_SERVER:
+                sys.exit("Log in to Gmail on the laptop (it opens a browser).")
+            from nuauto import mail
+            mail.login()
         elif cmd == "login":
             from nuauto import browser
             browser.cmd_login()

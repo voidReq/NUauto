@@ -221,7 +221,16 @@ COMPANY-SITE AGENT (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`;
   pages don't submit on Enter; the final Submit is a button), my call 2026-10-10. Enter anywhere else asks (one-page
   forms submit on Enter).
   Buttons with no name but their text (`button: Submit`, Workday) are checked by that text.
-- Mine: email codes and verification links, captchas, approving Submit. After I /exit, the launcher asks "did you submit?"; y =
+- Email codes and verification links (added 2026-10-11, my call): the agent runs `email --want code|link`; code (mail.py, not
+  the agent) reads my Gmail with its own read-only login (`nuauto login gmail`, local/gmail_token.json, 600, never synced;
+  `nuauto login google` renews it too), only mail of the last 15 minutes that names the site the agent is on (its company,
+  or a link to that very host), and hands back one code, or one link to that same site; nothing else from any message
+  reaches the agent or the logs. Never for Google / Microsoft / Apple / LinkedIn / GitHub / Northeastern sign-ins
+  (accounts.never). None found, two candidates or no login: it asks me. Setup once: enable the Gmail API in my Google
+  Cloud project, then `nuauto login gmail` (it refuses any Gmail but accounts_email's, and every lookup checks it).
+  Checked on my real inbox (2026-10-11): Workday's verification links found, each to its own site; "thanks for
+  applying" emails skipped. Not yet seen: an emailed code, and the agent using it in a live application.
+- Mine: email codes it can't find, captchas, approving Submit. After I /exit, the launcher asks "did you submit?"; y =
   Applied (dated today, counts toward the weekly limit), then the same job is submitted on NUworks too by
   apply.submit_nuworks_side (the tested NUworks code; every popup check except the off-site-link stop;
   outcome appended to Notes; retry: `nuauto assist nuworks <row>`). The agent never touches the sheet.
@@ -271,6 +280,7 @@ src/nuauto/: cli.py (the nuauto command)   config.py (all paths, hosts; reads lo
   browser.py (login/open, domain lock, cookies)   answers.py (answer bank)   jobs.py (pool + viewers)   fields.py (what you study: per-field starting preferences, kinds of work)
   daily.py (homelab update + Discord)   web.py (Mark-done page, homelab)   sync.py (laptop<->homelab)   deploy.py (homelab: deploys main)
   doctor.py (health check)   inspect_form.py (read-only form lister)   assist.py (company-site agent)   accounts.py (its job-site logins)
+  mail.py (the agent's email codes and links: read-only Gmail)
   setup_sheet.py (sheet setup / `format` restyle)   gui.py (the window's server)   gui_static/ (its page)
   health.py (the checks behind doctor and the GUI)   onboard.py (setup wizard)   demo.py (demo mode fakes)
   window.py (which window) + window_gtk.py (the Linux window, run by the system python3)
@@ -294,7 +304,7 @@ local/ (gitignored, mode 700): everything personal or secret, on both machines:
 Generated (gitignored, repo root): data/, logs/, work/
 SECRETS (in local/), never print, log or copy their contents: token.json, session_cookies.json,
 client_secret.json, discord_webhook.txt, web_secret.txt, accounts.json (job-site logins; only `nuauto accounts export`
-writes them out, for my password manager)
+writes them out, for my password manager), gmail_token.json (read-only Gmail login)
 
 COMMANDS (installed in .venv; no activation needed)
 nuauto gui             # the window (setup, review, apply, health); --demo: everything fake; --view: my real data, read-only (agents: only these two)
@@ -305,7 +315,8 @@ nuauto rate            # taste training viewer (keys in docs/PIPELINE.md)
 nuauto update          # check NUworks for new jobs now (runs on the homelab, then syncs)
 nuauto status          # Approved rows + weekly count (also pushes code to the homelab)
 nuauto login           # manual SSO login; close the window when done
-nuauto login google    # Google Sheets login, every 7 days (Discord warns the day before)
+nuauto login google    # Google Sheets login, every 7 days (Discord warns the day before); renews the Gmail one too
+nuauto login gmail     # read-only Gmail login for the agent's email codes (once; then renewed with login google)
 nuauto test            # all offline tests
 nuauto doctor [--json] # health check: laptop, homelab, Mark-done page (read-only)
 nuauto deploy          # homelab: deploy GitHub's main now (laptop: starts it there); the timer does it every 5 min
@@ -331,7 +342,8 @@ TESTS
 Ubuntu and macOS. tests/test_sync.py fails if a new module or prompt isn't in sync.CODE (so it would never
 reach the homelab). test_web.py covers the public Mark-done links (signatures; GET never
 changes the sheet). test_browser.py covers the domain lock and the profile lock. test_assist.py covers the
-company-site agent's guard. test_insights.py covers the Insights numbers (pay parsing, folding, no guessing). test_intern.py covers the
+company-site agent's guard. test_mail.py covers the email codes and links (Gmail's message format, which mail counts, the
+agent's `email` command). test_insights.py covers the Insights numbers (pay parsing, folding, no guessing). test_intern.py covers the
 internship pool and postings.py (job-site links, parsing, the network guard on a local server, fetch tries, rules,
 Review queue, a whole update with Claude stood in for). test_deploy.py runs deploy.py on a throwaway git repo (copy, web restart only when needed, undo on failure). test_demo.py runs the real apply.py on demo mode's fake pages (stops, cap, re-login).
 test_gui.py covers the GUI server's security and flows; test_view.py the read-only `--view` mode; test_setup.py the wizard; test_health.py the checks;

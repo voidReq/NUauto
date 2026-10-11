@@ -87,6 +87,8 @@ SECRETS AND STATE (never print or log any of these; all mode 600)
   assist_profile_2/, _3/ yes    no       the same, for the 2nd and 3rd assistant running side by side
   accounts.json         yes     no       the job-site logins the assistant made (email + a password per site); never
                                          synced; `nuauto accounts export` (or Settings) writes Bitwarden's import file
+  gmail_token.json      yes     no       the read-only Gmail login for the assistant's email codes (`nuauto login gmail`;
+                                         renewed by `nuauto login google`); never synced
   gui.lock              yes     no       the running GUI (pid, port, a secret that only opens a window); not synced
   answers.json, profile.json  laptop only in practice (apply runs on the laptop); not synced
 Not secret, gitignored, pushed by sync.push: local_config.json (personal settings),
@@ -102,6 +104,10 @@ GOOGLE SHEETS LOGIN (gspread + OAuth)
   pushes the new token to the homelab. Discord warns the day before; laptop commands re-open
   the Google login by themselves when it has expired.
 - Open the sheet with open_by_key(SHEET_ID) so only the Sheets API is needed.
+- Optional: the assistant's email codes (mail.py) need the Gmail API enabled in the same project
+  (console.cloud.google.com/apis/library/gmail.googleapis.com), then `nuauto login gmail` on the laptop: Google's
+  read-only Gmail permission, a token of its own (local/gmail_token.json), so the Sheets token never reads mail. It
+  lasts 7 days too; `nuauto login google` renews both (two Google pages in a row).
   SHEET_ID: sheet_id in local_config.json.
 
 SYNC (sync.py; runs automatically inside `nuauto` on the laptop, homelab mode only)

@@ -63,7 +63,7 @@ INTERACT = {"browser_click", "browser_type", "browser_fill_form", "browser_selec
 SUBMIT_RE = re.compile(r"^\s*(submit|submit (my |your |the )?application|send( my)? application|apply|apply now|"
                        r"finish|complete( my)? application|confirm( and submit)?)\s*$", re.I)
 ENTER_KEYS = {"enter", "numpadenter", "return"}
-BASH_COMMANDS = {"answer", "guess", "guesses", "save", "once", "confirm", "alias", "blank", "wait"}
+BASH_COMMANDS = {"answer", "guess", "guesses", "save", "once", "confirm", "alias", "blank", "email", "wait"}
 MAX_ANSWER = 300  # one line; enough for a "30 word limit" answer, not an essay (an essay is typed into its field)
 MAX_WHY = 200     # a guess's reason: a few words
 REF_LINE = re.compile(r'^(?P<indent>\s*)-\s+(?P<role>[a-z]+)(?:\s+"(?P<name>(?:[^"\\]|\\.)*)")?(?P<attrs>[^\n]*?)\[ref=(?P<ref>[^\]\s]+)\](?P<tail>[^\n]*)$')
@@ -706,6 +706,8 @@ def bank(argv):
     saves, so two sessions' answers never overwrite each other."""
     if argv[:1] == ["wait"]:
         return _bank(argv)
+    if argv[:1] == ["email"]:  # may wait a minute for the mail: never while holding the bank's lock
+        return email_cmd(argv[1:])
     os.makedirs(config.LOCAL_DIR, mode=0o700, exist_ok=True)
     with open(os.path.join(config.LOCAL_DIR, "answers.lock"), "a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -820,6 +822,43 @@ def record_guess(state, entries, a):
     n = sum(1 for x in state["guesses"].values() if not x.get("resolved"))
     return {"status": "guess", "value": a.value, "open": n,
             "next": "Fill it in and keep going: the user answers every guess at the end (guesses)."}
+
+def email_cmd(argv):
+    """email [--want code|link]: the code or link the site the browser is on just emailed the user (mail.lookup:
+    read-only Gmail, the last 15 minutes, messages about this site only). The agent gets that one value, never a
+    message; the run's log says from whom, never the code."""
+    import argparse
+    from nuauto import mail
+    ap = argparse.ArgumentParser(prog="assist.py email")
+    ap.add_argument("--want", choices=["code", "link"], default="")
+    a = ap.parse_args(argv)
+    d = run_dir()
+    with state_file(os.path.join(d, "state.json")) as state:
+        site, job = host(state.get("current_url", "")), host(state.get("job_url", ""))
+        company, used = state.get("company", ""), list(state.get("email_used") or [])
+    try:
+        found = mail.lookup(site, company, job, a.want, used)
+    except mail.NoAccess as e:
+        found = {"status": "no_email_access", "why": str(e)}
+    except Exception as e:  # Gmail down, no network: the user reads the email
+        found = {"status": "no_email_access", "why": f"Gmail could not be read ({type(e).__name__})"}
+    out = {k: v for k, v in found.items() if k != "id"}
+    if found.get("id"):
+        with state_file(os.path.join(d, "state.json")) as state:
+            state.setdefault("email_used", []).append(found["id"])
+            value = found.get("code") or found.get("link")
+            if value and value not in state["issued_values"]:
+                state["issued_values"].append(value)  # typing the code is not a value "with nothing behind it"
+    out["next"] = {
+        "code": "Type the code where the page asks for it.",
+        "link": "Open the link (browser_navigate), then take a snapshot.",
+        "ambiguous": "The site's email is there, but not one clear code or link: ask the user to read it.",
+        "none": "No email from this site in the last 15 minutes: ask the user (or try again if the page says it sent one just now).",
+        "refused": "Never for this sign-in: ask the user.",
+        "no_email_access": "Ask the user to open the email."}.get(found["status"], "Ask the user.")
+    log(d, f"email {a.want or 'any'} -> {found['status']}" + (f" from {found['from']} ({found['received']})" if found.get("from") else ""))
+    print(json.dumps(out))
+
 
 # ---------- hooks (Claude Code runs these for every browser / Bash call) ----------
 
@@ -1048,7 +1087,8 @@ def context_text(where, row, url, other, resume, read_roots, answer_cmd, writeup
             + (f"The user's writeups (look here first for essays and project questions): {', '.join(writeups)}\n"
                if writeups else "") +
             "Answer bank command: "
-            f"{' '.join(shlex.quote(a) for a in answer_cmd)} <answer|guess|guesses|save|once|confirm|alias|blank> ...")
+            f"{' '.join(shlex.quote(a) for a in answer_cmd)} <answer|guess|guesses|save|once|confirm|alias|blank> ...\n"
+            f"Email codes and links: {' '.join(shlex.quote(a) for a in answer_cmd)} email --want code|link")
 
 
 def session(d, answer_cmd, read_roots, profile, prompt, where):
