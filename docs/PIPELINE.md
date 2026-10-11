@@ -55,7 +55,8 @@ WHAT YOU STUDY (fields.py, added 2026-10-10; preferences "field" and "categories
 
 RANKING (my settings: the engineering field)
 - Cybersecurity is the top priority. Every scored job gets a category (CATEGORY_PROMPT.md).
-  Security roles need 60% to enter (junior-only still 90%).
+  Security roles need 50% to enter (my setting since 2026-10-11; the engineering default is 60%; a year up still
+  needs threshold_above).
 - Pool entry uses the RAW resume match (Boston +10 is ranking only).
 - Ranking = match + Boston + category bonus: security +20, low-level (embedded, hardware,
   systems, robotics/controls/test) +10. Front-end / UI roles (mainly the user-facing side: front-end, UI/UX,
