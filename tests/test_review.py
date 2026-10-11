@@ -18,6 +18,8 @@ import time
 from http.server import ThreadingHTTPServer
 from urllib.parse import parse_qs, urlencode, urlparse
 
+import tempfile as _tempfile  # noqa: E402
+os.environ["NUAUTO_STATE_DIR"] = _tempfile.mkdtemp(prefix="nuauto-test-")  # never the real local/ (logins, sheet)
 from nuauto import config
 
 tmp = tempfile.mkdtemp()
@@ -175,6 +177,25 @@ try:
     assert req("GET", "/s/2", cookie=KEY)[0] == 404 and req("GET", "/s/3", cookie=KEY)[0] == 404
     assert req("GET", "/s/0", cookie=KEY)[0] == 404 and req("GET", "/nope", cookie=KEY)[0] == 404
     assert req("GET", "/s/1/other", cookie=KEY)[0] == 404 and req("GET", "/s/2/v", cookie=KEY)[0] == 404
+
+    # the list reloads by itself when sessions change (/v); a queue row a session here works on links to it, in green
+    assert "data-poll='/v'" in text(req("GET", "/", cookie=KEY))
+    assert text(req("GET", "/v", cookie=KEY)).strip() == review.index_version() and req("GET", "/v")[0] == 403
+    from nuauto import remote  # noqa: E402
+
+    def cand(row, host):
+        return {"tab": "other", "row": row, "url": "https://x.example/a", "host": host, "company": "Q Co", "title": "T",
+                "closes": None, "match": 50}
+    real_queue = remote.queue_now
+    remote.queue_now = lambda manual=False: ([], [(cand(7, "acme.example"), "a session is on it"),
+                                                  (cand(9, "b.example"), "a session is on it"), (cand(11, "c.example"), None)])
+    try:
+        page_q = text(req("GET", "/", cookie=KEY))
+        assert "<a class=ok href='/s/1'>A session is working on it" in page_q    # row 7 is slot 1's session
+        assert "The laptop's assistant is working on it" in page_q              # row 9: a laptop claim, no session here
+        assert page_q.count("Start now") == 1                                   # only row 11 can start
+    finally:
+        remote.queue_now = real_queue
 
     # the session page: what it will do, the message (escaped)
     r = req("GET", "/s/1", cookie=KEY)

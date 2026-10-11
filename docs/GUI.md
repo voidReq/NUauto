@@ -88,13 +88,13 @@ SCREENS
                  in the other tabs (since 2026-10-09 Company sites is a part of Apply; the menu count is Approved + the
                  assistant's rows + retries). Company sites tab (assistants side by side, up to 3: a row with one
                  running shows "assistant running (slot N)" instead of Start, or "assistant waiting for you" / "approve in its window"
-                 (one the homelab runs, remote_assist: "assistant running on the homelab" / "waiting for you (its review page)",
-                 from `nuauto assist sessions` over ssh every minute; never in view or demo mode). With remote_assist a
-                 Homelab assistants card first: the homelab's sessions and what each waits for, Open its page (the
-                 homelab's review page in your browser), Open the review page, Pair this computer (a one-time pairing
-                 link from the homelab over ssh, opened in your browser; POST /api/action review_pair -> {"url"})
-                 while it waits for you (assist.sessions attention; a desktop notification says so too); "N of 3 assistants running"; it follows
-                 /api/state assistants): Needs Human rows for the assistant (opens
+                 while it waits for you (assist.sessions attention; a desktop notification says so too); one the homelab runs
+                 (remote_assist) shows "assistant running on the homelab" / "waiting for you (its review page)", from `nuauto
+                 assist sessions` over ssh every minute (never in view or demo mode); "N of 3 assistants running"; it follows
+                 /api/state assistants). With remote_assist a Homelab assistants card first: the homelab's sessions and what
+                 each waits for, Open its page (the homelab's review page in your browser), Open the review page, Pair this
+                 computer (a one-time pairing link from the homelab over ssh, opened in your browser; POST /api/action
+                 review_pair -> {"url"}). Then: Needs Human rows for the assistant (opens
                  `nuauto assist <row>` in a terminal window, or shows the command), "I applied myself", company sites still
                  owed (Mark done), the NUworks side to retry, then the Other jobs card: the sheet's Other jobs tab's
                  Approved rows (read fresh; counted in the tab, not the menu), Start assistant (opens `nuauto assist other

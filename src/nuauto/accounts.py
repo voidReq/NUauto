@@ -8,12 +8,20 @@ for that site only (assist.py). Kept in local/accounts.json (mode 600, never syn
                                      ~/Downloads/nuauto-logins-<date>.json). Import it in Bitwarden: the web vault,
                                      Tools > Import data > "Bitwarden (json)". Then delete the file.
   nuauto accounts export --all       every login again (e.g. into another password manager's copy)
+  nuauto accounts import <file>|- --only <site> [--only <site>...]
+                                     YOUR OWN logins from Bitwarden, for sites where you have an account already (your
+                                     Workday ones, Amazon jobs...): only the logins whose address contains one of the
+                                     --only texts. The agent then signs in with them and never makes an account there.
+                                     Best without exporting your whole vault, with Bitwarden's command line:
+                                       bw list items --search myworkday | nuauto accounts import - --only myworkday
+                                     (or a Bitwarden .json export file: delete it afterwards). Never exported back.
 
 The account email: local_config.json "accounts_email" (else your answer bank's email).
 """
 import fcntl
 import json
 import os
+import re
 import secrets
 import string
 import sys
@@ -39,8 +47,38 @@ BITWARDEN_HOST_MATCH = 1      # Bitwarden's URI match "Host": the login is offer
 FOLDER = "NUauto job sites"
 
 
+# One domain, many companies: a login there is for its exact host only (each company's Workday is its own site). On any
+# other domain, your own login counts for the whole domain (amazon.jobs: its sign-in pages live on account.amazon.jobs).
+SHARED = ("myworkdayjobs.com", "myworkdaysite.com", "icims.com", "oraclecloud.com", "taleo.net", "successfactors.com",
+          "successfactors.eu", "sapsf.com", "greenhouse.io", "lever.co", "smartrecruiters.com", "ashbyhq.com",
+          "jobvite.com", "workable.com", "eightfold.ai", "brassring.com", "ultipro.com", "paylocity.com", "adp.com",
+          "dayforcehcm.com", "applytojob.com", "bamboohr.com", "recruitee.com", "teamtailor.com", "jazzhr.com")
+
+
 class NoAccount(Exception):
     """No saved login for that site."""
+
+
+def domain(host):
+    """What one of your own logins counts for: the exact host on a shared job-site domain (SHARED), else the domain
+    (its last two labels: account.amazon.jobs -> amazon.jobs)."""
+    key = site(host)
+    h = host_of(key)
+    if any(h == d or h.endswith("." + d) for d in SHARED):
+        return key
+    return ".".join(h.split(".")[-2:])
+
+
+def find(data, where):
+    """The login for this page (or site): the one saved for exactly this site, else one saved for its whole host (a
+    login from before sites knew companies' paths, or yours saved without one), else your own login for its domain."""
+    key = site(where)
+    if key in data:
+        return data[key]
+    if host_of(key) in data:
+        return data[host_of(key)]
+    return next((a for a in data.values() if a.get("own") and a.get("match") == "domain" and domain(a["site"]) == domain(key)),
+                None)
 
 
 def make_password(length=LENGTH):
@@ -53,16 +91,36 @@ def make_password(length=LENGTH):
             return p
 
 
+# Workday's shared hosts carry the company in the path (wd1.myworkdaysite.com/en-US/recruiting/<company>/...): a login
+# there is the company's own, so the site is host/<company>.
+TENANT_HOSTS = ("myworkdaysite.com",)
+TENANT_PATH = re.compile(r"^/(?:[a-z]{2}(?:-[a-z]{2})?/)?recruiting/([^/?#]+)", re.I)
+
+
 def site(url_or_host):
-    """The site a login belongs to: the host (a company's Workday is <company>.wd5.myworkdayjobs.com)."""
+    """The site a login belongs to: the host (a company's Workday is <company>.wd5.myworkdayjobs.com), or host/<company>
+    on a host companies share by path (TENANT_HOSTS). Takes a page's address, a host, or a site this returned."""
     from urllib.parse import urlparse
-    s = str(url_or_host or "").strip().lower()
-    return (urlparse(s).hostname or "") if "://" in s else s.split("/")[0].split(":")[0]
+    s = str(url_or_host or "").strip()
+    if "://" in s:
+        u = urlparse(s)
+        h = (u.hostname or "").lower()
+        m = TENANT_PATH.match(u.path or "") if h.endswith(TENANT_HOSTS) else None
+        return f"{h}/{m.group(1).lower()}" if m else h
+    h, _, rest = s.lower().partition("/")
+    h = h.split(":")[0]
+    tenant = rest.strip("/")
+    return f"{h}/{tenant}" if h.endswith(TENANT_HOSTS) and tenant and "/" not in tenant else h
+
+
+def host_of(key):
+    """The host part of a site (site())."""
+    return key.split("/")[0]
 
 
 def never(host):
     """Why NUauto never fills a password on this host (an identity provider, Northeastern), or None."""
-    h = site(host)
+    h = host_of(site(host))
     if not h:
         return "no site (the page's address is unknown: take a snapshot first)"
     for d in NEVER:
@@ -112,11 +170,14 @@ def password_for(host, placeholder, company="", job=None):
     if placeholder not in PLACEHOLDERS:
         raise ValueError(placeholder)
     with locked() as data:
-        a = data.get(h)
+        a = find(data, h)
+        if a is not None and a.get("own") and placeholder == NEW:
+            raise NoAccount(f"the user has their own account on this site (as {a.get('email')}): sign in with that "
+                            f"email and {SIGN_IN}, never make a new account here")
         if a is None:
             if placeholder == SIGN_IN:
                 raise NoAccount(f"NUauto has no saved login for {h}: create an account ({NEW}), or ask the user")
-            a = data[h] = {"site": h, "url": f"https://{h}/", "email": account_email(), "password": make_password(),
+            a = data[h] = {"site": h, "url": site_url(h), "email": account_email(), "password": make_password(),
                            "company": company, "created": datetime.now().isoformat(timespec="minutes"), "jobs": [],
                            "exported": False}
         if job and job.get("url") and job["url"] not in [j.get("url") for j in a["jobs"]]:
@@ -124,6 +185,12 @@ def password_for(host, placeholder, company="", job=None):
         if company and not a.get("company"):
             a["company"] = company
         return a["password"]
+
+
+def site_url(key):
+    """An address for a site (Bitwarden matches the login on its host)."""
+    h, _, tenant = key.partition("/")
+    return f"https://{h}/recruiting/{tenant}/" if tenant else f"https://{h}/"
 
 
 def passwords(hosts):
@@ -135,7 +202,7 @@ def passwords(hosts):
         return []
     found = set()
     for h in hosts:
-        a = data.get(site(h))
+        a = find(data, h)
         if a:  # and the other password a merge kept (sync.merge_accounts): it may be the one typed
             found.update(p for p in [a.get("password"), *(a.get("other_passwords") or [])] if p)
     return sorted(found, key=len, reverse=True)
@@ -160,7 +227,7 @@ def export(path=None, every=False):
     """Write Bitwarden's import file (mode 600) with the logins not exported yet (every: all); mark them exported.
     Returns (path, count); count 0 writes nothing."""
     with locked() as data:
-        todo = [a for a in data.values() if every or not a.get("exported")]
+        todo = [a for a in data.values() if not a.get("own") and (every or not a.get("exported"))]  # yours stay yours
         if not todo:
             return None, 0
         path = os.path.expanduser(path or f"~/Downloads/nuauto-logins-{date.today():%Y-%m-%d}.json")
@@ -171,6 +238,63 @@ def export(path=None, every=False):
         for a in todo:
             a["exported"] = date.today().isoformat()
         return path, len(todo)
+
+
+def own_login(host):
+    """Your own login (imported) for this host, or None: {"site", "email", "company"} (never the password)."""
+    try:
+        with open(PATH) as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    a = find(data, host)
+    return {k: a.get(k) for k in ("site", "email", "company")} if a and a.get("own") else None
+
+
+def bitwarden_logins(data, only):
+    """[(host, {"name", "username", "password", "uri"})] from a Bitwarden export ({"items": [...]}) or `bw list items`
+    ([...]): login items with a username and a password, whose address contains one of the only texts (any case),
+    never one of NEVER's sign-ins. Pure."""
+    if isinstance(data, dict) and data.get("encrypted"):
+        raise ValueError("that export is encrypted: export it as plain .json (or use `bw list items`)")
+    items = data.get("items", []) if isinstance(data, dict) else data if isinstance(data, list) else []
+    only = [o.lower() for o in only if o.strip()]
+    out = []
+    for it in items:
+        login = (it or {}).get("login") or {}
+        user, pw = login.get("username") or "", login.get("password") or ""
+        if (it or {}).get("type", 1) != 1 or not user or not pw:
+            continue
+        for u in login.get("uris") or []:
+            uri = str((u or {}).get("uri") or "").strip()
+            h = site(uri if "://" in uri else "https://" + uri)
+            if h and any(o in uri.lower() for o in only) and not never(h):
+                out.append((h, {"name": it.get("name") or h, "username": user, "password": pw, "uri": uri}))
+    return out
+
+
+def import_own(entries):
+    """Save your own logins: [(host, {"name", "username", "password", "uri"})]. Your login replaces one NUauto made
+    on that site (kept as "replaced_nuauto", in case it is the right one after all). Returns the sites saved."""
+    saved, seen = [], {}
+    for h, e in entries:  # two of yours for one site: the last one counts (said)
+        if h in seen and seen[h]["password"] != e["password"]:
+            print(f"(two of your logins are for {h}: kept {e['name']!r}; give the other its job's full address in "
+                  "Bitwarden if it is another company's)")
+        seen[h] = e
+    entries = list(seen.items())
+    with locked() as data:
+        for h, e in entries:
+            old = data.get(h)
+            a = {"site": h, "url": e["uri"] if "://" in e["uri"] else site_url(h), "email": e["username"],
+                 "password": e["password"], "company": e["name"], "own": True,
+                 "match": "host" if domain(h) == h else "domain", "created": datetime.now().isoformat(timespec="minutes"),
+                 "jobs": (old or {}).get("jobs", []), "exported": True}
+            if old and not old.get("own") and old.get("password") != e["password"]:
+                a["replaced_nuauto"] = {k: old.get(k) for k in ("email", "password", "created")}
+            data[h] = a
+            saved.append(h)
+    return saved
 
 
 def main(argv):
@@ -184,7 +308,34 @@ def main(argv):
             return print("No logins yet. The assistant makes one when a company's site needs an account.")
         for a in sorted(data.values(), key=lambda a: a["created"]):
             print(f"{a['created'][:10]}  {a['site']:45} {a.get('company', '')[:25]:25} {a['email']}  "
-                  f"{len(a.get('jobs', []))} job(s)  {'exported ' + a['exported'] if a.get('exported') else 'not exported'}")
+                  f"{len(a.get('jobs', []))} job(s)  " + ("yours (imported)" if a.get("own") else
+                                                          f"exported {a['exported']}" if a.get("exported") else "not exported"))
+        return
+    if argv[0] == "import" and len(argv) >= 2:
+        rest, only = argv[1:], []
+        while "--only" in rest:
+            i = rest.index("--only")
+            if i + 1 >= len(rest):
+                sys.exit("--only needs a text (e.g. --only myworkday).")
+            only.append(rest[i + 1])
+            del rest[i:i + 2]
+        if len(rest) != 1 or not only:
+            sys.exit("Say which logins: nuauto accounts import <file>|- --only <site> [--only <site>...]\n"
+                     "(only logins whose address contains one of those texts are taken, e.g. --only myworkday)")
+        src = rest[0]
+        try:
+            data = json.load(sys.stdin if src == "-" else open(os.path.expanduser(src)))
+            entries = bitwarden_logins(data, only)
+        except (OSError, ValueError) as e:
+            sys.exit(f"Could not read that: {e}")
+        if not entries:
+            return print("No logins matched (nothing saved).")
+        for h in import_own(entries):
+            a = next(e for x, e in entries if x == h)
+            print(f"  {h:45} {a['name'][:30]:30} as {a['username']}")
+        print(f"Saved {len(entries)} of your own login{'s' if len(entries) != 1 else ''}: the assistant signs in with "
+              "them and never makes an account on those sites." + (f"\nNow delete the export file: rm {src}"
+                                                                  if src != "-" else ""))
         return
     if argv[0] == "export" and len(argv) <= 3:
         rest = [a for a in argv[1:] if a != "--all"]

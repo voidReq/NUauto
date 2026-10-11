@@ -11,6 +11,8 @@ import stat
 import sys
 import tempfile
 
+import tempfile as _tempfile  # noqa: E402
+os.environ["NUAUTO_STATE_DIR"] = _tempfile.mkdtemp(prefix="nuauto-test-")  # never the real local/ (logins, sheet)
 from nuauto import config
 
 tmp = tempfile.mkdtemp()

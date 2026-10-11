@@ -992,7 +992,7 @@ def fill(state, inp, plan):
     """The tool input with the site's real password in place of each placeholder (accounts.password_for: NEW makes
     one when the site has none). Remembers the site, so the replies can be cleaned of it. NoAccount if SIGN_IN has
     no saved login there."""
-    h = host(state.get("current_url", ""))
+    h = accounts.site(state.get("current_url", ""))  # the page's site: its host, with the company on Workday's shared hosts
     job = {"title": state.get("job_title", ""), "url": state.get("job_url", "")}
     new = json.loads(json.dumps(inp))
     for where, ph in plan:
@@ -1493,6 +1493,7 @@ def rules_text(answer_cmd):
 
 def context_text(where, row, url, other, resume, read_roots, answer_cmd, writeups=(), view_url=None):
     email = accounts.account_email()
+    own = accounts.own_login(url)  # one of your own logins (imported from Bitwarden) for this site
     return (f"\n\nTHIS RUN\n{where.capitalize()}: {row.company} | {row.title}\nPosting: {url}\n"
             + (OTHER_NOTE if other else "")
             + ("This browser runs on the user's homelab, not in front of them. They read your messages and answer on "
@@ -1503,6 +1504,8 @@ def context_text(where, row, url, other, resume, read_roots, answer_cmd, writeup
                if view_url else "") +
             f"Resume file (the only file you may upload): {resume or 'not found'}\n"
             f"Account email (for any account a site needs): {email or 'not set: ask the user'}\n"
+            + (f"The user has their own account on this job site ({own['site']}): sign in as {own['email']} with "
+               f"{accounts.SIGN_IN}; never make a new account here.\n" if own else "") +
             "If you have no browser tools yet, they are still connecting: run the answer-bank command with "
             "just `wait` (it pauses 5 s), then look again (up to 6 times) before telling the user.\n"
             f"Resume and notes you may read (Read / Glob / Grep): {', '.join(read_roots) or 'none'}\n"

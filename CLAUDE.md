@@ -221,6 +221,12 @@ COMPANY-SITE AGENT (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`;
   logs and, after the session, Claude Code's session log. Never on Google / Microsoft / Apple / LinkedIn / GitHub or
   Northeastern sign-ins (accounts.never). `nuauto accounts export` (or Settings) writes Bitwarden's import file (one
   login per site, matched on its host; the jobs in its notes). Proven end to end with a real session on a local page.
+  My own logins (added 2026-10-11, my request: my Workday and Amazon jobs accounts are in Bitwarden): `nuauto accounts
+  import <file>|- --only <text>` takes only the Bitwarden logins whose address has that text (best: `bw list items
+  --search myworkday | nuauto accounts import - --only myworkday`, no whole-vault export); saved "own" in accounts.json
+  (they replace one NUauto made there), used with {{PASSWORD}} and the email they hold, never a new account on that
+  site, never exported back. Sites: the host; on Workday's shared hosts (wd1.myworkdaysite.com/.../recruiting/<company>)
+  host/<company>; my own login on another domain counts for the whole domain (account.amazon.jobs = amazon.jobs).
 - Sign-in pages (added 2026-10-10, my call): a sign-in / create-account page's own "Submit" doesn't ask (the latest
   snapshot has a password box and only account boxes: assist.sign_in_page); any question on the page, or "Apply" /
   "Submit Application", still asks. The agent never types into a bot trap ("for robots only"). Also my call
@@ -343,6 +349,7 @@ nuauto insights        # pay, places, kinds of work in my pool and applications;
 nuauto selftest        # is this install OK? demo mode end to end in a hidden browser (nothing real touched)
 nuauto assist [<row>]  # company-site agent for a Needs Human row; asks me before any Submit
 nuauto accounts [export [<file>] [--all]]   # the job-site logins the agent made (no passwords shown); Bitwarden's import file
+nuauto accounts import <file>|- --only <text>   # my own logins from Bitwarden for those sites (bw list items --search ...)
 nuauto review pair [<name>] | devices | unpair <name>   # the homelab assistant's review page: pair my phone (docs/REMOTE.md)
 nuauto review demo                                      # that page with made-up sessions, locally (agents: look at it with this)
 nuauto assist queue | start <nuworks|other> <row>      # (homelab) the assistant's queue / start one row's session in tmux

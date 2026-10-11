@@ -127,7 +127,8 @@ WHAT LIVES WHERE (with remote_assist)
 
 PORTS (homelab; slot n = 1..3)
   review page http://<web_listen_host>:8766 (in nuauto-web; the Mark-done tunnel forwards 8765 only); its index lists
-  the running sessions and the queue (Start now)
+  the running sessions and the queue (Start now; a row a session works on links to it), and reloads by itself when a
+  session starts, ends or wants something (/v)
   virtual screen :40+n (Xvfb, -nolisten tcp)   VNC 127.0.0.1:5940+n (x11vnc -localhost: never on the network)
   browser view http://<web_listen_host>:6080+n/vnc.html (websockify + noVNC; Tailscale only; a password per run)
   The run folder's screen.log has the three programs' output; local/screen<n>.json their pids (a crashed run's are
