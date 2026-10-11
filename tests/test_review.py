@@ -21,6 +21,8 @@ from urllib.parse import parse_qs, urlencode, urlparse
 from nuauto import config
 
 tmp = tempfile.mkdtemp()
+os.environ["TMUX_TMPDIR"] = tmp  # a private tmux server for every tmux check here
+os.environ.pop("TMUX", None)
 config.LOCAL_DIR = os.path.join(tmp, "local")  # devices, pairing links, slot locks: never the real local/
 config.LOGS_DIR = os.path.join(tmp, "logs")
 os.makedirs(config.LOCAL_DIR, mode=0o700)
@@ -254,6 +256,11 @@ try:
         print("(skipped the tmux checks: tmux is not installed here)")
     else:
         subprocess.run(["tmux", "new-session", "-d", "-s", TMUX_NAME, "-x", "200", "-y", "50", "cat"], check=True)
+        for _ in range(50):  # tmux starts it through your shell: until then the pane shows the shell (never typed into)
+            if subprocess.run(["tmux", "display-message", "-p", "-t", f"={TMUX_NAME}:", "#{pane_current_command}"],
+                              capture_output=True, text=True).stdout.strip() == "cat":
+                break
+            time.sleep(0.1)
         try:
             sess = review.session(1)
             review.type_into(sess, "hello from the phone")
@@ -300,6 +307,29 @@ try:
             assert review.terminal(sess) == ""                                  # a gone session: nothing, no error
         finally:
             subprocess.run(["tmux", "kill-session", "-t", f"={TMUX_NAME}"], capture_output=True)
+
+    # the body of a POST is read only for a paired device (no waiting on a body from anyone else)
+    def raw_post(path, headers, cookie=None, body=b""):
+        conn = http.client.HTTPConnection("127.0.0.1", PORT, timeout=5)
+        conn.putrequest("POST", path, skip_host=True, skip_accept_encoding=True)
+        for k, v in {"Host": HOST, **headers}.items():
+            conn.putheader(k, v)
+        if cookie:
+            conn.putheader("Cookie", f"{review.COOKIE}={cookie}")
+        conn.endheaders(body)
+        r = conn.getresponse()
+        out = (r.status, r.read())
+        conn.close()
+        return out
+
+    t0 = time.time()
+    assert raw_post("/s/1/approve", {"Content-Length": "5000"})[0] == 403          # promises a body, sends none: refused at once
+    assert raw_post("/start", {"Content-Length": "5000"}, cookie="not-a-key")[0] == 403
+    assert time.time() - t0 < 3
+    for bad in ("abc", "-5", "", "1e3", " "):                                       # no crash, treated as no body
+        assert raw_post("/s/1/approve", {"Content-Length": bad}, cookie=KEY)[0] == 403, bad     # (no token without a body)
+        assert raw_post("/pair", {"Content-Length": bad})[0] == 403, bad
+    assert req("GET", "/", cookie=KEY)[0] == 200                                       # still serving
 
     # the page in a real browser: Firefox's own form posts (Origin, cookies, redirects), not just hand-made requests
     try:
@@ -394,6 +424,82 @@ try:
             pw.stop()
             if evil:
                 evil.shutdown()
+
+    # type_into goes only to the assistant's own pane, and never into a shell (real tmux, private socket)
+    if HAVE_TMUX:
+        tm = lambda *a: subprocess.run(["tmux", *a], capture_output=True, text=True)  # noqa: E731
+        S1, S2, S3 = (f"nuautotest-{random.randrange(10**8)}" for _ in range(3))
+        try:
+            def pane_text(target_):
+                return tm("capture-pane", "-p", "-J", "-t", target_).stdout
+
+            assert tm("new-session", "-d", "-s", S1, "-x", "120", "-y", "30", "sh -i").returncode == 0          # a shell
+            shell_s = {"state": {"tmux": S1}, "run": run}
+            time.sleep(0.5)
+            try:
+                review.type_into(shell_s, "rm -rf /tmp/never")
+                raise AssertionError("typed into a shell")
+            except ValueError as e:
+                assert "sh now" in str(e) and "nothing was typed" in str(e), e
+            time.sleep(0.3)
+            assert "never" not in pane_text(f"={S1}:")
+            assert "sh" in review.SHELLS and "bash" in review.SHELLS and "zsh" in review.SHELLS
+            # a program that ended (the pane is kept dead): refused too
+            assert tm("new-session", "-d", "-s", S2, "sleep 1", ";", "set-option", "-t", f"={S2}:", "remain-on-exit", "on").returncode == 0
+            time.sleep(2)
+            assert tm("display-message", "-p", "-t", f"={S2}:", "#{pane_dead}").stdout.strip() == "1"
+            try:
+                review.type_into({"state": {"tmux": S2}, "run": run}, "hello")
+                raise AssertionError("typed into a dead pane")
+            except ValueError as e:
+                assert "nothing was typed" in str(e)
+            # two windows: the shell is the active one, the assistant (cat) is the other: its recorded pane is the target
+            assert tm("new-session", "-d", "-s", S3, "-x", "120", "-y", "30", "cat").returncode == 0
+            cat_pane = tm("list-panes", "-t", f"={S3}:0", "-F", "#{pane_id}").stdout.strip()
+            assert re.fullmatch(r"%\d+", cat_pane)
+            assert tm("new-window", "-t", f"={S3}:", "sh -i").returncode == 0                                    # now the active window
+            shell_pane = tm("list-panes", "-t", f"={S3}:1", "-F", "#{pane_id}").stdout.strip()
+            assert shell_pane != cat_pane
+            time.sleep(0.5)
+            by_name = {"state": {"tmux": S3}, "run": run}                                                         # no pane recorded
+            assert review.target(by_name) == f"={S3}:"
+            try:
+                review.type_into(by_name, "into the shell?")
+                raise AssertionError("typed into the active pane (a shell)")
+            except ValueError:
+                pass
+            pinned = {"state": {"tmux": S3, "tmux_pane": cat_pane}, "run": run}
+            assert review.target(pinned) == cat_pane
+            for _ in range(50):  # started through your shell: wait until the pane runs cat itself
+                if tm("display-message", "-p", "-t", cat_pane, "#{pane_current_command}").stdout.strip() == "cat":
+                    break
+                time.sleep(0.1)
+            review.type_into(pinned, "for the assistant")
+            time.sleep(0.4)
+            assert "for the assistant" in pane_text(cat_pane) and "for the assistant" not in pane_text(shell_pane)
+            assert "for the assistant" in review.terminal(pinned) and "for the assistant" not in review.terminal(by_name)
+            assert "into the shell" not in pane_text(shell_pane)
+            # an odd pane value is ignored (falls back to the session), a gone pane refuses
+            assert review.target({"state": {"tmux": S3, "tmux_pane": "%1; kill-server"}, "run": run}) == f"={S3}:"
+            assert review.target({"state": {"tmux": S3, "tmux_pane": "x"}, "run": run}) == f"={S3}:"
+            try:
+                review.type_into({"state": {"tmux": S3, "tmux_pane": "%99999"}, "run": run}, "x")
+                raise AssertionError("typed into a pane that is not there")
+            except ValueError:
+                pass
+            # and through the page (the pinned pane): Reply reaches the assistant only
+            assist.write_private(os.path.join(run, "state.json"), {**state, "tmux": S3, "tmux_pane": cat_pane})
+            r = req("POST", "/s/1/reply", form={"t": token, "text": "via the page"}, cookie=KEY)
+            assert r[0] == 303 and "Sent" in r[1]["location"]
+            time.sleep(0.4)
+            assert "via the page" in pane_text(cat_pane) and "via the page" not in pane_text(shell_pane)
+            assist.write_private(os.path.join(run, "state.json"), {**state, "tmux": S1})
+            r = req("POST", "/s/1/reply", form={"t": token, "text": "to the shell"}, cookie=KEY)
+            assert "nothing+was+typed" in r[1]["location"] or "nothing%20was%20typed" in r[1]["location"], r[1]["location"]
+            assist.write_private(os.path.join(run, "state.json"), state)
+        finally:
+            for n_ in (S1, S2, S3):
+                tm("kill-session", "-t", f"={n_}")
 
     # unpairing: the cookie stops working
     config.IS_SERVER, config.REMOTE_ASSIST = True, True

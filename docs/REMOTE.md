@@ -47,9 +47,13 @@ THE QUEUE (remote.py; nuauto-assist.timer every 10 minutes runs `nuauto assist a
   time), so no pings at night.
 - What it starts: Approved rows of the Other jobs tab and Needs Human rows stopped at a company site, best first:
   closing within a week, then match % (the "match NN%" in Notes), then sheet order. Into free slots (assist_slots),
-  one session per job site, NUworks rows only under the weekly cap, never a row or site the laptop holds (claims).
+  one session per job site, never a row or site the laptop holds (claims). NUworks rows only while the weekly cap and
+  the total leave room, counting the NUworks sessions already running on either machine (each may submit one).
 - Each row starts by itself once (local/assist_auto.json). A session that ended without "Applied" leaves its row for
   you: Start now on the review page (it lists the queue and why each row waits), or `nuauto assist start other 12`.
+- A session where you approved a Submit but nobody answered "Did it go through?" (24 h, or Ctrl+C) is never started
+  again, not even by Start now: check the site and mark the row, or `nuauto assist start other 12 --again`.
+- The record file can't be read: the queue starts nothing until you fix or remove it (it could start a row twice).
 - Each session runs in tmux, named nuauto-<nuworks|other>-<row>, in its own systemd scope (it outlives the timer):
   ssh -t homelab tmux attach -t nuauto-other-12      (Ctrl+b then d to leave it running)
 - `nuauto assist queue` (homelab) shows what it would start and why the others wait.
@@ -79,10 +83,14 @@ THE REVIEW PAGE (review.py; http://<web_listen_host>:8766/, inside nuauto-web, o
                     typed with no answer behind it (the same list as the laptop's Submit question); the screen when it
                     asked. Approve / Decline (a note for the agent). The guard waits 9 minutes (assist.WAIT); after
                     that the agent is told to wait for you, the question stays, and a later Approve is a pass for
-                    that one action on that page for 10 minutes (assist.take_grant): the page tells the agent to do it.
+                    that one action on that page with those values, once, for 10 minutes (assist.take_grant: only a
+                    question the guard itself asked this run); the page tells the agent to do it. Anything typed or
+                    another page after the question withdraws it (and any pass); an Approve while something was typed
+                    meanwhile doesn't count (the agent is told to ask again).
   Its last message  the whole message (a question, the end list, a captcha), and a reply box: what you send is typed
                     into its terminal (tmux send-keys; a newline = Ctrl+J, so several lines go as one message: checked
-                    with a real Claude Code session, as is /exit), as if you typed it there.
+                    with a real Claude Code session, as is /exit), as if you typed it there. Only into the pane the
+                    session started in, and never when that pane shows a shell (the assistant ended).
   The browser       the browser view's link and password, and the screen now. A captcha: solve it there, reply "done".
   Its terminal      the last lines (this run's site passwords taken out); Interrupt (Esc), End session (/exit).
   Ended             Did it go through? Yes / No (typed into the launcher's question).
@@ -100,7 +108,10 @@ WHAT LIVES WHERE (with remote_assist)
        nuauto command (its pull), every 30 minutes while the GUI is open, after a laptop assistant session, on every push.
        Each question takes the side that changed it since the last merge (local/share_base.json); changed on both: the
        laptop's answer stays (it says which); aliases added on both: all kept. The homelab merges the laptop's result
-       under its own lock, so an answer its assistant saved in the meantime stays.
+       under its own lock, so an answer its assistant saved in the meantime stays. The merge never deletes by itself (a
+       missing file or a copy saved from an old read wipes nothing): delete answers in the GUI's Answers screen, which
+       records the deletion (local/answers_gone.json) for both machines; one deleted by editing the file comes back
+       from the other copy. A file that can't be read (bad JSON, e.g. while you edit it) is left alone.
   accounts.json (job-site logins)    both machines, merged the same way: a login is never dropped. If each machine made
        an account on the same site before they merged, the earlier stays the login and the other is kept with it
        ("other_passwords"); the merge names the site. Sent as JSON over ssh, never printed or logged.
@@ -118,7 +129,8 @@ PORTS (homelab; slot n = 1..3)
   virtual screen :40+n (Xvfb, -nolisten tcp)   VNC 127.0.0.1:5940+n (x11vnc -localhost: never on the network)
   browser view http://<web_listen_host>:6080+n/vnc.html (websockify + noVNC; Tailscale only; a password per run)
   The run folder's screen.log has the three programs' output; local/screen<n>.json their pids (a crashed run's are
-  stopped by the next run in that slot).
+  stopped by the next run in that slot). The browser tool's own files (downloads, snapshots, the resume copy) are in
+  the run folder's browser/, apart from the guard's (a page can't plant a Submit answer there).
 
 NOT YET PROVEN FOR REAL
 - Everything here: the virtual screen and view on the homelab, a session there, the merge against real files, the

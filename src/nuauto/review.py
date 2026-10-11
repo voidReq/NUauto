@@ -64,6 +64,13 @@ def page_url(slot=None):
     return base + (f"/s/{slot}" if slot else "/")
 
 
+def _log(msg):
+    """logs/review.log: pairings and sessions started from the page (each session's own answers go in its actions.log)."""
+    os.makedirs(config.LOGS_DIR, exist_ok=True)
+    with open(os.path.join(config.LOGS_DIR, "review.log"), "a") as f:
+        f.write(f"{datetime.now():%Y-%m-%d %H:%M:%S}  {msg}\n")
+
+
 def _hash(secret):
     return hashlib.sha256(secret.encode()).hexdigest()
 
@@ -109,6 +116,7 @@ def pair(code, name=""):
     key = secrets.token_urlsafe(32)
     with _locked(DEVICES) as d:
         d[_hash(key)] = {"name": (name.strip() or entry["name"])[:40], "paired": datetime.now().isoformat(timespec="minutes")}
+    _log(f"paired a device: {(name.strip() or entry['name'])[:40]}")
     return key
 
 
@@ -180,7 +188,14 @@ def _tmux(*args, input_=None):
     return subprocess.run(["tmux", *args], input=input_, capture_output=True, text=True, timeout=10)
 
 
+SHELLS = {"bash", "zsh", "sh", "dash", "fish", "ksh", "tcsh", "csh", "-bash", "-zsh", "-sh"}
+
+
 def target(s):
+    """The tmux pane the session runs in (recorded at its start), else its tmux session's active pane."""
+    pane = s["state"].get("tmux_pane")
+    if pane and re.fullmatch(r"%\d+", pane):
+        return pane
     name = s["state"].get("tmux")
     if not name or not re.fullmatch(r"[A-Za-z0-9_.-]+", name):
         raise ValueError("this session is not in a tmux session (start it as docs/REMOTE.md says)")
@@ -188,8 +203,13 @@ def target(s):
 
 
 def type_into(s, text):
-    """Type text into the session's terminal and press Enter (a newline between lines: Ctrl+J, Claude Code's own)."""
+    """Type text into the session's terminal and press Enter (a newline between lines: Ctrl+J, Claude Code's own).
+    Never into a shell: if the pane shows one (the assistant ended), nothing is typed."""
     t = target(s)
+    r = _tmux("display-message", "-p", "-t", t, "#{pane_dead} #{pane_current_command}")
+    dead, _, cmd = (r.stdout.strip() if r.returncode == 0 else "1 ").partition(" ")
+    if dead == "1" or not cmd or cmd in SHELLS:
+        raise ValueError(f"its terminal shows {cmd or 'nothing'} now, not the assistant: nothing was typed")
     lines = text.replace("\r", "").split("\n")
     for i, line in enumerate(lines):
         if line:
@@ -215,6 +235,26 @@ def terminal(s):
     return text.rstrip()
 
 
+def hook_alive(pid):
+    """True while the guard's hook that asked is still waiting (that process, still the hook). No pid: assume so."""
+    if not pid:
+        return True
+    try:
+        with open(f"/proc/{int(pid)}/cmdline", "rb") as f:
+            argv = f.read().split(b"\0")
+        return b"hook" in argv and b"pre" in argv
+    except FileNotFoundError:
+        return False
+    except OSError:  # no /proc (not Linux): only whether the process is there
+        try:
+            os.kill(int(pid), 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except OSError:
+            return True
+
+
 def answer_approval(s, approval_id, decision, by, note=""):
     """Your Approve / Decline. The guard still waiting: it gets the answer. It stopped waiting: Approve becomes a pass for
     that one action and the agent is told to do it; Decline tells it not to. Returns what happened, for the page."""
@@ -225,7 +265,7 @@ def answer_approval(s, approval_id, decision, by, note=""):
         a = assist.read_json(os.path.join(d, assist.APPROVAL))
         if not a or a.get("id") != approval_id:
             return "That question is gone (answered, or a newer one replaced it)."
-        if a.get("waiting"):
+        if a.get("waiting") and hook_alive(a.get("pid")):
             assist.write_private(os.path.join(d, assist.DECISION), {"id": a["id"], "decision": decision, "by": by,
                                                                    "note": note, "at": time.time()})
             message = None
@@ -233,7 +273,8 @@ def answer_approval(s, approval_id, decision, by, note=""):
             assist.remove(d, assist.APPROVAL, assist.SHOT)
             if decision == "approve":
                 assist.write_private(os.path.join(d, assist.GRANT), {"what": a["what"], "url": a["url"], "id": a["id"],
-                                                                     "by": by, "until": time.time() + assist.GRANT_TTL})
+                                                                     "fp": a.get("fp"), "by": by,
+                                                                     "until": time.time() + assist.GRANT_TTL})
                 message = (f"The user approved on the review page: {a['what']} on {a['url']}. Take a new snapshot, check "
                            "you are still on that page, then do exactly that action now.")
             else:
@@ -292,7 +333,7 @@ def queue_part(token):
     auto = "on" if config.LOCAL.get("remote_auto") else "off (\"remote_auto\" in local_config.json)"
     lines = []
     for c, why in (go + rest)[:12]:
-        startable = why is None or why.startswith("started by itself once")
+        startable = why is None or why.startswith("started by itself once")  # (the rest can't start even by hand)
         button = form("/start", token, "<button>Start now</button>", tab=c["tab"], row=c["row"]) if startable else ""
         lines.append(f"<div class=card><b>{esc(c['company'])}</b> <span class=dim>{esc(c['title'])} | "
                      f"{'Other jobs' if c['tab'] == 'other' else 'NUworks'} row {c['row']} | {esc(c['host'])}</span>"
@@ -418,7 +459,11 @@ class Handler(BaseHTTPRequestHandler):
         return (key, dev) if dev else (None, None)
 
     def _form(self):
-        n = min(int(self.headers.get("Content-Length") or 0), 20000)
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            n = 0
+        n = max(0, min(n, 20000))
         return {k: v[0] for k, v in parse_qs(self.rfile.read(n).decode("utf-8", "replace")).items()}
 
     def _session(self, path):
@@ -471,6 +516,9 @@ class Handler(BaseHTTPRequestHandler):
         if origin and origin != f"http://{listen_host()}:{PORT}":
             return self._send(403, "Wrong origin.", "text/plain")
         u = urlparse(self.path)
+        key, dev = self._who()
+        if u.path != "/pair" and not dev:  # only a paired device's body is read at all
+            return self._send(403, "Not allowed.", "text/plain")
         f = self._form()
         if u.path == "/pair":
             key = pair(f.get("c", ""), f.get("name", ""))
@@ -478,7 +526,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(403, pair_page("", False))
             return self._send(200, pair_page("", True), headers=[
                 ("Set-Cookie", f"{COOKIE}={key}; HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000")])
-        key, dev = self._who()
         if not dev or not hmac.compare_digest(f.get("t", ""), form_token(key)):
             return self._send(403, "Not allowed.", "text/plain")
         if u.path == "/start":
@@ -519,33 +566,23 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def start_now(f, by):
-    """Start now (the index's queue): one row the queue lists, when a slot and its job site are free."""
+    """Start now (the index's queue): one row the queue would start if you asked (remote.plan, manual: the start-once
+    rule doesn't apply; free slot, free job site, caps and an unanswered approved Submit still do)."""
     from nuauto import remote
     tab, row = f.get("tab"), f.get("row", "")
     if tab not in ("jobs", "other") or not row.isdigit():
         return "Nothing to do."
-    go, rest = remote.queue_now()
-    c = next((c for c, why in go + rest if c["tab"] == tab and c["row"] == int(row)
-              and (why is None or why.startswith("started by itself once"))), None)
+    go, rest = remote.queue_now(manual=True)
+    c = next((c for c, _ in go if c["tab"] == tab and c["row"] == int(row)), None)
     if not c:
-        return "That row can't start now (no free slot, its site is busy, or it is not in the queue)."
-    if c not in [x for x, _ in go]:  # it waits for you (started by itself once): still needs a free slot
-        go_any, _ = remote.plan([c], *remote_state())
-        if not go_any:
-            return "No free slot, or its job site is busy: try again when a session ends."
+        why = next((w for x, w in rest if x["tab"] == tab and x["row"] == int(row)), "it is not in the queue")
+        return f"Not started: {why}."
     why = remote.start(c["tab"], c["row"])
     if why:
         return f"Not started: {why}"
-    remote.record_started(c)
+    remote.record_started(c, auto=False)
+    _log(f"{by} started {c['tab']} row {c['row']} ({c['company']})")
     return f"Started {c['company']}."
-
-
-def remote_state():
-    """(running, claims, started={}, free) for remote.plan: a row you start by hand ignores the start-once rule."""
-    from nuauto import assist
-    from nuauto import remote
-    running = assist.sessions()
-    return running, remote.live_claims(), {}, max(0, assist.slots() - len(running))
 
 
 def serve():
@@ -609,7 +646,7 @@ def demo(port=0):
         f.flush()
         locks.append(f)
     import nuauto.remote as remote
-    remote.queue_now = lambda: ([], [])  # no sheet here
+    remote.queue_now = lambda manual=False: ([], [])  # no sheet here
     link = make_pairing("demo")
     print(json.dumps({"url": link, "port": port, "state_dir": config.STATE_DIR}), flush=True)
     serve()

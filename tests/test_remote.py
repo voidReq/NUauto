@@ -129,17 +129,72 @@ go, rest = remote.plan([a, b], [], [{"tab": "other", "row": 2, "host": "z.com"}]
 assert [x for x, _ in go] == [a] and rest == [(b, "a session is on it")]
 go, rest = remote.plan([a, b], [{"tab": "other", "row": 1, "host": "z.com"}], [], {}, 5)          # row 1 of the OTHER tab: not a's
 assert [x for x, _ in go] == [a, b]
-once = {"jobs-1": {"url": a["url"]}, "other-2": {"url": "https://old.example/was-here"}}
+once = {"jobs-1": {"url": a["url"], "auto": True}, "other-2": {"url": "https://old.example/was-here", "auto": True}}
 go, rest = remote.plan([a, b], [], [], once, 5)                               # started once: only if the URL matches
 assert [x for x, _ in go] == [b] and rest == [(a, "started by itself once already: yours to start now")]
-go, rest = remote.plan([a, b, d], [], [], {}, 5, cap_reached=True)            # the weekly cap: NUworks rows only
-assert [x for x, _ in go] == [b] and [(x["row"], w) for x, w in rest] == [(1, "this week's applications are used up"),
-                                                                           (4, "this week's applications are used up")]
-go, rest = remote.plan([e, a], [], [], {}, 1, cap_reached=True)
-assert [x for x, _ in go] == [e] and rest[0][1] == "this week's applications are used up"
+go, rest = remote.plan([a, b], [], [], once, 5, manual=True)                  # by hand: the start-once rule doesn't apply
+assert [x for x, _ in go] == [a, b] and rest == []
+# a row started by hand before (auto False), not approved: the queue may still start it
+assert [x for x, _ in remote.plan([a], [], [], {"jobs-1": {"url": a["url"], "auto": False}}, 5)[0]] == [a]
+assert [x for x, _ in remote.plan([a], [], [], {"jobs-1": {"url": a["url"], "auto": True, "approved": False, "answer": "n"}}, 5)[0]] == []
+# the NUworks applications left (week and total): NUworks-tab rows only, one used per row started
+j1, j2, j3 = cand("jobs", 31, "j1.com"), cand("jobs", 32, "j2.com"), cand("jobs", 33, "j3.com")
+USED = "this week's (or the total) NUworks applications are used up"
+go, rest = remote.plan([j1, b, j2, j3], [], [], {}, 9, jobs_left=2)
+assert [x["row"] for x, _ in go] == [31, 2, 32] and rest == [(j3, USED)]
+go, rest = remote.plan([a, b, d], [], [], {}, 5, jobs_left=0)
+assert [x for x, _ in go] == [b] and [(x["row"], w) for x, w in rest] == [(1, USED), (4, USED)]
+assert [x["row"] for x, _ in remote.plan([e, a], [], [], {}, 1, jobs_left=-3)[0]] == [5]   # the other tab has no cap
+assert [x["row"] for x, _ in remote.plan([j1, j2, j3], [], [], {}, 9, jobs_left=None)[0]] == [31, 32, 33]   # no limit to check
+assert [x["row"] for x, _ in remote.plan([j1, j2, j3], [], [], {}, 9, jobs_left=1)[0]] == [31]
+go, rest = remote.plan([j1, j2], [], [], {}, 1, jobs_left=5)                 # a row that waits for a slot used no application
+assert [x["row"] for x, _ in go] == [31] and rest == [(j2, "waiting for a free slot")]
+# an approved Submit nobody said the outcome of: never again by itself (even by hand); y / n settle it
+unk = {"jobs-1": {"url": a["url"], "auto": True, "approved": True, "answer": None}}
+go, rest = remote.plan([a, b], [], [], unk, 5)
+assert [x for x, _ in go] == [b] and rest == [(a, remote.OUTCOME_UNKNOWN)]
+assert remote.plan([a], [], [], unk, 5, manual=True) == ([], [(a, remote.OUTCOME_UNKNOWN)])
+assert "--again" in remote.OUTCOME_UNKNOWN and "check the site" in remote.OUTCOME_UNKNOWN
+assert [x for x, _ in remote.plan([a], [], [], {"jobs-1": {**unk["jobs-1"], "url": "https://elsewhere/1"}}, 5)[0]] == [a]   # another job
+for ans in ("y", "n"):
+    got, _ = remote.plan([a], [], [], {"jobs-1": {**unk["jobs-1"], "answer": ans, "auto": False}}, 5)
+    assert [x for x, _ in got] == [a], ans
+assert [x for x, _ in remote.plan([a], [], [], {"jobs-1": {"url": a["url"], "approved": True, "answer": "y", "auto": True}}, 5, manual=True)[0]] == [a]
+# the order of reasons: a busy row first, then the unknown outcome, then start-once, the application limit, the host, the slots
+go, rest = remote.plan([a], [{"tab": "jobs", "row": 1, "host": "z.com"}], [], unk, 5, jobs_left=0)
+assert rest == [(a, "a session is on it")]
+go, rest = remote.plan([a], [], [], {"jobs-1": {**unk["jobs-1"]}}, 5, jobs_left=0)
+assert rest == [(a, remote.OUTCOME_UNKNOWN)]
+go, rest = remote.plan([a], [], [], once, 5, jobs_left=0)
+assert rest == [(a, "started by itself once already: yours to start now")]
+go, rest = remote.plan([a], [{"tab": "other", "row": 9, "host": "a.com"}], [], {}, 0, jobs_left=0)
+assert rest == [(a, USED)]
 # a skipped row does not take a slot or its host
 go, rest = remote.plan([a, d, b], [], [], once, 1)
 assert [x for x, _ in go] == [d] and [w for _, w in rest] == ["started by itself once already: yours to start now", "waiting for a free slot"]
+
+# ---- the NUworks applications left: the week's cap and the total, minus sessions on either machine
+real_max_total, real_local = sheet.MAX_TOTAL, config.LOCAL
+today_s, old_s = date.today().isoformat(), (date.today() - timedelta(days=40)).isoformat()
+applied = [row(60 + i, "Applied", f"https://x/{i}", "", None) for i in range(2)]
+for r_ in applied:
+    r_.date = today_s
+longago = row(70, "Applied", "https://x/old")
+longago.date = old_s
+try:
+    config.LOCAL = {**config.LOCAL, "max_per_week": 5}
+    assert remote.jobs_left(applied + [longago], [], []) == 3                           # 5 - the 2 this week
+    assert remote.jobs_left(applied, [{"tab": "jobs"}], [{"tab": "jobs"}, {"tab": "other"}]) == 1   # minus NUworks-tab sessions
+    assert remote.jobs_left(applied, [{"tab": "other"}], []) == 3                       # the other tab uses none
+    assert remote.jobs_left(applied, [{"tab": "jobs"}] * 4, []) == -1
+    sheet.MAX_TOTAL = 3                                                                  # the total binds first
+    assert remote.jobs_left(applied + [longago], [], []) == 0
+    sheet.MAX_TOTAL = 99
+    config.LOCAL = {**config.LOCAL, "max_per_week": 2}
+    assert remote.jobs_left(applied, [], []) == 0
+    assert remote.jobs_left([], [], []) == 2
+finally:
+    sheet.MAX_TOTAL, config.LOCAL = real_max_total, real_local
 
 # ---- claims (the homelab's side), in the temp local/
 assert remote.CLAIMS_DIR == os.path.join(config.LOCAL_DIR, "assist_claims") and remote.AUTO_PATH.startswith(config.LOCAL_DIR)
@@ -149,6 +204,7 @@ assist.sessions = lambda: list(sessions_now)
 try:
     assert remote.live_claims() == [] and remote.claimed("other", 5, "x.com") is None
     assert remote.claim("other", 5, "acme.example") == (True, None)
+    assert not [n for n in os.listdir(remote.CLAIMS_DIR) if n.endswith(".tmp")]           # written whole (tmp + rename), none left
     assert oct(os.stat(remote.CLAIMS_DIR).st_mode & 0o777) == "0o700"
     assert [(x["tab"], x["row"], x["host"]) for x in remote.live_claims()] == [("other", 5, "acme.example")]
     assert remote.claim("other", 5, "acme.example") == (True, None)                      # the same row again: fine
@@ -183,8 +239,121 @@ try:
     for t_, r_ in (("other", 5), ("jobs", 6), ("jobs", 41)):
         remote.unclaim(t_, r_)
     assert remote.live_claims() == []
+    # claim / unclaim / claimed from several threads at once: always whole claims, nothing left over
+    errors = []
+
+    def churn(n):
+        try:
+            for k in range(40):
+                assert remote.claim("other", 100 + n, f"h{n}.example")[0]
+                remote.unclaim("other", 100 + n)
+        except Exception as ex:  # noqa: BLE001
+            errors.append(ex)
+    threads = [threading.Thread(target=churn, args=(n,)) for n in range(4)]
+    for t_ in threads:
+        t_.start()
+    for _ in range(150):
+        remote.claimed("jobs", 1, "zzz.example")
+        remote.live_claims()
+    for t_ in threads:
+        t_.join()
+    assert errors == [] and remote.live_claims() == [] and not [n for n in os.listdir(remote.CLAIMS_DIR) if n.endswith(".tmp")]
 finally:
     assist.sessions = real_sessions
+
+# ---- the queue's records (local/assist_auto.json): started, approved, answered
+remote.AUTO_PATH = os.path.join(config.LOCAL_DIR, "assist_auto_records.json")
+try:
+    cx = {**cand("other", 51, "x.example"), "company": "Xco"}
+    assert remote._read_auto() == {}                                                     # no file yet
+    remote.record_started(cx)
+    rec = remote._read_auto()["other-51"]
+    assert (rec["url"], rec["company"], rec["auto"], rec["approved"], rec["answer"]) == (cx["url"], "Xco", True, False, None) and rec["started"]
+    assert oct(os.stat(remote.AUTO_PATH).st_mode & 0o777) == "0o600" and os.path.exists(remote.AUTO_PATH + ".lock")
+    remote.record_outcome("other", 51, cx["url"], True, None)                            # approved a Submit, nobody said the outcome
+    rec = remote._read_auto()["other-51"]
+    assert rec["approved"] is True and rec["answer"] is None and rec["auto"] is True and rec["company"] == "Xco" and rec["ended"]
+    assert remote.plan([cx], [], [], remote._read_auto(), 5, manual=True) == ([], [(cx, remote.OUTCOME_UNKNOWN)])
+    remote.record_outcome("other", 51, cx["url"], True, "y")                             # said: it went through
+    assert remote._read_auto()["other-51"]["answer"] == "y"
+    assert [x for x, _ in remote.plan([cx], [], [], remote._read_auto(), 5, manual=True)[0]] == [cx]
+    remote.record_started(cx, auto=False)                                                # by hand, the same job: auto stays, a new try
+    rec = remote._read_auto()["other-51"]
+    assert rec["auto"] is True and rec["approved"] is False and rec["answer"] is None
+    cy = {**cx, "url": "https://x.example/another-job"}                                  # the row reused for another job: fresh
+    remote.record_started(cy, auto=False)
+    rec = remote._read_auto()["other-51"]
+    assert rec["url"] == cy["url"] and rec["auto"] is False
+    remote.record_outcome("other", 51, "https://x.example/third", False, "n")            # an outcome for a job never recorded as started
+    rec = remote._read_auto()["other-51"]
+    assert rec["url"] == "https://x.example/third" and rec["approved"] is False and rec["answer"] == "n" and "auto" not in rec
+    remote.record_outcome("jobs", 52, "https://x.example/52", False, None)
+    assert remote._read_auto()["jobs-52"]["answer"] is None and remote._read_auto()["jobs-52"]["approved"] is False
+    # several writers at once: none lost
+    with open(remote.AUTO_PATH, "w") as f:
+        f.write("{}")
+    ts = [threading.Thread(target=remote.record_started, args=({**cand("other", 200 + n, f"w{n}.example"), "company": f"W{n}"},)) for n in range(10)]
+    for t_ in ts:
+        t_.start()
+    for t_ in ts:
+        t_.join()
+    assert sorted(remote._read_auto()) == sorted(f"other-{200 + n}" for n in range(10))
+    # a file that can't be read: nothing is guessed, nothing overwritten
+    for bad in ("{not json", "[1, 2]", '"text"', "null", ""):
+        with open(remote.AUTO_PATH, "w") as f:
+            f.write(bad)
+        try:
+            remote._read_auto()
+            raise AssertionError(f"read {bad!r}")
+        except remote.RecordError as ex:
+            assert remote.AUTO_PATH in str(ex) and "starts nothing" in str(ex) or "not what the queue wrote" in str(ex)
+        try:
+            remote.record_started(cx)
+            raise AssertionError("wrote over an unreadable file")
+        except remote.RecordError:
+            pass
+        out_, sys.stdout = sys.stdout, io.StringIO()
+        try:
+            remote.record_outcome("other", 51, cx["url"], True, "y")                       # never fails the end of a session
+            said = sys.stdout.getvalue()
+        finally:
+            sys.stdout = out_
+        assert "could not record how this session ended" in said and open(remote.AUTO_PATH).read() == bad
+    # the real queue_now: records, applications left and "manual" reach plan()
+    from nuauto import apply as apply_mod
+    nrows = [row(2, "Needs Human", notes=ext("g1.example") + " | match 80%"), row(3, "Needs Human", notes=ext("g2.example") + " | match 70%"),
+             row(4, "Applied", "https://x/4"), row(5, "Applied", "https://x/5")]
+    nrows[2].date = nrows[3].date = date.today().isoformat()
+    orows = [row(9, "Approved", "https://o1.example/1", "match 60%")]
+    fakes = (sheet.open_worksheet, sheet.open_other, sheet.read_rows, apply_mod.row_closes, assist.sessions)
+    sheet.open_worksheet, sheet.open_other = (lambda interactive=True: "main"), (lambda interactive=True, create=False: "other")
+    sheet.read_rows = lambda ws: nrows if ws == "main" else orows
+    apply_mod.row_closes = lambda r: None
+    assist.sessions = lambda: []
+    real_cfg = config.LOCAL
+    try:
+        config.LOCAL = {**config.LOCAL, "max_per_week": 3}                               # 2 applied this week: 1 left
+        with open(remote.AUTO_PATH, "w") as f:
+            json.dump({"jobs-2": {"url": "https://g1.example/job/1", "auto": True}}, f)
+        go, rest = remote.queue_now()
+        assert [(c["tab"], c["row"]) for c, _ in go] == [("jobs", 3), ("other", 9)]
+        assert [(c["row"], w) for c, w in rest] == [(2, "started by itself once already: yours to start now")]
+        go, rest = remote.queue_now(manual=True)                                          # by hand: row 2 is allowed, 3 is out of applications
+        assert [(c["tab"], c["row"]) for c, _ in go] == [("jobs", 2), ("other", 9)]
+        assert rest[0][0]["row"] == 3 and "used up" in rest[0][1]
+        with open(remote.AUTO_PATH, "w") as f:
+            f.write("{broken")
+        try:
+            remote.queue_now()
+            raise AssertionError("queue_now went on with a broken record file")
+        except remote.RecordError:
+            pass
+    finally:
+        config.LOCAL = real_cfg
+        sheet.open_worksheet, sheet.open_other, sheet.read_rows, apply_mod.row_closes, assist.sessions = fakes
+        assist.sessions = real_sessions
+finally:
+    restore("AUTO_PATH")
 
 # ---- the laptop's side of a claim, ssh stood in for
 calls = []
@@ -288,6 +457,10 @@ try:
         assert isinstance(code, str) and remote.live_claims() == [], bad
     code, _ = run_main(["queue"], server=False)
     assert "homelab" in code
+    code, out = run_main(["auto"], remote_on=False)                                            # the timer's: quietly nothing when off
+    assert code is None and out == ""
+    code, out = run_main(["auto"], remote_on=True)                                             # on, but remote_auto off: also nothing
+    assert code is None and out == ""
     code, _ = run_main(["queue"], remote_on=False)
     assert "remote_assist" in code
     code, _ = run_main(["bogus"])
@@ -300,7 +473,7 @@ try:
                                                  "attention": {"kind": "waiting"}}]
     assist.sessions = real_sessions
     # queue prints what the queue holds
-    remote.queue_now = lambda: ([(cand("other", 5, "e.com"), None)], [(cand("jobs", 1, "a.com"), "waiting for a free slot")])
+    remote.queue_now = lambda manual=False: ([(cand("other", 5, "e.com"), None)], [(cand("jobs", 1, "a.com"), "waiting for a free slot")])
     code, out = run_main(["queue"])
     assert code is None and "Starts by itself: off" in out and "9:00-22:00" in out and "row 5" in out and "waiting for a free slot" in out
     assert "next" in out
@@ -312,8 +485,31 @@ try:
     remote.start = lambda tab, rown: None
     code, out = run_main(["start", "nuworks", "5"])
     assert code is None and "nuauto-nuworks-5" in out and "tmux attach -t nuauto-nuworks-5" in out
-    for bad in (["start", "other"], ["start", "other", "x"], ["start", "bogus", "1"]):
+    for bad in (["start", "other"], ["start", "other", "x"], ["start", "bogus", "1"], ["start", "other", "1", "--bogus"],
+                ["start", "other", "1", "--again", "x"]):
         assert run_main(bad)[0] == remote.__doc__
+    # an approved Submit nobody said the outcome of: refused unless --again; an answer (y / n) settles it
+    started_with.clear()
+    remote.start = lambda tab, rown: started_with.append((tab, rown)) or None
+    saved_path = remote.AUTO_PATH
+    remote.AUTO_PATH = os.path.join(config.LOCAL_DIR, "assist_auto_start.json")
+    try:
+        with open(remote.AUTO_PATH, "w") as f:
+            json.dump({"other-12": {"url": "https://x/1", "approved": True, "answer": None}}, f)
+        code, _ = run_main(["start", "other", "12"])
+        assert isinstance(code, str) and code.startswith("Not started:") and "nobody said whether it went through" in code and started_with == []
+        code, out = run_main(["start", "other", "12", "--again"])
+        assert code is None and started_with == [("other", 12)] and "nuauto-other-12" in out
+        started_with.clear()
+        for ans in ("y", "n"):
+            with open(remote.AUTO_PATH, "w") as f:
+                json.dump({"other-12": {"url": "https://x/1", "approved": True, "answer": ans}}, f)
+            assert run_main(["start", "other", "12"])[0] is None
+        with open(remote.AUTO_PATH, "w") as f:
+            json.dump({"other-12": {"url": "https://x/1", "approved": False, "answer": None}}, f)
+        assert run_main(["start", "other", "12"])[0] is None and len(started_with) == 3          # not approved: nothing unknown
+    finally:
+        remote.AUTO_PATH = saved_path
 finally:
     assist.sessions = real_sessions
 restore('queue_now', 'start')       # the module's own again
@@ -419,7 +615,7 @@ review.page_url = lambda slot=None: "http://100.64.0.1:8766/"
 remote.AUTO_PATH = os.path.join(config.LOCAL_DIR, "assist_auto_test.json")
 remote.STARTUP_CHECK = 0
 ca, cb, cc = cand("other", 21, "a.example"), cand("other", 22, "b.example"), cand("jobs", 23, "c.example")
-remote.queue_now = lambda: ([(ca, None), (cb, None), (cc, None)], [])
+remote.queue_now = lambda manual=False: ([(ca, None), (cb, None), (cc, None)], [])
 remote.in_hours = lambda now=None: True
 remote.ended = lambda name: name == remote.tmux_name("jobs", 23)
 
@@ -458,12 +654,20 @@ try:
     assert oct(os.stat(remote.AUTO_PATH).st_mode & 0o777) == "0o600"
     assert len(sent) == 1 and "C21: T" in sent[0] and "C22" not in sent[0] and "C23: T (ended right away" in sent[0]
     assert "tmux attach -t nuauto-nuworks-23" in sent[0] and "C21: T (ended" not in sent[0] and "http://100.64.0.1:8766/" in sent[0]
+    # a broken record file: said, nothing starts, no message
+    started_now.clear()
+    sent.clear()
+    remote.start = fake_start
+    remote.queue_now = lambda manual=False: (_ for _ in ()).throw(remote.RecordError("assist_auto.json can't be read"))
+    printed = run_auto()
+    assert "can't be read" in printed and started_now == [] and sent == []
+    remote.queue_now = lambda manual=False: ([(ca, None), (cb, None), (cc, None)], [])
     # nothing started: no message
     sent.clear()
     remote.start = lambda tab, rown: "no"
     run_auto()
     assert sent == []
-    remote.queue_now = lambda: ([], [])
+    remote.queue_now = lambda manual=False: ([], [])
     assert run_auto() == "" and sent == []
     # the written record makes plan() leave those rows to you
     go, rest = remote.plan([ca, cb], [], [], remote._read_auto(), 5)
@@ -472,6 +676,33 @@ finally:
     daily.discord, review.page_url = real_daily, real_page
     restore("queue_now", "in_hours", "start", "ended", "STARTUP_CHECK", "AUTO_PATH")
     config.LOCAL = {k: v for k, v in config.LOCAL.items() if k != "remote_auto"}
+
+# ---- `nuauto assist auto` on the homelab while remote_assist is off: no failure for the timer
+import socket as _socket  # noqa: E402
+
+example = json.load(open(os.path.join(config.PROJECT_DIR, "local_config.example.json")))
+cli_state = tempfile.mkdtemp(prefix="nuauto-test-remote-cli-")
+os.makedirs(os.path.join(cli_state, "local"), mode=0o700)
+
+
+def cli(argv, **local):
+    with open(os.path.join(cli_state, "local", "local_config.json"), "w") as f:
+        json.dump({**example, "server_hostname": _socket.gethostname(), "server_dir": "/x", **local}, f)
+    env = {**os.environ, "NUAUTO_STATE_DIR": cli_state}
+    for k in ("NUAUTO_DEMO", "TMUX"):
+        env.pop(k, None)
+    return subprocess.run([sys.executable, "-m", "nuauto", *argv], env=env, capture_output=True, text=True, timeout=120,
+                          cwd=config.PROJECT_DIR)
+
+
+r = cli(["assist", "auto"])
+assert r.returncode == 0 and r.stdout == "" and r.stderr == "", (r.returncode, r.stdout, r.stderr)
+r = cli(["assist", "queue"])
+assert r.returncode != 0 and "only with \"remote_assist\"" in (r.stdout + r.stderr), (r.stdout, r.stderr)    # the others still say why
+r = cli(["assist", "7"])
+assert r.returncode != 0 and "remote_assist" in (r.stdout + r.stderr)
+r = cli(["assist", "auto"], remote_assist=True)                                                # on, remote_auto off: quiet too
+assert r.returncode == 0 and r.stdout == "", (r.returncode, r.stdout, r.stderr[-300:])
 
 # ---- assist.ask_line
 def fed(data, close=True):
@@ -620,33 +851,46 @@ KEY = review.pair(parse_qs(urlparse(review.make_pairing("phone")).query)["c"][0]
 TOKEN = review.form_token(KEY)
 c1 = {**cand("other", 12, "a.example"), "company": "Acme <i>Co</i>"}
 c2, c3, c4, c5 = cand("jobs", 13, "b.example"), cand("other", 14, "c.example"), cand("other", 15, "d.example"), cand("jobs", 16, "e.example")
-QUEUE = ([(c1, None)], [(c2, "another session is on b.example"), (c3, "started by itself once already: yours to start now"),
-                       (c4, "waiting for a free slot"), (c5, "this week's applications are used up")])
-remote.queue_now = lambda: QUEUE
+c6 = cand("other", 17, "f.example")
+W_BUSY, W_ONCE, W_SLOT, W_USED = ("another session is on b.example", "started by itself once already: yours to start now",
+                                  "waiting for a free slot", "this week's (or the total) NUworks applications are used up")
+AUTO_VIEW = ([(c1, None)], [(c2, W_BUSY), (c3, W_ONCE), (c4, W_SLOT), (c5, W_USED), (c6, remote.OUTCOME_UNKNOWN)])
+MANUAL_VIEW = ([(c1, None), (c3, None)], [(c2, W_BUSY), (c4, W_SLOT), (c5, W_USED), (c6, remote.OUTCOME_UNKNOWN)])
+asked = []
+
+
+def queue_view(manual=False):
+    asked.append(manual)
+    return MANUAL_VIEW if manual else AUTO_VIEW
+
+
+remote.queue_now = queue_view
 started_now, recorded = [], []
 remote.start = lambda tab, rown: started_now.append((tab, rown)) or None
-remote.record_started = lambda c: recorded.append(c)
-real_state = review.remote_state
+remote.record_started = lambda c, auto=True: recorded.append((c, auto))
+assert not hasattr(review, "remote_state")                                            # one rule: remote.plan, manual
 try:
     page = req("GET", "/", cookie=KEY)[2]
     assert "<h3>Queue</h3>" in page and "Starts by itself: off" in page and "9:00-22:00" in page
     assert "Acme &lt;i&gt;Co&lt;/i&gt;" in page and "<i>Co</i>" not in page and "starts next" in page
     assert page.count("Start now") == 2                                       # c1 (next) and c3 (yours to start now) only
     assert "name=row value='12'" in page and "name=row value='14'" in page and "name=tab value='other'" in page
-    for n in (13, 15, 16):
-        assert f"name=row value='{n}'" not in page
-    assert "another session is on b.example" in page and "waiting for a free slot" in page and "used up" in page
+    for n in (13, 15, 16, 17):
+        assert f"name=row value='{n}'" not in page                            # busy, slot, used up, outcome unknown: no button
+    assert W_BUSY in page and W_SLOT in page and "used up" in page and "nobody said whether it went through" in page
     config.LOCAL = {**config.LOCAL, "remote_auto": True, "remote_hours": [8, 20]}
     page = req("GET", "/", cookie=KEY)[2]
     assert "Starts by itself: on" in page and "8:00-20:00" in page
     config.LOCAL = {k: v for k, v in config.LOCAL.items() if k not in ("remote_auto", "remote_hours")}
-    remote.queue_now = lambda: ([(cand("other", n, f"h{n}.example"), None) for n in range(20, 40)], [])
+    remote.queue_now = lambda manual=False: ([(cand("other", n, f"h{n}.example"), None) for n in range(20, 40)], [])
     assert req("GET", "/", cookie=KEY)[2].count("Start now") == 12              # the first twelve
-    remote.queue_now = lambda: ([], [])
+    remote.queue_now = lambda manual=False: ([], [])
     assert "Nothing approved is waiting" in req("GET", "/", cookie=KEY)[2]
-    remote.queue_now = lambda: (_ for _ in ()).throw(RuntimeError("sheet"))
+    remote.queue_now = lambda manual=False: (_ for _ in ()).throw(RuntimeError("sheet"))
     assert "Queue not readable now (RuntimeError)" in req("GET", "/", cookie=KEY)[2]
-    remote.queue_now = lambda: QUEUE
+    remote.queue_now = lambda manual=False: (_ for _ in ()).throw(remote.RecordError("assist_auto.json can't be read"))
+    assert "Queue not readable now (RecordError)" in req("GET", "/", cookie=KEY)[2]
+    remote.queue_now = queue_view
 
     def post_start(form, token=TOKEN, **kw):
         r = req("POST", "/start", form={"t": token, **form}, cookie=KEY, **kw)
@@ -658,24 +902,21 @@ try:
     assert req("POST", "/start", form={"t": TOKEN, "tab": "other", "row": "12"})[0] == 403
     assert post_start({"tab": "other", "row": "12"}, headers={"Origin": "http://evil.example"})[0] == 403
     assert started_now == []
-    # a row in the queue that can start
+    # a row the queue would start: recorded as started by hand (auto False), asked for as "manual"
+    asked.clear()
     code, where = post_start({"tab": "other", "row": "12"})
-    assert code == 303 and where == "/?m=Started Acme <i>Co</i>." and started_now == [("other", 12)] and recorded == [c1]
-    # one that waits for you (started once): needs a free slot
+    assert code == 303 and where == "/?m=Started Acme <i>Co</i>." and started_now == [("other", 12)] and recorded == [(c1, False)]
+    assert asked == [True]
+    # one that waits for you (started once by itself): the manual view lets it go
     started_now.clear(); recorded.clear()
-    review.remote_state = lambda: ([], [], {}, 1)
-    code, where = post_start({"tab": "other", "row": "14"})
-    assert "Started" in where and started_now == [("other", 14)] and recorded == [c3]
+    assert "Started" in post_start({"tab": "other", "row": "14"})[1] and started_now == [("other", 14)] and recorded == [(c3, False)]
     started_now.clear(); recorded.clear()
-    review.remote_state = lambda: ([], [], {}, 0)
-    assert "No free slot" in post_start({"tab": "other", "row": "14"})[1] and started_now == []
-    review.remote_state = lambda: ([{"tab": "other", "row": 99, "host": "c.example"}], [], {}, 2)   # its site is busy
-    assert "job site is busy" in post_start({"tab": "other", "row": "14"})[1] and started_now == []
-    review.remote_state = real_state
-    # rows that cannot start: not in the queue, another reason, odd input
-    for form in ({"tab": "jobs", "row": "13"}, {"tab": "other", "row": "15"}, {"tab": "jobs", "row": "16"},
-                 {"tab": "other", "row": "999"}, {"tab": "jobs", "row": "12"}):
-        assert "can't start now" in post_start(form)[1], form
+    # the others say why, and nothing starts
+    for form, why in (({"tab": "jobs", "row": "13"}, W_BUSY), ({"tab": "other", "row": "15"}, W_SLOT), ({"tab": "jobs", "row": "16"}, W_USED),
+                      ({"tab": "other", "row": "17"}, remote.OUTCOME_UNKNOWN)):
+        assert post_start(form)[1] == f"/?m=Not started: {why}.", form
+    for form in ({"tab": "other", "row": "999"}, {"tab": "jobs", "row": "12"}):
+        assert post_start(form)[1] == "/?m=Not started: it is not in the queue.", form
     for form in ({"tab": "bogus", "row": "12"}, {"tab": "other", "row": "x"}, {"tab": "other"}, {"row": "12"}, {}):
         assert post_start(form)[1] == "/?m=Nothing to do.", form
     assert started_now == [] and recorded == []
@@ -683,23 +924,16 @@ try:
     remote.start = lambda tab, rown: "tmux session nuauto-other-12 exists already"
     assert post_start({"tab": "other", "row": "12"})[1] == "/?m=Not started: tmux session nuauto-other-12 exists already"
     assert recorded == []
+    # the start is logged with the device's name
+    remote.start = lambda tab, rown: None
+    assert post_start({"tab": "other", "row": "12"})[0] == 303
+    assert "Phone started other row 12" in open(os.path.join(config.LOGS_DIR, "review.log")).read()
     # the flash is escaped on the page
     page = req("GET", "/?m=" + "%3Cscript%3Ex%3C%2Fscript%3E", cookie=KEY)[2]
     assert "<script>x</script>" not in page and "&lt;script&gt;x&lt;/script&gt;" in page
 finally:
-    review.remote_state = real_state
     srv.shutdown()
     restore("queue_now", "start", "record_started")
-
-# review.remote_state is the real running sessions, the laptop's claims, no start-once rule, and the free slots
-assist.sessions = lambda: [{"slot": 1, "tab": "other", "row": 1, "host": "x"}]
-try:
-    remote.claim("jobs", 50, "claimed.example")
-    running, claims_, once_, free = review.remote_state()
-    assert [r["row"] for r in running] == [1] and [c_["row"] for c_ in claims_] == [50] and once_ == {} and free == assist.slots() - 1
-    remote.unclaim("jobs", 50)
-finally:
-    assist.sessions = real_sessions
 
 # ---- gui.homelab_assistants: a cached background read
 from nuauto import gui  # noqa: E402

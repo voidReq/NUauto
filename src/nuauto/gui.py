@@ -1182,6 +1182,9 @@ def answers_put(body):
         fcntl.flock(lock, fcntl.LOCK_EX)
         if body.get("version") != answers_get(bank)["version"]:
             raise Refused("The answer bank changed since you opened it (a run saved an answer). Reload, then edit again.")
+        # what you deleted here is deleted on the homelab's copy too (sync.share never deletes by itself)
+        answers.forget(bank_path(bank), {answers.norm(e["question"]) for e in answers.load(bank_path(bank))}
+                       - {e["question"] for e in clean})
         answers.save(clean, bank_path(bank))
     return answers_get(bank)
 

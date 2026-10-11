@@ -133,7 +133,12 @@ def passwords(hosts):
             data = json.load(f)
     except FileNotFoundError:
         return []
-    return sorted({data[site(h)]["password"] for h in hosts if site(h) in data}, key=len, reverse=True)
+    found = set()
+    for h in hosts:
+        a = data.get(site(h))
+        if a:  # and the other password a merge kept (sync.merge_accounts): it may be the one typed
+            found.update(p for p in [a.get("password"), *(a.get("other_passwords") or [])] if p)
+    return sorted(found, key=len, reverse=True)
 
 
 def bitwarden(accounts):

@@ -76,6 +76,53 @@ def save(entries, path=None):
     with os.fdopen(fd, "w") as f:
         json.dump(entries, f, indent=2)
     os.replace(tmp, path)
+    bank = os.path.basename(path)
+    g = gone_all()
+    back = {q for q in gone_questions(g, bank)} & {norm(e.get("question", "")) for e in entries}
+    if back:  # a question saved again after it was deleted: back, from now on (on both machines: sync.merge_gone)
+        set_gone({**g, bank: {**g[bank], **{q: _event(False) for q in back}}})
+
+
+# Questions you deleted from a bank (the GUI's Answers screen), so the homelab's copy deletes them too (sync.share: its
+# merge never deletes anything by itself), and questions saved again after that. The latest event per question counts
+# on both machines. {bank file name: {question: {"when", "gone": true|false}}}. local/answers_gone.json.
+def _event(gone):
+    from datetime import datetime
+    return {"when": datetime.now().isoformat(timespec="microseconds"), "gone": gone}
+
+
+def gone_questions(records, bank):
+    """The questions whose latest event in records is a deletion, for this bank file name."""
+    return {q for q, r in (records.get(bank) or {}).items() if isinstance(r, dict) and r.get("gone")}
+def _gone_path():
+    return os.path.join(config.LOCAL_DIR, "answers_gone.json")
+
+
+def gone_all():
+    try:
+        with open(_gone_path()) as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def set_gone(data):
+    tmp = _gone_path() + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump(data, f)
+    os.replace(tmp, _gone_path())
+
+
+def forget(path, questions):
+    """Record these questions as deleted from the bank at path (call it before saving the bank without them)."""
+    questions = {norm(q) for q in questions if norm(q)}
+    if not questions:
+        return
+    g = gone_all()
+    bank = os.path.basename(path)
+    set_gone({**g, bank: {**(g.get(bank) or {}), **{q: _event(True) for q in questions}}})
 
 
 def nuworks_only(entry):

@@ -18,7 +18,8 @@ sessions off that row and site; the laptop lets go when its session ends. Homela
 and says so.
 
   nuauto assist auto | queue                 start what the queue allows now / show what it would start
-  nuauto assist start <nuworks|other> <row>  (homelab) start one row's session now, in tmux
+  nuauto assist start <nuworks|other> <row> [--again]   (homelab) start one row's session now, in tmux (--again: also
+                                             after an approved Submit whose outcome nobody gave)
   nuauto assist sessions                     (homelab) the running sessions, as JSON (the laptop's GUI reads it)
   nuauto assist claim|unclaim <nuworks|other> <row> <host>   (homelab) what the laptop's sessions run over ssh
 """
@@ -97,21 +98,30 @@ def candidates(main_rows, other_rows, closes=None, today=None):
                                       c["tab"] != "jobs", c["row"]))
 
 
-def plan(cands, running, claims, started, free, cap_reached=False):
+OUTCOME_UNKNOWN = ("a Submit was approved in its last session and nobody said whether it went through: check the site, "
+                   "then mark the row (Applied), or start it again by hand: nuauto assist start <nuworks|other> <row> --again")
+
+
+def plan(cands, running, claims, records, free, jobs_left=None, manual=False):
     """Which of cands to start now: [(candidate, None)] to start and [(candidate, why not)] for the rest. running: the
-    homelab's sessions (assist.sessions); claims: the laptop's live claims; started: rows the queue started before
-    ({"<tab>-<row>": {"url"}}); free: free slots. Pure (tests/test_remote.py)."""
+    homelab's sessions (assist.sessions); claims: the laptop's live claims; records: what the queue knows of earlier
+    sessions ({"<tab>-<row>": {"url", "auto", "approved", "answer"}}); free: free slots; jobs_left: NUworks-tab
+    applications still allowed (week and total; None = no limit to check). manual: you start it (Start now): the
+    start-once rule doesn't apply, the others do. Pure (tests/test_remote.py)."""
     busy_rows = {(s.get("tab"), s.get("row")) for s in running} | {(c.get("tab"), c.get("row")) for c in claims}
     busy_hosts = {s.get("host") for s in running} | {c.get("host") for c in claims}
     go, rest = [], []
     for c in cands:
-        key = f"{c['tab']}-{c['row']}"
+        rec = records.get(f"{c['tab']}-{c['row']}") or {}
+        same = rec.get("url") == c["url"]  # a row reused for another job starts fresh
         if (c["tab"], c["row"]) in busy_rows:
             why = "a session is on it"
-        elif key in started and started[key].get("url") == c["url"]:
+        elif same and rec.get("approved") and rec.get("answer") not in ("y", "n"):
+            why = OUTCOME_UNKNOWN
+        elif same and rec.get("auto") and not manual:
             why = "started by itself once already: yours to start now"
-        elif c["tab"] == "jobs" and cap_reached:
-            why = "this week's applications are used up"
+        elif c["tab"] == "jobs" and jobs_left is not None and jobs_left <= 0:
+            why = "this week's (or the total) NUworks applications are used up"
         elif c["host"] in busy_hosts:
             why = f"another session is on {c['host']}"
         elif len(go) >= free:
@@ -119,6 +129,8 @@ def plan(cands, running, claims, started, free, cap_reached=False):
         else:
             go.append((c, None))
             busy_hosts.add(c["host"])
+            if c["tab"] == "jobs" and jobs_left is not None:
+                jobs_left -= 1
             continue
         rest.append((c, why))
     return go, rest
@@ -170,8 +182,10 @@ def claim(tab, row, host):
         for c in live_claims():
             if (c["tab"], c["row"]) != (tab, row) and c.get("host") == host:
                 return False, f"another laptop session is on {host}"
-        with open(_claim_path(tab, row), "w") as f:
+        path = _claim_path(tab, row)
+        with open(path + ".tmp", "w") as f:  # whole or not at all: a reader never sees half a claim
             json.dump({"tab": tab, "row": row, "host": host, "since": time.time()}, f)
+        os.replace(path + ".tmp", path)
     return True, None
 
 
@@ -184,12 +198,14 @@ def unclaim(tab, row):
 
 
 def claimed(tab, row, host):
-    """(homelab) Why a session must not start here: the laptop holds this row or job site; else None."""
-    for c in live_claims():
-        if (c["tab"], c["row"]) == (tab, row):
-            return "the laptop's assistant is on this row now"
-        if c.get("host") == host:
-            return f"the laptop's assistant is on {host} now"
+    """(homelab) Why a session must not start here: the laptop holds this row or job site; else None. Under the claims'
+    lock, after the session took its slot: a laptop claim either came first (seen here) or sees that slot."""
+    with _claims_lock():
+        for c in live_claims():
+            if (c["tab"], c["row"]) == (tab, row):
+                return "the laptop's assistant is on this row now"
+            if c.get("host") == host:
+                return f"the laptop's assistant is on {host} now"
     return None
 
 
@@ -269,16 +285,52 @@ def ended(name):
     return r.returncode != 0 or r.stdout.strip() == "1"
 
 
+class RecordError(Exception):
+    """local/assist_auto.json can't be read: the queue starts nothing (it could start a row twice)."""
+
+
 def _read_auto():
     try:
         with open(AUTO_PATH) as f:
-            return json.load(f)
-    except (OSError, ValueError):
+            data = json.load(f)
+    except FileNotFoundError:
         return {}
+    except (OSError, ValueError) as e:
+        raise RecordError(f"{AUTO_PATH} can't be read ({type(e).__name__}): fix or remove it; the queue starts nothing "
+                          "meanwhile") from None
+    if not isinstance(data, dict):
+        raise RecordError(f"{AUTO_PATH} is not what the queue wrote: fix or remove it")
+    return data
 
 
-def queue_now():
-    """(go, rest, why_none): what the queue would start now and why the others wait (homelab)."""
+@contextmanager
+def _records():
+    """The queue's records of earlier sessions, read and written under a lock (the timer, Start now and the sessions'
+    ends write them)."""
+    os.makedirs(config.LOCAL_DIR, mode=0o700, exist_ok=True)
+    with open(AUTO_PATH + ".lock", "a") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        data = _read_auto()
+        yield data
+        from nuauto import assist
+        assist.write_private(AUTO_PATH, data)
+
+
+def record_outcome(tab, row, url, approved, answer):
+    """(homelab) How a session ended: whether you approved a Submit in it, and your answer to "Did it go through?"
+    (y / n / None: nobody said). Never fails the end of a session."""
+    try:
+        with _records() as data:
+            key = f"{tab}-{int(row)}"
+            old = data.get(key) if (data.get(key) or {}).get("url") == url else {}
+            data[key] = {**(old or {}), "url": url, "approved": bool(approved), "answer": answer,
+                         "ended": datetime.now().isoformat(timespec="minutes")}
+    except (RecordError, OSError) as e:
+        print(f"(could not record how this session ended: {e})")
+
+
+def queue_now(manual=False):
+    """(go, rest): what the queue would start now and why the others wait (homelab). manual: for Start now."""
     from nuauto import apply
     from nuauto import assist
     from nuauto import sheet
@@ -288,22 +340,27 @@ def queue_now():
         other_rows = sheet.read_rows(sheet.open_other(interactive=False))
     except sheet.SheetError:
         other_rows = []
-    try:
-        sheet.check_limits(main_rows)
-        cap = False
-    except sheet.LimitReached:
-        cap = True
-    running = assist.sessions()
+    running, claims = assist.sessions(), live_claims()
     free = max(0, assist.slots() - len(running))
-    return plan(candidates(main_rows, other_rows, apply.row_closes), running, live_claims(), _read_auto(), free, cap)
+    return plan(candidates(main_rows, other_rows, apply.row_closes), running, claims, _read_auto(), free,
+                jobs_left(main_rows, running, claims), manual)
 
 
-def record_started(c):
-    data = _read_auto()
-    data[f"{c['tab']}-{c['row']}"] = {"url": c["url"], "company": c["company"],
-                                      "started": datetime.now().isoformat(timespec="minutes")}
-    from nuauto import assist
-    assist.write_private(AUTO_PATH, data)
+def jobs_left(main_rows, running, claims):
+    """NUworks-tab applications still allowed now: the weekly cap and the total, minus the NUworks-tab sessions running
+    on either machine (each may submit one)."""
+    from nuauto import sheet
+    dates = sheet.applied_dates(main_rows)
+    left = min(sheet.max_per_week() - sheet.week_count(dates), sheet.MAX_TOTAL - len(dates))
+    return left - sum(1 for x in [*running, *claims] if x.get("tab") == "jobs")
+
+
+def record_started(c, auto=True):
+    with _records() as data:
+        key = f"{c['tab']}-{c['row']}"
+        old = data.get(key) if (data.get(key) or {}).get("url") == c["url"] else {}
+        data[key] = {**(old or {}), "url": c["url"], "company": c["company"], "auto": bool(auto or (old or {}).get("auto")),
+                     "approved": False, "answer": None, "started": datetime.now().isoformat(timespec="minutes")}
 
 
 def auto():
@@ -312,7 +369,10 @@ def auto():
         return
     if not in_hours():
         return
-    go, _ = queue_now()
+    try:
+        go, _ = queue_now()
+    except RecordError as e:
+        return print(e)
     started = []
     for c, _ in go:
         why = start(c["tab"], c["row"])
@@ -354,10 +414,10 @@ def main(argv):
         sys.exit("The queue runs on the homelab (docs/REMOTE.md).")
     if argv == ["sessions"]:
         return sessions_json()
+    if argv == ["auto"]:  # the timer's: quietly nothing while remote_assist / remote_auto are off
+        return auto()
     if not config.REMOTE_ASSIST:
         sys.exit("Turn on \"remote_assist\" in local_config.json first (docs/REMOTE.md).")
-    if argv == ["auto"]:
-        return auto()
     if argv == ["queue"]:
         go, rest = queue_now()
         a, b = hours()
@@ -366,8 +426,13 @@ def main(argv):
         for c, why in go + rest:
             print(f"  {c['company'][:28]:28} {c['tab']:5} row {c['row']:<4} {c['host'][:34]:34} {why or 'next'}")
         return
-    if argv[:1] == ["start"] and len(argv) == 3 and argv[1] in TABS and argv[2].isdigit():
+    if argv[:1] == ["start"] and len(argv) in (3, 4) and argv[1] in TABS and argv[2].isdigit() and \
+            argv[3:] in ([], ["--again"]):
         tab, row = TABS[argv[1]], int(argv[2])
+        if argv[3:] != ["--again"]:
+            rec = _read_auto().get(f"{tab}-{row}") or {}
+            if rec.get("approved") and rec.get("answer") not in ("y", "n"):
+                sys.exit(f"Not started: {OUTCOME_UNKNOWN}.")
         why = start(tab, row)
         if why:
             sys.exit(why)

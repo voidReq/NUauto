@@ -135,37 +135,40 @@ BANKS = ("answers.json", "answers_other.json")   # in local/; lists of entries, 
 ACCOUNTS = "accounts.json"                       # in local/; {site: login}
 BASE = "share_base.json"                         # in local/ (laptop): the banks as both machines last agreed
 NOTES_MAX = 50_000_000                           # a writeups folder bigger than this is not copied (not notes)
+UNREADABLE = "unreadable"                        # what shared_out sends for a file it can't read (left alone)
 
 
 def _key(entry):
     return str(entry.get("question", "")).strip().lower()
 
 
-def merge_bank(base, mine, theirs):
-    """Three-way merge of two copies of one answer bank that both started from base (the last merge): each question
-    takes the side that changed it. Both changed it: mine wins (aliases only: both kept), and its question is listed.
-    One deleted it and the other changed it: the changed one stays. Returns (merged, [conflicting questions]).
-    Pure (tests/test_sync.py)."""
+def merge_bank(base, mine, theirs, gone=()):
+    """Three-way merge of two copies of one answer bank that both started from base (the last merge): a question both
+    have takes the side that changed it (both changed it: mine wins, and it is listed; aliases only: all kept). A
+    question only one side has is kept: the merge never deletes by itself (a missing file, or a copy saved from an old
+    read, must not wipe answers). Deleted on purpose = in gone (answers.forget: the GUI's Answers screen): dropped on
+    both. mine / theirs None = not known (missing): as if unchanged since base. Returns (merged, [conflicting
+    questions]). Pure (tests/test_share.py)."""
+    gone = set(gone)
     b = {_key(e): e for e in base or []}
-    m = {_key(e): e for e in mine or []}
-    t = {_key(e): e for e in theirs or []}
-    order = list(m) + [k for k in t if k not in m]
+    m = {_key(e): e for e in (mine if mine is not None else base) or []}
+    t = {_key(e): e for e in (theirs if theirs is not None else base) or []}
     out, conflicts = [], []
-    for k in order:
+    for k in list(m) + [k for k in t if k not in m]:
         mk, tk, bk = m.get(k), t.get(k), b.get(k)
-        if mk == tk or tk == bk:
-            pick = mk
+        if k in gone:
+            continue
+        if mk is None or tk is None or mk == tk or tk == bk:
+            pick = mk or tk
         elif mk == bk:
             pick = tk
-        elif mk and tk and {**mk, "aliases": []} == {**tk, "aliases": []}:
+        elif {**mk, "aliases": []} == {**tk, "aliases": []}:
             pick = {**mk, "aliases": list(mk.get("aliases") or []) +
                     [a for a in tk.get("aliases") or [] if a not in (mk.get("aliases") or [])]}
         else:
-            pick = mk or tk
-            if mk and tk:
-                conflicts.append(k)
-        if pick is not None:
-            out.append(pick)
+            pick = mk
+            conflicts.append(k)
+        out.append(pick)
     return out, conflicts
 
 
@@ -197,12 +200,27 @@ def merge_accounts(mine, theirs):
     return out, clashes
 
 
+def merge_gone(mine, theirs):
+    """Both machines' deletion records together ({bank: {question: {"when", "gone"}}}): per question the later event
+    (deleted, or saved again) counts."""
+    out = {b: dict(q) for b, q in (mine or {}).items() if isinstance(q, dict)}
+    for bank, qs in (theirs or {}).items():
+        for q, ev in (qs or {}).items() if isinstance(qs, dict) else ():
+            if isinstance(ev, dict) and str(ev.get("when", "")) > str((out.setdefault(bank, {}).get(q) or {}).get("when", "")):
+                out[bank][q] = ev
+    return out
+
+
 def _read_json(path, default):
+    """The file's JSON; default when it doesn't exist; UNREADABLE when it can't be read (bad JSON: perhaps being edited
+    by hand): such a file is left alone, never merged over."""
     try:
         with open(path) as f:
             return json.load(f)
     except FileNotFoundError:
         return default
+    except (OSError, ValueError):
+        return UNREADABLE
 
 
 def _write_secret(path, obj):
@@ -223,52 +241,69 @@ def _bank_lock():
 
 
 def shared_out():
-    """(homelab) The answer banks and job-site logins, each read under its lock, as one JSON object on stdout: read
-    by the laptop's share() over ssh, never shown."""
+    """(homelab) The answer banks, their deletion records and the job-site logins, each read under its lock, as one
+    JSON object on stdout: read by the laptop's share() over ssh, never shown."""
     from nuauto import accounts
+    from nuauto import answers
     lock = _bank_lock()
     try:
         out = {n: _read_json(os.path.join(config.LOCAL_DIR, n), None) for n in BANKS}
+        out["gone"] = answers.gone_all()
     finally:
         lock.close()
-    with accounts.locked() as data:
-        out[ACCOUNTS] = dict(data)
+    try:
+        with accounts.locked() as data:
+            out[ACCOUNTS] = dict(data)
+    except ValueError:  # accounts.json can't be read: left alone
+        out[ACCOUNTS] = UNREADABLE
     json.dump(out, sys.stdout)
 
 
-def merge_into_banks(parts):
-    """Merge {bank: {"base", "merged"}} into this machine's banks, under their lock. Returns the conflicts."""
+def merge_into_banks(parts, gone):
+    """Merge {bank: {"base", "merged"}} into this machine's banks under their lock, with the deletion records (merged
+    into this machine's too). A bank file that can't be read here is skipped. Returns (conflicts, skipped banks)."""
     from nuauto import answers
-    conflicts = []
+    conflicts, skipped = [], []
     lock = _bank_lock()
     try:
+        answers.set_gone(merge_gone(answers.gone_all(), gone))
+        gone = answers.gone_all()
         for n, part in parts.items():
             path = os.path.join(config.LOCAL_DIR, n)
             mine = _read_json(path, None)
-            merged, c = merge_bank(part.get("base"), mine or [], part.get("merged") or [])
+            if mine == UNREADABLE or part.get("merged") == UNREADABLE:
+                skipped.append(n)
+                continue
+            merged, c = merge_bank(part.get("base"), mine, part.get("merged"), answers.gone_questions(gone, n))
             conflicts += c
-            if merged != (mine or []):
+            if merged != (mine or []) and (merged or mine is not None):
                 answers.save(merged, path)
     finally:
         lock.close()
-    return conflicts
+    return conflicts, skipped
 
 
 def merge_into_accounts(theirs):
-    """Merge another machine's logins into this one's, under their lock. Returns the sites with two passwords."""
+    """Merge another machine's logins into this one's, under their lock. Returns (merged, sites with two passwords);
+    (None, []) when either side can't be read (then nothing is changed)."""
     from nuauto import accounts
-    with accounts.locked() as data:
-        merged, clashes = merge_accounts(dict(data), theirs or {})
-        data.clear()
-        data.update(merged)
+    if theirs == UNREADABLE:
+        return None, []
+    try:
+        with accounts.locked() as data:
+            merged, clashes = merge_accounts(dict(data), theirs or {})
+            data.clear()
+            data.update(merged)
+    except ValueError:
+        return None, []
     return merged, clashes
 
 
 def shared_in(payload):
-    """(homelab) Merge what the laptop's share() sent: per bank {"base": what it read here, "merged": its result},
-    and its logins. A change made here in the meantime is kept (it shows up as this side's change)."""
-    merge_into_banks({n: payload[n] for n in BANKS if n in payload})
-    if ACCOUNTS in payload:
+    """(homelab) Merge what the laptop's share() sent: per bank {"base": what it read here, "merged": its result}, the
+    deletion records and its logins. A change made here in the meantime is kept (it shows up as this side's change)."""
+    merge_into_banks({n: payload[n] for n in BANKS if n in payload}, payload.get("gone") or {})
+    if payload.get(ACCOUNTS) not in (None, UNREADABLE):
         merge_into_accounts(payload[ACCOUNTS])
 
 
@@ -284,8 +319,9 @@ def _remote_py(command, stdin=None):
 
 
 def share():
-    """Laptop, with "remote_assist": the answer banks and job-site logins of both machines, merged both ways (an
-    answer saved by the assistant on either one is there for the next run on both). True if it went through."""
+    """Laptop, with "remote_assist": the answer banks (and their deletion records) and the job-site logins of both
+    machines, merged both ways (an answer saved by the assistant on either one is there for the next run on both).
+    True if it went through."""
     if not config.REMOTE_ASSIST or config.IS_SERVER:
         return True
     out = _remote_py("shared-out")
@@ -298,21 +334,23 @@ def share():
         return False
     base_path = os.path.join(config.LOCAL_DIR, BASE)
     base = _read_json(base_path, {})
-    parts = {}
-    for n in BANKS:
-        if theirs.get(n) is not None or os.path.exists(os.path.join(config.LOCAL_DIR, n)):
-            parts[n] = {"base": base.get(n), "merged": theirs.get(n) or []}
-    conflicts = merge_into_banks(parts)
-    merged = {n: _read_json(os.path.join(config.LOCAL_DIR, n), []) for n in parts}
+    base = base if isinstance(base, dict) else {}
+    parts = {n: {"base": base.get(n), "merged": theirs.get(n)} for n in BANKS}
+    conflicts, skipped = merge_into_banks(parts, theirs.get("gone") or {})
+    from nuauto import answers
+    merged = {n: _read_json(os.path.join(config.LOCAL_DIR, n), None) for n in BANKS if n not in skipped}
     logins, clashes = merge_into_accounts(theirs.get(ACCOUNTS))
     # The homelab merges our result with what it had when we read it as the base: whatever its assistants saved in
     # the meantime stays.
-    payload = {**{n: {"base": theirs.get(n) or [], "merged": merged[n]} for n in parts}, ACCOUNTS: logins}
+    payload = {**{n: {"base": theirs.get(n), "merged": merged[n]} for n in merged if merged[n] != UNREADABLE},
+               "gone": answers.gone_all(), **({ACCOUNTS: logins} if logins is not None else {})}
     ok = _remote_py("shared-in", stdin=json.dumps(payload)) is not None
     if ok:
-        _write_secret(base_path, merged)
+        _write_secret(base_path, {n: v for n, v in merged.items() if v not in (None, UNREADABLE)})
     else:
         print("(sync: could not send the answers and logins to the homelab; next time)")
+    for n in skipped:
+        print(f"(sync: {n} can't be read on one of the machines (bad JSON?): left alone, not merged)")
     if conflicts:
         print(f"(sync: changed on both machines, this computer's answer kept: {', '.join(conflicts[:5])})")
     if clashes:

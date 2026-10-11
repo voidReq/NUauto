@@ -139,6 +139,8 @@ def main():
             from nuauto import daily
             sys.exit(daily.main())
         elif cmd == "assist":
+            if config.IS_SERVER and not config.REMOTE_ASSIST and rest == ["auto"]:
+                return  # nuauto-assist.timer while the assistant on the homelab is off: nothing to do, no failure
             if config.IS_SERVER and not config.REMOTE_ASSIST:
                 sys.exit("nuauto assist runs on the laptop (visible browser, you at the terminal). On the homelab only "
                          "with \"remote_assist\": true in local_config.json (docs/REMOTE.md).")

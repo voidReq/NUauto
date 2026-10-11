@@ -74,9 +74,12 @@ COMPANY-SITE AGENT (assist.py, prompts/ASSIST_PROMPT.md)
   test_screen, test_assist
 - On the homelab a Submit-type action is approved only on the review page, by a paired device: the guard writes the
   question (what, page, review_lines, a screenshot) and waits up to assist.WAIT for an answer with that question's id;
-  no answer or an error = blocked. A later Approve is a pass for exactly that action on that page, once, for
-  assist.GRANT_TTL | assist.pre_hook, open_approval, remote_decision, take_grant, review.answer_approval | test_assist,
-  test_review
+  no answer or an error = blocked. A later Approve is a pass for exactly that action on that page with the same typed
+  values (typed_print), once, for assist.GRANT_TTL, and only for a question the guard asked this run; typing or another
+  page after the question withdraws it; an Approve after something was typed meanwhile is refused; a question whose
+  hook died becomes a pass, never a lost answer. The browser tool writes only in the run's browser/ folder, never next
+  to the guard's files | assist.pre_hook, open_approval, remote_decision, take_grant, withdraw, session;
+  review.answer_approval, hook_alive | test_assist, test_review
 - The review page: Tailscale IP only (port 8766, not the tunnel's), paired devices only (one-time pairing link, 10 min;
   a random key in an HttpOnly SameSite=Strict cookie, its hash on the homelab), its own Host, a form token from the key
   and a matching Origin on every POST; run folders under logs/ only; site passwords taken out of the terminal it shows;

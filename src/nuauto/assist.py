@@ -79,7 +79,8 @@ WEB_TOOLS = {"WebSearch", "WebFetch"}  # looking things up (the company, the rol
 # The agent never clicks, types or hovers in one (decide refuses); it tells the user and waits.
 CAPTCHA = re.compile(r"captcha|not a robot|verify (that )?you(?:'re| are) (a )?human|are you (a )?(human|robot)|"
                      r"human verification|security (check|challenge)|press (and|&) hold|turnstile|challenge-platform|"
-                     r"arkose|funcaptcha|geetest", re.I)
+                     r"arkose|funcaptcha|geetest|select all (the )?(images|squares)|verify once there are none left|"
+                     r"i am human|prove you(?:'re| are) (a )?human|human challenge|slide to (verify|complete)", re.I)
 HONEYPOT = re.compile(r"robots? only|for robots|do not (fill|enter|type)|leave (this )?(field |box )?(blank|empty)|honey ?pot", re.I)
 ACCOUNT_FIELD = re.compile(r"e-?mail|user ?name|user ?id|login|password|passcode", re.I)
 SIGN_IN_SUBMIT = {"submit", "confirm"}  # the SUBMIT_RE names a sign-in page's own button may have
@@ -187,7 +188,30 @@ def parse_refs(text):
             above[indent] = inline
         elif role not in LABEL_ROLES:
             above.pop(indent, None)
+    captcha_frames(text, out)
     return out
+
+
+def captcha_frames(text, refs):
+    """A frame with a captcha anywhere in it (its words, a picture challenge's text, a captcha link): every element in
+    that frame is the captcha's, named or not (a picture challenge's tiles and its Verify button often have no name)."""
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        m = REF_LINE.match(line)
+        if not m or m.group("role") != "iframe":
+            continue
+        base, block = len(m.group("indent")), []
+        for nxt in lines[i + 1:]:
+            if not nxt.strip():
+                continue
+            if len(nxt) - len(nxt.lstrip()) <= base:
+                break
+            block.append(nxt)
+        if CAPTCHA.search(line) or any(CAPTCHA.search(x) for x in block):
+            for x in (line, *block):
+                r = REF_LINE.match(x)
+                if r and r.group("ref") in refs:
+                    refs[r.group("ref")]["captcha"] = True
 
 
 def page_url(text):
@@ -432,7 +456,12 @@ def own_network(url, resolve=True):
     shorthands browsers accept (127.1, 2130706433, 0x7f.0.0.1), and, with resolve, a name that resolves to one of
     those. The agent on the homelab never opens one (decide)."""
     import socket
-    h = (urlparse(url).hostname or "").lower().strip("[]").rstrip(".")
+    # as browsers read it: tabs and newlines dropped, "\\" is "/" (so http://127.0.0.1\\@example.com is 127.0.0.1)
+    url = re.sub(r"[\t\n\r]", "", str(url or "")).strip().replace("\\", "/")
+    try:
+        h = (urlparse(url).hostname or "").lower().strip("[]").rstrip(".")
+    except ValueError:
+        return True  # an address even Python can't read: never yours to open
     if not h:
         return True
     if "." not in h and ":" not in h and not h.isdigit() and not h.startswith("0x"):
@@ -508,6 +537,9 @@ def decide(state, tool, inp):
         return deny(f"{name} is not allowed (no page scripts: they could submit behind the review).")
     if captcha_target(state, name, inp):
         return deny(CAPTCHA_DENY)
+    if config.IS_SERVER and (name in INTERACT or name in INPUT_TOOLS) and \
+            own_network(state.get("current_url") or "", resolve=False):  # a link or redirect led there
+        return deny(OWN_NETWORK + " Go back (browser_navigate_back) or open the job's page again.")
     if name in ("browser_navigate", "browser_tabs") and inp.get("url"):
         scheme = urlparse(inp["url"]).scheme
         if scheme not in ("http", "https"):
@@ -1044,11 +1076,13 @@ def pre_hook(d, tool, inp):
         pending = None
         if verdict == "ask" and config.IS_SERVER:
             target = approval_target(state, tool, inp)
-            grant = take_grant(d, target)
+            grant = take_grant(d, target, state)
             if grant:
                 verdict, why = "allow", f"approved on the review page by {grant.get('by') or 'you'}"
             else:
                 pending = open_approval(d, state, target, why)
+        if config.IS_SERVER and verdict != "deny" and pending is None and changes_page(tool, inp):
+            withdraw(d)  # what you were asked about is not what is on the page any more
         if verdict != "deny" and tool.split("__")[-1] in INPUT_TOOLS:
             state["filled"] = True  # something is filled in now: from here on a posting's "Apply" asks again
             record_typed(state, tool, inp)
@@ -1117,29 +1151,61 @@ def remove(d, *names):
             pass
 
 
+def typed_print(state):
+    """A fingerprint of everything typed into the page this run (the guard's own record): an answer you gave about a
+    Submit counts only while it is the same."""
+    import hashlib
+    return hashlib.sha256(json.dumps(state.get("typed") or {}, sort_keys=True).encode()).hexdigest()[:16]
+
+
 def approval_target(state, tool, inp):
-    """What you approve, as the guard sees it: the button (or key) and the page it is on."""
+    """What you approve, as the guard sees it: the button (or key, and the box it goes to), the page it is on, and
+    what is typed in the page at that moment (typed_print)."""
     name = tool.split("__")[-1]
     if name == "browser_click":
         what = f"click {(state['refs'].get(ref_of(inp) or '') or {}).get('name', '?')!r}"
     elif name == "browser_press_key":
-        what = f"press {inp.get('key', '?')}"
+        box = next((r for r in state["refs"].values() if r.get("active")), {})
+        what = f"press {inp.get('key', '?')}" + (f" in {box.get('name')!r}" if box.get("name") else "")
     else:
-        what = "type into a box and press Enter"
-    return {"what": what, "url": state.get("current_url") or ""}
+        box = state["refs"].get(ref_of(inp) or "") or {}
+        what = f"type into {box.get('name') or 'a box'!r} and press Enter"
+    return {"what": what, "url": state.get("current_url") or "", "fp": typed_print(state)}
 
 
-def take_grant(d, target):
-    """Your late Approve for exactly this action on this page, used up now; None if there is none (or it expired)."""
+def changes_page(tool, inp):
+    """True for an action that may change what a pending Submit question showed you (typing, choosing, uploading,
+    going to another page or tab)."""
+    name = tool.split("__")[-1]
+    return name in INPUT_TOOLS or name in ("browser_navigate", "browser_navigate_back") or \
+        (name == "browser_tabs" and inp.get("action") in ("new", "select", "close"))
+
+
+def withdraw(d):
+    """The page changes: a question the guard stopped waiting on, and any pass from it, no longer count."""
+    with approval_lock(d):
+        a = read_json(os.path.join(d, APPROVAL))
+        gone = [n for n in (GRANT,) if os.path.exists(os.path.join(d, n))]
+        if a and not a.get("waiting"):
+            remove(d, APPROVAL, SHOT)
+            gone.append(APPROVAL)
+        remove(d, GRANT)
+    if gone:
+        log(d, "the open Submit question / pass was withdrawn: the page changed after it was asked")
+
+
+def take_grant(d, target, state):
+    """Your late Approve for exactly this action on this page with these values (one of the guard's own questions this
+    run), used up now; None if there is none, it expired, or anything differs."""
     import time
     with approval_lock(d):
         g = read_json(os.path.join(d, GRANT))
         if not g:
             return None
-        if time.time() > g.get("until", 0):
+        if time.time() > g.get("until", 0) or g.get("id") not in (state.get("approvals") or []):
             remove(d, GRANT)
             return None
-        if g.get("what") != target["what"] or g.get("url") != target["url"]:
+        if g.get("what") != target["what"] or g.get("url") != target["url"] or g.get("fp") != target["fp"]:
             return None
         remove(d, GRANT)
         return g
@@ -1152,7 +1218,9 @@ def open_approval(d, state, target, why):
     from nuauto import daily
     from nuauto import review
     from nuauto import screen
-    a = {**target, "id": secrets.token_urlsafe(12), "why": why, "since": time.time(), "waiting": True}
+    a = {**target, "id": secrets.token_urlsafe(12), "why": why, "since": time.time(), "waiting": True,
+         "pid": os.getpid()}  # this hook process: the review page sees when it is gone (then Approve gives a pass)
+    state["approvals"] = [*(state.get("approvals") or [])[-19:], a["id"]]  # the guard's own questions this run
     with approval_lock(d):
         remove(d, DECISION, GRANT)  # a new question: an old answer or pass never counts for it
         shot = screen.screenshot(d)
@@ -1190,6 +1258,13 @@ def remote_decision(d, a):
         clear_attention(d)
     by = (dec or {}).get("by") or "you"
     if dec and dec.get("decision") == "approve":
+        with open(os.path.join(d, "state.json")) as f:
+            now_print = typed_print(json.load(f))
+        if now_print != a.get("fp"):  # typed into meanwhile (another of its calls): not what you were shown
+            log(d, f"APPROVED by {by}, but the page changed after the question: blocked ({a['what']})")
+            print("The page changed after the user was asked (something was typed meanwhile), so their approval does not "
+                  "count. Take a snapshot and click it again: they will be asked again.", file=sys.stderr)
+            sys.exit(2)
         log(d, f"APPROVED on the review page by {by}: {a['what']}")
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow",
                                                  "permissionDecisionReason": f"NUAUTO: approved on the review page by {by}"}}))
@@ -1444,8 +1519,12 @@ def session(d, answer_cmd, read_roots, profile, prompt, where, display=None):
     goes through the guard (hook pre), every browser reply through hook post; a guard that fails or times out blocks.
     display: the homelab's virtual screen the browser opens on (screen.py), else this computer's own."""
     browser = ["--browser", config.ASSIST_BROWSER] if config.ASSIST_BROWSER else []
+    # The browser tool saves what pages hand it (downloads, its snapshots) in a folder of its own, never next to the
+    # guard's files (state.json, the Submit question and its answer): a page can't plant those.
+    out = os.path.join(d, BROWSER_DIR)
+    os.makedirs(out, mode=0o700, exist_ok=True)
     mcp = {"mcpServers": {SERVER: {"command": "npx", "args": [MCP_PACKAGE, *browser, "--user-data-dir", profile,
-                                                              "--output-dir", d]}}}
+                                                              "--output-dir", out]}}}
     if display:
         mcp["mcpServers"][SERVER]["env"] = {"DISPLAY": display}
     hook_cmd = " ".join(shlex.quote(a) for a in answer_cmd) + " hook"
@@ -1541,7 +1620,7 @@ def run_locked(number, other, row, url, where, tab, slot, slot_lock):
     read_roots = [os.path.realpath(r) for r in [*config.ASSIST_READ_PATHS, *config.ASSIST_WRITEUPS, resume_src]
                   if os.path.exists(r)]
     writeups = [os.path.realpath(r) for r in config.ASSIST_WRITEUPS if os.path.exists(r)]
-    resume = upload_copy(resume_src, d) if os.path.exists(resume_src) else None
+    resume = upload_copy(resume_src, os.path.join(d, BROWSER_DIR)) if os.path.exists(resume_src) else None
     view = None
     if config.IS_SERVER:  # no monitor: the browser draws on a virtual screen you can open on your phone (screen.py)
         from nuauto import screen
@@ -1554,7 +1633,9 @@ def run_locked(number, other, row, url, where, tab, slot, slot_lock):
              "resume_src": os.path.realpath(resume_src), "resume": resume, "tab": "other" if other else "jobs",
              "company": row.company, "job_title": row.title, "job_url": url, "password_sites": [],
              "guesses": {}, "typed": {}, "account_email": accounts.account_email() or "", "where": where,
-             "slot": slot, "view_url": view.url if view else None, "tmux": tmux_session() if view else None}
+             "slot": slot, "view_url": view.url if view else None, "tmux": tmux_session() if view else None,
+             # the pane this runs in: the review page types only there (never another window of that tmux session)
+             "tmux_pane": os.environ.get("TMUX_PANE") if view and re.fullmatch(r"%\d+", os.environ.get("TMUX_PANE", "")) else None}
     with open(os.path.join(d, "state.json"), "w") as f:
         json.dump(state, f)
     profile = slot_profile(slot)
@@ -1591,13 +1672,17 @@ def run_locked(number, other, row, url, where, tab, slot, slot_lock):
                              "[y = yes / n = no]: ", FINISH_WAIT if view else None)
             if reply is None:
                 log_.write(f"No answer within {FINISH_WAIT // 3600} h: {where} left as it was (check it yourself).")
-                reply = "n"
+                break
             if reply in ("y", "n"):
                 break
     except (KeyboardInterrupt, EOFError):
-        reply = "n"
+        reply = None if config.IS_SERVER else "n"  # the laptop as before; the homelab: nobody said (see record_outcome)
+    if config.IS_SERVER:  # the queue reads this: an approved Submit nobody said the outcome of is never restarted
+        from nuauto import remote
+        remote.record_outcome(tab, number, url, approved=approved_submit(d), answer=reply)
     if reply != "y":
-        log_.write(f"Not submitted; {where} stays {row.status}.")
+        if reply == "n":
+            log_.write(f"Not submitted; {where} stays {row.status}.")
         return
     ws = sheet.open_other() if other else sheet.open_worksheet()
     sheet.mark_applied_by_hand(ws, row.number, row.url, how="on the company site (nuauto assist; you pressed Submit)")
@@ -1610,6 +1695,19 @@ def run_locked(number, other, row, url, where, tab, slot, slot_lock):
                    "Apply > Company sites.")
         return
     nuworks_side(ws, row.number)
+
+
+BROWSER_DIR = "browser"  # in the run folder: the browser tool's own output (downloads, snapshots) and the resume copy
+
+
+def approved_submit(d):
+    """True if you approved a Submit-type action in this run (actions.log: an approval, or a pass that was used)."""
+    try:
+        with open(os.path.join(d, "actions.log")) as f:
+            text = f.read()
+    except OSError:
+        return False
+    return "APPROVED on the review page by" in text or "(approved on the review page by" in text
 
 
 FINISH_WAIT = 24 * 3600  # (homelab) how long "Did you press Submit?" waits for your answer before leaving the row as it was

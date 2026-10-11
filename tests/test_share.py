@@ -21,6 +21,7 @@ config.LOCAL_DIR = LAPTOP  # never the real local/
 config.LOGS_DIR = os.path.join(tmp, "logs")
 
 from nuauto import accounts  # noqa: E402
+from nuauto import answers  # noqa: E402
 from nuauto import sync  # noqa: E402
 
 accounts.PATH, accounts.LOCK = os.path.join(LAPTOP, "accounts.json"), os.path.join(LAPTOP, "accounts.lock")
@@ -49,9 +50,39 @@ assert names(m) == ["email", "city", "phone", "github"] and c == []
 changed = [e("email", "b@x.com"), base[1], base[2]]                   # only one side changed
 assert sync.merge_bank(base, changed, base) == (changed, [])
 assert sync.merge_bank(base, base, changed) == (changed, [])
-gone = [base[0], base[2]]                                             # only one side deleted
-assert sync.merge_bank(base, gone, base) == (gone, [])
-assert sync.merge_bank(base, base, gone) == (gone, [])
+fewer = [base[0], base[2]]                                            # a side that lacks an entry: the merge never deletes
+m, c = sync.merge_bank(base, fewer, base)
+assert names(m) == ["email", "phone", "city"] and c == []
+m, c = sync.merge_bank(base, base, fewer)
+assert names(m) == ["email", "city", "phone"] and c == []
+m, c = sync.merge_bank(base, fewer, fewer)                            # both lack it: it is gone (nobody has it)
+assert names(m) == ["email", "phone"]
+# deleted on purpose = in gone (answers.forget): dropped on both, whatever either side has
+for gone_arg in ({"city"}, ["city"], {"city": {"when": "2026-10-11T10:00:00.000001", "gone": True}}.keys(), ("city",)):
+    m, c = sync.merge_bank(base, base, base, gone_arg)
+    assert names(m) == ["email", "phone"] and c == []
+m, c = sync.merge_bank(base, fewer, base, {"city"})
+assert names(m) == ["email", "phone"]
+m, c = sync.merge_bank(base, mine, mine, {"github", "email"})                 # a changed one is dropped too when it was deleted
+assert names(m) == ["city", "phone"]
+assert sync.merge_bank(base, base, base, {"nothing-like-it"}) == (base, [])
+m, c = sync.merge_bank(base, [e("City", "Boston")], base, {"city"})           # keys are lowercased questions
+assert "city" not in [x.lower() for x in names(m)]
+# a copy that is not known (None: a missing file) is "unchanged since base": nothing is wiped, the other side's news stays
+assert sync.merge_bank(base, None, base) == (base, [])
+m, c = sync.merge_bank(base, None, mine)
+assert names(m) == ["email", "city", "phone", "github"] and c == []
+m, c = sync.merge_bank(base, mine, None)
+assert m == mine and c == []
+assert sync.merge_bank(base, None, None) == (base, [])
+m, c = sync.merge_bank(None, None, mine)                                      # no base, nothing here: theirs
+assert m == mine
+# a stale copy (made from an old read: it lacks entries the base had and holds nothing newer): wipes nothing
+stale = [base[0]]
+m, c = sync.merge_bank(base, stale, base + [e("github", "me")])
+assert names(m) == ["email", "city", "phone", "github"] and c == []
+m, c = sync.merge_bank(base, base + [e("github", "me")], stale)
+assert names(m) == ["email", "city", "phone", "github"] and c == []
 # both changed the same entry differently: mine wins, listed
 theirs = [e("email", "t@x.com"), base[1], base[2]]
 m, c = sync.merge_bank(base, changed, theirs)
@@ -63,13 +94,32 @@ mine_a = [e("email", "a@x.com", ["mail"]), base[1], base[2]]
 their_a = [e("email", "a@x.com", ["e-mail", "mail"]), base[1], base[2]]
 m, c = sync.merge_bank(base, mine_a, their_a)
 assert m[0]["aliases"] == ["mail", "e-mail"] and c == [] and m[0]["answer"] == "a@x.com"
-# one deleted, the other changed: the changed one stays (whichever side it is)
-m, c = sync.merge_bank(base, gone, changed)
+# one lacks it, the other changed it: the changed one stays (whichever side it is)
+m, c = sync.merge_bank(base, fewer, changed)
 assert [x["answer"] for x in m if x["question"] == "email"] == ["b@x.com"] and c == []
-m, c = sync.merge_bank(base, changed, gone)
+m, c = sync.merge_bank(base, changed, fewer)
 assert [x["answer"] for x in m if x["question"] == "email"] == ["b@x.com"] and c == []
-# both deleted: gone
-assert sync.merge_bank(base, gone, gone) == (gone, [])
+# merge_gone: both machines' records ({bank: {question: {"when", "gone"}}}), per question the later event
+def ev(when, gone=True):
+    return {"when": f"2026-10-{when}", "gone": gone}
+
+
+assert sync.merge_gone(None, None) == {}
+assert sync.merge_gone({"answers.json": {"city": ev("01T10:00:00.000001")}},
+                       {"answers.json": {"city": ev("03T10:00:00.000001"), "phone": ev("02T10:00:00.000001")},
+                        "answers_other.json": {"x": ev("01T00:00:00.000001")}}) == {
+    "answers.json": {"city": ev("03T10:00:00.000001"), "phone": ev("02T10:00:00.000001")}, "answers_other.json": {"x": ev("01T00:00:00.000001")}}
+assert sync.merge_gone({"answers.json": {"city": ev("05T10:00:00.000001")}}, {"answers.json": {"city": ev("03T10:00:00.000001")}}) == {
+    "answers.json": {"city": ev("05T10:00:00.000001")}}
+# deleted, then saved again (later): back, from whichever machine said it last
+deleted, back = ev("03T10:00:00.000001"), ev("04T10:00:00.000001", False)
+assert sync.merge_gone({"answers.json": {"c": deleted}}, {"answers.json": {"c": back}}) == {"answers.json": {"c": back}}
+assert sync.merge_gone({"answers.json": {"c": back}}, {"answers.json": {"c": deleted}}) == {"answers.json": {"c": back}}
+assert sync.merge_gone({"answers.json": {"c": back}}, {"answers.json": {"c": ev("05T10:00:00.000001")}}) == {"answers.json": {"c": ev("05T10:00:00.000001")}}
+assert sync.merge_gone({"answers.json": {"a": ev("01T00:00:00.000001")}}, {"answers.json": None}) == {"answers.json": {"a": ev("01T00:00:00.000001")}}
+assert sync.merge_gone({"answers.json": {"a": ev("01T00:00:00.000001")}}, {"answers.json": {"a": "junk"}}) == {"answers.json": {"a": ev("01T00:00:00.000001")}}
+assert answers.gone_questions({"answers.json": {"c": deleted, "d": back, "e": "junk"}}, "answers.json") == {"c"}
+assert answers.gone_questions({}, "answers.json") == set() and answers.gone_questions({"answers.json": None}, "answers.json") == set()
 # no base (first share): union; the same entry once; differing entries -> mine + conflict
 m, c = sync.merge_bank(None, [e("email", "a@x.com"), e("city", "Boston")], [e("city", "Boston"), e("phone", "1")])
 assert names(m) == ["email", "city", "phone"] and c == []
@@ -166,14 +216,46 @@ write_bank(HOMELAB, "answers.json", [e("city", "Boston")])
 write_accounts(HOMELAB, {"acme.com": login("pw1", "2026-10-01")})
 o = out_of(HOMELAB)
 assert o["answers.json"] == [e("city", "Boston")] and o["answers_other.json"] is None and list(o["accounts.json"]) == ["acme.com"]
+assert o["gone"] == {}
 with at(HOMELAB):
-    conflicts = sync.merge_into_banks({"answers.json": {"base": [e("city", "Boston")], "merged": [e("city", "Boston"), e("email", "a")]}})
-assert conflicts == [] and names(read_bank(HOMELAB, "answers.json")) == ["city", "email"]
+    conflicts, skipped = sync.merge_into_banks({"answers.json": {"base": [e("city", "Boston")], "merged": [e("city", "Boston"), e("email", "a")]}}, {})
+assert conflicts == [] and skipped == [] and names(read_bank(HOMELAB, "answers.json")) == ["city", "email"]
+# the deletion records ride along and are applied
+with at(HOMELAB):
+    conflicts, skipped = sync.merge_into_banks({"answers.json": {"base": None, "merged": [e("city", "Boston"), e("email", "a")]}},
+                                               {"answers.json": {"email": ev("11T10:00:00.000001")}})
+assert names(read_bank(HOMELAB, "answers.json")) == ["city"] and out_of(HOMELAB)["gone"] == {"answers.json": {"email": ev("11T10:00:00.000001")}}
+write_bank(HOMELAB, "answers.json", [e("city", "Boston"), e("email", "a")])
+with at(HOMELAB):
+    answers.set_gone({})
+# a file that can't be read is left alone (and said): in either direction
+open(os.path.join(HOMELAB, "answers_other.json"), "w").write("{bad json")
+assert out_of(HOMELAB)["answers_other.json"] == sync.UNREADABLE
+with at(HOMELAB):
+    conflicts, skipped = sync.merge_into_banks({"answers_other.json": {"base": None, "merged": [e("x", "1")]},
+                                                "answers.json": {"base": None, "merged": [e("zip", "02115")]}}, {})
+assert skipped == ["answers_other.json"] and open(os.path.join(HOMELAB, "answers_other.json")).read() == "{bad json"
+assert names(read_bank(HOMELAB, "answers.json")) == ["city", "email", "zip"]                  # the other bank still merges
+with at(HOMELAB):
+    conflicts, skipped = sync.merge_into_banks({"answers_other.json": {"base": None, "merged": sync.UNREADABLE}}, {})
+assert skipped == ["answers_other.json"]
+os.remove(os.path.join(HOMELAB, "answers_other.json"))
+assert sync._read_json(os.path.join(HOMELAB, "nothing.json"), "dflt") == "dflt"
+write_bank(HOMELAB, "answers.json", [e("city", "Boston"), e("email", "a")])
 assert stat.S_IMODE(os.stat(os.path.join(HOMELAB, "answers.json")).st_mode) == 0o600
 with at(HOMELAB):
     merged, clashes = sync.merge_into_accounts({"acme.com": login("pw-other", "2026-10-09"), "new.com": login("pw9", "2026-10-09")})
 assert set(merged) == {"acme.com", "new.com"} and clashes == ["acme.com"]
 assert read_accounts(HOMELAB)["acme.com"]["other_passwords"] == ["pw-other"]
+before_acc = open(os.path.join(HOMELAB, "accounts.json")).read()
+with at(HOMELAB):
+    assert sync.merge_into_accounts(sync.UNREADABLE) == (None, [])                           # the other side's unreadable: nothing changes
+assert open(os.path.join(HOMELAB, "accounts.json")).read() == before_acc
+open(os.path.join(HOMELAB, "accounts.json"), "w").write("{bad")                              # this side's unreadable
+with at(HOMELAB):
+    assert sync.merge_into_accounts({"x.com": login("p", "2026-10-01")}) == (None, [])
+assert open(os.path.join(HOMELAB, "accounts.json")).read() == "{bad" and out_of(HOMELAB)["accounts.json"] == sync.UNREADABLE
+open(os.path.join(HOMELAB, "accounts.json"), "w").write(before_acc)
 assert stat.S_IMODE(os.stat(os.path.join(HOMELAB, "accounts.json")).st_mode) == 0o600
 # a bank file that does not exist yet is made (never an error) and a bank with no change is not rewritten
 with at(HOMELAB):
@@ -301,6 +383,139 @@ try:
         state[key] = False
         assert not ok and "could not read the homelab" in printed and calls[-1] == "shared-out"
     assert "shared-in" not in calls and open(os.path.join(LAPTOP, "answers.json")).read() == laptop_before
+
+    # ---- the merge never deletes by itself
+    def reset():
+        for folder in (LAPTOP, HOMELAB):
+            for f_ in os.listdir(folder):
+                os.remove(os.path.join(folder, f_))
+    abc = [e("a", "1"), e("b", "2"), e("c", "3")]
+    reset()
+    write_bank(LAPTOP, "answers.json", abc)
+    assert run_share()[0]
+    assert names(read_bank(HOMELAB, "answers.json")) == ["a", "b", "c"]
+    # the homelab's file is missing (a rebuilt box): nothing is wiped on the laptop, the homelab gets the laptop's
+    os.remove(os.path.join(HOMELAB, "answers.json"))
+    assert run_share()[0]
+    assert names(read_bank(LAPTOP, "answers.json")) == ["a", "b", "c"] and names(read_bank(HOMELAB, "answers.json")) == ["a", "b", "c"]
+    # the laptop's file is missing: it takes the homelab's
+    os.remove(os.path.join(LAPTOP, "answers.json"))
+    assert run_share()[0] and names(read_bank(LAPTOP, "answers.json")) == ["a", "b", "c"]
+    assert names(read_bank(HOMELAB, "answers.json")) == ["a", "b", "c"]
+    # a stale save (the laptop's copy lacks entries the last agreement had): wipes nothing, on either side
+    write_bank(LAPTOP, "answers.json", [e("a", "1")])
+    assert run_share()[0]
+    assert names(read_bank(LAPTOP, "answers.json")) == ["a", "b", "c"] and names(read_bank(HOMELAB, "answers.json")) == ["a", "b", "c"]
+    write_bank(HOMELAB, "answers.json", [e("a", "1")])                                      # and the same the other way
+    assert run_share()[0]
+    assert names(read_bank(LAPTOP, "answers.json")) == ["a", "b", "c"] and sorted(names(read_bank(HOMELAB, "answers.json"))) == ["a", "b", "c"]
+    # no base file at all (a first share on a laptop that lost it): the union
+    os.remove(os.path.join(LAPTOP, sync.BASE))
+    write_bank(HOMELAB, "answers.json", [e("a", "1"), e("z", "9")])
+    assert run_share()[0]
+    assert sorted(names(read_bank(LAPTOP, "answers.json"))) == ["a", "b", "c", "z"] and sorted(names(read_bank(HOMELAB, "answers.json"))) == ["a", "b", "c", "z"]
+    # a deletion on purpose (the GUI's Answers screen): recorded, then deleted on both machines, and it stays deleted
+    from nuauto import gui
+    config.ANSWERS_PATH, config.OTHER_ANSWERS_PATH = os.path.join(LAPTOP, "answers.json"), os.path.join(LAPTOP, "answers_other.json")
+    reset()
+    write_bank(LAPTOP, "answers.json", abc)
+    assert run_share()[0]
+    version = gui.answers_get("nuworks")["version"]
+    keep = [{**x, "field_type": "text"} for x in abc if x["question"] != "c"]
+    gui.answers_put({"bank": "nuworks", "entries": keep, "version": version})
+    assert names(read_bank(LAPTOP, "answers.json")) == ["a", "b"]
+    gq = lambda records=None: answers.gone_questions(records if records is not None else answers.gone_all(), "answers.json")  # noqa: E731
+    g = answers.gone_all()
+    assert list(g) == ["answers.json"] and list(g["answers.json"]) == ["c"]
+    assert g["answers.json"]["c"]["gone"] is True and "." in g["answers.json"]["c"]["when"]       # (with microseconds)
+    assert stat.S_IMODE(os.stat(os.path.join(LAPTOP, "answers_gone.json")).st_mode) == 0o600
+    assert names(read_bank(HOMELAB, "answers.json")) == ["a", "b", "c"]
+    ok, printed = run_share()
+    assert ok and printed == ""
+    assert names(read_bank(LAPTOP, "answers.json")) == ["a", "b"] and names(read_bank(HOMELAB, "answers.json")) == ["a", "b"]
+    with at(HOMELAB):
+        assert gq() == {"c"}                                                                    # the homelab knows too
+    assert run_share()[0] and names(read_bank(HOMELAB, "answers.json")) == ["a", "b"]           # and it stays deleted
+    # a deletion made on the homelab's side only (a record there) reaches the laptop
+    with at(HOMELAB):
+        answers.forget(os.path.join(HOMELAB, "answers.json"), ["b"])
+    assert run_share()[0]
+    assert names(read_bank(LAPTOP, "answers.json")) == ["a"] and names(read_bank(HOMELAB, "answers.json")) == ["a"]
+    # an entry you only change (not delete) in the GUI leaves no new record
+    version = gui.answers_get("nuworks")["version"]
+    gui.answers_put({"bank": "nuworks", "entries": [{**keep[0], "answer": "changed"}], "version": version})
+    assert gq() == {"b", "c"} and sorted(answers.gone_all()["answers.json"]) == ["b", "c"]
+    # a question deleted, then saved again: "back" (a newer event, kept in the records; answers.save)
+    answers.save([e("a", "1"), e("c", "again")], os.path.join(LAPTOP, "answers.json"))
+    assert gq() == {"b"} and answers.gone_all()["answers.json"]["c"]["gone"] is False
+    answers.forget(os.path.join(LAPTOP, "answers.json"), ["  Zed ", "", "  "])
+    assert gq() == {"b", "zed"}
+    answers.forget(os.path.join(LAPTOP, "answers.json"), [])
+    answers.save([e("a", "1"), e("Zed", "x")], os.path.join(LAPTOP, "answers.json"))
+    assert gq() == {"b"}
+    answers.save([e("never-deleted", "1")], os.path.join(LAPTOP, "answers.json"))              # no record for a question never deleted
+    assert "never-deleted" not in answers.gone_all()["answers.json"]
+    answers.save([], os.path.join(LAPTOP, "answers_other.json"))                              # another bank: its own records
+    assert gq() == {"b"} and "answers_other.json" not in answers.gone_all()
+
+    # a deleted question added again later (both machines already hold the deletion) stays: on the laptop's side...
+    reset()
+    write_bank(LAPTOP, "answers.json", abc)
+    assert run_share()[0]
+    gui.answers_put({"bank": "nuworks", "entries": [{**x, "field_type": "text"} for x in abc[:2]], "version": gui.answers_get("nuworks")["version"]})
+    assert run_share()[0] and names(read_bank(HOMELAB, "answers.json")) == ["a", "b"]
+    with at(HOMELAB):
+        assert gq() == {"c"}
+    answers.save([e("a", "1"), e("b", "2"), e("c", "back")], os.path.join(LAPTOP, "answers.json"))
+    assert run_share()[0]
+    for folder in (LAPTOP, HOMELAB):
+        assert {x["question"]: x["answer"] for x in read_bank(folder, "answers.json")}.get("c") == "back", folder
+        with at(folder):
+            assert gq() == set()
+    assert run_share()[0] and names(read_bank(HOMELAB, "answers.json")).count("c") == 1       # and it is not deleted again later
+    assert names(read_bank(LAPTOP, "answers.json")).count("c") == 1
+    # ...and on the homelab's side (its assistant saved it again after the laptop deleted it)
+    gui.answers_put({"bank": "nuworks", "entries": [{**x, "field_type": "text"} for x in abc[:2]], "version": gui.answers_get("nuworks")["version"]})
+    assert run_share()[0] and "c" not in names(read_bank(HOMELAB, "answers.json")) and "c" not in names(read_bank(LAPTOP, "answers.json"))
+    with at(HOMELAB):
+        answers.save(read_bank(HOMELAB, "answers.json") + [e("c", "homelab again")], os.path.join(HOMELAB, "answers.json"))
+    assert run_share()[0]
+    for folder in (LAPTOP, HOMELAB):
+        assert {x["question"]: x["answer"] for x in read_bank(folder, "answers.json")}.get("c") == "homelab again", folder
+    # deleted on the laptop AFTER the homelab saved it: the later event wins, deleted everywhere
+    gui.answers_put({"bank": "nuworks", "entries": [{**x, "field_type": "text"} for x in abc[:2]], "version": gui.answers_get("nuworks")["version"]})
+    assert run_share()[0] and "c" not in names(read_bank(HOMELAB, "answers.json")) and "c" not in names(read_bank(LAPTOP, "answers.json"))
+    config.ANSWERS_PATH = os.path.join(tmp, "unused-answers.json")
+    # a bank that can't be read on one machine is left alone and said; the other bank and the logins still merge
+    reset()
+    write_bank(LAPTOP, "answers.json", abc)
+    write_bank(LAPTOP, "answers_other.json", [e("o", "1")])
+    write_accounts(LAPTOP, {"acme.com": login("pw1", "2026-10-01")})
+    assert run_share()[0]
+    open(os.path.join(HOMELAB, "answers_other.json"), "w").write("{bad json")                  # hand-edited, mid-edit
+    write_bank(LAPTOP, "answers.json", abc + [e("d", "4")])
+    write_bank(LAPTOP, "answers_other.json", [e("o", "1"), e("p", "2")])
+    ok, printed = run_share()
+    assert ok and "answers_other.json can't be read on one of the machines" in printed and "left alone" in printed
+    assert open(os.path.join(HOMELAB, "answers_other.json")).read() == "{bad json"
+    assert names(read_bank(LAPTOP, "answers_other.json")) == ["o", "p"]
+    assert names(read_bank(HOMELAB, "answers.json")) == ["a", "b", "c", "d"]
+    assert "answers_other.json" not in json.load(open(base_path)) and "answers.json" in json.load(open(base_path))   # no agreement recorded for it
+    os.remove(os.path.join(HOMELAB, "answers_other.json"))
+    open(os.path.join(LAPTOP, "answers_other.json"), "w").write("[oops")                       # and on the laptop's side
+    write_bank(HOMELAB, "answers.json", read_bank(HOMELAB, "answers.json") + [e("e", "5")])
+    ok, printed = run_share()
+    assert ok and "answers_other.json can't be read" in printed and open(os.path.join(LAPTOP, "answers_other.json")).read() == "[oops"
+    assert not os.path.exists(os.path.join(HOMELAB, "answers_other.json"))                    # nothing was sent for it
+    assert "e" in names(read_bank(LAPTOP, "answers.json"))
+    # logins: an unreadable accounts.json is left alone, on either side
+    before_h = open(os.path.join(HOMELAB, "accounts.json")).read()
+    open(os.path.join(LAPTOP, "accounts.json"), "w").write("{nope")
+    assert run_share()[0] and open(os.path.join(LAPTOP, "accounts.json")).read() == "{nope" and open(os.path.join(HOMELAB, "accounts.json")).read() == before_h
+    open(os.path.join(LAPTOP, "accounts.json"), "w").write(before_h)
+    open(os.path.join(HOMELAB, "accounts.json"), "w").write("{nope")
+    laptop_before = open(os.path.join(LAPTOP, "accounts.json")).read()
+    assert run_share()[0] and open(os.path.join(HOMELAB, "accounts.json")).read() == "{nope" and open(os.path.join(LAPTOP, "accounts.json")).read() == laptop_before
 
     # pull() shares only with remote_assist
     ran, shared = [], []
