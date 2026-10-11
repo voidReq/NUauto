@@ -622,7 +622,10 @@ for p_ in (os.path.join(sess, "s1.jsonl"), os.path.join(sess, "sub", "s2.jsonl")
     assert os.stat(p_).st_mode & 0o777 == 0o600
 assert open(old).read() == pw and lines_ and "3 files" in lines_[0], lines_
 del os.environ["CLAUDE_CONFIG_DIR"]
-assert assist.session_log_dir("/home/x/projects/auto").endswith("/projects/-home-x-projects-auto")
+real_dir = os.path.realpath(tempfile.mkdtemp())  # Claude Code names the folder after the real path (macOS: /private/var)
+assert assist.session_log_dir(real_dir) == os.path.join(os.path.expanduser("~/.claude"), "projects",
+                                                        "".join(c if c.isalnum() or c == "-" else "-" for c in real_dir))
+assert assist.session_log_dir(real_dir).rsplit("/", 1)[1].startswith("-")  # "/tmp/x" -> "-tmp-x"
 
 # Bitwarden's import file: one login per site, matched on that host only, the jobs in its notes; then nothing new
 path, n = accounts.export(os.path.join(tmp, "bw.json"))
