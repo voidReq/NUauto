@@ -95,6 +95,15 @@ assert mail.pick([msg(OTHER)], "boards.greenhouse.io", "Acme Robotics", now=NOW)
 link = mail.pick([msg(WORKDAY)], SITE, "Acme Robotics", now=NOW)
 assert link["status"] == "link" and link["link"].startswith("https://acme.wd5.myworkdayjobs.com/en-US/External/activate/")
 assert mail.pick([msg(WORKDAY)], SITE, "Acme Robotics", want="code", now=NOW)["status"] == "ambiguous"  # the email, no code
+# "thanks for applying" (it says "confirm" too) is not the email we wait for: none, and an older verification email under
+# it is still found (the shapes of real ones: Workday's "Verify your candidate account", an application-received note)
+THANKS = gmail("n1", "Acme HR <hr@acme.com>", "Thank you for your interest in Acme Robotics", age=20,
+               plain="We want to confirm that your application for the 2027 Ignite role has been received.")
+assert mail.pick([msg(THANKS)], "acme.taleo.net", "Acme Robotics", now=NOW) == {"status": "none"}
+CYBER = gmail("n2", "Acme Talent <talent@acme.com>", "Application Received! Software Engineering Intern - Cybersecurity at Acme",
+              plain="We're happy to confirm that we've received your application.")
+assert mail.pick([msg(CYBER)], "acme.avature.net", "Acme", now=NOW) == {"status": "none"}  # "security" in a role's name
+assert mail.pick([msg(THANKS), msg(WORKDAY)], SITE, "Acme Robotics", now=NOW)["status"] == "link"
 two = gmail("t1", "Acme <a@acme.com>", "Your code", plain="Use code 123456 or code 654321")
 assert mail.pick([msg(two)], "acme.com", "Acme", now=NOW)["status"] == "ambiguous"
 

@@ -32,7 +32,10 @@ POLL = 8
 # Gmail search: the words a verification email has (the rest is checked here, on each message)
 QUERY = '(code OR passcode OR verify OR verification OR confirm OR activate OR "one-time" OR otp OR security OR pin)'
 CODE_WORDS = re.compile(r"\b(codes?|passcode|pass code|one[- ]time|otp|pin)\b", re.I)
-VERIFY_WORDS = re.compile(r"verif|confirm|activat|validat|\bcodes?\b|passcode|one[- ]time", re.I)
+# a verification email's subject ("Verify your candidate account", "Your one-time passcode"); "we confirm that your
+# application was received" is not one
+VERIFY_SUBJECT = re.compile(r"verif|activat|validat|confirm (your )?(e-?mail|account|address)|\bcodes?\b|passcode|"
+                            r"one[- ]time|sign[- ]?in|log[- ]?in|security code", re.I)  # not "Cybersecurity Intern"
 CODE_AFTER = re.compile(r"\b(?:codes?|passcode|pin|otp)\b(?:\s+(?:is|was))?\s*[:\-]?\s*([A-Za-z0-9]{4,10})\b", re.I)
 DIGITS = re.compile(r"(?<![\w.,/-])(\d{4,8})(?![\w.,/-])")
 MIXED = re.compile(r"(?<![\w.,/-])((?=[A-Za-z0-9]*\d)(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-9]{6,10})(?![\w.,/-])")
@@ -159,8 +162,9 @@ def pick(messages, site_host, company, job_host="", want="", used=(), now=None):
             return {"status": "code", "code": code, "from": sender, "received": when, "id": m["id"]}
         if link:
             return {"status": "link", "link": link, "from": sender, "received": when, "id": m["id"]}
-        if VERIFY_WORDS.search(f"{m['subject']} {m['text']}"):  # it is the email, but no single code / link in it
+        if VERIFY_SUBJECT.search(m["subject"]) or CODE_WORDS.search(m["text"]):  # the email, but no one code / link
             return {"status": "ambiguous", "from": sender, "received": when, "id": m["id"]}
+        # anything else from the site ("thanks for applying"): not the email we wait for; look at the older ones
     return {"status": "none"}
 
 

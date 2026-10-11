@@ -227,7 +227,9 @@ COMPANY-SITE AGENT (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`;
   or a link to that very host), and hands back one code, or one link to that same site; nothing else from any message
   reaches the agent or the logs. Never for Google / Microsoft / Apple / LinkedIn / GitHub / Northeastern sign-ins
   (accounts.never). None found, two candidates or no login: it asks me. Setup once: enable the Gmail API in my Google
-  Cloud project, then `nuauto login gmail`. Not yet run against my real inbox.
+  Cloud project, then `nuauto login gmail` (it refuses any Gmail but accounts_email's, and every lookup checks it).
+  Checked on my real inbox (2026-10-11): Workday's verification links found, each to its own site; "thanks for
+  applying" emails skipped. Not yet seen: an emailed code, and the agent using it in a live application.
 - Mine: email codes it can't find, captchas, approving Submit. After I /exit, the launcher asks "did you submit?"; y =
   Applied (dated today, counts toward the weekly limit), then the same job is submitted on NUworks too by
   apply.submit_nuworks_side (the tested NUworks code; every popup check except the off-site-link stop;
