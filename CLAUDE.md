@@ -177,8 +177,9 @@ COMPANY-SITE AGENT (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`;
   Workday, Oracle, iCIMS, SuccessFactors...). Never NUworks itself (refused even with --url), never rows
   stopped for something on NUworks (cover letter, transcript...): those are mine (assist.assist_target).
 - Laptop, real terminal, me watching; or (Phase 3, my call 2026-10-11) the homelab, in a tmux session I attach to, with
-  "remote_assist" on: its browser on a virtual screen I open over Tailscale (screen.py), Discord tells me when it waits,
-  the same guard and Submit question (docs/REMOTE.md). Starts `claude --model sonnet --effort low --permission-mode default` (never my auto
+  "remote_assist" on: its browser on a virtual screen I open over Tailscale (screen.py), Discord links me to the review
+  page (review.py, Tailscale only, paired devices only): I answer it, approve or decline each Submit (the guard waits
+  for my tap; a late Approve = a 10-minute pass for that one action) and get captchas there (docs/REMOTE.md). Starts `claude --model sonnet --effort low --permission-mode default` (never my auto
   mode: its own check asked about every click; the guard decides; local_config.json "assist_effort":
   low / medium / high; Settings; low is my call, 2026-10-10) with the Playwright MCP browser (profile assist_profile/:
   it holds my company-site logins, treat it as secret), Bash, Read/Glob/Grep and WebSearch/WebFetch (company context,
@@ -295,6 +296,7 @@ src/nuauto/: cli.py (the nuauto command)   config.py (all paths, hosts; reads lo
   daily.py (homelab update + Discord)   web.py (Mark-done page, homelab)   sync.py (laptop<->homelab)   deploy.py (homelab: deploys main)
   doctor.py (health check)   inspect_form.py (read-only form lister)   assist.py (company-site agent)   accounts.py (its job-site logins)
   mail.py (the agent's email codes and links: read-only Gmail)   screen.py (the homelab assistant's virtual screen + browser view)
+  review.py (the homelab assistant's review page, inside nuauto web)
   setup_sheet.py (sheet setup / `format` restyle)   gui.py (the window's server)   gui_static/ (its page)
   health.py (the checks behind doctor and the GUI)   onboard.py (setup wizard)   demo.py (demo mode fakes)
   window.py (which window) + window_gtk.py (the Linux window, run by the system python3)
@@ -338,6 +340,7 @@ nuauto insights        # pay, places, kinds of work in my pool and applications;
 nuauto selftest        # is this install OK? demo mode end to end in a hidden browser (nothing real touched)
 nuauto assist [<row>]  # company-site agent for a Needs Human row; asks me before any Submit
 nuauto accounts [export [<file>] [--all]]   # the job-site logins the agent made (no passwords shown); Bitwarden's import file
+nuauto review pair [<name>] | devices | unpair <name>   # the homelab assistant's review page: pair my phone (docs/REMOTE.md)
 nuauto assist other [<row>]                      # same agent for the sheet's Other jobs tab (no NUworks step after)
 nuauto assist other add <url> <company> <title>  # add a job there as Approved
 nuauto sheet add <nuworks|other> <url> [<company> <title>] [--proposed]   # add a job by hand

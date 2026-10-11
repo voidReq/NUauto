@@ -72,6 +72,16 @@ COMPANY-SITE AGENT (assist.py, prompts/ASSIST_PROMPT.md)
   session's terminal; the agent reads only the writeups copy and the resume; never a NUworks submit there (the row is
   left for the laptop) | screen.listen_host, commands; config (IS_SERVER read paths); assist.run, assist.main |
   test_screen, test_assist
+- On the homelab a Submit-type action is approved only on the review page, by a paired device: the guard writes the
+  question (what, page, review_lines, a screenshot) and waits up to assist.WAIT for an answer with that question's id;
+  no answer or an error = blocked. A later Approve is a pass for exactly that action on that page, once, for
+  assist.GRANT_TTL | assist.pre_hook, open_approval, remote_decision, take_grant, review.answer_approval | test_assist,
+  test_review
+- The review page: Tailscale IP only (port 8766, not the tunnel's), paired devices only (one-time pairing link, 10 min;
+  a random key in an HttpOnly SameSite=Strict cookie, its hash on the homelab), its own Host, a form token from the key
+  and a matching Origin on every POST; run folders under logs/ only; site passwords taken out of the terminal it shows;
+  the agent's browser and WebFetch never open the user's own network there | review.Handler, pair, device, form_token,
+  session, terminal; assist.own_network | test_review, test_assist
 - The answer banks and job-site logins shared with the homelab: merged under each file's lock, a login never dropped,
   sent as JSON over ssh and never printed; the writeups copy holds only files the agent may read | sync.share,
   merge_bank, merge_accounts, notes_files | test_share

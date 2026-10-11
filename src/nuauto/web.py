@@ -136,6 +136,16 @@ def main():
     if not config.IS_SERVER:
         sys.exit("web.py runs on the homelab.")
     _secret()
+    if config.REMOTE_ASSIST:  # the assistant's review page: its own port, never through the Mark-done tunnel (review.py)
+        import threading
+        from nuauto import review
+
+        def review_page():
+            try:
+                review.serve()
+            except Exception as e:  # the Mark links keep working without it
+                _log(f"review page did not start: {type(e).__name__}: {e}")
+        threading.Thread(target=review_page, daemon=True).start()
     ThreadingHTTPServer(LISTEN, Handler).serve_forever()
 
 

@@ -1,19 +1,21 @@
 REMOTE: the company-site assistant on the homelab (Phase 3)
-(Keep this current when you change it. Code: screen.py, the IS_SERVER parts of assist.py, sync.share / push_notes.)
+(Keep this current when you change it. Code: screen.py, review.py, the IS_SERVER parts of assist.py, sync.share /
+push_notes.)
 
 WHAT IT IS
 - `nuauto assist [other] <row>` runs on the homelab too, inside a tmux session, so an application can go on with the
   laptop closed. Its browser draws on a virtual screen there; you see and use that browser in a web page (noVNC) on
   your phone or laptop, over Tailscale only.
-- Phase 3a (this part): you start a session by hand over ssh, and you answer it and approve its Submit in its Claude
-  Code terminal (attach to the tmux session from the laptop, or from a phone ssh app). Discord tells you when it waits.
-- Next: 3b a review page (answer, approve Submit, captcha hand-off from the phone, through Discord links); 3c sessions
-  that start by themselves from the Approved rows, and a claim so the laptop and the homelab never work the same row;
-  3d tests, demo mode, docs.
+- 3a: you start a session by hand over ssh, in tmux. 3b: you answer it, approve or decline its Submit, and get the
+  captcha hand-off on the review page, from your phone; Discord links you there. The terminal (tmux attach) still
+  works for anything else.
+- Next: 3c sessions that start by themselves from the Approved rows, and a claim so the laptop and the homelab never
+  work the same row; 3d demo mode for the review page.
 
 WHAT STAYS THE SAME
-- Nothing is submitted without your OK: the same guard (assist.decide) asks before every Submit-type click and Enter,
-  in the session's terminal.
+- Nothing is submitted without your OK: the same guard (assist.decide) catches every Submit-type click and Enter. On
+  the laptop it asks in the terminal; on the homelab it puts the question on the review page and waits for your tap
+  (below). No answer, an error, or anything else = not submitted.
 - Captchas are yours, on both machines: the guard refuses any click, typing, hover or key inside a captcha (its box,
   its pictures, its buttons; assist.CAPTCHA, captcha_target). The agent tells you and waits; you solve it in the
   browser view. No solver, no disguised browser, no human-like mouse: a plain Playwright Firefox, on a virtual screen.
@@ -27,20 +29,47 @@ TURN IT ON (once)
 2. Homelab, the browser tool's own Firefox (its version, next to the update's):
      npx -y -p @playwright/mcp@0.0.82 playwright install firefox
    (assist.MCP_PACKAGE: change the version here too when that pin changes.)
+   And once, so Claude Code trusts the folder the sessions start in (the review page can't answer that question):
+     ssh -t homelab 'cd ~/projects/auto && claude'     -> "Yes, I trust this folder", then /exit
 3. local_config.json (laptop): "remote_assist": true. web_listen_host must be the homelab's Tailscale IP (it already
    is for the Mark-done page): the browser view listens there only.
 4. Laptop: `nuauto status`. It pushes the setting, the Gmail login, a copy of your writeups, and merges the answer
    banks and job-site logins both ways (below). Merge the PR first: the homelab runs main (deploy_from_git).
 Off again: "remote_assist": false (the homelab then refuses `nuauto assist`; its copies stay until you delete them).
 
+PAIR YOUR PHONE (once per device)
+  nuauto review pair phone          (laptop or homelab; --discord also posts the link to your Discord)
+  Open the printed link on the phone, Tailscale on, and press Pair (within 10 minutes; the link works once).
+  nuauto review devices / nuauto review unpair <name>|--all
+
 RUN ONE
   ssh -t homelab 'tmux new -s nuauto1 "cd ~/projects/auto && .venv/bin/nuauto assist other 12"'
   Leave it running: Ctrl+b then d. Back to it: ssh -t homelab tmux attach -t nuauto1 (a phone ssh app works too).
 - At the start the terminal shows the browser view's link, http://<web_listen_host>:6081/vnc.html... (slot 1; 6082,
   6083 for slots 2, 3), and its password for this run only (shown nowhere else: not in a log, not on Discord).
-- Discord says when the session waits for you (a question, the end list, a captcha) or wants to Submit: the company,
-  the agent's first line, the tmux attach command and the browser link.
-- Ends like on the laptop: /exit, then "Did you press Submit...?" y = Applied. The virtual screen stops with it.
+- Discord says when the session waits for you (a question, the end list, a captcha), wants to Submit, or ended: the
+  company, the agent's first line, the review page's link (and the tmux attach command).
+- Ends like on the laptop: /exit (or End session on the page), then "Did you press Submit...?" (the page's Yes / No
+  types the answer there) y = Applied. The virtual screen stops with it.
+
+THE REVIEW PAGE (review.py; http://<web_listen_host>:8766/, inside nuauto-web, only with remote_assist)
+- One page per running session (/s/<slot>):
+  Ready to submit   what it will click, on which page; the guesses you haven't confirmed, what you changed, anything
+                    typed with no answer behind it (the same list as the laptop's Submit question); the screen when it
+                    asked. Approve / Decline (a note for the agent). The guard waits 9 minutes (assist.WAIT); after
+                    that the agent is told to wait for you, the question stays, and a later Approve is a pass for
+                    that one action on that page for 10 minutes (assist.take_grant): the page tells the agent to do it.
+  Its last message  the whole message (a question, the end list, a captcha), and a reply box: what you send is typed
+                    into its terminal (tmux send-keys; a newline = Ctrl+J, so several lines go as one message: checked
+                    with a real Claude Code session, as is /exit), as if you typed it there.
+  The browser       the browser view's link and password, and the screen now. A captcha: solve it there, reply "done".
+  Its terminal      the last lines (this run's site passwords taken out); Interrupt (Esc), End session (/exit).
+  Ended             Did it go through? Yes / No (typed into the launcher's question).
+- Paired devices only: a cookie with a random key (HttpOnly, SameSite=Strict; the homelab keeps its hash in
+  local/review_devices.json); this server's own Host; on every POST a token made from the key and a matching Origin.
+  Discord links carry no power by themselves. Each answer goes in the run's actions.log with the device name.
+- The agent on the homelab never opens your own network: localhost, the LAN, Tailscale addresses (so not this page,
+  not the browser view) are refused in its browser and WebFetch (assist.own_network).
 
 WHAT LIVES WHERE (with remote_assist)
   answers.json, answers_other.json   both machines. The laptop merges them both ways (sync.share): at the start of every
@@ -61,10 +90,12 @@ WHAT LIVES WHERE (with remote_assist)
        the same job site, on both machines at once.
 
 PORTS (homelab; slot n = 1..3)
+  review page http://<web_listen_host>:8766 (in nuauto-web; the Mark-done tunnel forwards 8765 only)
   virtual screen :40+n (Xvfb, -nolisten tcp)   VNC 127.0.0.1:5940+n (x11vnc -localhost: never on the network)
   browser view http://<web_listen_host>:6080+n/vnc.html (websockify + noVNC; Tailscale only; a password per run)
   The run folder's screen.log has the three programs' output; local/screen<n>.json their pids (a crashed run's are
   stopped by the next run in that slot).
 
 NOT YET PROVEN FOR REAL
-- Everything here: the virtual screen and view on the homelab, a session there, the merge against real files.
+- Everything here: the virtual screen and view on the homelab, a session there, the merge against real files, the
+  review page on a phone, tmux typing into a real Claude Code session.

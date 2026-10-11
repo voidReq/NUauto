@@ -18,6 +18,7 @@ Tools (each module's own command line; `nuauto <tool>` with no arguments shows i
   nuauto jobs ...        job pool steps (list, triage-export, details, pool, suggest N, stats...)
   nuauto intern ...      Summer 2027 internships from Simplify's list (update, approve, rate, stats, pool, fetch <url>)
   nuauto accounts ...    the logins the assistant made on job sites (list; export: Bitwarden's import file)
+  nuauto review ...      the homelab assistant's review page: pair a phone, list / forget devices (docs/REMOTE.md)
   nuauto answers ...     answer bank (init, list)
   nuauto sheet ...       sheet commands (status; add / move / remove a job by hand)
   nuauto setup-sheet     one-time sheet setup; `format` restyles it
@@ -39,7 +40,8 @@ from nuauto import config
 
 TOOLS = {"jobs": "jobs", "answers": "answers", "sheet": "sheet", "setup-sheet": "setup_sheet",
          "inspect": "inspect_form", "daily": "daily", "web": "web", "health": "health", "demo": "demo",
-         "onboard": "onboard", "selftest": "selftest", "insights": "insights", "intern": "intern", "accounts": "accounts"}
+         "onboard": "onboard", "selftest": "selftest", "insights": "insights", "intern": "intern", "accounts": "accounts",
+         "review": "review"}
 COMMANDS = ("approve", "rate", "apply", "status", "update", "login", "test", "doctor", "assist", "gui", "deploy")
 
 

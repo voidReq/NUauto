@@ -16,8 +16,10 @@ import secrets
 import shutil
 import signal
 import string
+import struct
 import subprocess
 import time
+import zlib
 
 from nuauto import config
 
@@ -26,6 +28,7 @@ WEB_BASE = 6080     # slot n's view: http://<web_listen_host>:6080+n/vnc.html
 SIZE = "1366x900x24"
 NOVNC_DIRS = ("/usr/share/novnc", "/usr/share/webapps/novnc")
 TOOLS = ("Xvfb", "x11vnc", "websockify")
+VIEW_FILE = "view.json"  # in the run folder while the screen is up: the view's link and password (mode 600)
 
 
 class ScreenError(Exception):
@@ -78,7 +81,8 @@ def commands(slot, run_dir, host, web_dir):
     """The three programs behind one slot's screen, in start order: [argv]. Pure (the tests check them)."""
     d, vnc = display(slot), vnc_port(slot)
     return [
-        ["Xvfb", d, "-screen", "0", SIZE, "-nolisten", "tcp"],
+        # -fbdir: the screen is also a file in the run folder (XWD), always current: screenshot() reads it.
+        ["Xvfb", d, "-screen", "0", SIZE, "-nolisten", "tcp", "-fbdir", run_dir],
         # -localhost: the shared screen itself is never on the network; only websockify (below) reaches it.
         # "rm:": x11vnc reads the password file, then deletes it.
         ["x11vnc", "-display", d, "-localhost", "-rfbport", str(vnc), "-passwdfile",
@@ -137,6 +141,10 @@ class Screen:
         finally:
             out.close()
         self.url = view_url(self.slot, host)
+        # for the review page (it shows the link and the password to your paired devices only); gone at stop()
+        fd = os.open(os.path.join(self.run_dir, VIEW_FILE), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            json.dump({"url": self.url, "password": self.password}, f)
         return self
 
     def _wait_display(self):
@@ -201,8 +209,51 @@ class Screen:
                 except OSError:
                     pass
         self.procs = []
-        for path in (os.path.join(self.run_dir, "vnc.pass"), _pids_path(self.slot)):
+        for path in (os.path.join(self.run_dir, "vnc.pass"), os.path.join(self.run_dir, VIEW_FILE), _pids_path(self.slot),
+                     frame_path(self.run_dir)):
             try:
                 os.remove(path)
             except OSError:
                 pass
+
+
+# ---------- screenshots (the review page shows what you approve): the screen's own file, as a PNG ----------
+
+def frame_path(run_dir):
+    return os.path.join(run_dir, "Xvfb_screen0")
+
+
+def xwd_to_png(data):
+    """A TrueColor XWD image (what Xvfb -fbdir keeps) as PNG bytes. Pure stdlib (struct + zlib)."""
+    head = struct.unpack(">25I", data[:100])
+    size, depth, width, height, byte_order, bpp, per_line = head[0], head[3], head[4], head[5], head[7], head[11], head[12]
+    masks, ncolors = head[14:17], head[19]
+    if bpp != 32 or depth not in (24, 32):
+        raise ValueError(f"unsupported XWD image ({depth}-bit, {bpp} bits per pixel)")
+    start = size + 12 * ncolors
+    pixels = memoryview(data)[start:start + per_line * height]
+
+    def offset(mask):  # which byte of a pixel holds this color
+        shift = (mask & -mask).bit_length() - 1
+        return shift // 8 if byte_order == 0 else 3 - shift // 8
+    r, g, b = (offset(m) for m in masks)
+    rows = []
+    for y in range(height):
+        row = bytes(pixels[y * per_line:y * per_line + width * 4])
+        rgb = bytearray(width * 3)
+        rgb[0::3], rgb[1::3], rgb[2::3] = row[r::4], row[g::4], row[b::4]
+        rows.append(b"\x00" + bytes(rgb))
+
+    def chunk(kind, body):
+        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body) & 0xffffffff)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(b"".join(rows), 6)) + chunk(b"IEND", b""))
+
+
+def screenshot(run_dir):
+    """What the session's browser shows right now (PNG bytes), or None (no screen: not on the homelab, or it stopped)."""
+    try:
+        with open(frame_path(run_dir), "rb") as f:
+            return xwd_to_png(f.read())
+    except (OSError, ValueError, struct.error):
+        return None

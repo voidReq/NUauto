@@ -70,7 +70,8 @@ Unit files live in this repo (deploy/systemd/) and are installed in ~/.config/sy
   does not import, or a web that does not come back, is undone and Discord says so once. It waits while an
   update (`nuauto daily`, `nuauto intern update`) runs. Record: local/deployed.json; log: logs/deploy.log.
 - nuauto-web.service: `nuauto web`, always on (Restart=on-failure). Listens on web_listen_host:8765
-  only (web.LISTEN). Serves the signed Discord links: GET = confirm page only, POST (button)
+  only (web.LISTEN). With remote_assist it also serves the assistant's review page on web_listen_host:8766
+  (review.py; never add 8766 to the tunnel: Tailscale only, docs/REMOTE.md). Serves the signed Discord links: GET = confirm page only, POST (button)
   changes the sheet. Every link is HMAC-signed with web_secret.txt for one action on one
   row + job. Log: logs/web.log.
 - Don't also schedule the update on the laptop while the homelab runs it: two runs = double

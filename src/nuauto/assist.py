@@ -35,6 +35,7 @@ Code checks every call (Claude Code hooks -> `assist.py hook pre|post`, logic in
 - If the guard itself fails or times out, the action is blocked (the hooks' onFailure "block").
 """
 import fcntl
+import ipaddress
 import json
 import os
 import re
@@ -414,6 +415,47 @@ def captcha_target(state, name, inp):
     return next((t for t in targets if t and t.get("captcha")), None)
 
 
+OWN_NETWORK = ("That address is on the user's own machines or network (the homelab, its review page and browser view, "
+               "the LAN): never yours to open. Job sites only.")
+TAILSCALE = ipaddress.ip_network("100.64.0.0/10")
+
+
+def _own_ip(ip):
+    return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_unspecified or ip.is_reserved or \
+        ip.is_multicast or (ip.version == 4 and ip in TAILSCALE) or \
+        (ip.version == 6 and ip.ipv4_mapped is not None and _own_ip(ip.ipv4_mapped))
+
+
+def own_network(url, resolve=True):
+    """True for an address on your own machines or network: localhost, the LAN, Tailscale (the homelab's review page
+    and browser view live there), a one-word host name (a LAN or Tailscale short name), an IPv4 address in any of the
+    shorthands browsers accept (127.1, 2130706433, 0x7f.0.0.1), and, with resolve, a name that resolves to one of
+    those. The agent on the homelab never opens one (decide)."""
+    import socket
+    h = (urlparse(url).hostname or "").lower().strip("[]").rstrip(".")
+    if not h:
+        return True
+    if "." not in h and ":" not in h and not h.isdigit() and not h.startswith("0x"):
+        return True  # "homelab", "printer": a name only your own network knows
+    if h == "localhost" or h.endswith((".localhost", ".local", ".lan", ".home", ".internal", ".ts.net", ".home.arpa")):
+        return True
+    try:
+        return _own_ip(ipaddress.ip_address(h))
+    except ValueError:
+        pass
+    try:
+        return _own_ip(ipaddress.ip_address(socket.inet_aton(h)))  # the shorthands (inet_aton reads them as browsers do)
+    except OSError:
+        pass
+    if not resolve:
+        return False
+    try:
+        infos = socket.getaddrinfo(h, None)
+    except (OSError, UnicodeError):
+        return False  # does not resolve: the browser can't open it either
+    return any(_own_ip(ipaddress.ip_address(i[4][0].split("%")[0])) for i in infos)
+
+
 def placeholder_of(value):
     """The password placeholder this value is ("" for none); None when it mixes one with other text."""
     v = str(value or "")
@@ -455,6 +497,8 @@ def decide(state, tool, inp):
         why = check_read(state, tool, inp)
         return deny(why) if why else ALLOW
     if tool in WEB_TOOLS:
+        if config.IS_SERVER and tool == "WebFetch" and own_network(inp.get("url", "")):
+            return deny(OWN_NETWORK)
         return ALLOW
     prefix = f"mcp__{SERVER}__"
     if not tool.startswith(prefix):
@@ -466,7 +510,9 @@ def decide(state, tool, inp):
         return deny(CAPTCHA_DENY)
     if name in ("browser_navigate", "browser_tabs") and inp.get("url"):
         scheme = urlparse(inp["url"]).scheme
-        return ALLOW if scheme in ("http", "https") else deny(f"Only web pages, not {scheme}: links.")
+        if scheme not in ("http", "https"):
+            return deny(f"Only web pages, not {scheme}: links.")
+        return deny(OWN_NETWORK) if config.IS_SERVER and own_network(inp["url"]) else ALLOW
     if name == "browser_file_upload":
         paths = inp.get("paths") or []
         resume = state.get("resume")
@@ -972,31 +1018,12 @@ def hook(kind):
     d = run_dir()
     data = json.load(sys.stdin)
     tool, inp = data.get("tool_name", ""), data.get("tool_input") or {}
+    if kind == "pre":
+        pending = pre_hook(d, tool, inp)
+        if pending is not None:  # outside the state lock: the other hooks go on while this one waits for you
+            remote_decision(d, pending)
+        return
     with state_file(os.path.join(d, "state.json")) as state:
-        if kind == "pre":
-            verdict, why = decide(state, tool, inp)
-            if verdict != "deny" and tool.split("__")[-1] in INPUT_TOOLS:
-                state["filled"] = True  # something is filled in now: from here on a posting's "Apply" asks again
-                record_typed(state, tool, inp)
-            if verdict == "fill":  # a password placeholder: the guard types the real one (the agent never sees it)
-                try:
-                    new = fill(state, inp, why)
-                except accounts.NoAccount as e:
-                    verdict, why = deny(f"{e}.")
-                else:
-                    log(d, f"FILL  {tool} {json.dumps(inp)[:300]}  (the site's password typed by NUauto)")
-                    print(json.dumps({"hookSpecificOutput": {
-                        "hookEventName": "PreToolUse", "permissionDecision": "allow", "updatedInput": new,
-                        "permissionDecisionReason": "NUAUTO: NUauto typed this site's password (the agent never sees it)"}}))
-                    return
-            log(d, f"{verdict.upper():5} {tool} {json.dumps(inp)[:300]}" + (f"  ({why})" if why else ""))
-            if verdict == "deny":
-                print(why, file=sys.stderr)
-                sys.exit(2)
-            if verdict == "ask":  # Claude Code shows the user a yes/no confirmation in the terminal
-                print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
-                                                         "permissionDecisionReason": why}}))
-            return
         response, changed = data.get("tool_response"), False
         if state.get("password_sites"):  # the browser tool echoes what it typed ("Ran Playwright code"): never the password
             response, changed = redact(response, accounts.passwords(state["password_sites"]))
@@ -1007,6 +1034,177 @@ def hook(kind):
         if changed:
             print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": response,
                                                      "updatedMCPToolOutput": response}}))
+
+
+def pre_hook(d, tool, inp):
+    """The PreToolUse guard: prints its answer (or exits 2 to block). On the homelab a Submit-type action has no
+    terminal to ask in: returns the approval it opened on the review page, for hook() to wait on; else None."""
+    with state_file(os.path.join(d, "state.json")) as state:
+        verdict, why = decide(state, tool, inp)
+        pending = None
+        if verdict == "ask" and config.IS_SERVER:
+            target = approval_target(state, tool, inp)
+            grant = take_grant(d, target)
+            if grant:
+                verdict, why = "allow", f"approved on the review page by {grant.get('by') or 'you'}"
+            else:
+                pending = open_approval(d, state, target, why)
+        if verdict != "deny" and tool.split("__")[-1] in INPUT_TOOLS:
+            state["filled"] = True  # something is filled in now: from here on a posting's "Apply" asks again
+            record_typed(state, tool, inp)
+        if verdict == "fill":  # a password placeholder: the guard types the real one (the agent never sees it)
+            try:
+                new = fill(state, inp, why)
+            except accounts.NoAccount as e:
+                verdict, why = deny(f"{e}.")
+            else:
+                log(d, f"FILL  {tool} {json.dumps(inp)[:300]}  (the site's password typed by NUauto)")
+                print(json.dumps({"hookSpecificOutput": {
+                    "hookEventName": "PreToolUse", "permissionDecision": "allow", "updatedInput": new,
+                    "permissionDecisionReason": "NUAUTO: NUauto typed this site's password (the agent never sees it)"}}))
+                return None
+        log(d, f"{verdict.upper():5} {tool} {json.dumps(inp)[:300]}" + (f"  ({why})" if why else "")
+            + ("  -> the review page" if pending else ""))
+        if verdict == "deny":
+            print(why, file=sys.stderr)
+            sys.exit(2)
+        if verdict == "ask" and pending is None:  # Claude Code shows the user a yes/no confirmation in the terminal
+            print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
+                                                     "permissionDecisionReason": why}}))
+        return pending
+
+
+# ---------- Submit approvals on the homelab: the review page (review.py) asks you, the guard waits for your answer ----------
+
+APPROVAL = "approval.json"   # in the run folder: the Submit-type action waiting for you (what, page, why, since)
+DECISION = "decision.json"   # your answer to it, written by the review page
+GRANT = "grant.json"         # your Approve after the guard stopped waiting: that one action, on that page, for a while
+SHOT = "approval.png"        # the screen when it asked (the review page shows it)
+WAIT = 540                   # seconds the guard waits for your answer (Claude Code's own hook limit is 600 by default)
+GRANT_TTL = 600              # seconds a late Approve stays good for
+
+
+@contextmanager
+def approval_lock(d):
+    """The guard and the review page change approval / decision / grant only under this lock."""
+    with open(os.path.join(d, "approval.lock"), "a") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        yield
+
+
+def read_json(path, default=None):
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return default
+
+
+def write_private(path, data):
+    """A file only you can read (mode 600), replaced in one step: JSON for a dict or list, else bytes."""
+    tmp = path + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "wb") as f:
+        f.write(data if isinstance(data, bytes) else json.dumps(data).encode())
+    os.replace(tmp, path)
+
+
+def remove(d, *names):
+    for n in names:
+        try:
+            os.remove(os.path.join(d, n))
+        except OSError:
+            pass
+
+
+def approval_target(state, tool, inp):
+    """What you approve, as the guard sees it: the button (or key) and the page it is on."""
+    name = tool.split("__")[-1]
+    if name == "browser_click":
+        what = f"click {(state['refs'].get(ref_of(inp) or '') or {}).get('name', '?')!r}"
+    elif name == "browser_press_key":
+        what = f"press {inp.get('key', '?')}"
+    else:
+        what = "type into a box and press Enter"
+    return {"what": what, "url": state.get("current_url") or ""}
+
+
+def take_grant(d, target):
+    """Your late Approve for exactly this action on this page, used up now; None if there is none (or it expired)."""
+    import time
+    with approval_lock(d):
+        g = read_json(os.path.join(d, GRANT))
+        if not g:
+            return None
+        if time.time() > g.get("until", 0):
+            remove(d, GRANT)
+            return None
+        if g.get("what") != target["what"] or g.get("url") != target["url"]:
+            return None
+        remove(d, GRANT)
+        return g
+
+
+def open_approval(d, state, target, why):
+    """Put this Submit-type action on the review page (with a screenshot) and tell you on Discord. Returns it."""
+    import secrets
+    import time
+    from nuauto import daily
+    from nuauto import review
+    from nuauto import screen
+    a = {**target, "id": secrets.token_urlsafe(12), "why": why, "since": time.time(), "waiting": True}
+    with approval_lock(d):
+        remove(d, DECISION, GRANT)  # a new question: an old answer or pass never counts for it
+        shot = screen.screenshot(d)
+        if shot:
+            write_private(os.path.join(d, SHOT), shot)
+        else:
+            remove(d, SHOT)
+        write_private(os.path.join(d, APPROVAL), a)
+    write_private(os.path.join(d, ATTENTION), {"kind": "approve", "since": a["since"], "time": a["since"], "said": target["what"]})
+    log(d, f"needs you: approve {target['what']} on {target['url']} (review page)")
+    daily.discord(f"**NUauto: {state.get('company') or 'assistant'}**\nReady to submit ({state.get('where', '')}): "
+                  f"{target['what']}. Approve or decline: {review.page_url(state.get('slot') or 1)}")
+    return a
+
+
+def remote_decision(d, a):
+    """Wait (up to WAIT) for your answer on the review page, then allow or block the action. Stopped waiting: block;
+    the question stays on the page, and a late Approve becomes a pass for that one action (take_grant)."""
+    import time
+    end = a["since"] + WAIT
+    while True:
+        with approval_lock(d):
+            dec = read_json(os.path.join(d, DECISION))
+            if dec and dec.get("id") == a["id"]:
+                remove(d, DECISION, APPROVAL, SHOT)
+                break
+            if time.time() >= end:
+                current = read_json(os.path.join(d, APPROVAL))
+                if current and current.get("id") == a["id"]:
+                    write_private(os.path.join(d, APPROVAL), {**current, "waiting": False})
+                dec = None
+                break
+        time.sleep(1)
+    if dec:
+        clear_attention(d)
+    by = (dec or {}).get("by") or "you"
+    if dec and dec.get("decision") == "approve":
+        log(d, f"APPROVED on the review page by {by}: {a['what']}")
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow",
+                                                 "permissionDecisionReason": f"NUAUTO: approved on the review page by {by}"}}))
+        return
+    if dec:
+        note = (dec.get("note") or "").strip()
+        log(d, f"DECLINED on the review page by {by}: {a['what']}" + (f" ({note})" if note else ""))
+        print("The user declined this on the review page" + (f": {note}" if note else "") +
+              ". Don't submit. Ask them what to change.", file=sys.stderr)
+    else:
+        log(d, f"NOT ANSWERED within {WAIT // 60} min: {a['what']} (still on the review page)")
+        print("The user hasn't approved this yet (it is waiting on their phone, on the review page). End your turn now "
+              "with one line saying it is ready for their review. Don't click or type anything else; when they approve, "
+              "a message tells you to do it.", file=sys.stderr)
+    sys.exit(2)
 
 
 def hook_main(kind):
@@ -1022,6 +1220,7 @@ def hook_main(kind):
 # ---------- "needs you": when a session waits for you (Claude Code's own Stop / Notification / UserPromptSubmit hooks) ----------
 
 ATTENTION = "attention.json"  # in the run folder while the session waits for you; sessions() and the GUI read it
+MESSAGE = "message.txt"       # (homelab) the agent's whole last message, for the review page
 REMIND = 60  # seconds: the same news is not shown twice within this
 
 
@@ -1033,17 +1232,18 @@ def clear_attention(d):
 
 
 def attention_text(kind, where, company, message="", homelab=None):
-    """(title, body) of the notification. homelab: {"tmux", "view_url"} for a session on the homelab (Discord)."""
+    """(title, body) of the notification. homelab: {"tmux", "review_url"} for a session on the homelab (Discord)."""
     title = f"NUauto: {company or 'assistant'}"
-    window = "its terminal window" if not homelab else \
-        "its terminal on the homelab" + (f" (ssh homelab -t tmux attach -t {homelab['tmux']})" if homelab.get("tmux") else "")
+    if homelab:
+        body = f"The assistant on the homelab is waiting for you ({where})" + (f": {message}" if message else ".")
+        if homelab.get("review_url"):
+            body += f"\nAnswer it: {homelab['review_url']}"
+        if homelab.get("tmux"):
+            body += f"\nIts terminal: ssh homelab -t tmux attach -t {homelab['tmux']}"
+        return title, body
     if kind == "approve":
-        body = f"Approve or decline in {window} ({where}): it wants to submit or press Enter."
-    else:
-        body = f"The assistant is waiting for you in {window} ({where})" + (f": {message}" if message else ".")
-    if homelab and homelab.get("view_url"):
-        body += f"\nBrowser (Tailscale): {homelab['view_url']}"
-    return title, body
+        return title, f"Approve or decline in its terminal window ({where}): it wants to submit or press Enter."
+    return title, f"The assistant is waiting for you in its terminal window ({where})" + (f": {message}" if message else ".")
 
 
 def tmux_session():
@@ -1096,10 +1296,13 @@ def attention_main(kind):
         log(d, f"needs you: {kind}")
         if old.get("kind") == kind and now - old.get("time", 0) < REMIND:
             return
-        if config.IS_SERVER:  # no desktop there: your Discord, like the update's messages
+        if config.IS_SERVER:  # no desktop there: the review page shows its whole message; your Discord links to it
             from nuauto import daily
+            from nuauto import review
+            if kind == "waiting":
+                write_private(os.path.join(d, MESSAGE), (data.get("last_assistant_message") or "").encode())
             title, body = attention_text(kind, st.get("where", ""), st.get("company", ""), said,
-                                         {"tmux": st.get("tmux"), "view_url": st.get("view_url")})
+                                         {"tmux": st.get("tmux"), "review_url": review.page_url(st.get("slot") or 1)})
             daily.discord(f"**{title}**\n{body}")
             return
         from nuauto import health
@@ -1217,8 +1420,11 @@ def context_text(where, row, url, other, resume, read_roots, answer_cmd, writeup
     email = accounts.account_email()
     return (f"\n\nTHIS RUN\n{where.capitalize()}: {row.company} | {row.title}\nPosting: {url}\n"
             + (OTHER_NOTE if other else "")
-            + (f"This browser runs on the user's homelab, not in front of them: they see and use it at {view_url} "
-               "(give them that link whenever they have to do something in the browser, like a captcha).\n"
+            + ("This browser runs on the user's homelab, not in front of them. They read your messages and answer on "
+               "their phone (a review page), and they see and use this browser there too (for a captcha: say there is "
+               "one and wait for them). A Submit-type action waits for their approval on that page: if it comes back "
+               "not approved yet, end your turn with one line saying it is ready for review; when a message says they "
+               "approved, take a new snapshot and do exactly that action again.\n"
                if view_url else "") +
             f"Resume file (the only file you may upload): {resume or 'not found'}\n"
             f"Account email (for any account a site needs): {email or 'not set: ask the user'}\n"
@@ -1243,7 +1449,10 @@ def session(d, answer_cmd, read_roots, profile, prompt, where, display=None):
     if display:
         mcp["mcpServers"][SERVER]["env"] = {"DISPLAY": display}
     hook_cmd = " ".join(shlex.quote(a) for a in answer_cmd) + " hook"
-    guard = lambda kind: [{"type": "command", "command": f"{hook_cmd} {kind}", "timeout": 60, "onFailure": "block"}]  # noqa: E731
+    # On the homelab a Submit-type action waits for your answer on the review page (remote_decision: up to WAIT).
+    wait = WAIT + 60 if config.IS_SERVER else 60
+    guard = lambda kind: [{"type": "command", "command": f"{hook_cmd} {kind}", "timeout": wait if kind == "pre" else 60,  # noqa: E731
+                           "onFailure": "block"}]
     # "needs you": Claude Code's own events (never the agent): its turn ended (it waits for your reply), or it shows a
     # permission question (a Submit to approve); and you answered. Never blocking, never failing a turn.
     note = lambda kind: [{"type": "command", "command": f"{' '.join(shlex.quote(a) for a in answer_cmd)} attention {kind}",  # noqa: E731
@@ -1343,6 +1552,13 @@ def run(number, url_override, other=False):
         after_session(d, started, log_)
         if view:
             view.stop()
+    if view:  # the review page asks too: its Yes / No types your answer here (review.py)
+        import time as t_
+        write_private(os.path.join(d, ATTENTION), {"kind": "finish", "since": t_.time(), "time": t_.time(), "said": ""})
+        from nuauto import daily
+        from nuauto import review
+        daily.discord(f"**NUauto: {row.company}**\nSession ended ({where}). Did it go through? Answer on the review page: "
+                      f"{review.page_url(slot)}")
     try:
         while True:
             reply = input(f"\nDid you press Submit for {where} ({row.company}) and see the confirmation? "
