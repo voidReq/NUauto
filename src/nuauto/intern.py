@@ -1,8 +1,10 @@
-"""Summer 2027 internships from SimplifyJobs' list (github.com/SimplifyJobs/Summer2027-Internships): a second pool,
-built like the NUworks co-op pool (jobs.py), for jobs that are not on NUworks. Approved ones go in the sheet's Other
+"""Summer 2027 internships from public lists (SimplifyJobs' github.com/SimplifyJobs/Summer2027-Internships, and
+vanshb03's github.com/vanshb03/Summer2027-Internships; a job on both is kept once): a second pool, built like the
+NUworks co-op pool (jobs.py), for jobs that are not on NUworks. Approved ones go in the sheet's Other
 jobs tab (no weekly or total cap); `nuauto assist other <row>` applies on the company's site.
 
-  nuauto intern update     check the list (downloads it only when it changed), then: rules -> Claude triage (titles:
+  nuauto intern update     check the lists (each downloaded only when it changed; the same job on two lists is
+                           kept once, from the list that had it first), then: rules -> Claude triage (titles:
                            only clearly unrelated roles are dropped; the rest get an order) -> each posting read from
                            the company's own job site (postings.py) -> Claude score (match % vs your resume, and who may
                            apply) -> Claude category -> the pool. Only new work, a limited amount per run (the first
@@ -32,9 +34,18 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from nuauto import config
 from nuauto import jobs
 
+# The lists, in this order (a job both have, seen the same day, is kept from the earlier one): key, name, id prefix.
+# Both use the same listings.json format; vanshb03's has no term per listing, only a season ("Summer"): its year is the
+# one in the list's address.
+LISTS = (("simplify", "Simplify's list", "s"), ("vansh", "vanshb03's list", "sv"))
+NAMES = {k: name for k, name, _ in LISTS}
+PREFIXES = {k: prefix for k, _, prefix in LISTS}
 DEFAULTS = {
     "term": "Summer 2027",  # as Simplify's list names it
-    "source": "https://raw.githubusercontent.com/SimplifyJobs/Summer2027-Internships/dev/.github/scripts/listings.json",
+    "lists": {  # each list's file ("" = not read)
+        "simplify": "https://raw.githubusercontent.com/SimplifyJobs/Summer2027-Internships/dev/.github/scripts/listings.json",
+        "vansh": "https://raw.githubusercontent.com/vanshb03/Summer2027-Internships/dev/.github/scripts/listings.json",
+    },
     "fetch_per_run": 300,   # postings read per run by plain requests (about a second each)
     "browser_per_run": 40,  # ...and by the hidden browser, for pages built by JavaScript (10-20 s each)
     "score_per_run": 120,   # postings Claude scores per run (20 per call, about 3 minutes each)
@@ -43,13 +54,14 @@ _CFG = config.LOCAL.get("internships")
 ENABLED = isinstance(_CFG, dict) or _CFG is True
 SETTINGS = {**DEFAULTS, **(_CFG if isinstance(_CFG, dict) else {})}
 TERM = SETTINGS["term"]
+LIST_URLS = {**DEFAULTS["lists"], **({"simplify": SETTINGS["source"]} if SETTINGS.get("source") else {}),  # (old key)
+             **(SETTINGS["lists"] if isinstance(SETTINGS["lists"], dict) else {})}
 DIR = os.path.join(config.DATA_DIR, "intern")
 FITS = ("high", "medium", "low")              # triage's guess from the title: only the order postings are read in
 YEAR_REQS = ("ok", "one_year_up", "two_years_up", "grad")  # the scorer's "who may apply", compared with you
 TRIES = 3            # runs that read a posting every way (browser too) before it shows as unreadable
 STALE_DAYS = 45      # older postings are flagged (internships fill on a rolling basis)
 TRIAGE_BATCH = 250
-SITE_NOTE = f"{TERM} internship (Simplify's list)"
 
 
 # ---------------------------------------------------------------- storage
@@ -85,11 +97,27 @@ def load_details():
     return out
 
 
-# ---------------------------------------------------------------- Simplify's list (pure parts: offline-tested)
+# ---------------------------------------------------------------- the lists (pure parts: offline-tested)
 
-def listing_id(simplify_id):
-    """Our id for a listing: "s" + Simplify's id without dashes (letters and digits only, like NUworks ids)."""
-    return "s" + re.sub(r"[^0-9a-z]", "", str(simplify_id).lower())
+def listing_id(list_id, prefix="s"):
+    """Our id for a listing: the list's prefix ("s" Simplify's, "sv" vanshb03's) + its id without dashes (letters and
+    digits only, like NUworks ids). Simplify's ids are hex, so no "s" id ever starts with "sv"."""
+    return prefix + re.sub(r"[^0-9a-z]", "", str(list_id).lower())
+
+
+def list_of(i):
+    """Which list a listing id is from (the longest prefix that fits)."""
+    return max((k for k, p in PREFIXES.items() if str(i).startswith(p)), key=lambda k: len(PREFIXES[k]), default="simplify")
+
+
+def list_name(i):
+    return NAMES[list_of(i)]
+
+
+def lists_text():
+    """The lists read, for messages: "Simplify's list", or "Simplify's and vanshb03's lists"."""
+    on = [NAMES[k].removesuffix(" list") for k, _, _ in LISTS if LIST_URLS.get(k)]
+    return f"{on[0]} list" if len(on) == 1 else ", ".join(on[:-1]) + f" and {on[-1]} lists" if on else "no list"
 
 
 def clean_url(url):
@@ -107,9 +135,10 @@ def _day(ts):
         return None
 
 
-def slim(sim):
-    """One listing of Simplify's file, as data/intern/listings.json keeps it."""
-    return {"id": listing_id(sim["id"]), "simplify_id": str(sim["id"]), "company": str(sim.get("company_name") or "").strip(),
+def slim(sim, key="simplify"):
+    """One listing of a list's file, as data/intern/listings.json keeps it."""
+    return {"id": listing_id(sim["id"], PREFIXES[key]), "list": key, "list_id": str(sim["id"]),
+            "company": str(sim.get("company_name") or "").strip(),
             "title": str(sim.get("title") or "").strip(), "locations": [str(x) for x in sim.get("locations") or []],
             "url": clean_url(sim.get("url")), "category": str(sim.get("category") or ""),
             "degrees": [str(x) for x in sim.get("degrees") or []], "sponsorship": str(sim.get("sponsorship") or ""),
@@ -117,16 +146,25 @@ def slim(sim):
             "active": bool(sim.get("active")), "terms": [str(x) for x in sim.get("terms") or []]}
 
 
-def merge(listings, data, today=None):
-    """Simplify's file (a list) into our listings: ones for TERM that Simplify shows. A listing that Simplify closes or
+def in_term(sim, year=None):
+    """A listing for TERM: in its terms (Simplify's), or, on a list with no terms (vanshb03's), its season ("Summer",
+    "Spring/Summer") on a list for TERM's year (year: the one in the list's address)."""
+    if "terms" in sim:
+        return TERM in (sim.get("terms") or [])
+    season, term_year = TERM.split()[0].lower(), TERM.split()[-1]
+    return year == term_year and season in [s.strip().lower() for s in str(sim.get("season") or "").split("/")]
+
+
+def merge(listings, data, today=None, key="simplify", year=None):
+    """One list's file (a list) into our listings: ones for TERM that the list shows. A listing that its list closes or
     drops stays, marked inactive. Returns (listings, ids new and open, ids closed now)."""
     today = (today or date.today()).isoformat()
     out, new, closed, seen = dict(listings), [], [], set()
     for sim in data:
-        if not isinstance(sim, dict) or TERM not in (sim.get("terms") or []) or not sim.get("is_visible", True) \
+        if not isinstance(sim, dict) or not in_term(sim, year) or not sim.get("is_visible", True) \
                 or not sim.get("id") or not str(sim.get("url") or "").startswith(("https://", "http://")):
             continue
-        x = slim(sim)
+        x = slim(sim, key)
         old = out.get(x["id"])
         seen.add(x["id"])
         if old is None:
@@ -135,17 +173,122 @@ def merge(listings, data, today=None):
         elif old.get("active") and not x["active"]:
             closed.append(x["id"])
         out[x["id"]] = {**x, "first_seen": (old or {}).get("first_seen", today)}
+        if (old or {}).get("dup_of"):
+            out[x["id"]]["dup_of"] = old["dup_of"]
     for i, x in out.items():
-        if i not in seen and x.get("active"):  # no longer in the file at all
+        if i not in seen and x.get("active") and x.get("list", "simplify") == key:  # no longer in the file at all
             out[i] = {**x, "active": False, "gone": today}
             closed.append(i)
     return out, new, closed
 
 
+# ---------------------------------------------------------------- the same job on two lists
+
+JOB_PARAMS = {"gh_jid", "token", "for", "jr_id", "job", "jobid", "job_id", "jid", "id", "pid", "req", "reqid",
+              "jobcode", "career_job_req_id"}  # parts of a link's query that name the job (the rest: tracking, layout)
+COMPANY_SUFFIXES = {"inc", "llc", "ltd", "corp", "corporation", "co", "company", "plc", "lp", "llp", "the"}
+TITLE_WORDS = {"internship": "intern", "engineering": "engineer", "development": "developer"}
+
+
+def url_key(url):
+    """A posting link as compared across lists: no www, case, trailing /apply, locale (/en-US/) or tracking."""
+    u = urlparse(str(url or "").strip().lower())
+    p = re.sub(r"^/[a-z]{2}-[a-z]{2}(?=/)", "", re.sub(r"/(apply|application)$", "", u.path.rstrip("/")))
+    q = sorted((k, v) for k, v in parse_qsl(u.query) if k in JOB_PARAMS)
+    return u.netloc.removeprefix("www.") + p + ("?" + urlencode(q) if q else "")
+
+
+JOB_NUMBER_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|(?<![0-9a-z])\d{5,}(?![0-9a-z])")
+
+
+def job_number(url):
+    """The job's number in its link (the last 5+ digit number or id like 0f6a1b2c-1111-...), or "": the same posting
+    on two hosts (careers.example.com/jobs/91180?icims=1, careers.example.com/careers-home/jobs/91180) has the same one."""
+    found = JOB_NUMBER_RE.findall(url_key(url).split("/", 1)[-1])
+    return found[-1] if found else ""
+
+
+def words(text):
+    text = str(text or "").lower().replace("c++", "cpp").replace("c#", "csharp").replace("&", " and ")
+    return re.sub(r"[^a-z0-9]+", " ", text).split()
+
+
+def company_words(name):
+    return [w for w in words(name) if w not in COMPANY_SUFFIXES]
+
+
+def title_key(title):
+    """A title as compared across lists: no punctuation, season or year; "internship" = "intern", "engineering" =
+    "engineer"."""
+    return " ".join(TITLE_WORDS.get(w, w) for w in words(title)
+                    if w not in ("summer", "fall", "autumn", "winter", "spring") and not re.fullmatch(r"20\d\d", w))
+
+
+US_WIDE = re.compile(r"\b(united states|usa|us|remote)\b", re.I)
+
+
+def same_place(a, b):
+    """Two listings' places could be the same job's: a shared US state, or a place for the whole US ("United States",
+    "Remote in USA") or none given on one of them, or the same place abroad. Chicago and London: not the same."""
+    pa, pb = a["locations"], b["locations"]
+    sa, sb = set(states_of(pa)), set(states_of(pb))
+    if sa and sb:
+        return bool(sa & sb)
+    if not pa or not pb or any(US_WIDE.search(p) and not STATE_RE.search(p) for p in pa + pb):
+        return True
+    return not sa and not sb and bool({p.strip().lower() for p in pa} & {p.strip().lower() for p in pb})
+
+
+def same_company(a, b):
+    """"Acme Capital" = "Acme Capital University", "Acme" = "Acme, Inc.": one name's words start the other's."""
+    a, b = company_words(a), company_words(b)
+    n = min(len(a), len(b))
+    return n > 0 and a[:n] == b[:n]
+
+
+def mark_dupes(listings):
+    """Each job once: a listing that another list had first (seen earlier; on the same day the earlier list in LISTS)
+    gets dup_of = that listing's id, and rules() leaves it out. The same job = the same posting link or the same company
+    and job number in the link (another host), except a link or number that several titles on one list share (a careers
+    page, not a job); or the same company and title in the same place (same_place) while that listing is open (a closed one may be an old posting with the same title). Once a
+    duplicate, always: a stale copy never comes back when the first one closes. Returns (listings, duplicates)."""
+    out = {i: dict(x) for i, x in listings.items()}
+    order = {k: n for n, (k, _, _) in enumerate(LISTS)}
+    company = lambda x: " ".join(company_words(x["company"])[:1])  # noqa: E731  (same_company checks the rest)
+    keys = lambda x: [url_key(x["url"])] + ([(company(x), job_number(x["url"]))] if job_number(x["url"]) else [])  # noqa: E731
+    titles = {}
+    for x in out.values():
+        for k in keys(x):
+            titles.setdefault((x.get("list", "simplify"), k), set()).add(title_key(x["title"]))
+    shared = {k for (_, k), t in titles.items() if len(t) > 1}
+    by_key, by_title = {}, {}  # the first listings only: link or (company, number) -> ids; title -> ids
+    for x in sorted(out.values(), key=lambda x: (x.get("first_seen") or "", order.get(x.get("list", "simplify"), 99), x["id"])):
+        if x.get("dup_of") in out:
+            continue
+        mine, ks, t = x.get("list", "simplify"), [k for k in keys(x) if k not in shared], title_key(x["title"])
+        other = lambda i: out[i].get("list", "simplify") != mine  # noqa: E731
+        hit = next((i for k in ks for i in by_key.get(k, []) if other(i)
+                    and (isinstance(k, str) or same_company(out[i]["company"], x["company"]))), None)
+        if hit is None:
+            hit = next((i for i in by_title.get(t, []) if other(i) and out[i].get("active")
+                        and same_company(out[i]["company"], x["company"]) and same_place(out[i], x)), None)
+        if hit:
+            x["dup_of"] = hit
+        else:
+            x.pop("dup_of", None)
+            for k in ks:
+                by_key.setdefault(k, []).append(x["id"])
+            by_title.setdefault(t, []).append(x["id"])
+    return out, sum(1 for x in out.values() if x.get("dup_of"))
+
+
 def rules(listing):
-    """(keep, why): Simplify still lists it as open, and it is open to undergraduates (no degree listed = open)."""
+    """(keep, why): not a job another list had first, its list still shows it as open, and it is open to
+    undergraduates (no degree listed = open)."""
+    if listing.get("dup_of"):
+        return False, f"the same job as {listing['dup_of']} ({list_name(listing['dup_of'])})"
     if not listing.get("active"):
-        return False, "closed on Simplify's list"
+        return False, f"closed on {list_name(listing['id'])}"
     degrees = listing.get("degrees") or []
     if degrees and not any("bachelor" in d.lower() for d in degrees):
         return False, f"degree {'/'.join(degrees)}"
@@ -173,7 +316,7 @@ def details_of(listing, got, today=None):
     """A read posting in the shape of a NUworks job's details (jobs.py's rules, viewers and model read these keys)."""
     places = listing["locations"] or ([got["location"]] if got.get("location") else [])
     return {"id": listing["id"], "title": listing["title"], "company": listing["company"], "url": listing["url"],
-            "source": "simplify", "how": got["how"], "position_types": ["Internship"], "term": [TERM], "lengths": [],
+            "source": "simplify", "list": listing.get("list", "simplify"), "how": got["how"], "position_types": ["Internship"], "term": [TERM], "lengths": [],
             "class_levels": [], "degree_levels": listing["degrees"], "majors": [], "states": states_of(places),
             "location": "; ".join(places), "skills": [], "experience": [],
             "function": [listing["category"]] if listing["category"] else [], "pay": got.get("pay") or "",
@@ -196,34 +339,69 @@ def prompt_fields():
 
 # ---------------------------------------------------------------- 1. the list
 
+def download(url, src, log, name):
+    """A list's file, or None when it had not changed since src's ETag (src is updated in place)."""
+    req = urllib.request.Request(url, headers={"User-Agent": "NUauto (internship list check)"})
+    if src.get("etag") and src.get("url", url) == url:
+        req.add_header("If-None-Match", src["etag"])
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            body, etag = r.read(), r.headers.get("ETag")
+    except urllib.error.HTTPError as e:
+        if e.code != 304:
+            raise
+        log(f"{name}: unchanged")
+        return None
+    data = json.loads(body)
+    if not isinstance(data, list):
+        raise ValueError(f"not a list of listings ({type(data).__name__})")
+    src.update(etag=etag, url=url, changed=datetime.now().isoformat(timespec="minutes"))
+    return data
+
+
 def refresh(log=print):
-    """Download Simplify's file when it changed (the server says so: ETag), merge it. Returns (new, closed) ids, or
-    None when it had not changed."""
+    """Download each list when it changed (the server says so: ETag), merge it, then mark the jobs another list had
+    first. A list that can't be read now is skipped (the others still count). Returns (new, closed) ids (duplicates
+    left out), or None when no list had changed."""
     src = load("source.json", {})
-    if config.DEMO:  # demo mode: a local file, never the network
-        with open(path("demo_listings.json")) as f:
-            data, src = json.load(f), {}
-    else:
-        req = urllib.request.Request(SETTINGS["source"], headers={"User-Agent": "NUauto (internship list check)"})
-        if src.get("etag"):
-            req.add_header("If-None-Match", src["etag"])
+    if "etag" in src or "checked" in src:  # before there were two lists it was Simplify's alone
+        src = {"simplify": src}
+    listings, new, closed, got = load("listings.json", {}), {}, {}, False
+    for key, name, _ in LISTS:
+        url, s = LIST_URLS.get(key), dict(src.get(key) or {})
+        if not url:
+            continue
         try:
-            with urllib.request.urlopen(req, timeout=120) as r:
-                body, etag = r.read(), r.headers.get("ETag")
-        except urllib.error.HTTPError as e:
-            if e.code != 304:
-                raise
-            save("source.json", {**src, "checked": datetime.now().isoformat(timespec="minutes")})
-            log("internship list: unchanged")
-            return None
-        data = json.loads(body)
-        src = {"etag": etag, "changed": datetime.now().isoformat(timespec="minutes")}
-    listings, new, closed = merge(load("listings.json", {}), data)
-    save("listings.json", listings)
-    save("source.json", {**src, "checked": datetime.now().isoformat(timespec="minutes")})
-    log(f"internship list: {sum(1 for x in listings.values() if x['active'])} open for {TERM}, {len(new)} new, "
-        f"{len(closed)} closed")
-    return new, closed
+            if config.DEMO:  # demo mode: a local file, never the network (Simplify's list only)
+                if key != "simplify":
+                    continue
+                with open(path("demo_listings.json")) as f:
+                    data = json.load(f)
+            else:
+                data = download(url, s, log, name)
+        except Exception as e:
+            log(f"{name}: could not check it ({type(e).__name__}: {str(e)[:120]})")
+            continue
+        finally:
+            src[key] = {**s, "checked": datetime.now().isoformat(timespec="minutes")}
+        if data is None:
+            continue
+        year = re.search(r"20\d\d", url)
+        listings, new[key], closed[key] = merge(listings, data, key=key, year=year and year.group())
+        got = True
+    if got:
+        listings, _ = mark_dupes(listings)
+        save("listings.json", listings)
+    save("source.json", src)
+    if not got:
+        return None
+    first = lambda ids: [i for i in ids if not listings[i].get("dup_of")]  # noqa: E731
+    for key in new:
+        mine = [x for x in listings.values() if x.get("list", "simplify") == key and x["active"]]
+        dups = sum(1 for x in mine if x.get("dup_of"))
+        log(f"{NAMES[key]}: {len(mine) - dups} open for {TERM}" + (f" (and {dups} another list had first)" if dups else "")
+            + f", {len(first(new[key]))} new, {len(first(closed[key]))} closed")
+    return [i for v in new.values() for i in first(v)], [i for v in closed.values() for i in first(v)]
 
 
 # ---------------------------------------------------------------- 2. triage (titles)
@@ -467,6 +645,7 @@ def pool_entry(listing, d, score, cat, threshold, flags, today=None):
     e = jobs.pool_entry(listing["id"], d, score, cat, threshold, flags)
     e["flags"] = [f for f in e["flags"] if f != "apply on company site too?"]  # it IS on the company site
     e.update(source="simplify", url=listing["url"], posted=listing.get("posted"), year_text=score.get("year_text") or "")
+    # (source "simplify" = an internship, whichever list it is from: the GUI and jobs.py tell them from co-ops by it)
     return e
 
 
@@ -591,7 +770,7 @@ def details_for(r):
 def job_view(r, d, today=None):
     """One internship for the GUI's Review card: jobs.job_view plus where it is from (the posting's own link)."""
     listing = load("listings.json", {}).get(r["id"]) or {}
-    extra = {"source": "simplify", "url": r["url"], "posted_text": posted_text(listing, today),
+    extra = {"source": "simplify", "url": r["url"], "posted_text": f"{posted_text(listing, today)} ({list_name(r['id'])})",
              "year_text": r.get("year_text") or "", "unread": bool(r.get("unread")),
              "external": None}  # the posting IS the company's site: no "also apply there" hint
     if r.get("unread"):
@@ -606,10 +785,11 @@ def job_view(r, d, today=None):
 
 def sheet_item(r):
     """A queue entry as a new Other jobs tab row."""
+    note = f"{TERM} internship ({list_name(r['id'])})"
     if r.get("unread"):
-        notes = f"{SITE_NOTE}; not scored (the posting could not be read)"
+        notes = f"{note}; not scored (the posting could not be read)"
     else:
-        notes = f"{SITE_NOTE}; " + jobs.sheet_item(r)["notes"]
+        notes = f"{note}; " + jobs.sheet_item(r)["notes"]
     return {"url": r["url"], "company": r["company"], "title": r["title"], "notes": notes}
 
 
@@ -698,7 +878,7 @@ def update():
 
 
 def closed_notice(closed, daily):
-    """Internships you approved that Simplify's list now shows as closed: a message, so no assistant run is spent on
+    """Internships you approved that their list now shows as closed: a message, so no assistant run is spent on
     one. The sheet is only read."""
     listings = load("listings.json", {})
     urls = {listings[i]["url"]: listings[i] for i in closed if i in listings}
@@ -708,7 +888,8 @@ def closed_notice(closed, daily):
         daily.log(f"closed internships: could not read the sheet ({type(e).__name__})")
         return
     if rows:
-        daily.notify(f"{len(rows)} approved internship{'s' if len(rows) > 1 else ''} closed on Simplify's list",
+        daily.notify(f"{len(rows)} approved internship{'s' if len(rows) > 1 else ''} closed on "
+                     + (list_name(urls[clean_url(rows[0].url)]["id"]) if len(rows) == 1 else "their lists"),
                      "\n".join(f"Other jobs row {r.number}: {r.title[:40]} | {r.company[:22]}" for r in rows)
                      + "\nCheck the posting before starting the assistant (or remove the row on the Sheet screen).")
 
@@ -718,7 +899,7 @@ def summary(now=None, hours=24):
     now = now or datetime.now()
     recent = [s for s in load("scans.json", []) if now - datetime.fromisoformat(s["time"]) <= timedelta(hours=hours)]
     listed, pooled = sum(s["listed"] for s in recent), sum(s["pool"] for s in recent)
-    return (f"Internships ({TERM}): {listed} new on Simplify's list, {pooled} made your pool"
+    return (f"Internships ({TERM}): {listed} new on {lists_text()}, {pooled} made your pool"
             + (" (Review > Summer internships)" if pooled else ""))
 
 
@@ -728,11 +909,18 @@ def stats():
     open_ = [i for i, x in listings.items() if rules(x)[0]]
     kept = [i for i in open_ if (triage.get(i) or {}).get("keep")]
     src = load("source.json", {})
+    src = {"simplify": src} if "checked" in src else src  # (before there were two lists)
+    checked = min((v.get("checked", "never") for v in src.values()), default="never")
     print(f"{TERM}: {len(listings)} listed ({len(open_)} open to you) | triaged {sum(i in triage for i in open_)} "
           f"(kept {len(kept)}) | postings read {sum(i in details for i in kept)}, waiting "
           f"{sum(i not in details and not unreadable(failed, i) for i in kept)}, unreadable "
           f"{sum(unreadable(failed, i) for i in kept)} | scored {sum(i in scores for i in kept)} | pool "
-          f"{len(load('pool.json', []))} | list checked {src.get('checked', 'never')}")
+          f"{len(load('pool.json', []))} | lists checked {checked}")
+    for key, name, _ in LISTS:
+        mine = [x for x in listings.values() if x.get("list", "simplify") == key and x.get("active")]
+        if mine or LIST_URLS.get(key):
+            dups = sum(1 for x in mine if x.get("dup_of"))
+            print(f"{name}: {len(mine)} open, {dups} of them another list had first")
     hows = {}
     for d in details.values():
         hows[d.get("how")] = hows.get(d.get("how"), 0) + 1

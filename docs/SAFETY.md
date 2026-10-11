@@ -5,7 +5,7 @@ Paths below are in src/nuauto/ unless a folder is given.
 
 BATCH CLAUDE (daily.run_claude: triage, score, category for NUworks and internships)
 - Runs in work/, reads and edits only there (Read(./**), Edit(./**); never a bare Write, which allows every path);
-  no shell, web or MCP tools; -p refuses anything else. The batches hold web text (postings, Simplify's list) | daily.run_claude |
+  no shell, web or MCP tools; -p refuses anything else. The batches hold web text (postings, the internship lists) | daily.run_claude |
   test_daily (the command); a real call: writes in work/ work, /tmp and /etc refused (2026-10-10, by hand)
 - Internship imports keep the good rows (a mis-copied id or a failed batch is retried next run; nothing usable stops
   the step) | jobs.read_outputs(lenient), intern.take | test_intern

@@ -72,7 +72,7 @@ def run_claude(prompt_file, batch_file, extra=None):
               "can be read or written.")
     log(f"claude: {name}")
     os.makedirs(w, exist_ok=True)
-    # Shut in work/: the batches hold text from the web (job postings, Simplify's list), so what a posting says can
+    # Shut in work/: the batches hold text from the web (job postings, the internship lists), so what a posting says can
     # never make this session read or write anything else (local/ with your logins, the code, your home). It runs
     # in work/, reads and edits only there (Edit rules cover Write; acceptEdits stays inside the working folder; in
     # -p mode anything that would need a prompt is refused), and has no shell, web or MCP tools.

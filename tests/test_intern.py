@@ -229,6 +229,138 @@ assert new2 == [] and closed2 == [ID(1)] and again[ID(1)]["first_seen"] == TODAY
 gone, _, closed3 = intern.merge(listings, raw[5:], TODAY)  # 1 dropped from the file entirely
 assert ID(1) in closed3 and gone[ID(1)]["active"] is False and gone[ID(1)]["gone"]
 assert "rising junior" in intern.standing() and "2029" in intern.standing()
+
+# ---------------------------------------------------------------- vanshb03's list: a season, not terms; the same job on two lists
+assert set(intern.LIST_URLS) == {"simplify", "vansh"} and all(intern.LIST_URLS.values())
+assert intern.lists_text() == "Simplify's and vanshb03's lists"
+
+
+def van(n, title="Firmware Intern", season="Summer", active=True, url=None, places=("Boston, MA",), company=None):
+    ts = int((date.today() - timedelta(days=2)).strftime("%s"))
+    return {"id": f"10000000-0000-4000-8000-{n:012d}", "company_name": company or f"Co{n}", "title": title,
+            "season": season, "active": active, "is_visible": True, "url": url or f"https://jobs.example.org/v{n}",
+            "locations": list(places), "sponsorship": "Other", "date_posted": ts, "date_updated": ts, "source": "vanshb03",
+            "company_url": ""}
+
+
+VID = lambda n: intern.listing_id(f"10000000-0000-4000-8000-{n:012d}", "sv")  # noqa: E731
+assert VID(1).startswith("sv") and intern.list_of(VID(1)) == "vansh" and intern.list_of(ID(1)) == "simplify"
+assert intern.list_name(VID(1)) == "vanshb03's list"
+assert intern.in_term(van(1), "2027") and intern.in_term(van(1, season="Spring/Summer"), "2027")
+assert not intern.in_term(van(1), "2026") and not intern.in_term(van(1), None) and not intern.in_term(van(1, season="Fall"), "2027")
+assert intern.in_term(sim(1), None) and not intern.in_term(sim(1, term="Fall 2027"), "2027")  # a list with terms: its terms
+K = intern.url_key
+assert K("https://www.Example.com/en-US/jobs/123/apply?utm_source=x&source=Indeed&gh_jid=9") == K("https://example.com/jobs/123?gh_jid=9")
+assert K("https://x.com/jobs?token=1") != K("https://x.com/jobs?token=2")
+assert intern.job_number("https://careers.amd.com/careers-home/jobs/91180") == intern.job_number("https://careers.amd.com/jobs/91180?icims=1") == "91180"
+assert intern.job_number("https://job-boards.greenhouse.io/embed/job_app?for=acme&token=8489233002") == "8489233002"
+assert intern.job_number("https://x.com/careers/firmware-intern-summer-2027") == ""
+assert intern.job_number("https://acme.wd1.myworkdayjobs.com/Careers/job/Austin/Intern_R123456") == ""  # a letter before: not one
+T = intern.title_key
+assert T("Software Engineering Internship - Summer 2027 (C++)") == T("Software Engineer Intern, C++") != T("Software Engineer Intern, C#")
+assert intern.same_company("Akuna Capital", "Akuna Capital University") and intern.same_company("Acme, Inc.", "acme")
+assert not intern.same_company("Capital One", "Capital Group") and not intern.same_company("", "Acme")
+P = lambda *places: {"locations": list(places)}  # noqa: E731
+assert not intern.same_place(P("Chicago, IL"), P("London, UK")) and not intern.same_place(P("Austin, TX"), P("Boston, MA"))
+assert intern.same_place(P("Bala Cynwyd, PA"), P("United States")) and intern.same_place(P("Cary, United States"), P("Cary, NC"))
+assert intern.same_place(P(), P("London, UK")) and intern.same_place(P("London, UK"), P("london, uk"))
+assert intern.same_place(P("NYC", "SF"), P("San Francisco, CA"))
+
+D0, D1 = TODAY, TODAY + timedelta(days=1)
+s_raw = [sim(21, title="Embedded Software Intern", url="https://boards.greenhouse.io/co21/jobs/5550001"),
+         sim(22, title="Hardware Intern", url="https://careers.example.com/jobs/77777?icims=1"),
+         sim(23, title="Test Intern", places=("Austin, TX",)), sim(24, title="Old Intern", active=False),
+         sim(25, title="Firmware Intern", url="https://careers.example.net/open-roles"),
+         sim(26, title="Data Intern", url="https://careers.example.net/open-roles")]
+for x in s_raw[5:]:
+    x["company_name"] = "Co25"
+v_raw = [van(1, title="Embedded SW Intern", company="Co21 Inc", url="https://www.boards.greenhouse.io/co21/jobs/5550001/apply?utm_source=v"),
+         van(2, title="Hardware Engineering Intern", company="Co22", url="https://careers.example.com/careers-home/jobs/77777"),
+         van(3, title="Test Internship", company="Co23", places=("Austin, TX",)),
+         van(4, title="Test Intern", company="Co23", places=("London, UK",)),
+         van(5, title="Old Intern", company="Co24"),
+         van(6, title="Product Intern", company="Co25", url="https://careers.example.net/open-roles"),
+         van(7, title="Embedded Software Intern", company="Other Co"),
+         van(8, title="Firmware Intern", season="Fall"),
+         van(9, title="Robotics Intern", company="Co30", url="https://jobs.example.org/robotics-30")]
+two, s_new, _ = intern.merge({}, s_raw, D0)
+two, v_new, _ = intern.merge(two, v_raw, D0, key="vansh", year="2027")
+assert VID(8) not in two and len(v_new) == 8 and two[VID(1)]["list"] == "vansh" and two[VID(1)]["list_id"].startswith("10000000")
+assert all(two[ID(n)]["active"] == (n != 24) for n in range(21, 27))  # vanshb03's file doesn't close Simplify's listings
+two, n_dups = intern.mark_dupes(two)
+dup = {i: x.get("dup_of") for i, x in two.items() if x.get("dup_of")}
+assert dup == {VID(1): ID(21), VID(2): ID(22), VID(3): ID(23)} and n_dups == 3, dup  # link, number on another host, title
+# kept: the same title in London, a closed one's title (maybe an old posting), a careers page several titles share, another company
+assert intern.rules(two[VID(1)]) == (False, f"the same job as {ID(21)} (Simplify's list)")
+assert intern.rules(two[VID(4)])[0] and intern.rules(two[VID(5)])[0] and intern.rules(two[VID(6)])[0] and intern.rules(two[VID(7)])[0]
+assert intern.rules({**two[VID(9)], "active": False}) == (False, "closed on vanshb03's list")
+# seen first on vanshb03's list: Simplify's copy (a day later) is the duplicate
+later, _, _ = intern.merge(two, s_raw + [sim(31, title="Robotics Intern", url="https://jobs.example.org/robotics-30/")], D1)
+later[ID(31)]["company"] = "Co30"
+later, _ = intern.mark_dupes(later)
+assert later[ID(31)]["dup_of"] == VID(9) and not later[VID(9)].get("dup_of")
+# once a duplicate, always: Simplify closes 23, vanshb03's copy stays out; merging the list again keeps the mark
+later, _, _ = intern.merge(later, s_raw[:2] + [sim(23, title="Test Intern", places=("Austin, TX",), active=False)] + s_raw[3:], D1)
+later, _, _ = intern.merge(later, v_raw[1:], D1, key="vansh", year="2027")  # v1 dropped from its file
+later, _ = intern.mark_dupes(later)
+assert later[VID(3)]["dup_of"] == ID(23) and later[VID(1)]["dup_of"] == ID(21) and later[VID(1)]["active"] is False
+assert later[ID(21)]["active"] and later[ID(23)]["active"] is False
+
+# refresh: both lists from a local server (ETag), duplicates left out of "new", a list that fails doesn't stop the other
+FILES, ASKED = {}, []
+
+
+class Lists(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        ASKED.append((self.path, self.headers.get("If-None-Match")))
+        if self.path not in FILES:
+            self.send_response(404)
+            self.end_headers()
+            return
+        tag = f'"{self.path}-{len(FILES[self.path])}"'
+        if self.headers.get("If-None-Match") == tag:
+            self.send_response(304)
+            self.end_headers()
+            return
+        body = json.dumps(FILES[self.path]).encode()
+        self.send_response(200)
+        self.send_header("ETag", tag)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *a):
+        pass
+
+
+lsrv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Lists)
+threading.Thread(target=lsrv.serve_forever, daemon=True).start()
+lbase = f"http://127.0.0.1:{lsrv.server_port}"
+real_urls = intern.LIST_URLS
+intern.LIST_URLS = {"simplify": lbase + "/simplify.json", "vansh": lbase + "/Summer2027/vansh.json"}
+FILES.update({"/simplify.json": s_raw, "/Summer2027/vansh.json": v_raw})
+intern.save("source.json", {"etag": '"old"', "changed": "2026-10-10T08:00", "checked": "2026-10-10T08:00"})  # Simplify's only
+logged = []
+got_new, got_closed = intern.refresh(logged.append)
+assert ASKED[0] == ("/simplify.json", '"old"') and ASKED[1] == ("/Summer2027/vansh.json", None), ASKED  # the old ETag is Simplify's
+assert set(got_new) == {ID(n) for n in (21, 22, 23, 25, 26)} | {VID(n) for n in (4, 5, 6, 7, 9)} and got_closed == [], got_new
+src = intern.load("source.json", {})
+assert set(src) == {"simplify", "vansh"} and src["vansh"]["etag"] and src["vansh"]["url"] == intern.LIST_URLS["vansh"], src
+assert any(m.startswith("vanshb03's list: 5 open for Summer 2027 (and 3 another list had first), 5 new") for m in logged), logged
+assert intern.refresh(logged.append) is None and logged[-1] == "vanshb03's list: unchanged"  # both unchanged
+del FILES["/Summer2027/vansh.json"]
+FILES["/simplify.json"] = s_raw + [sim(27, title="Security Intern")]
+got_new, _ = intern.refresh(logged.append)
+assert got_new == [ID(27)] and any(m.startswith("vanshb03's list: could not check it (HTTPError") for m in logged), logged
+assert intern.load("listings.json", {})[VID(4)]["active"]  # a list that can't be read closes nothing
+intern.LIST_URLS["vansh"] = lbase + "/Summer2026/vansh.json"  # another year's list: no season counts
+FILES["/Summer2026/vansh.json"] = [van(40)]
+intern.refresh(logged.append)
+assert VID(40) not in intern.load("listings.json", {})
+lsrv.shutdown()
+intern.LIST_URLS = real_urls
+for name in ("listings.json", "source.json"):
+    os.remove(intern.path(name))
 for name in ("INTERN_TRIAGE_PROMPT.md", "INTERN_SCORE_PROMPT.md"):
     with open(jobs.render_prompt(name, intern.prompt_fields())) as f:
         text = f.read()
@@ -415,7 +547,7 @@ todo, _ = intern.review_queue("rate", {}, [])
 assert [r["id"] for r in todo] == [ID(6)]  # rate: scored ones only
 view = intern.job_view(todo[0], intern.details_for(todo[0]))
 assert view["url"] == "https://jobs.example.com/6" and view["source"] == "simplify" and view["external"] is None
-assert view["posted_text"] == "posted 2 days ago" and view["match"] == 62
+assert view["posted_text"] == "posted 2 days ago (Simplify's list)" and view["match"] == 62
 unread = [r for r in intern.review_queue("approve", {}, [])[0] if r.get("unread")][0]
 uv = intern.job_view(unread, intern.details_for(unread))
 assert uv["match"] is None and uv["unread"] and uv["description"] == [] and "could not be read" in uv["score"]
@@ -439,7 +571,7 @@ jobs.load_details = real_load
 intern.save("scans.json", [{"time": "2026-10-10T06:00", "listed": 4, "pool": 1}, {"time": "2026-10-08T06:00", "listed": 9, "pool": 9}])
 from datetime import datetime  # noqa: E402
 assert intern.summary(datetime(2026, 10, 10, 8, 0)) == \
-    "Internships (Summer 2027): 4 new on Simplify's list, 1 made your pool (Review > Summer internships)"
+    "Internships (Summer 2027): 4 new on Simplify's and vanshb03's lists, 1 made your pool (Review > Summer internships)"
 intern.stats()
 
 # the whole update, Claude's calls stood in for, the list read from the demo file
