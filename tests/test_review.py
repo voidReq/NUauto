@@ -156,6 +156,9 @@ try:
     assert review.device(KEY)["name"] == "Phone"
     assert req("POST", "/pair", form={"c": code, "name": "Phone"})[0] == 403 and device_count() == 1   # used up
     assert "Not paired" in text(req("POST", "/pair", form={"c": code}))
+    for m in ("GET", "POST"):  # an old pairing link opened again on a paired device: straight to the page
+        r = req(m, f"/pair?c={code}", cookie=KEY) if m == "GET" else req(m, "/pair", form={"c": code}, cookie=KEY)
+        assert r[0] == 303 and r[1]["location"] == "/" and device_count() == 1, (m, r[0])
 
     # headers on every answer
     for r in (req("GET", "/", cookie=KEY), req("GET", "/"), req("GET", "/pair?c=x"), req("GET", "/poll.js")):
@@ -176,6 +179,9 @@ try:
     # the session page: what it will do, the message (escaped)
     r = req("GET", "/s/1", cookie=KEY)
     page = text(r)
+    # like a chat: the terminal, then the latest message, then the reply box at the very bottom; opens at the Submit
+    assert page.index("Its terminal") < page.index("Its latest message") < page.index("id=reply")
+    assert page.index("Ready to submit") < page.index("Its terminal") and "data-scroll='approve'" in page
     assert r[0] == 200 and "Ready to submit" in page and "click &#x27;Submit&#x27;" in page and "https://acme.example/apply" in page
     assert "guesses: Graduation = May 2029" in page and "Approve: submit" in page and "Decline" in page
     assert EVIL not in page and "&lt;script&gt;alert(1)&lt;/script&gt;" in page, "the agent's message is escaped"

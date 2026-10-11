@@ -208,6 +208,10 @@ class Screen:
                     os.killpg(p.pid, signal.SIGKILL)
                 except OSError:
                     pass
+                try:
+                    p.wait(timeout=5)  # reaped, so nothing is left behind
+                except subprocess.TimeoutExpired:
+                    pass
         self.procs = []
         for path in (os.path.join(self.run_dir, "vnc.pass"), os.path.join(self.run_dir, VIEW_FILE), _pids_path(self.slot),
                      frame_path(self.run_dir)):

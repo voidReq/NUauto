@@ -299,7 +299,8 @@ img{max-width:100%;border:1px solid #ccc;border-radius:.3rem}.dim{color:#777;fon
 @media (prefers-color-scheme:dark){body{background:#151515;color:#eee}.card{background:#1f1f1f;border-color:#333}
 pre{background:#262626}.chip{background:#333}.approve{background:#5a1f1d}.waiting{background:#4d3f0d}.finish{background:#1e4227}a{color:#7ab4ff}}"""
 
-POLL_JS = """const v = document.body.dataset.v, u = document.body.dataset.poll;
+POLL_JS = """const v = document.body.dataset.v, u = document.body.dataset.poll, at = document.body.dataset.scroll;
+if (at && document.getElementById(at)) document.getElementById(at).scrollIntoView({block: at === "reply" ? "end" : "start"});
 if (u) setInterval(async () => {
   if ([...document.querySelectorAll("textarea,input[type=text]")].some(e => e.value)) return;
   try { const r = await fetch(u, {cache: "no-store"}); if (r.ok && (await r.text()).trim() !== v) location.reload(); } catch (e) {}
@@ -310,10 +311,11 @@ def esc(x):
     return html.escape(str(x or ""))
 
 
-def layout(title, body, v="", poll=""):
+def layout(title, body, v="", poll="", scroll=""):
     return (f"<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
             f"<meta name=robots content=noindex><title>{esc(title)}</title><style>{CSS}</style>"
-            f"<body data-v='{esc(v)}' data-poll='{esc(poll)}'>{body}<script src='/poll.js'></script></body>")
+            f"<body data-v='{esc(v)}' data-poll='{esc(poll)}' data-scroll='{esc(scroll)}'>{body}"
+            "<script src='/poll.js'></script></body>")
 
 
 def form(action, token, inner, **hidden):
@@ -355,12 +357,16 @@ def index_page(token):
 
 
 def session_page(s, token, flash=""):
+    """Read like a chat: what needs a decision first (the end of the session, a Submit), then the browser and the
+    terminal, then its latest message with the reply box right under it, at the bottom (the page opens there)."""
     st, a, word = s["state"], s["approval"], status(s)[0]
     slot = s["slot"]
+    chat = word not in ("finish", "prompt")
+    note = f"<div class=card><b>{esc(flash)}</b></div>" if flash else ""
     parts = [f"<p><a href='/'>&larr; all</a></p><h2>{esc(st.get('company'))}</h2>"
              f"<div class=dim>{esc(st.get('job_title'))} | {esc(st.get('where'))} | slot {slot}</div>"]
-    if flash:
-        parts.append(f"<div class=card><b>{esc(flash)}</b></div>")
+    if note and not chat:
+        parts.append(note)
     if word == "finish":
         parts.append("<div class='card finish'><b>The session ended. Did you approve Submit and did the site confirm "
                      "the application?</b><p class=dim>Yes marks the row Applied (dated today).</p>"
@@ -369,8 +375,8 @@ def session_page(s, token, flash=""):
     if a:
         late = "" if a.get("waiting") else ("<p class=dim>The assistant stopped waiting for this; Approve tells it to "
                                             "do it now (good for 10 minutes, this action on this page only).</p>")
-        parts.append(f"<div class='card approve'><b>Ready to submit</b><p>It wants to <b>{esc(a.get('what'))}</b><br>"
-                     f"<span class=dim>on {esc(a.get('url'))}</span></p><pre>{esc(a.get('why'))}</pre>"
+        parts.append(f"<div class='card approve' id=approve><b>Ready to submit</b><p>It wants to <b>{esc(a.get('what'))}</b>"
+                     f"<br><span class=dim>on {esc(a.get('url'))}</span></p><pre>{esc(a.get('why'))}</pre>"
                      + (f"<img src='/s/{slot}/shot.png?a={esc(a['id'])}' alt='the screen when it asked'>"
                         if os.path.exists(os.path.join(s["run"], "approval.png")) else "")
                      + late + form(f"/s/{slot}/approve", token,
@@ -382,13 +388,6 @@ def session_page(s, token, flash=""):
                      "question, not a Submit of the guard's). The reply box is off until it is answered, because Enter "
                      "would pick its first option. Answer it in the terminal: "
                      f"<code>ssh -t homelab tmux attach -t {esc(st.get('tmux') or '?')}</code></div>")
-    if s["message"] and word != "finish":
-        parts.append(f"<div class='card {'waiting' if word == 'waiting' else ''}'><b>Its last message</b>"
-                     f"<pre>{esc(s['message'])}</pre></div>")
-    if word not in ("finish", "prompt"):
-        parts.append("<div class=card><b>Reply</b> <span class=dim>(typed into its terminal)</span>"
-                     + form(f"/s/{slot}/reply", token, "<textarea name=text rows=4 maxlength=4000></textarea>"
-                            "<button>Send</button>") + "</div>")
     view = s["view"]
     if view.get("url"):
         parts.append(f"<div class=card><b>The browser</b> <span class=dim>(captchas: you solve them here, then reply "
@@ -398,12 +397,24 @@ def session_page(s, token, flash=""):
     parts.append(f"<div class=card><b>Its terminal</b><pre>{esc(terminal(s)) or '(not readable)'}</pre>"
                  + form(f"/s/{slot}/key", token, "<button class=no name=k value=interrupt>Interrupt (Esc)</button>"
                         "<button class=no name=k value=exit>End session (/exit)</button>") + "</div>")
-    return layout(f"NUauto: {st.get('company') or 'assistant'}", "".join(parts), version(s), f"/s/{slot}/v")
+    if s["message"] and word != "finish":
+        parts.append(f"<div class='card {'waiting' if word == 'waiting' else ''}'><b>Its latest message</b>"
+                     f"<pre>{esc(s['message'])}</pre></div>")
+    if chat:
+        parts.append(note + "<div class=card id=reply><b>Reply</b> <span class=dim>(typed into its terminal)</span>"
+                     + form(f"/s/{slot}/reply", token, "<textarea name=text rows=4 maxlength=4000></textarea>"
+                            "<button>Send</button>") + "</div>")
+    # open at what wants you: a Submit question, else the reply box at the bottom
+    return layout(f"NUauto: {st.get('company') or 'assistant'}", "".join(parts), version(s), f"/s/{slot}/v",
+                  scroll="approve" if a else "reply" if chat else "")
 
 
 def pair_page(code, done=None):
     if done is True:
-        return layout("Paired", "<h2>Paired</h2><p>This device can use the review page now.</p><p><a href='/'>Open it</a></p>")
+        home = page_url()
+        return layout("Paired", f"<h2>Paired</h2><p>This device can use the review page now. The pairing link was "
+                      f"for once; to come back, open <a href='/'>{esc(home)}</a> (bookmark it, or Add to Home Screen). "
+                      "Discord's messages link there too.</p><p><a href='/'>Open it</a></p>")
     if done is False:
         return layout("Not paired", "<h2>Not paired</h2><p>That link is used up or expired. Make a new one: "
                       "<code>nuauto review pair</code></p>")
@@ -477,9 +488,9 @@ class Handler(BaseHTTPRequestHandler):
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
         if u.path == "/poll.js":
             return self._send(200, POLL_JS, "text/javascript")
-        if u.path == "/pair":
-            return self._send(200, pair_page(q.get("c", "")))
         key, dev = self._who()
+        if u.path == "/pair":  # already paired (an old pairing link opened again): straight to the page
+            return self._redirect("/") if dev else self._send(200, pair_page(q.get("c", "")))
         if not dev:
             return self._send(403, layout("Not paired", "<h2>Not paired</h2><p>This device is not paired with NUauto. "
                                           "On the laptop: <code>nuauto review pair</code>, then open its link here.</p>"))
@@ -521,6 +532,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, "Not allowed.", "text/plain")
         f = self._form()
         if u.path == "/pair":
+            if dev:
+                return self._redirect("/")
             key = pair(f.get("c", ""), f.get("name", ""))
             if not key:
                 return self._send(403, pair_page("", False))
