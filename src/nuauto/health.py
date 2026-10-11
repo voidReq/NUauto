@@ -283,6 +283,35 @@ def discord():
     return [check("discord", "Discord", OK, "Webhook works.")]
 
 
+def bitwarden():
+    """Your password manager (local_config "password_manager": "bitwarden"; optional, off by default): Bitwarden's command
+    line there and logged in, and how many logins NUauto made still wait to go into your vault. Never unlocks it (its
+    "unlocked" belongs to the terminal you unlocked it in, so locked is fine here)."""
+    if (config.LOCAL.get("password_manager") or "") != "bitwarden":
+        return [check("bitwarden", "Bitwarden", OFF, "Not used (optional: Settings, Password manager).")]
+    from nuauto import accounts
+    waiting = accounts.waiting()
+    exe = None if config.DEMO else (shutil.which("bw") or config.tool_path("bw"))  # demo: never your real Bitwarden
+    if not exe:
+        return [check("bitwarden", "Bitwarden", WARN, "Bitwarden's command line (bw) is not installed: NUauto adds its "
+                      "logins to your vault with it.", ("bitwarden_install", "Install it"))]
+    try:
+        r = subprocess.run([exe, "status", "--nointeraction"], capture_output=True, text=True, timeout=60)
+        status = json.loads(r.stdout or "{}").get("status")
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        status = None
+    if status == "unauthenticated":
+        return [check("bitwarden", "Bitwarden", WARN, "Bitwarden's command line is not logged in.",
+                      ("bitwarden_login", "Log in"))]
+    if status not in ("locked", "unlocked"):
+        return [check("bitwarden", "Bitwarden", WARN, "Bitwarden's command line gave no answer (bw status).")]
+    if waiting:
+        return [check("bitwarden", "Bitwarden", WARN, f"{waiting} login{'s' if waiting != 1 else ''} NUauto made "
+                      f"{'wait' if waiting != 1 else 'waits'} to go into your vault.",
+                      ("bitwarden_add", f"Add {waiting} to Bitwarden"))]
+    return [check("bitwarden", "Bitwarden", OK, "Logged in; every login NUauto made is in your vault.")]
+
+
 def homelab():
     if not config.HAS_SERVER or config.IS_SERVER:
         return [check("homelab", "Homelab", OFF, "Not used (everything runs on this machine).")]
@@ -374,7 +403,7 @@ def nuworks():
 
 
 QUICK = {"files": files, "resume": resume, "google": google, "nuworks_saved": nuworks_saved, "updates": updates}
-LIGHT = {"sheet": sheet_live, "claude": claude, "firefox": firefox, "discord": discord, "homelab": homelab,
+LIGHT = {"sheet": sheet_live, "claude": claude, "firefox": firefox, "discord": discord, "homelab": homelab, "bitwarden": bitwarden,
          "app_update": app_update}
 HEAVY = {"nuworks": nuworks, "claude_live": claude_live}
 ALL = {**QUICK, **LIGHT, **HEAVY}

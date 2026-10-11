@@ -190,9 +190,90 @@ if onboard.scheduler_kind():
 # the steps on a fresh start: everything to do but the tools
 config.SHEET_ID = ""
 steps = {s["id"]: s for s in onboard.steps({})}
-assert list(steps) == ["welcome", "tools", "google_client", "google_login", "sheet", "resume", "nuworks", "preferences", "extras"]
+assert list(steps) == ["welcome", "tools", "google_client", "google_login", "sheet", "resume", "nuworks", "preferences", "extras",
+                      "password_manager"]
 assert steps["welcome"]["status"] == "todo" and steps["extras"]["status"] == "optional" and not onboard.complete(list(steps.values()))
 os.remove(config.TOKEN_PATH)
+
+# the optional steps at the end: Password manager always; Assistant on your homelab only with a homelab (not on the
+# homelab itself, not in the packaged app); optional steps never keep the wizard from finishing
+from nuauto import accounts  # noqa: E402
+from nuauto import health  # noqa: E402
+
+assert list(steps)[-1] == "password_manager" and steps["password_manager"]["status"] == "optional"
+assert "homelab_assistant" not in steps and not onboard.homelab_assistant()["available"]  # demo: no homelab
+accounts.PATH = os.path.join(config.LOCAL_DIR, "accounts.json")
+with open(accounts.PATH, "w") as f:
+    json.dump({"a.example.com": {"password": "pw-secret-a"}, "b.example.com": {"exported": True},
+               "c.example.com": {"own": True}, "d.example.com": {"own": True, "exported": True}}, f)
+pm = onboard.password_manager({})
+assert pm == {"on": False, "check": None, "waiting": 1, "own": 2, "only": ["myworkday"], "bw": False}, pm  # demo: never a real bw
+assert "pw-secret" not in json.dumps(steps)
+old_pm = {k: onboard.local_config().get(k) for k in ("password_manager", "bitwarden_import", "remote_assist", "remote_auto",
+                                                    "assist_slots", "remote_hours")}
+
+
+def chk(status):
+    return {"bitwarden": health.check("bitwarden", "Bitwarden", status, "x")}
+
+
+def step(id_, checks=None):
+    return next(s for s in onboard.steps(checks or {}) if s["id"] == id_)
+
+
+try:
+    onboard.save_config({"password_manager": "bitwarden", "bitwarden_import": ["amazon.jobs", "myworkday"]})
+    assert step("password_manager", chk("ok"))["status"] == "done"      # on and the check is OK: done
+    for status in ("warn", "fail", "unknown"):
+        assert step("password_manager", chk(status))["status"] == "optional", status
+    assert step("password_manager")["status"] == "optional"             # no check result yet
+    pm = step("password_manager", chk("warn"))["data"]
+    assert pm["on"] and pm["only"] == ["amazon.jobs", "myworkday"] and pm["check"]["status"] == "warn", pm
+    onboard.save_config({"password_manager": ""})
+    assert step("password_manager", chk("ok"))["status"] == "optional"  # off, even when the check says ok
+    onboard.save_config({"password_manager": "bitwarden", "bitwarden_import": []})
+    assert onboard.password_manager({})["only"] == ["myworkday"]        # empty: the default
+    # the homelab step
+    real_flags = (config.HAS_SERVER, config.IS_SERVER, config.FROZEN)
+    try:
+        config.HAS_SERVER, config.IS_SERVER, config.FROZEN = True, False, False
+        ha = onboard.homelab_assistant()
+        assert ha["available"] and ha["on"] is False and ha["auto"] is False and ha["review_url"] is None, ha
+        assert ha["slots"] == 3 and ha["hours"] == list(__import__("nuauto.remote", fromlist=["x"]).hours()), ha
+        ids = [s["id"] for s in onboard.steps({})]
+        assert ids[-2:] == ["password_manager", "homelab_assistant"], ids
+        assert step("homelab_assistant")["status"] == "optional"
+        onboard.save_config({"remote_assist": True, "remote_auto": True, "assist_slots": 2, "remote_hours": [8, 20]})
+        ha = onboard.homelab_assistant()
+        assert ha["on"] and ha["auto"] and ha["slots"] == 2 and ha["hours"] == [8, 20], ha
+        assert ha["review_url"] is None or (ha["review_url"].startswith("http") and not ha["review_url"].endswith("/")), ha
+        assert step("homelab_assistant")["status"] == "done"
+        for bad in (0, 4, "2", None):  # (True also passes isinstance int: onboard.py homelab_assistant, minor)
+            onboard.save_config({"assist_slots": bad})
+            assert onboard.homelab_assistant()["slots"] == 3, bad        # out of range: the default
+        config.IS_SERVER = True                                          # the homelab itself: no step
+        assert not onboard.homelab_assistant()["available"]
+        assert "homelab_assistant" not in [s["id"] for s in onboard.steps({})]
+        config.IS_SERVER, config.FROZEN = False, True                    # the packaged app: always local mode
+        assert not onboard.homelab_assistant()["available"]
+        assert "homelab_assistant" not in [s["id"] for s in onboard.steps({})]
+        config.FROZEN, config.HAS_SERVER = False, False
+        assert not onboard.homelab_assistant()["available"]
+    finally:
+        config.HAS_SERVER, config.IS_SERVER, config.FROZEN = real_flags
+    # optional steps (todo ones done) never block complete(); a todo one still does
+    every = [{"id": "x", "status": "done"}, {"id": "password_manager", "status": "optional"},
+             {"id": "homelab_assistant", "status": "optional"}]
+    assert onboard.complete(every) and not onboard.complete(every + [{"id": "y", "status": "todo"}])
+finally:
+    onboard.save_config({k: v for k, v in old_pm.items() if v is not None})
+    cfg_now = onboard.local_config()
+    for k, v in old_pm.items():
+        if v is None:
+            cfg_now.pop(k, None)
+    onboard.write_json(config.LOCAL_CONFIG_PATH, cfg_now, mode=0o644)
+    config.LOCAL = cfg_now
+    os.remove(accounts.PATH)
 
 
 # ---------------------------------------------------------------- the whole wizard, in the browser
@@ -229,6 +310,10 @@ try:
         page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
         page.goto(url)
         page.wait_for_selector("[data-testid=setup-steps]")  # a fresh start opens Setup
+        # the list ends with the optional Password manager step; no homelab, so no homelab-assistant step
+        assert page.locator("[data-testid=setup-steps] > li").last.get_attribute("data-testid") == "step-password_manager"
+        assert "optional" in page.locator("[data-testid=step-password_manager] .head").inner_text().lower()
+        assert page.locator("[data-testid=step-homelab_assistant]").count() == 0
         page.click("[data-testid=setup-ack]")  # the box is not ticked: refused
         page.wait_for_selector("[data-testid=toast]")
         page.check("[data-testid=setup-tos]")

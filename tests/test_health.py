@@ -139,6 +139,108 @@ assert health.WEBHOOK.match("https://discord.com/api/webhooks/123/abc-DEF_9")
 config.HAS_SERVER = False
 assert one(health.homelab).status == "off"
 
+# bitwarden: optional (off unless local_config "password_manager" is "bitwarden"); a fake `bw` first on PATH answers
+# `bw status`; the real one is never reached (PATH is only the fake's folder; config.tool_path is cut off too)
+from nuauto import accounts  # noqa: E402
+
+accounts.PATH = os.path.join(local, "accounts.json")
+bw_dir = os.path.join(tmp, "fakebin")
+os.makedirs(bw_dir)
+FAKE_BW = """#!{py}
+import sys
+assert sys.argv[1:] == ["status", "--nointeraction"], sys.argv
+{body}
+"""
+
+
+def fake_bw(body):
+    path = os.path.join(bw_dir, "bw")
+    with open(path, "w") as f:
+        f.write(FAKE_BW.format(py=sys.executable, body=body))
+    os.chmod(path, 0o755)
+
+
+def says(status):
+    return f"print('{{\"status\": \"{status}\"}}')"
+
+
+real_path, real_pm, real_tool_path = os.environ["PATH"], config.LOCAL.get("password_manager"), config.tool_path
+config.tool_path = lambda name: None
+os.environ["PATH"] = bw_dir
+try:
+    config.LOCAL.pop("password_manager", None)
+    c = one(health.bitwarden)
+    assert c.status == "off" and not c.fix, c
+    config.LOCAL["password_manager"] = ""
+    assert one(health.bitwarden).status == "off"
+    config.LOCAL["password_manager"] = "keepass"
+    assert one(health.bitwarden).status == "off"
+    config.LOCAL["password_manager"] = "bitwarden"
+    c = one(health.bitwarden)  # on, but no bw
+    assert (c.status, c.fix) == ("warn", "bitwarden_install") and "not installed" in c.detail, c
+    assert accounts.waiting() == 0  # no accounts.json yet
+    fake_bw(says("unauthenticated"))
+    c = one(health.bitwarden)
+    assert (c.status, c.fix, c.fix_label) == ("warn", "bitwarden_login", "Log in"), c
+    fake_bw("print('not json')")
+    c = one(health.bitwarden)
+    assert c.status == "warn" and not c.fix and "no answer" in c.detail, c
+    fake_bw("print('{}')")
+    assert one(health.bitwarden).status == "warn"
+    fake_bw("sys.exit(1)")
+    assert one(health.bitwarden).status == "warn"
+    for state in ("locked", "unlocked"):  # locked is fine: it is never unlocked here
+        fake_bw(says(state))
+        c = one(health.bitwarden)
+        assert c.status == "ok" and not c.fix, (state, c)
+    # waiting: logins NUauto made and did not export yet; your own and exported ones never count
+    with open(accounts.PATH, "w") as f:
+        json.dump({"a.example.com": {"site": "a.example.com", "password": "pw-a"},
+                   "b.example.com": {"site": "b.example.com", "password": "pw-b", "exported": False},
+                   "c.example.com": {"site": "c.example.com", "password": "pw-c", "exported": True},
+                   "d.example.com": {"site": "d.example.com", "own": True},
+                   "e.example.com": {"site": "e.example.com", "own": True, "exported": False}}, f)
+    assert accounts.waiting() == 2
+    c = one(health.bitwarden)
+    assert (c.status, c.fix, c.fix_label) == ("warn", "bitwarden_add", "Add 2 to Bitwarden") and "2 logins" in c.detail, c
+    assert "pw-" not in json.dumps(c.to_dict())
+    with open(accounts.PATH, "w") as f:
+        json.dump({"a.example.com": {"site": "a.example.com"}, "c.example.com": {"exported": True}}, f)
+    c = one(health.bitwarden)
+    assert (c.fix, c.fix_label) == ("bitwarden_add", "Add 1 to Bitwarden") and "1 login " in c.detail, c
+    with open(accounts.PATH, "w") as f:
+        json.dump({"c.example.com": {"exported": True}, "d.example.com": {"own": True}}, f)
+    assert one(health.bitwarden).status == "ok"
+    open(accounts.PATH, "w").write("not json")
+    assert accounts.waiting() == 0 and one(health.bitwarden).status == "ok"
+    # demo mode never uses a real bw, even with one on PATH
+    config.DEMO = True
+    try:
+        assert one(health.bitwarden).fix == "bitwarden_install"
+    finally:
+        config.DEMO = False
+    # a slow bw is a "no answer", not a hang
+    fake_bw("import time; time.sleep(30)")
+    real_run = health.subprocess.run
+
+    def quick_timeout(*a, **kw):
+        kw["timeout"] = 0.5
+        return real_run(*a, **kw)
+    health.subprocess.run = quick_timeout
+    try:
+        c = one(health.bitwarden)
+        assert c.status == "warn" and "no answer" in c.detail, c
+    finally:
+        health.subprocess.run = real_run
+finally:
+    os.environ["PATH"] = real_path
+    config.tool_path = real_tool_path
+    if real_pm is None:
+        config.LOCAL.pop("password_manager", None)
+    else:
+        config.LOCAL["password_manager"] = real_pm
+assert "bitwarden" in health.ALL
+
 # the sheet: login problems become a google failure, a broken sheet a sheet failure, counts become limits
 real_open = sheet.open_worksheet
 

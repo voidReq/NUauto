@@ -214,9 +214,42 @@ def server():
     if sh(["loginctl", "show-user", os.environ.get("USER", ""), "-p", "Linger", "--value"]).stdout.strip() != "yes":
         say("FAIL", "lingering is off, so timers stop when you log out: sudo loginctl enable-linger $USER")
     check_claude()
+    if config.LOCAL.get("remote_assist"):
+        check_remote_assist()
     free_gb = shutil.disk_usage(config.PROJECT_DIR).free / 1e9
     if free_gb < 2:
         say("WARN", f"only {free_gb:.1f} GB free on the homelab")
+
+
+def check_remote_assist():
+    """What the company-site assistant needs on the homelab (docs/REMOTE.md, TURN IT ON). Only config and the standard
+    library: this file may run against older code there."""
+    import glob
+    import socket
+    gone = [t for t in ("Xvfb", "x11vnc", "websockify", "npx", "tmux") if not shutil.which(t)]
+    if not any(os.path.exists(os.path.join(d, "vnc.html")) for d in ("/usr/share/novnc", "/usr/share/webapps/novnc")):
+        gone.append("novnc")
+    if gone:
+        say("FAIL", f"the assistant needs {', '.join(gone)}: sudo apt install xvfb x11vnc novnc nodejs npm tmux")
+    else:
+        say("ok", "the assistant's virtual screen and browser view tools are installed")
+    if not glob.glob(os.path.expanduser("~/.cache/ms-playwright/firefox-*")):
+        say("FAIL", "no Playwright Firefox for the assistant's browser: npx -y -p @playwright/mcp@0.0.82 playwright install firefox")
+    try:
+        with open(os.path.expanduser("~/.claude.json")) as f:
+            trusted = (json.load(f).get("projects", {}).get(os.path.realpath(config.STATE_DIR)) or {}).get("hasTrustDialogAccepted")
+    except (OSError, ValueError):
+        trusted = None
+    if not trusted:
+        say("WARN", f"Claude Code may ask whether to trust {config.STATE_DIR} at the first session (the review page "
+                    f"can't answer that): once, ssh -t homelab 'cd {config.STATE_DIR} && claude', then /exit")
+    host = (config.LOCAL.get("web_listen_host") or "").strip()
+    try:
+        socket.create_connection((host, 8766), timeout=3).close()
+        say("ok", f"the review page answers on {host}:8766")
+    except OSError:
+        say("FAIL", "the review page does not answer on :8766: systemctl --user restart nuauto-web (it starts it "
+                    "when remote_assist is on)")
 
 
 def check_web_fresh():

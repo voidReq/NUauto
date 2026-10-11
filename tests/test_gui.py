@@ -207,6 +207,60 @@ try:
     post("/api/logins/export", {}, expect=409)  # exported already
     assert post("/api/logins/export", {"every": True})["count"] == 1
     post("/api/settings", {"accounts_email": "", "assist_effort": "low", "assist_read_paths": []})  # back as they were
+    # the password manager (Bitwarden, optional): off to start, in settings with its counts only (never a password); what
+    # is accepted; the homelab assistant's settings need a homelab (demo has none); the terminal commands it opens
+    # (demo: only shown) hold no password, and the site texts are checked before they reach a shell
+    local_config = os.path.join(STATE, "local", "local_config.json")
+    pm0, ha0 = s0["password_manager"], s0["homelab_assistant"]
+    assert (pm0["on"], pm0["waiting"], pm0["own"], pm0["bw"], pm0["only"]) == (False, 0, 0, False, ["myworkday"]), pm0
+    assert ha0["available"] is False and ha0["on"] is False, ha0
+    for bad in ("keepass", "Bitwarden", 1, True, None, ["bitwarden"]):
+        post("/api/settings", {"password_manager": bad}, expect=409)
+    for bad in ("myworkday", ["a"], ["x" * 61], ["two words"], ["a/b"], ["a;rm -rf"], ["$(id)"], ["ok.site", "bad site"], None):
+        post("/api/settings", {"bitwarden_import": bad}, expect=409)
+    assert "bitwarden_import" not in json.load(open(local_config))
+    for body in ({"remote_assist": True}, {"remote_auto": True}, {"remote_hours": [9, 22]}, {"assist_slots": 2},
+                 {"remote_assist": "yes"}, {"remote_hours": [22, 9]}):
+        post("/api/settings", body, expect=409)  # no homelab (server_hostname): refused before anything is saved
+    cfg_now = json.load(open(local_config))
+    assert not any(k in cfg_now for k in ("remote_assist", "remote_auto", "remote_hours", "assist_slots")), cfg_now
+    s3 = post("/api/settings", {"password_manager": "bitwarden", "bitwarden_import": [" myworkday ", "", "amazon.jobs"]})
+    assert s3["password_manager"]["on"] and s3["password_manager"]["only"] == ["myworkday", "amazon.jobs"], s3["password_manager"]
+    assert json.load(open(local_config))["password_manager"] == "bitwarden"
+    with open(os.path.join(STATE, "local", "accounts.json"), "w") as f:  # waiting = made by NUauto, not exported; own never counts
+        json.dump({"a.example.com": {"site": "a.example.com", "password": FAKE_PW},
+                   "b.example.com": {"site": "b.example.com", "exported": True},
+                   "c.example.com": {"site": "c.example.com", "own": True, "password": FAKE_PW}}, f)
+    pm1 = get("/api/settings")["password_manager"]
+    assert (pm1["on"], pm1["waiting"], pm1["own"]) == (True, 1, 1) and FAKE_PW not in json.dumps(get("/api/settings")), pm1
+    assert pm1["check"]["id"] == "bitwarden"
+    os.remove(os.path.join(STATE, "local", "accounts.json"))
+    r = post("/api/action", {"kind": "bitwarden_add", "args": {}})
+    assert r["opened"] is False and r["demo"] and "accounts export --bitwarden" in r["command"], r
+    assert r["command"].startswith('BW_SESSION="$(bw unlock --raw)" && export BW_SESSION && '), r["command"]
+    assert "--session" not in r["command"] and FAKE_PW not in r["command"]
+    r = post("/api/action", {"kind": "bitwarden_login", "args": {}})
+    assert r["demo"] and r["command"] == "bw login", r
+    r = post("/api/action", {"kind": "bitwarden_install", "args": {}})
+    assert r["demo"] and r["command"] == "npm install -g @bitwarden/cli && bw login", r
+    # import: the saved texts when none come with the click; bad or no texts refused; the texts are saved
+    post("/api/settings", {"bitwarden_import": []})
+    post("/api/action", {"kind": "bitwarden_import", "args": {}}, expect=409)  # none saved, none given
+    post("/api/action", {"kind": "bitwarden_import", "args": {"only": [" ", ""]}}, expect=409)
+    for bad in (["bad text"], ["a;rm -rf /"], ["x"], ["ok.site", "$(id)"], ["a|b"], ["`id`"], ["x" * 61]):
+        post("/api/action", {"kind": "bitwarden_import", "args": {"only": bad}}, expect=409)
+    assert json.load(open(local_config)).get("bitwarden_import") == []
+    r = post("/api/action", {"kind": "bitwarden_import", "args": {"only": [" myworkday ", "amazon.jobs"]}})
+    assert r["opened"] is False and r["demo"], r
+    exe = re.search(r"\| (\S+) accounts import - --only myworkday", r["command"]).group(1)  # this install's nuauto command
+    assert r["command"] == ('BW_SESSION="$(bw unlock --raw)" && export BW_SESSION && bw sync && '
+                            f"bw list items --search myworkday | {exe} accounts import - --only myworkday && "
+                            f"bw list items --search amazon.jobs | {exe} accounts import - --only amazon.jobs"), r["command"]
+    assert json.load(open(local_config))["bitwarden_import"] == ["myworkday", "amazon.jobs"]
+    r2 = post("/api/action", {"kind": "bitwarden_import", "args": {}})  # no texts given: the saved ones
+    assert r2["command"] == r["command"]
+    post("/api/settings", {"password_manager": "", "bitwarden_import": ["myworkday"]})  # off again (the page part below turns it on)
+    assert get("/api/settings")["password_manager"]["on"] is False
     # assistants side by side: a running one (its slot's lock held, as by a live `nuauto assist`) shows on its row
     # (the state string is "<this computer's>|<the homelab's>": empty on both sides without remote_assist)
     assert get("/api/company")["sessions"] == [] and get("/api/company")["slots"] == 3 and get("/api/state")["assistants"] == "|"
@@ -870,6 +924,48 @@ fetch("{target}", {{method: "POST", credentials: "include", body: {json.dumps(bo
 
         page.click("[data-testid=nav-settings]")
         page.wait_for_selector("[data-testid=check-google]")
+        # Settings > Password manager: off to start (no status chip), Use Bitwarden turns it on (saved; demo has no bw, so
+        # Install it shows and Add / Import are greyed out), the status strip gets its chip, Stop using it hides it again.
+        # No homelab in demo: no Assistant on your homelab card.
+        local_config = os.path.join(STATE, "local", "local_config.json")
+        page.wait_for_selector("[data-testid=pm-settings]")
+        assert page.locator("[data-testid=ha-settings]").count() == 0
+        assert page.inner_text("[data-testid=pm-toggle]") == "Use Bitwarden"
+        assert page.locator("[data-testid=pm-install]").count() == 0 and page.locator("[data-testid=health-bitwarden]").count() == 0
+        page.click("[data-testid=pm-toggle]")
+        page.wait_for_selector("[data-testid=pm-toggle]:has-text('Stop using it')")
+        page.wait_for_selector("[data-testid=pm-install]")
+        assert page.is_disabled("[data-testid=pm-add]") and page.is_disabled("[data-testid=pm-import]")
+        assert json.load(open(local_config))["password_manager"] == "bitwarden"
+        page.wait_for_selector("[data-testid=health-bitwarden]", timeout=20000)
+        assert "warn" in page.get_attribute("[data-testid=health-bitwarden]", "class")  # demo: no bw
+        assert eventually(lambda: get("/api/settings")["password_manager"]["check"]["fix"] == "bitwarden_install", "bw check")
+        # the terminal commands: Install asks first; Add and Import show the command (demo opens nothing). Their buttons
+        # are greyed out here (no bw), so enable them to go through the real click handlers
+        page.click("[data-testid=pm-install]")
+        page.click("[data-testid=confirm-yes]")
+        page.wait_for_selector("[data-testid=terminal-command]")
+        assert "npm install -g @bitwarden/cli" in page.inner_text("[data-testid=terminal-command]")
+        page.click("[role=dialog] button:has-text('Close')")
+        page.eval_on_selector("[data-testid=pm-add]", "(b) => { b.disabled = false; }")
+        page.click("[data-testid=pm-add]")
+        page.wait_for_selector("[data-testid=terminal-command]")
+        cmd = page.inner_text("[data-testid=terminal-command]")
+        assert "accounts export --bitwarden" in cmd and "bw unlock --raw" in cmd, cmd
+        page.click("[role=dialog] button:has-text('Close')")
+        page.fill("[data-testid=pm-only]", "myworkday, amazon.jobs, ")
+        page.eval_on_selector("[data-testid=pm-import]", "(b) => { b.disabled = false; }")
+        page.click("[data-testid=pm-import]")
+        page.wait_for_selector("[data-testid=terminal-command]")
+        cmd = page.inner_text("[data-testid=terminal-command]")
+        assert "accounts import - --only myworkday" in cmd and "accounts import - --only amazon.jobs" in cmd, cmd
+        page.click("[role=dialog] button:has-text('Close')")
+        assert json.load(open(local_config))["bitwarden_import"] == ["myworkday", "amazon.jobs"]
+        page.click("[data-testid=pm-toggle]")
+        page.wait_for_selector("[data-testid=pm-toggle]:has-text('Use Bitwarden')")
+        assert page.locator("[data-testid=pm-install]").count() == 0
+        assert json.load(open(local_config))["password_manager"] == ""
+        page.wait_for_selector("[data-testid=health-bitwarden]", state="detached", timeout=20000)
         page.click("[data-testid=btn-quit]")
         page.click("[data-testid=confirm-yes]")
         page.wait_for_selector("[data-testid=gone]")

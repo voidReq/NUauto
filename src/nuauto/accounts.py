@@ -316,6 +316,16 @@ def export(path=None, every=False):
         return path, len(todo)
 
 
+def waiting():
+    """How many logins NUauto made are not in your password manager yet (never yours: they came from there)."""
+    try:
+        with open(PATH) as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return 0
+    return sum(1 for a in data.values() if not a.get("own") and not a.get("exported"))
+
+
 def own_login(host):
     """Your own login (imported) for this host, or None: {"site", "email", "company"} (never the password)."""
     try:
@@ -409,6 +419,9 @@ def main(argv):
         for h in import_own(entries):
             a = next(e for x, e in entries if x == h)
             print(f"  {h:45} {a['name'][:30]:30} as {a['username']}")
+        if config.REMOTE_ASSIST and not config.IS_SERVER:  # the assistant on the homelab uses them too
+            from nuauto import sync
+            sync.share()
         print(f"Saved {len(entries)} of your own login{'s' if len(entries) != 1 else ''}: the assistant signs in with "
               "them and never makes an account on those sites." + (f"\nNow delete the export file: rm {src}"
                                                                   if src != "-" else ""))

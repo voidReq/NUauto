@@ -31,7 +31,9 @@ TURN IT ON (once)
    (assist.MCP_PACKAGE: change the version here too when that pin changes.)
    And once, so Claude Code trusts the folder the sessions start in (the review page can't answer that question):
      ssh -t homelab 'cd ~/projects/auto && claude'     -> "Yes, I trust this folder", then /exit
-3. local_config.json (laptop): "remote_assist": true. web_listen_host must be the homelab's Tailscale IP (it already
+3. Turn it on: the GUI's Settings > Assistant on your homelab (or setup's optional step), or "remote_assist": true in
+   local_config.json (laptop). The GUI pushes it to the homelab and restarts its review page; the Homelab chip then
+   checks what the homelab still needs (the tools above, its Firefox, Claude's folder trust, the review page). web_listen_host must be the homelab's Tailscale IP (it already
    is for the Mark-done page): the browser view listens there only.
 4. Laptop: `nuauto status`. It pushes the setting, the Gmail login, a copy of your writeups, and merges the answer
    banks and job-site logins both ways (below). Merge the PR first: the homelab runs main (deploy_from_git).

@@ -119,8 +119,15 @@ SCREENS
                  "NUworks only" column (never used for Other jobs; default on for start/end date and co-op term)
   Settings       every health check (run them now), logins, resume label, applications per week (the weekly cap), week start;
                  the company-site assistant: account email, effort (low / medium / high), the folders it may read, its job-site
-                 logins (how many; Export for Bitwarden: the import file in ~/Downloads, mode 600, and how to import it); setup,
-                 logs, quit
+                 logins (how many; Export for Bitwarden: the import file in ~/Downloads, mode 600, and how to import it);
+                 Password manager (optional, for anyone; local_config "password_manager": "bitwarden"): Use Bitwarden / Stop
+                 using it, Install it (npm @bitwarden/cli, then bw login, in a terminal window), Add N to Bitwarden (a terminal
+                 window: bw unlock asks your master password itself, then `nuauto accounts export --bitwarden`), Your own logins
+                 (words their addresses contain, "bitwarden_import") + Import my logins (a terminal: unlock, then `bw list items
+                 --search <word> | nuauto accounts import - --only <word>` per word), Check now; Assistant on your homelab
+                 (homelab mode only, docs/REMOTE.md): on / off (remote_assist: pushed to the homelab, its review page restarted),
+                 Start sessions by itself (remote_auto), its hours (remote_hours), assistants at once (assist_slots), Pair this
+                 computer, Open the review page; setup, logs, quit
   Setup          the wizard (below); opens by itself until setup is done
   Past runs      logs/ folders: actions.log and the screenshots before and after Submit
 
@@ -147,6 +154,8 @@ SETUP WIZARD (onboard.py + gui_static/setup.js; each step checks itself)
                listed job), so it works before the pool has anything for you.
   extras       Discord webhook (checked with a GET, posts nothing until you press Test), automatic updates
                (local mode: systemd user timer / launchd agent at 08:00 and 18:00), app icon
+  password_manager   optional: the same Password manager part as Settings (done when Bitwarden is on and its check is OK)
+  homelab_assistant  optional, only in homelab mode: the same Assistant on your homelab part as Settings (done when on)
 
 HEALTH (health.py; the same checks `nuauto doctor` prints, `nuauto doctor --json`)
   check     how                                                               GUI runs it
@@ -160,7 +169,11 @@ HEALTH (health.py; the same checks `nuauto doctor` prints, `nuauto doctor --json
             `claude -p` call (no tools, no MCP, not saved)
   firefox   Playwright's Firefox starts (a separate empty profile)             daily
   discord   GET the webhook (posts nothing)                                    6 h
-  homelab   doctor's homelab checks over ssh (homelab mode only)               15 min
+  homelab   doctor's homelab checks over ssh (homelab mode only; with remote_assist  15 min
+            also the assistant's tools, its browser, Claude's folder trust, the review page)
+  bitwarden only with password_manager bitwarden: bw there and logged in (`bw  15 min
+            status`; locked is fine), the logins NUauto made not in the vault yet
+            (Add N to Bitwarden); no chip while off; demo mode never uses a real bw
   updates   age of the last scan (data/scans.json)                             every minute
 - The status chips at the top (Google, Sheet, NUworks, Claude Code, Homelab): click one for its detail, its fix button
   and Check now (runs that check's groups again, gui.App.GROUPS: google quick + sheet, nuworks quick + nuworks, the
@@ -237,7 +250,9 @@ API (JSON; all need the cookie; POSTs need X-NUauto: 1)
                              Proposed in the Other jobs tab); POST /api/review/done (push ratings, homelab mode)
   GET  /api/apply            Approved rows in apply order, week, why_not, recent runs
   POST /api/action           {"kind": apply ({"n", "order"} or {"row"})|update|login_google|login_nuworks|check_nuworks|login_claude|
-                             install_firefox|install_claude|nuworks_side|assist|fix_permissions, "args"}
+                             install_firefox|install_claude|nuworks_side|assist|fix_permissions|review_pair|bitwarden_add|
+                             bitwarden_import ({"only": [words]})|bitwarden_login|bitwarden_install, "args"} (the bitwarden_ ones
+                             open a terminal window: Bitwarden asks for your master password there, never this page)
                              (assist: {"row", "tab": "other"} for the Other jobs tab)
   GET  /api/task?after=N     the current task: state, new log lines, question, row, screenshot, countdown
   POST /api/answer           {"task", "id", "reply"}; POST /api/stop {"task", "force"}
@@ -256,7 +271,10 @@ API (JSON; all need the cookie; POSTs need X-NUauto: 1)
   GET  /api/answers?bank=    entries + version (bank other: answers_other.json); POST /api/answers {"bank", "entries",
                              "version"}. answers.json entries carry nuworks_only; leave_blank is kept while empty
   GET  /api/settings         settings (no secrets; logins: {sites, new}, never a password); POST /api/settings {"resume_label",
-                             "week_start", "max_per_week", "accounts_email", "assist_effort", "assist_read_paths"}
+                             "week_start", "max_per_week", "accounts_email", "assist_effort", "assist_read_paths",
+                             "password_manager" ("" | "bitwarden"), "bitwarden_import" [words], and with a homelab "remote_assist",
+                             "remote_auto", "remote_hours" [from, to], "assist_slots"}; GET adds password_manager {on, check,
+                             waiting, own, only, bw} and homelab_assistant {available, on, auto, hours, slots, review_url}
   POST /api/logins/export    Bitwarden's import file of the logins not exported yet ({"every": true}: all) -> {"path", "count"}
   GET  /api/setup            wizard steps; POST /api/setup {"action": ack|client_upload|client_downloads|
                              sheet_create|sheet_link|resume_pick|resume_set|labels_read|label_set|terms_read|

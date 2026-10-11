@@ -182,7 +182,9 @@ COMPANY-SITE AGENT (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`;
   for my tap; a late Approve = a 10-minute pass for that one action) and get captchas there. With "remote_auto" the
   homelab starts sessions by itself from my approved rows (remote.py: 09:00-22:00, free slots, each row once by itself,
   never a row or site the laptop holds: claims over ssh). The GUI's Company sites shows them (Homelab assistants: Open its
-  page, Pair this computer). Proven with a practice run on 2026-10-11 (docs/REMOTE.md). Starts `claude --model sonnet --effort low --permission-mode default` (never my auto
+  page, Pair this computer). Everything optional and set in the GUI too (my request, for other users: setup's optional
+  steps and Settings: Assistant on your homelab, Password manager (Bitwarden) with its status chip). Proven with a
+  practice run on 2026-10-11 (docs/REMOTE.md). Starts `claude --model sonnet --effort low --permission-mode default` (never my auto
   mode: its own check asked about every click; the guard decides; local_config.json "assist_effort":
   low / medium / high; Settings; low is my call, 2026-10-10) with the Playwright MCP browser (profile assist_profile/:
   it holds my company-site logins, treat it as secret), Bash, Read/Glob/Grep and WebSearch/WebFetch (company context,
