@@ -131,9 +131,16 @@ for cats, needle in (([{"label": "A", "description": "x"}, {"label": "a", "descr
                                          "categories": cats}), needle)
 refused(lambda: onboard.check_prefs({**jobs.DEFAULTS, "field": "astrology"}), "What you study")
 refused(lambda: onboard.check_prefs({**jobs.DEFAULTS, **fields.preset("business"), "category_bonus": {"security": 5}}), "unknown category")
-# a job sorted into another set of kinds (before you changed field) counts as not sorted: it is sorted again
-cats, sets = {"a": "security", "b": "finance", "c": "finance"}, {"c": fields.fingerprint(fields.FIELDS["business"]["categories"])}
-assert [jobs.job_category(cats, sets, i) for i in "abc"] == ["security", "uncategorized", "uncategorized"]  # engineering
+# a job sorted into another set of kinds (before you changed field, or before the kinds changed) counts as not sorted:
+# it is sorted again. One from before sets were recorded was sorted into the engineering kinds of 2026-10-10 (LEGACY).
+eng = fields.fingerprint(fields.ENGINEERING_CATEGORIES)
+cats = {"a": "security", "b": "finance", "c": "finance", "d": "security"}
+sets = {"c": fields.fingerprint(fields.FIELDS["business"]["categories"]), "d": eng}
+assert [jobs.job_category(cats, sets, i) for i in "abcd"] == ["uncategorized", "uncategorized", "uncategorized", "security"]
+old = [c for c in fields.ENGINEERING_CATEGORIES if c["key"] != "frontend"]
+assert fields.fingerprint(old) == fields.LEGACY != eng
+jobs.set_prefs({"categories": old, "category_bonus": {}, "rank_last": []})  # kept the old kinds: nothing to sort again
+assert [jobs.job_category(cats, sets, i) for i in "ad"] == ["security", "uncategorized"]
 jobs.set_prefs({**fields.preset("business"), "field": "business"})
 assert [jobs.job_category(cats, sets, i) for i in "abc"] == ["uncategorized", "uncategorized", "finance"]
 jobs.set_prefs(None)

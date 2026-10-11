@@ -705,8 +705,9 @@ def cmd_score_import():
 
 def categorized(cats, sets, i):
     """Whether job i is sorted into one of your current kinds of work (sorted under another set of kinds, e.g.
-    before you changed field: no). Jobs sorted before sets were recorded were sorted into the engineering kinds."""
-    return cats.get(i) in CATEGORIES and sets.get(i, fields.ENGINEERING) == CATEGORY_SET
+    before you changed field: no). Jobs sorted before sets were recorded were sorted into the engineering kinds of
+    that day (fields.LEGACY)."""
+    return cats.get(i) in CATEGORIES and sets.get(i, fields.LEGACY) == CATEGORY_SET
 
 
 def job_category(cats, sets, i):

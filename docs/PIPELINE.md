@@ -42,7 +42,8 @@ WHAT YOU STUDY (fields.py, added 2026-10-10; preferences "field" and "categories
   engineering field (the default, = my original settings) it renders byte-identical to the old prompt.
 - Which set of kinds a job was sorted into: data/category_sets.json {id: fingerprint of the keys}. A job sorted under
   another set (you changed field or the list's keys) counts as uncategorized and is sorted again on the next update
-  (about one Claude call per 120 jobs). Jobs from before this file count as the engineering set. Changing only a
+  (about one Claude call per 120 jobs). Jobs from before this file count as the engineering set of 2026-10-10
+  (fields.LEGACY, without front-end), so the front-end split of 2026-10-11 sorted them again too. Changing only a
   name or description does not re-sort.
 - Triage the same way: each decision records which triage text it was made with ("by" in triage.json, a hash of
   student / keep_roles / drop_roles). A job dropped under other text is triaged again (a new student's first update
