@@ -1042,7 +1042,12 @@ screens.apply = async (view) => {
 // running says so instead of offering another; with every slot in use, Start waits.
 function assistantStart(d, r, tab, testid, args) {
   const running = (d.sessions || []).find((s) => s.tab === tab && s.row === r.row);
-  if (running) return el("span", { class: "chip ok", testid: `${testid}-running`, text: `assistant running (slot ${running.slot})` });
+  if (running) {  // a session waiting for you says so (its terminal window has the question or the Submit to approve)
+    const wait = running.attention && running.attention.kind;
+    return el("span", { class: wait ? "chip warn" : "chip ok", testid: `${testid}-running`,
+      text: wait === "approve" ? `assistant: approve in its window (slot ${running.slot})`
+        : wait ? `assistant waiting for you (slot ${running.slot})` : `assistant running (slot ${running.slot})` });
+  }
   const full = (d.sessions || []).length >= (d.slots || 1);
   return el("button", { class: "btn small primary", text: "Start assistant", testid, disabled: full || (args.disabled || false),
     title: full ? `${d.slots} assistants are running (the most at once): finish one first` : "", onclick: (e) => {
