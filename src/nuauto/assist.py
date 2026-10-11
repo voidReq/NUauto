@@ -16,6 +16,10 @@ makes the accounts sites ask for, with your account email and a password NUauto 
 placeholder and the guard types the real password, for that site only; the agent never sees it. It NEVER submits
 without you: every Submit-type click (SUBMIT_RE, incl. "Apply") and the Enter key make Claude Code ask you in the
 terminal first (hook "ask"); you review the application, then approve.
+It doesn't stop to ask while it fills (your call, 2026-10-11): a question the answer bank can't answer gets its best
+guess, recorded with `guess`; at the last page it asks you everything at once (`guesses`), and your answers are saved
+for next time. The Submit question lists every guess you haven't confirmed, every answer you changed, and anything
+typed that came from neither the bank nor a guess (review_lines).
 When you /exit, the terminal asks whether you submitted; y marks the row Applied (dated today), then the
 same job is submitted on NUworks too (apply.submit_nuworks_side, the tested NUworks code). For an Other jobs tab
 row, y only marks it Applied (those rows have no weekly or total cap), and its answers come from Bank.
@@ -59,8 +63,9 @@ INTERACT = {"browser_click", "browser_type", "browser_fill_form", "browser_selec
 SUBMIT_RE = re.compile(r"^\s*(submit|submit (my |your |the )?application|send( my)? application|apply|apply now|"
                        r"finish|complete( my)? application|confirm( and submit)?)\s*$", re.I)
 ENTER_KEYS = {"enter", "numpadenter", "return"}
-BASH_COMMANDS = {"answer", "save", "once", "alias", "blank", "wait"}
-MAX_ANSWER = 300  # one line; enough for a "30 word limit" answer, not an essay
+BASH_COMMANDS = {"answer", "guess", "guesses", "save", "once", "confirm", "alias", "blank", "wait"}
+MAX_ANSWER = 300  # one line; enough for a "30 word limit" answer, not an essay (an essay is typed into its field)
+MAX_WHY = 200     # a guess's reason: a few words
 REF_LINE = re.compile(r'^(?P<indent>\s*)-\s+(?P<role>[a-z]+)(?:\s+"(?P<name>(?:[^"\\]|\\.)*)")?(?P<attrs>[^\n]*?)\[ref=(?P<ref>[^\]\s]+)\](?P<tail>[^\n]*)$')
 TEXT_LINE = re.compile(r'^(?P<indent>\s*)-\s+text:\s*(?P<text>.+)$')
 LABEL_ROLES = {"paragraph", "generic", "text", "heading", "label", "strong", "emphasis", "legend"}
@@ -294,6 +299,46 @@ def ask(reason):
     return ("ask", "NUAUTO: " + reason)
 
 
+def unexplained(state):
+    """[(field, value)] typed this run that came from neither the answer bank nor a recorded guess (nor the account
+    email): what the agent filled in on its own without saying so. From the guard's own record (state["typed"])."""
+    explained = set(state.get("issued_values") or []) | {state.get("account_email") or ""}
+    guessed = set(state.get("guesses") or {})
+    return [(name, value) for name, value in (state.get("typed") or {}).items()
+            if value and value not in explained and label_key(name) not in guessed]
+
+
+def review_lines(state):
+    """What the Submit question shows besides the button: the guesses the user hasn't confirmed, the answers they
+    changed (the page must show the new one), how many they confirmed, and what was typed with no answer behind it."""
+    g = list((state.get("guesses") or {}).values())
+    cut = lambda v: v if len(v) <= 90 else v[:87] + "..."  # noqa: E731
+    lines = []
+    open_ = [x for x in g if not x.get("resolved")]
+    if open_:
+        lines.append("NOT CONFIRMED BY YOU (the agent's guesses: say No and ask it for its list):")
+        lines += [f"  - {x['label']} = {cut(x['value'])!r} ({x['why']})" for x in open_[:12]]
+        lines += [f"  ... and {len(open_) - 12} more"] if len(open_) > 12 else []
+    changed = [x for x in g if x.get("resolved") and x.get("final") != x["value"]]
+    if changed:
+        lines.append("You changed these (check the page shows your answer):")
+        lines += [f"  - {x['label']}: {cut(x['value'])!r} -> {cut(x.get('final') or 'blank')!r}" for x in changed[:12]]
+    confirmed = len(g) - len(open_) - len(changed)
+    if confirmed:
+        lines.append(f"Guesses you confirmed as they were: {confirmed}.")
+    extra = unexplained(state)
+    if extra:
+        lines.append("Typed with no saved answer or guess behind it (check these):")
+        lines += [f"  - {name} = {cut(value)!r}" for name, value in extra[:8]]
+    return lines
+
+
+def submit_ask(state, reason):
+    """ask(), with review_lines under it: the user sees every open guess at the moment they approve a submit."""
+    lines = review_lines(state)
+    return ask(reason + ("\n" + "\n".join(lines) if lines else ""))
+
+
 def is_password(target):
     """Whether the latest snapshot names this field a password (never the agent's own description of it)."""
     return bool(target) and any(w in (target.get("name") or "").lower() for w in PASSWORD_WORDS)
@@ -403,8 +448,9 @@ def decide(state, tool, inp):
                 return ("allow", "Enter on the posting (no form on it): a job search at most")
             if workday(state) and any(r.get("active") and r["role"] in FIELD_ROLES for r in state["refs"].values()):
                 return ("allow", "Enter in a box on Workday (its pages don't submit on Enter; Submit is its own button)")
-            return ask("pressing Enter can submit a form (on a one-page application, the whole application). Approve "
-                       "only if the user has reviewed everything; to pick from a list, click the option instead.")
+            return submit_ask(state, "pressing Enter can submit a form (on a one-page application, the whole "
+                              "application). Approve only if the user has reviewed everything; to pick from a list, "
+                              "click the option instead.")
         return ALLOW
     if name == "browser_type":
         target = state["refs"].get(ref_of(inp) or "")
@@ -416,7 +462,7 @@ def decide(state, tool, inp):
         if inp.get("submit"):
             if workday(state) and target and target["role"] in FIELD_ROLES:
                 return ("allow", "Enter in a box on Workday (its pages don't submit on Enter; Submit is its own button)")
-            return ask("typing with submit=true presses Enter, which can submit the form.")
+            return submit_ask(state, "typing with submit=true presses Enter, which can submit the form.")
         return ALLOW
     if name == "browser_fill_form":
         plan = []
@@ -442,8 +488,8 @@ def decide(state, tool, inp):
                 return ("allow", "a sign-in page's own Submit (only account boxes on it): no application goes out")
             if target["name"].strip().lower() in POSTING_APPLY and posting_page(state):
                 return ("allow", "the posting's own Apply (its page, nothing filled in, no form on it): opens the application")
-            return ask(f"clicking {target['name']!r} may SUBMIT the application. Approve only after the user has "
-                       "reviewed every page (it is fine if this only opens the form).")
+            return submit_ask(state, f"clicking {target['name']!r} may SUBMIT the application. Approve only after "
+                              "the user has reviewed every page (it is fine if this only opens the form).")
         return ALLOW
     return ALLOW
 
@@ -526,10 +572,30 @@ def saved_answers(entries):
 
 def valid_answer(value, options):
     if not value.strip() or "\n" in value or len(value) > MAX_ANSWER:
-        return f"Answers are one short line (max {MAX_ANSWER} characters): essays are the user's."
+        return (f"Answers are one short line (max {MAX_ANSWER} characters). An essay is typed into its field and "
+                "recorded with guess --essay.")
     if options and value not in options:
         return f"{value!r} is not exactly one of the options."
     return None
+
+
+def settle(state, label, how, value):
+    """A guess for this label is answered (save / once / confirm / blank / alias): the user's answer is `value`."""
+    g = (state.get("guesses") or {}).get(label_key(label))
+    if g and not g.get("resolved"):
+        g["resolved"], g["final"] = how, value
+
+
+def guess_list(state):
+    """The run's guesses for the end list: open ones (numbered, in the order they were made) and settled ones."""
+    g = list((state.get("guesses") or {}).values())
+    show = lambda x, n: {"n": n, **{k: x[k] for k in ("label", "value", "why", "options", "page", "essay", "always_ask")}}  # noqa: E731
+    open_ = [x for x in g if not x.get("resolved")]
+    return {"open": [show(x, n) for n, x in enumerate(open_, 1)],
+            "settled": [{"label": x["label"], "guess": x["value"], "answer": x.get("final"), "how": x["resolved"]}
+                        for x in g if x.get("resolved")],
+            "next": "Show the user every open one in ONE message and record each answer (save / once / confirm / "
+                    "blank)." if open_ else "Nothing open: tell the user it is ready for their final review."}
 
 
 # ---------- run state (one folder per run, under logs/) ----------
@@ -654,20 +720,28 @@ def _bank(argv):
     import argparse
     ap = argparse.ArgumentParser(prog="assist.py")
     ap.add_argument("cmd", choices=sorted(BASH_COMMANDS))
-    ap.add_argument("label")
+    ap.add_argument("label", nargs="?")
     ap.add_argument("value", nargs="?")
     ap.add_argument("--option", action="append", default=[])
     ap.add_argument("--page", default="")
+    ap.add_argument("--why", default="")
+    ap.add_argument("--essay", action="store_true")
     a = ap.parse_args(argv)
     d = run_dir()
     out = {}
     with state_file(os.path.join(d, "state.json")) as state:
         b = Bank(other=state.get("tab") == "other")
         entries = b.entries
-        if a.cmd == "answer":
+        if a.cmd != "guesses" and not (a.label or "").strip():
+            out = {"error": f"{a.cmd} needs the field's label."}
+        elif a.cmd == "guesses":
+            out = {"status": "guesses", **guess_list(state)}
+        elif a.cmd == "answer":
             out = lookup(entries, a.label, a.option, a.page or state.get("page", ""))
             if out["status"] == "answer":
                 issue(state, a.label, out["value"])
+        elif a.cmd == "guess":
+            out = record_guess(state, entries, a)
         elif a.cmd in ("save", "once"):
             if a.value is None:
                 out = {"error": f"{a.cmd} needs a value"}
@@ -684,7 +758,18 @@ def _bank(argv):
                         b.put(label_key(a.label), a.value, "select" if a.option else "text")
                 if not out:
                     issue(state, a.label, a.value)
+                    settle(state, a.label, "saved" if a.cmd == "save" else "once", a.value)
                     out = {"status": "answer", "value": a.value, "saved": a.cmd == "save"}
+        elif a.cmd == "confirm":
+            g = (state.get("guesses") or {}).get(label_key(a.label))
+            if not g:
+                out = {"error": f"No guess for {a.label!r} (guesses lists them)."}
+            elif g.get("resolved"):
+                out = {"error": f"Already answered ({g['resolved']}: {g.get('final')!r})."}
+            else:
+                settle(state, a.label, "confirmed", g["value"])
+                issue(state, a.label, g["value"])
+                out = {"status": "confirmed", "value": g["value"], "saved": False}
         elif a.cmd == "alias":
             target = answers.find(entries, a.value or "")
             if not target:
@@ -695,6 +780,7 @@ def _bank(argv):
                 out = lookup(entries, a.label, a.option, a.page)
                 if out["status"] == "answer":
                     issue(state, a.label, out["value"])
+                    settle(state, a.label, "alias", out["value"])
         elif a.cmd == "blank":
             if answers.find(entries, label_key(a.label)):
                 out = {"error": "That question already has an entry; edit answers.json by hand."}
@@ -702,10 +788,38 @@ def _bank(argv):
                 e = answers.new_entry(label_key(a.label), "", "text")
                 e["leave_blank"] = True
                 b.add(e)
+                settle(state, a.label, "blank", "")
                 out = {"status": "leave_blank", "saved": True}
     log(d, f"bank {a.cmd} {a.label!r} -> {out.get('status') or out.get('error')}")
     print(json.dumps(out))
 
+
+def record_guess(state, entries, a):
+    """guess "<label>" "<value>" --why "<what it is based on>" [--option ...] [--essay]: the agent filled its best guess
+    and goes on; the user answers every guess at the end. Never over a saved answer, one the user gave this run, or a
+    leave-blank one. An ask-every-time question may be guessed (marked: the user confirms it every time, with once)."""
+    if a.value is None:
+        return {"error": 'guess needs your guess: guess "<label>" "<value>" --why "<what it is based on>"'}
+    if not a.why.strip() or "\n" in a.why or len(a.why) > MAX_WHY:
+        return {"error": f"--why says in a few words what the guess is based on (one line, max {MAX_WHY} characters)."}
+    if why := valid_answer(a.value, a.option):
+        return {"error": why}
+    key = label_key(a.label)
+    if key in state.get("issued", {}):
+        return {"error": f"Answered already in this run: use {state['issued'][key]!r}."}
+    found = lookup(entries, a.label, a.option, a.page)
+    if found["status"] == "answer":
+        return {"error": f"It has a saved answer: use {found['value']!r}."}
+    if found["status"] == "leave_blank":
+        return {"error": "The user said to always leave this one blank."}
+    state.setdefault("guesses", {})[key] = {
+        "label": a.label, "value": a.value, "why": a.why.strip(), "options": a.option, "page": a.page or state.get("page", ""),
+        "essay": a.essay, "always_ask": found["status"] == "ask_every_time", "resolved": None}
+    if a.value not in state["issued_values"]:
+        state["issued_values"].append(a.value)
+    n = sum(1 for x in state["guesses"].values() if not x.get("resolved"))
+    return {"status": "guess", "value": a.value, "open": n,
+            "next": "Fill it in and keep going: the user answers every guess at the end (guesses)."}
 
 # ---------- hooks (Claude Code runs these for every browser / Bash call) ----------
 
@@ -744,6 +858,29 @@ def redact(obj, secrets_):
     return obj, False
 
 
+def record_typed(state, tool, inp):
+    """What the agent typed or picked, by field (the latest snapshot's name for it, else the agent's own, marked so):
+    review_lines lists the values with no saved answer or guess behind them. A search (type with submit, a search box),
+    a password placeholder, a tick box or an upload is not an answer."""
+    name = tool.split("__")[-1]
+    items = []
+    if name == "browser_type" and not inp.get("submit"):
+        items = [(ref_of(inp), inp.get("element"), inp.get("text"))]
+    elif name == "browser_fill_form":
+        items = [(ref_of(f), f.get("name"), f.get("value")) for f in inp.get("fields") or []
+                 if f.get("type") not in ("checkbox", "radio")]
+    elif name == "browser_select_option":
+        items = [(ref_of(inp), inp.get("element"), ", ".join(str(v) for v in inp.get("values") or []))]
+    typed = state.setdefault("typed", {})
+    for ref, described, value in items:
+        value = str(value if value is not None else "").strip()
+        target = state["refs"].get(ref or "") or {}
+        field = target.get("name") or (f"{described} (as the agent called it)" if described else "a field")
+        if not value or placeholder_of(value) != "" or SEARCH_BOX.search(field) or target.get("role") == "searchbox":
+            continue
+        typed[field] = value[:MAX_ANSWER]
+
+
 def hook(kind):
     d = run_dir()
     data = json.load(sys.stdin)
@@ -753,6 +890,7 @@ def hook(kind):
             verdict, why = decide(state, tool, inp)
             if verdict != "deny" and tool.split("__")[-1] in INPUT_TOOLS:
                 state["filled"] = True  # something is filled in now: from here on a posting's "Apply" asks again
+                record_typed(state, tool, inp)
             if verdict == "fill":  # a password placeholder: the guard types the real one (the agent never sees it)
                 try:
                     new = fill(state, inp, why)
@@ -822,7 +960,7 @@ def find_other_row(number, url_override):
 
 OTHER_NOTE = ("This job is not on NUworks (the sheet's Other jobs tab): nothing is submitted on NUworks afterwards. "
               "Its answer bank leaves out the NUworks co-op answers (start / end dates, co-op term): when the form "
-              "asks one, ask the user.\n")
+              "asks one, guess it from the posting (record the guess) like any other.\n")
 
 
 def answer_prefix():
@@ -898,7 +1036,7 @@ def rules_text(answer_cmd):
         return f.read().replace("ANSWER ", " ".join(shlex.quote(a) for a in answer_cmd) + " ")
 
 
-def context_text(where, row, url, other, resume, read_roots, answer_cmd):
+def context_text(where, row, url, other, resume, read_roots, answer_cmd, writeups=()):
     email = accounts.account_email()
     return (f"\n\nTHIS RUN\n{where.capitalize()}: {row.company} | {row.title}\nPosting: {url}\n"
             + (OTHER_NOTE if other else "") +
@@ -907,8 +1045,10 @@ def context_text(where, row, url, other, resume, read_roots, answer_cmd):
             "If you have no browser tools yet, they are still connecting: run the answer-bank command with "
             "just `wait` (it pauses 5 s), then look again (up to 6 times) before telling the user.\n"
             f"Resume and notes you may read (Read / Glob / Grep): {', '.join(read_roots) or 'none'}\n"
+            + (f"The user's writeups (look here first for essays and project questions): {', '.join(writeups)}\n"
+               if writeups else "") +
             "Answer bank command: "
-            f"{' '.join(shlex.quote(a) for a in answer_cmd)} <answer|save|once|alias|blank> ...")
+            f"{' '.join(shlex.quote(a) for a in answer_cmd)} <answer|guess|guesses|save|once|confirm|alias|blank> ...")
 
 
 def session(d, answer_cmd, read_roots, profile, prompt, where):
@@ -967,18 +1107,21 @@ def run(number, url_override, other=False):
     log_ = browser.RunLog(f"assist_{'other_' if other else ''}row{number}")
     d = log_.dir
     answer_cmd = answer_prefix()
-    read_roots = [os.path.realpath(r) for r in [*config.ASSIST_READ_PATHS, config.LAPTOP_RESUME] if os.path.exists(r)]
+    read_roots = [os.path.realpath(r) for r in [*config.ASSIST_READ_PATHS, *config.ASSIST_WRITEUPS, config.LAPTOP_RESUME]
+                  if os.path.exists(r)]
+    writeups = [os.path.realpath(r) for r in config.ASSIST_WRITEUPS if os.path.exists(r)]
     resume = upload_copy(config.LAPTOP_RESUME, d) if os.path.exists(config.LAPTOP_RESUME) else None
     state = {"current_url": url, "refs": {}, "issued": {}, "issued_values": [], "answer_cmd": answer_cmd,
              "read_roots": read_roots, "protected": protected_dirs(read_roots),
              "resume_src": os.path.realpath(config.LAPTOP_RESUME), "resume": resume, "tab": "other" if other else "jobs",
-             "company": row.company, "job_title": row.title, "job_url": url, "password_sites": []}
+             "company": row.company, "job_title": row.title, "job_url": url, "password_sites": [],
+             "guesses": {}, "typed": {}, "account_email": accounts.account_email() or ""}
     with open(os.path.join(d, "state.json"), "w") as f:
         json.dump(state, f)
     profile = slot_profile(slot)
     os.makedirs(profile, mode=0o700, exist_ok=True)
     cmd = session(d, answer_cmd, read_roots, profile, rules_text(answer_cmd) + context_text(
-        where, row, url, other, resume, read_roots, answer_cmd), where)
+        where, row, url, other, resume, read_roots, answer_cmd, writeups), where)
     log_.write(f"{where.capitalize()}: {row.company} | {row.title} -> {host(url)} (assistant slot {slot} of {slots()})")
     log_.write("Starting the agent. Captchas, email codes and Submit are yours. Type /exit in the session when done.")
     import time

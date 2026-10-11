@@ -49,7 +49,8 @@ HARD LIMITS
 - I should check NUworks' terms of use before running against the real site.
 
 SAFETY RULES (most important)
-1. No guessing, ever. If unsure about anything, stop and ask me.
+1. No guessing, ever. If unsure about anything, stop and ask me. (The one exception: the company-site agent's
+   recorded guesses, which I answer all at once before Submit: COMPANY-SITE AGENT, 2026-10-11.)
 2. Only act on Approved rows. (Exception: `nuauto assist <row>` works on a Needs Human row I
    approved earlier; the row only changes after I press Submit myself and answer y.)
 3. Field filling uses two local files:
@@ -88,7 +89,8 @@ ANSWER BANK (answers.json)
   NUworks runner (apply.py). The company-site agent (`nuauto assist`) may work an unmatched field out from
   my saved answers (other wording, or a direct part like city from address; a dropdown option that means
   the saved answer), says what it used, and aliases the label so the next run matches exactly. Never from
-  always_ask or leave-blank entries; anything my answers don't cover, it asks. I review before Submit.
+  always_ask or leave-blank entries. Anything my answers don't cover, it guesses and records (since 2026-10-11:
+  COMPANY-SITE AGENT), then asks me everything at once at the end. I review before Submit.
 - (Added 2026-10-07.) Jobs in the sheet's Other jobs tab use a second bank, local/answers_other.json, checked
   first; then answers.json minus its NUworks-only entries (answers.NUWORKS_ONLY: available start/end date,
   co-op term; an entry's own "nuworks_only" true/false wins, GUI Answers checkbox). Everything the agent saves
@@ -178,18 +180,30 @@ COMPANY-SITE AGENT (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`;
   it holds my company-site logins, treat it as secret), Bash, Read/Glob/Grep and WebSearch/WebFetch (company context,
   my call 2026-10-10).
 - Relaxed 2026-10-05 (my call): the agent may visit any site, fill anything, tick boxes, upload the
-  resume, and draft longer answers that I approve before it types them. The one hard rule: NOTHING is
+  resume, and draft longer answers (since 2026-10-11 typed in as drafts that I approve in the end list). The one hard rule: NOTHING is
   submitted without my review. Enforced by code (Claude Code hooks -> `assist.py hook pre|post`, logic
   in assist.decide / update_after, tested in tests/test_assist.py): every Submit-type click (SUBMIT_RE, incl.
   "Apply"), Enter and type(submit) make the terminal ask me first ("ask"); element names come from the
   latest full snapshot only (refs cleared by anything that changes the page), never from the agent's
   description. Never: page scripts (could submit behind the review), uploads other than
   the resume (the launcher copies it into the run's log folder, logs/<run>/upload/, because the browser tool
-  only uploads from there; only that copy is allowed), non-web links; Bash only the answer-bank command (answer|save|once|alias|blank|wait);
-  Read/Glob/Grep only inside my resume and local_config.json "assist_read_paths" (my projects and writeups: mine is
-  ~/projects, 2026-10-10), and never NUauto's local/ folders or logs, keys, tokens, .env or .git files in them
+  only uploads from there; only that copy is allowed), non-web links; Bash only the answer-bank command (answer|guess|guesses|save|once|confirm|alias|blank|wait);
+  Read/Glob/Grep only inside my resume, local_config.json "assist_read_paths" (my projects and writeups: mine is
+  ~/projects, 2026-10-10) and "assist_writeups" (the first place it looks for essay material: mine is my site's
+  project and security writeups, 2026-10-11), and never NUauto's local/ folders or logs, keys, tokens, .env or .git files in them
   (assist.secret_path; Grep may not search a folder holding a local/). A guard that fails or times out (60 s) blocks
   the action (hooks' "onFailure": "block").
+- Guess, then ask once (added 2026-10-11, my call: "fill the questions with their best guess and then navigate to the
+  end, asking all their questions at once"): a field the answer bank can't answer gets the agent's best guess (from my
+  resume, notes, writeups, the posting, my saved answers), recorded with `guess` (a reason; never over a saved answer,
+  one I gave this run, or a leave-blank one; always-ask questions are guessed too and confirmed with `once`). It asks
+  right away only for captchas, email codes, sign-in trouble and a required field it can't guess. At the last page it
+  lists every open guess in one message (`guesses`), essays in full; my answers are saved (save; an essay is only
+  confirmed, never saved), it fixes the fields I changed, then waits for my review. Every Submit-type question also lists,
+  from code (assist.review_lines): the guesses I haven't answered, the ones I changed, how many I confirmed, and values
+  typed with no saved answer or guess behind them (the guard's own record, assist.record_typed). Proven with a real
+  Sonnet session on a local practice form (guesses, one end list, a correction saved and fixed, the Submit question's
+  list); not yet on a real application.
 - Accounts (added 2026-10-10, my call): the agent makes the accounts job sites ask for (Workday...), with
   local_config.json "accounts_email" (mine: my Gmail, in local_config only) and a random password per site that NUauto
   makes (accounts.py; local/accounts.json, 600, under a lock, never synced). It types {{NEW_PASSWORD}} / {{PASSWORD}}

@@ -733,4 +733,78 @@ assert all(p.wait() == 0 for p in procs)
 saved = {e["question"]: e["answer"] for e in answers.load(config.OTHER_ANSWERS_PATH)}
 assert all(saved.get(f"question {k}") == f"answer {k}" for k in range(8)), saved
 
+# guess, then ask once (2026-10-11): an unknown field gets a recorded guess and the run goes on; at the end the agent
+# lists them (guesses) and records the user's answers; every Submit question shows what is still a guess
+answers.save([answers.new_entry("email", "me@example.com", "text"), answers.new_entry("city", "Boston", "text"),
+              answers.new_entry("work authorization", "", "select", always_ask=True)])
+answers.save([], config.OTHER_ANSWERS_PATH)
+d = tempfile.mkdtemp()
+with open(os.path.join(d, "state.json"), "w") as f:
+    json.dump({**fresh(), "tab": "jobs", "company": "Acme", "job_title": "T", "job_url": "https://x/1",
+               "password_sites": [], "guesses": {}, "typed": {}, "account_email": "jobs@example.com"}, f)
+os.environ[assist.STATE_ENV] = d
+YN = ("--option", "Yes", "--option", "No")
+assert "error" in bank("guess", "Email*", "x@example.com", "--why", "w")          # it has a saved answer: use it
+assert "error" in bank("guess", "Relocate?*", "Yes", *YN)                         # a guess says what it's based on
+assert "error" in bank("guess", "Relocate?*", "Maybe", "--why", "w", *YN)         # one of the options
+assert "error" in bank("guess", "Relocate?*", "x\ny", "--why", "w")               # one line
+r = bank("guess", "Graduation date*", "May 2029", "--why", "resume: B.S. expected May 2029", "--page", "My Experience")
+assert r["status"] == "guess" and r["open"] == 1
+bank("guess", "Relocate?*", "Yes", "--why", "saved answers: anywhere in the US", *YN)
+assert bank("guess", "Work Authorization*", "Yes", "--why", "resume: US citizen", *YN)["open"] == 3  # always-ask: guessed too
+bank("guess", "Why Acme?*", "essay draft: I wrote drone firmware...", "--essay", "--why", "writeups/flight-controller.md")
+g = bank("guesses")
+assert [x["label"] for x in g["open"]] == ["Graduation date*", "Relocate?*", "Work Authorization*", "Why Acme?*"]
+assert [x["n"] for x in g["open"]] == [1, 2, 3, 4] and g["open"][2]["always_ask"] and g["open"][3]["essay"]
+assert g["open"][1]["options"] == ["Yes", "No"] and g["open"][0]["page"] == "My Experience" and g["settled"] == []
+# the guard keeps its own record of what was typed: a value with no saved answer or guess behind it is listed
+assert bank("answer", "City*")["value"] == "Boston"
+run_hook("pre", {"tool_name": B + "browser_type", "tool_input": {"ref": "e13", "text": "Boston"}})        # saved: fine
+run_hook("pre", {"tool_name": B + "browser_type", "tool_input": {"ref": "e12", "text": "Jamie"}})         # no answer behind it
+run_hook("pre", {"tool_name": B + "browser_type", "tool_input": {"ref": "e70", "text": assist.accounts.NEW}})  # a password
+run_hook("pre", {"tool_name": B + "browser_fill_form", "tool_input": {"fields": [
+    {"ref": "e50", "name": "terms", "type": "checkbox", "value": "true"},                                 # a tick box
+    {"ref": "e99", "name": "Mobile", "type": "textbox", "value": "jobs@example.com"}]}})                  # the account email
+st = state()
+assert st["typed"] == {"City*": "Boston", "First Name*": "Jamie", "Mobile (as the agent called it)": "jobs@example.com"}
+assert assist.unexplained(st) == [("First Name*", "Jamie")]  # the saved city and the account email are explained
+verdict, why = assist.decide(st, B + "browser_click", {"ref": "e90"})                     # "Submit Application"
+assert verdict == "ask" and "NOT CONFIRMED BY YOU" in why and "Graduation date* = 'May 2029' (resume: B.S." in why, why
+assert "Why Acme?* = 'essay draft: I wrote drone firmware...'" in why and "First Name* = 'Jamie'" in why
+assert "NOT CONFIRMED" in assist.decide(st, B + "browser_press_key", {"key": "Enter"})[1]  # Enter asks the same way
+# the end list: the user's answers settle every guess (save: reused next time; once: always-ask; confirm: an essay)
+assert bank("save", "Graduation date*", "May 2029")["saved"]
+assert bank("save", "Relocate?*", "No", *YN)["saved"]                                     # the user changed this one
+assert "error" in bank("save", "Work Authorization*", "Yes", *YN)                         # always-ask: once only
+assert bank("once", "Work Authorization*", "Yes", *YN)["value"] == "Yes"
+assert "error" in bank("confirm", "Cover letter*")                                        # no such guess
+assert bank("confirm", "Why Acme?*")["status"] == "confirmed"
+assert "error" in bank("confirm", "Why Acme?*")                                           # once only
+assert "error" in bank("guess", "Work Authorization*", "No", "--why", "w", *YN)           # answered in this run
+g = bank("guesses")
+assert g["open"] == [] and {x["label"]: x["how"] for x in g["settled"]} == {
+    "Graduation date*": "saved", "Relocate?*": "saved", "Work Authorization*": "once", "Why Acme?*": "confirmed"}
+assert answers.find(answers.load(), "relocate?")["answer"] == "No"                        # reused next time
+assert answers.find(answers.load(), "why acme?") is None                                  # an essay is never saved
+why = assist.decide(state(), B + "browser_click", {"ref": "e90"})[1]
+assert "NOT CONFIRMED" not in why and "Relocate?*: 'Yes' -> 'No'" in why and "confirmed as they were: 3" in why, why
+assert "First Name* = 'Jamie'" in why                                                     # still listed: no answer behind it
+# a guess is settled by a blank or an alias too; a run with nothing guessed and nothing extra asks as before
+bank("guess", "Middle name", "J", "--why", "no info")
+bank("blank", "Middle name")
+bank("guess", "E-mail address*", "me@example.com", "--why", "the saved email")
+assert bank("alias", "E-mail address*", "email")["value"] == "me@example.com" and bank("guesses")["open"] == []
+plain = assist.decide({**fresh(), "guesses": {}, "typed": {}}, B + "browser_click", {"ref": "e90"})[1]
+assert plain.startswith("NUAUTO: clicking 'Submit Application'") and "\n" not in plain
+assert "guess" in assist.BASH_COMMANDS and assist.check_bash(fresh(), " ".join(ANSWER_CMD) + " guesses") is None
+# the run's context names the writeups (the first place to look for essays)
+ctx = assist.context_text("row 3", type("R", (), {"company": "Acme", "title": "Intern"})(), "https://x/1", False, RESUME,
+                          [tmp], ANSWER_CMD, ["/home/u/projects/site/data/projects"])
+assert "writeups (look here first for essays" in ctx and "/home/u/projects/site/data/projects" in ctx
+assert "<answer|guess|guesses|save|once|confirm|alias|blank>" in ctx
+assert "writeups" not in assist.context_text("row 3", type("R", (), {"company": "A", "title": "I"})(), "https://x/1",
+                                             False, RESUME, [tmp], ANSWER_CMD).split("Resume and notes")[1].split("\n")[1]
+rules = assist.rules_text(ANSWER_CMD)
+assert "THE END LIST" in rules and f"{' '.join(ANSWER_CMD)} guesses" in rules and "ANSWER " not in rules
+
 print("All assist (agent guard) checks passed.")

@@ -86,6 +86,8 @@ LOGS_DIR = os.path.join(STATE_DIR, "logs")
 ASSIST_PROFILE_DIR = os.path.join(LOCAL_DIR, "assist_profile")
 # Folders/files the agent may read (notes, writeups) to suggest answers; the resume is always added.
 ASSIST_READ_PATHS = [os.path.expanduser(p) for p in LOCAL.get("assist_read_paths", [])]
+# Your own writeups (projects, security reports): read too, and the first place the agent looks for essay material.
+ASSIST_WRITEUPS = [os.path.expanduser(p) for p in LOCAL.get("assist_writeups", [])]
 
 # Homelab server (optional): runs the twice-daily update and the Discord reminders. The laptop syncs with it over
 # Tailscale (sync.py): it pulls job data and pushes ratings, the NUworks session and the resume.
