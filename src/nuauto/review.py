@@ -300,7 +300,7 @@ img{max-width:100%;border:1px solid #ccc;border-radius:.3rem}.dim{color:#777;fon
 pre{background:#262626}.chip{background:#333}.approve{background:#5a1f1d}.waiting{background:#4d3f0d}.finish{background:#1e4227}a{color:#7ab4ff}}"""
 
 POLL_JS = """const v = document.body.dataset.v, u = document.body.dataset.poll, at = document.body.dataset.scroll;
-if (at && document.getElementById(at)) document.getElementById(at).scrollIntoView({block: at === "reply" ? "end" : "start"});
+if (at && document.getElementById(at)) document.getElementById(at).scrollIntoView({block: at === "approve" ? "start" : "end"});
 if (u) setInterval(async () => {
   if ([...document.querySelectorAll("textarea,input[type=text]")].some(e => e.value)) return;
   try { const r = await fetch(u, {cache: "no-store"}); if (r.ok && (await r.text()).trim() !== v) location.reload(); } catch (e) {}
@@ -357,21 +357,33 @@ def index_page(token):
 
 
 def session_page(s, token, flash=""):
-    """Read like a chat: what needs a decision first (the end of the session, a Submit), then the browser and the
-    terminal, then its latest message with the reply box right under it, at the bottom (the page opens there)."""
+    """Read like a chat, newest at the bottom: the browser and the terminal, then its latest message, then what it wants
+    from you right under it (a Submit to approve, or the session's end), then the reply box with End session. The page
+    opens at the bottom part (the Submit question when there is one)."""
     st, a, word = s["state"], s["approval"], status(s)[0]
     slot = s["slot"]
     chat = word not in ("finish", "prompt")
     note = f"<div class=card><b>{esc(flash)}</b></div>" if flash else ""
     parts = [f"<p><a href='/'>&larr; all</a></p><h2>{esc(st.get('company'))}</h2>"
              f"<div class=dim>{esc(st.get('job_title'))} | {esc(st.get('where'))} | slot {slot}</div>"]
-    if note and not chat:
-        parts.append(note)
-    if word == "finish":
-        parts.append("<div class='card finish'><b>The session ended. Did you approve Submit and did the site confirm "
-                     "the application?</b><p class=dim>Yes marks the row Applied (dated today).</p>"
-                     + form(f"/s/{slot}/finish", token, "<button class=go name=a value=y>Yes, it went through</button>"
-                            "<button class=no name=a value=n>No</button>") + "</div>")
+    view = s["view"]
+    if view.get("url"):
+        parts.append(f"<div class=card><b>The browser</b> <span class=dim>(captchas: you solve them here, then reply "
+                     f"\"done\")</span><p><a href='{esc(view['url'])}' target=_blank rel=noopener>Open it</a> &middot; "
+                     f"password <code>{esc(view.get('password'))}</code></p>"
+                     f"<img src='/s/{slot}/shot.png?live={int(time.time())}' alt='the screen now'></div>")
+    parts.append(f"<div class=card><b>Its terminal</b><pre>{esc(terminal(s)) or '(not readable)'}</pre>"
+                 + form(f"/s/{slot}/key", token, "<button class=no name=k value=interrupt>Interrupt (Esc)</button>")
+                 + "</div>")
+    if s["message"] and word != "finish":
+        parts.append(f"<div class='card {'waiting' if word == 'waiting' else ''}'><b>Its latest message</b>"
+                     f"<pre>{esc(s['message'])}</pre></div>")
+    parts.append(note)
+    if word == "prompt":
+        parts.append("<div class='card approve'><b>Claude Code is asking something in its terminal</b> (a permission "
+                     "question, not a Submit of the guard's). The reply box is off until it is answered, because Enter "
+                     "would pick its first option. Answer it in the terminal: "
+                     f"<code>ssh -t homelab tmux attach -t {esc(st.get('tmux') or '?')}</code></div>")
     if a:
         late = "" if a.get("waiting") else ("<p class=dim>The assistant stopped waiting for this; Approve tells it to "
                                             "do it now (good for 10 minutes, this action on this page only).</p>")
@@ -383,30 +395,21 @@ def session_page(s, token, flash=""):
                                    "<button class=go name=d value=approve>Approve: submit</button>"
                                    "<input type=text name=note placeholder='Note for the agent (when you decline)'>"
                                    "<button class=no name=d value=decline>Decline</button>", id=a["id"]) + "</div>")
-    if word == "prompt":
-        parts.append("<div class='card approve'><b>Claude Code is asking something in its terminal</b> (a permission "
-                     "question, not a Submit of the guard's). The reply box is off until it is answered, because Enter "
-                     "would pick its first option. Answer it in the terminal: "
-                     f"<code>ssh -t homelab tmux attach -t {esc(st.get('tmux') or '?')}</code></div>")
-    view = s["view"]
-    if view.get("url"):
-        parts.append(f"<div class=card><b>The browser</b> <span class=dim>(captchas: you solve them here, then reply "
-                     f"\"done\")</span><p><a href='{esc(view['url'])}' target=_blank rel=noopener>Open it</a> &middot; "
-                     f"password <code>{esc(view.get('password'))}</code></p>"
-                     f"<img src='/s/{slot}/shot.png?live={int(time.time())}' alt='the screen now'></div>")
-    parts.append(f"<div class=card><b>Its terminal</b><pre>{esc(terminal(s)) or '(not readable)'}</pre>"
-                 + form(f"/s/{slot}/key", token, "<button class=no name=k value=interrupt>Interrupt (Esc)</button>"
-                        "<button class=no name=k value=exit>End session (/exit)</button>") + "</div>")
-    if s["message"] and word != "finish":
-        parts.append(f"<div class='card {'waiting' if word == 'waiting' else ''}'><b>Its latest message</b>"
-                     f"<pre>{esc(s['message'])}</pre></div>")
+    if word == "finish":
+        parts.append("<div class='card finish' id=finish><b>The session ended. Did you approve Submit and did the site "
+                     "confirm the application?</b><p class=dim>Yes marks the row Applied (dated today).</p>"
+                     + form(f"/s/{slot}/finish", token, "<button class=go name=a value=y>Yes, it went through</button>"
+                            "<button class=no name=a value=n>No</button>") + "</div>")
     if chat:
-        parts.append(note + "<div class=card id=reply><b>Reply</b> <span class=dim>(typed into its terminal)</span>"
+        parts.append("<div class=card id=reply><b>Reply</b> <span class=dim>(typed into its terminal)</span>"
                      + form(f"/s/{slot}/reply", token, "<textarea name=text rows=4 maxlength=4000></textarea>"
-                            "<button>Send</button>") + "</div>")
-    # open at what wants you: a Submit question, else the reply box at the bottom
+                            "<button>Send</button>")
+                     + "<p class=dim>Done (it submitted, or you stop here)? End the session; then it asks whether it "
+                       "went through.</p>"
+                     + form(f"/s/{slot}/key", token, "<button class=no name=k value=exit>End session</button>")
+                     + "</div>")
     return layout(f"NUauto: {st.get('company') or 'assistant'}", "".join(parts), version(s), f"/s/{slot}/v",
-                  scroll="approve" if a else "reply" if chat else "")
+                  scroll="approve" if a else "finish" if word == "finish" else "reply" if chat else "")
 
 
 NOT_PAIRED = ("<h2>Not paired</h2><p>This browser is not paired with NUauto. Make a pairing link (<code>nuauto review "

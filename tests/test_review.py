@@ -179,9 +179,10 @@ try:
     # the session page: what it will do, the message (escaped)
     r = req("GET", "/s/1", cookie=KEY)
     page = text(r)
-    # like a chat: the terminal, then the latest message, then the reply box at the very bottom; opens at the Submit
-    assert page.index("Its terminal") < page.index("Its latest message") < page.index("id=reply")
-    assert page.index("Ready to submit") < page.index("Its terminal") and "data-scroll='approve'" in page
+    # like a chat, newest at the bottom: the terminal, the latest message, the Submit question right under it, then
+    # the reply box with End session; opens at the Submit question
+    assert page.index("Its terminal") < page.index("Its latest message") < page.index("Ready to submit") < page.index("id=reply")
+    assert page.index("id=reply") < page.index(">End session<") and "data-scroll='approve'" in page
     assert r[0] == 200 and "Ready to submit" in page and "click &#x27;Submit&#x27;" in page and "https://acme.example/apply" in page
     assert "guesses: Graduation = May 2029" in page and "Approve: submit" in page and "Decline" in page
     assert EVIL not in page and "&lt;script&gt;alert(1)&lt;/script&gt;" in page, "the agent's message is escaped"
