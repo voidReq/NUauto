@@ -48,7 +48,7 @@ DEFAULTS = {
     "category_threshold": _ENG["category_threshold"],  # a lower bar for roles you care most about (not "above your year")
     "major_words": _ENG["major_words"],  # a targeted major without these words: flagged
     "home_state": "MA", "home_label": "Boston", "home_bonus": 10,  # ranking only (not for getting into the pool)
-    "category_bonus": _ENG["category_bonus"],  # ranking
+    "category_bonus": _ENG["category_bonus"],  # ranking (may be negative: engineering's front-end -20)
     # the kinds of work Claude sorts jobs into (prompts/CATEGORY_PROMPT.md): key, label, description; "other" always
     "categories": _ENG["categories"],
     # ranking only: a tag is given when any of its phrases is anywhere in the job (job_tag); the first tag that matches
@@ -143,7 +143,8 @@ def tag_bonus(tag):
 def set_categories():
     """CATEGORIES: your kinds of work (keys, in your order). CATEGORY_SET: which set that is (a job sorted into another
     set is sorted again). RATE_ORDER: the rating rotation, your order with the rank_last ones after the rest
-    (engineering: security, embedded, hardware, systems, robotics_test, software, data_ml, it, other, fullstack_web)."""
+    (engineering: security, embedded, hardware, systems, robotics_test, fullstack_web, software, data_ml, it, other,
+    frontend)."""
     global CATEGORIES, CATEGORY_SET, RATE_ORDER
     CATEGORIES = [c["key"] for c in PREFS["categories"]]
     CATEGORY_SET = fields.fingerprint(PREFS["categories"])
@@ -774,7 +775,7 @@ def category_bonus(cat):
 
 
 def pool_sort_key(r):
-    """rank_last categories (full-stack/web) always last; otherwise by rank (match + home state + category bonus),
+    """rank_last categories (engineering: front-end) always last; otherwise by rank (match + home state + category bonus),
     or blended with taste."""
     base = r["rank"] / 100
     value = 0.5 * base + 0.5 * r["taste"] if "taste" in r else base
@@ -789,11 +790,12 @@ def score_parts(r):
 
 
 def rank_text(r):
-    """'103 = 73% match + 20 security + 10 MA', or just '73' with no bonuses."""
+    """'103 = 73% match + 20 security + 10 MA' ('53 = 73% match - 20 frontend'), or just '73' with no bonuses."""
     parts = score_parts(r)
     if len(parts) == 1:
         return str(r["rank"])
-    return f"{r['rank']} = " + " + ".join(f"{n}{label}" for n, label in parts)
+    return f"{r['rank']} = {parts[0][0]}{parts[0][1]}" + "".join(
+        f" {'-' if n < 0 else '+'} {abs(n)}{label}" for n, label in parts[1:])
 
 
 def order_text(r, why):
@@ -1093,7 +1095,7 @@ def rate_viewer(todo, details, ratings, approved=None, urgent=()):
             curses.init_pair(k, col, bg)
             pair[n] = curses.color_pair(k)
         # the biggest bonus red, other bonuses green, rank_last dim (engineering: security red; embedded, hardware,
-        # systems, robotics_test green; fullstack_web dim)
+        # systems, robotics_test green; frontend dim)
         top = max(PREFS["category_bonus"].values(), default=0)
         cat_color = {c: pair["red"] if b == top else pair["green"] for c, b in PREFS["category_bonus"].items() if b > 0}
         cat_color.update({c: curses.A_DIM for c in PREFS["rank_last"]})

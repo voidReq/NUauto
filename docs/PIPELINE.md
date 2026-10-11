@@ -58,8 +58,10 @@ RANKING (my settings: the engineering field)
   Security roles need 60% to enter (junior-only still 90%).
 - Pool entry uses the RAW resume match (Boston +10 is ranking only).
 - Ranking = match + Boston + category bonus: security +20, low-level (embedded, hardware,
-  systems, robotics/controls/test) +10. Full-stack/web/front-end roles stay in the pool but
-  always rank last.
+  systems, robotics/controls/test) +10. Front-end / UI roles (mainly the user-facing side: front-end, UI/UX,
+  web design, app screens) stay in the pool but get -20 and always rank last (my call 2026-10-11: my resume has
+  front-end work, so they match well, but I don't want them); full-stack and web back-end rank like any software job
+  (before 2026-10-11 one "Web / full-stack" kind held all of them and ranked last).
 - Extra boosts (past job experience): AR/XR/smart glasses +5, wearables (incl. medical) +3
   (not stacked with AR), embedded +5 more (so +15 total). Scaled down 2026-10-02 so real fit
   matters more (I need to pass technical interviews).
@@ -78,7 +80,7 @@ MY RATINGS (taste model)
   and pushes to the homelab. They train a TF-IDF model that reorders the pool (half rank,
   half my taste) once there are 5 yes + 5 no.
 - Rating order rotates categories (security, embedded, hardware, systems, robotics/test,
-  software, data/ML, IT, other, full-stack) so every category gets rated; once the model
+  web/full-stack, software, data/ML, IT, other, front-end) so every category gets rated; once the model
   trains, it also mixes in the jobs it is least sure about.
 - Viewer keys: j/k scroll, space/b page, g/G top/bottom, y/n rate (overwrites an earlier
   answer), s skip, u back one job, o open in browser, q quit.
@@ -87,7 +89,8 @@ SUMMER INTERNSHIPS (intern.py + postings.py, added 2026-10-10; `nuauto intern ..
 A second pool for jobs that are not on NUworks: SimplifyJobs' Summer 2027 list (github.com/SimplifyJobs/
 Summer2027-Internships, dev branch, .github/scripts/listings.json; their own scripts only build the README).
 On when local_config.json has "internships" (an object; {} = defaults: term "Summer 2027", the list's URL, per run
-300 postings read by plain requests, 40 by the hidden browser, 120 scored). Mine: on (2026-10-10).
+300 postings read by plain requests, 40 by the hidden browser, 120 scored; "threshold": the bar to enter the pool,
+default the co-ops' bar). Mine: on (2026-10-10), threshold 60 (2026-10-11; the co-ops stay at 65).
 - Runs: the homelab every 2 hours (nuauto-intern.timer, :40 on even hours New York) and after each NUworks update
   (daily.py); one at a time (data/intern/update.lock). The list changes every 30 min; it is downloaded only when it
   changed (ETag). Each step does only new work, a limited amount per run: the first runs work through the backlog
@@ -104,7 +107,8 @@ On when local_config.json has "internships" (an object; {} = defaults: term "Sum
   4. Claude score (prompts/INTERN_SCORE_PROMPT.md): the same match formula as the co-ops, plus year_req, who may
   apply compared with your standing DURING the internship (a sophomore now = a rising junior then): ok = your bar,
   one_year_up = threshold_above, two_years_up / grad = dropped; the sentence used is kept (year_text). 4b. Claude
-  category (CATEGORY_PROMPT.md). 5. pool: same bars and bonuses as the co-ops (Boston +10, category, tags);
+  category (CATEGORY_PROMPT.md). 5. pool: the co-ops' bars (or the internships' own "threshold"; a kind's lower bar still
+  applies) and bonuses (Boston +10, category, tags);
   flags: posted 45+ days ago, US citizens only, mentions graduation, vague posting, a year further along.
 - Sample test 2026-10-10: 69 of 78 random listings read by plain requests, the rest by the hidden browser (39 of 39 in
   a run with it).

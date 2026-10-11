@@ -85,7 +85,7 @@ details, ratings = jobs.load_details(), jobs.load("ratings.json", {})
 todo, urgent = jobs.review_queue("approve", details, ratings, sheet.read_rows(ws))
 ids = [r["id"] for r in todo]
 assert "900101" not in ids and "900102" not in ids and set(ids) >= {"900103", "900104", "900106"} and not urgent, ids
-assert ids[-1] == "900107"  # full-stack/web always last
+assert ids[-1] == "900107"  # front-end always last
 view = jobs.job_view(todo[0], details[todo[0]["id"]])
 assert view["url"] == jobs.job_url(view["id"]) and {"header", "bullet", "text"} <= {b["kind"] for b in view["description"]}
 assert jobs.text_blocks("Responsibilities:\n- Build things\nPlain line") == [
