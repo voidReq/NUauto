@@ -27,10 +27,13 @@ DIRS = ["src/nuauto", "prompts", "docs", "deploy/systemd"]
 FILES = ["pyproject.toml", "README.md", "CLAUDE.md", "CONTRIBUTING.md", "local_config.example.json"]
 UNIT_SRC = "deploy/systemd"
 # nuauto-web keeps the code it started with: restart it when one of these changed (doctor warns about the same list).
-WEB_CODE = ["src/nuauto/web.py", "src/nuauto/config.py", "src/nuauto/sheet.py", "src/nuauto/jobs.py"]
+WEB_CODE = ["src/nuauto/web.py", "src/nuauto/config.py", "src/nuauto/sheet.py", "src/nuauto/jobs.py",
+            # the assistant's review page runs inside nuauto-web too (remote_assist)
+            "src/nuauto/review.py", "src/nuauto/assist.py", "src/nuauto/screen.py", "src/nuauto/accounts.py",
+            "src/nuauto/answers.py", "src/nuauto/remote.py"]
 # Imported from the new code before anything is copied (the modules the homelab runs; not the GUI's).
 MODULES = ["cli", "config", "sheet", "jobs", "daily", "web", "doctor", "sync", "deploy", "browser", "health", "intern",
-           "postings"]
+           "postings", "assist", "review", "screen", "remote"]
 UNIT_DIR = os.path.expanduser("~/.config/systemd/user")
 STATE_PATH = os.path.join(config.LOCAL_DIR, "deployed.json")
 LOG_PATH = os.path.join(config.LOGS_DIR, "deploy.log")

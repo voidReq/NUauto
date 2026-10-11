@@ -465,6 +465,7 @@ class FakeWS:
 from nuauto import browser  # noqa: E402
 
 config.LOGS_DIR, config.ASSIST_PROFILE_DIR, config.LAPTOP_RESUME = os.path.join(tmp, "logs"), os.path.join(tmp, "prof"), RESUME
+config.RESUME_PATH = RESUME  # assist.run reads the resume from RESUME_PATH (the homelab has its copy there)
 config.ASSIST_READ_PATHS = []
 posting = "https://careers.example.com/jobs/4821"
 full_week = [list(sheet.HEADERS)] + [[f"https://x/{i}", "Co", "Job", "Applied", "", __import__("datetime").date.today().isoformat()]
@@ -493,7 +494,8 @@ assert "nuworks_side" not in calls
 assert ws.values[row_n - 1][5] == __import__("datetime").date.today().isoformat()
 assert "nuauto assist" in ws.values[row_n - 1][4]
 upload = [p for p in os.listdir(config.LOGS_DIR) if p.endswith(f"assist_other_row{row_n}")]
-assert upload and os.path.exists(os.path.join(config.LOGS_DIR, upload[0], "upload", "Resume.pdf"))  # the resume copy
+assert upload and os.path.exists(os.path.join(config.LOGS_DIR, upload[0], "browser", "upload", "Resume.pdf"))  # the resume copy
+assert not os.path.exists(os.path.join(config.LOGS_DIR, upload[0], "upload"))   # not in the run folder itself (browser/ is the tool's)
 assert json.load(open(os.path.join(config.LOGS_DIR, upload[0], "state.json")))["tab"] == "other"
 try:
     assist.main(["other", str(row_n)])  # Applied now: refused
@@ -866,5 +868,756 @@ holder.kill()
 holder.wait()
 os.environ.pop(assist.STATE_ENV)
 assert attention("stop", {}) == ""                               # outside a session: nothing, no error
+
+def blocked(state, tool, inp, needle=""):  # (the name was used for the NUworks-side check further up)
+    verdict, why = assist.decide(state, tool, inp)
+    assert verdict == "deny" and needle.lower() in why.lower(), (tool, inp, verdict, why)
+
+
+# captchas (2026-10-11): an element named like one, or anything inside a captcha frame, is the user's: never clicked,
+# typed in or hovered; the rest of the page works as before
+CAPTCHA_SNAP = f"""### Page state
+- Page URL: https://{H}/careers/job/X_1/apply
+- Page Snapshot:
+```yaml
+- generic [ref=c1]:
+  - textbox "First Name*" [ref=c2]
+  - checkbox "I'm not a robot" [ref=c3]
+  - iframe "reCAPTCHA" [ref=c4]:
+    - checkbox "I'm not a robot" [ref=c5]
+    - button "Get an audio challenge" [ref=c6]
+    - generic [ref=c7]:
+      - textbox "Type the text" [active] [ref=c8]
+  - textbox "Last Name*" [ref=c9]
+  - iframe "Widget containing checkbox for hCaptcha security challenge" [ref=c10]:
+    - checkbox "hCaptcha checkbox" [ref=c11]
+  - button "Verify you are human" [ref=c12]
+  - button "Next" [ref=c13]
+  - iframe "Ad" [ref=c14]:
+    - link "Learn more" [ref=c15]
+  - button "Submit Application" [ref=c16]
+```"""
+cp = {**fresh(), "refs": assist.parse_refs(CAPTCHA_SNAP)}
+marked = sorted(r for r, v in cp["refs"].items() if v.get("captcha"))
+assert marked == ["c10", "c11", "c12", "c3", "c4", "c5", "c6", "c7", "c8"], marked  # frames + everything under them
+assert "captcha" not in cp["refs"]["c2"] and "captcha" not in cp["refs"]["c9"]     # same / lower indent after a frame: not marked
+assert "captcha" not in cp["refs"]["c13"] and "captcha" not in cp["refs"]["c15"] and "captcha" not in cp["refs"]["c1"]
+assert cp["refs"]["c3"] == {"role": "checkbox", "name": "I'm not a robot", "captcha": True}
+for name in ("Verify you are human", "Verify that you're a human", "Are you a robot?", "Human verification", "Press & hold",
+             "Cloudflare Turnstile", "hCaptcha checkbox", "Security check", "Arkose Labs challenge"):
+    assert assist.parse_refs(f'- checkbox "{name}" [ref=z1]')["z1"].get("captcha"), name
+for name in ("First Name", "Verify your email address", "Robotics experience", "Humane Society volunteer"):
+    assert "captcha" not in assist.parse_refs(f'- textbox "{name}" [ref=z1]')["z1"], name
+assert assist.parse_refs('- iframe [ref=f1]:\n  - button "Go" [ref=f2]')["f2"] == {"role": "button", "name": "Go"}  # no name: not one
+# the guard: any action on a captcha ref is refused, whatever the tool
+for ref in ("c3", "c5", "c6", "c8", "c11", "c12"):
+    for tool in ("browser_click", "browser_hover", "browser_type", "browser_select_option"):
+        blocked(cp, B + tool, {"ref": ref, "text": "x", "values": ["x"]}, "captcha")
+    blocked(cp, B + "browser_click", {"target": ref}, "captcha")
+blocked(cp, B + "browser_fill_form", {"fields": [{"ref": "c2", "type": "textbox", "value": "Jane"},
+                                                 {"ref": "c5", "type": "checkbox", "value": "true"}]}, "captcha")
+blocked(cp, B + "browser_press_key", {"key": "Space"}, "captcha")                       # the focused element is in the captcha
+assert "captcha" in assist.decide(cp, B + "browser_click", {"ref": "c12"})[1].lower() and "wait" in assist.CAPTCHA_DENY
+# the rest of the page behaves as before
+ok(cp, B + "browser_type", {"ref": "c2", "text": "Jane"})
+ok(cp, B + "browser_type", {"ref": "c9", "text": "Doe"})
+ok(cp, B + "browser_click", {"ref": "c13"})
+ok(cp, B + "browser_click", {"ref": "c15"})
+ok(cp, B + "browser_fill_form", {"fields": [{"ref": "c2", "type": "textbox", "value": "Jane"}]})
+asks(cp, B + "browser_click", {"ref": "c16"}, "submit")
+nofocus = {**cp, "refs": {r: {k: v for k, v in info.items() if k != "active"} for r, info in cp["refs"].items()}}
+asks(nofocus, B + "browser_press_key", {"key": "Enter"}, "enter")                    # no captcha focused: Enter asks as before
+ok(nofocus, B + "browser_press_key", {"key": "Tab"})
+focus_normal = {**cp, "refs": {**cp["refs"], "c8": {k: v for k, v in cp["refs"]["c8"].items() if k != "active"},
+                               "c2": {**cp["refs"]["c2"], "active": True}}}
+ok(focus_normal, B + "browser_press_key", {"key": "Tab"})                             # focus on a normal box: fine
+ok(cp, B + "browser_snapshot", {})
+ok(cp, B + "browser_navigate", {"url": "https://other.example/"})
+
+# on the homelab the "needs you" news goes to Discord (no desktop there): a link to the review page, and how to reach the
+# terminal; the agent's whole message is kept for that page
+import nuauto.daily as daily  # noqa: E402
+from nuauto import review  # noqa: E402
+sent, real_discord, real_server, real_page = [], daily.discord, config.IS_SERVER, review.page_url
+daily.discord = lambda text: sent.append(text)
+review.page_url = lambda slot=None: "http://100.64.0.1:8766" + (f"/s/{slot}" if slot else "/")
+shown.clear()
+PAGE1 = "http://100.64.0.1:8766/s/1"
+try:
+    config.IS_SERVER = True
+    d = tempfile.mkdtemp()
+    with open(os.path.join(d, "state.json"), "w") as f:
+        json.dump({**fresh(), "company": "Acme", "where": "Other jobs row 7", "password_sites": [], "tmux": "nuauto1",
+                   "slot": 1}, f)
+    os.environ[assist.STATE_ENV] = d
+    whole = "There is a captcha on this page.\nPlease solve it.\n<b>not html</b>"
+    assert attention("stop", {"last_assistant_message": whole}) == ""
+    assert len(sent) == 1 and shown == [], (sent, shown)
+    assert f"Answer it: {PAGE1}" in sent[0] and "Its terminal: ssh homelab -t tmux attach -t nuauto1" in sent[0]
+    assert "Acme" in sent[0] and "Other jobs row 7" in sent[0] and "vnc.html" not in sent[0]
+    assert "There is a captcha on this page." in sent[0] and "Please solve it" not in sent[0]
+    assert open(os.path.join(d, assist.MESSAGE)).read() == whole        # the whole message, for the review page
+    assert oct(os.stat(os.path.join(d, assist.MESSAGE)).st_mode & 0o777) == "0o600"
+    assert json.load(open(os.path.join(d, assist.ATTENTION)))["kind"] == "waiting"
+    attention("stop", {})
+    assert len(sent) == 1                                                # the same news within a minute: once
+    attention("notification", {"message": "Claude needs your permission to use mcp__browser__browser_click",
+                               "notification_type": "permission_prompt"})
+    assert len(sent) == 2 and PAGE1 in sent[1] and "tmux attach -t nuauto1" in sent[1]
+    assert open(os.path.join(d, assist.MESSAGE)).read() == whole        # an approval notice leaves the message alone
+    # slot 2's session links to its own page
+    d5 = tempfile.mkdtemp()
+    with open(os.path.join(d5, "state.json"), "w") as f:
+        json.dump({**fresh(), "company": "Eps", "where": "row 9", "password_sites": [], "tmux": "nuauto2", "slot": 2}, f)
+    os.environ[assist.STATE_ENV] = d5
+    attention("stop", {"last_assistant_message": "q?"})
+    assert "http://100.64.0.1:8766/s/2" in sent[2] and "attach -t nuauto2" in sent[2], sent[2]
+    # no tmux in the state: still sent, without the terminal line
+    d2 = tempfile.mkdtemp()
+    with open(os.path.join(d2, "state.json"), "w") as f:
+        json.dump({**fresh(), "company": "Beta", "where": "row 3", "password_sites": []}, f)
+    os.environ[assist.STATE_ENV] = d2
+    attention("stop", {})
+    assert len(sent) == 4 and "tmux" not in sent[3] and PAGE1 in sent[3] and "Beta" in sent[3]
+    # on the laptop: the desktop notification, nothing to Discord, no message file
+    config.IS_SERVER = False
+    d4 = tempfile.mkdtemp()
+    with open(os.path.join(d4, "state.json"), "w") as f:
+        json.dump({**fresh(), "company": "Delta", "where": "row 5", "password_sites": [], "tmux": "nuauto1"}, f)
+    os.environ[assist.STATE_ENV] = d4
+    attention("stop", {"last_assistant_message": "hello"})
+    assert len(sent) == 4 and len(shown) == 1 and "tmux" not in shown[0][1] and "8766" not in shown[0][1]
+    assert not os.path.exists(os.path.join(d4, assist.MESSAGE))
+finally:
+    daily.discord, config.IS_SERVER, review.page_url = real_discord, real_server, real_page
+    os.environ.pop(assist.STATE_ENV, None)
+title, body = assist.attention_text("waiting", "row 1", "Acme", "hi", {"tmux": "nuauto2", "review_url": PAGE1})
+assert title == "NUauto: Acme" and "Its terminal: ssh homelab -t tmux attach -t nuauto2" in body
+assert body.splitlines()[0] == "The assistant on the homelab is waiting for you (row 1): hi" and f"Answer it: {PAGE1}" in body
+assert "ssh" not in assist.attention_text("waiting", "row 1", "Acme", "", {"review_url": PAGE1})[1]
+assert assist.attention_text("waiting", "row 1", "Acme", "hi")[1] == "The assistant is waiting for you in its terminal window (row 1): hi"
+
+# the browser's settings in mcp.json: the screen it draws on, and which browser
+sd = tempfile.mkdtemp()
+real_browser = config.ASSIST_BROWSER
+
+
+def mcp_of(**kw):
+    assist.session(sd, ANSWER_CMD, [tmp], os.path.join(tmp, "profile"), "rules", "row 1", **kw)
+    return json.load(open(os.path.join(sd, "mcp.json")))["mcpServers"][assist.SERVER]
+
+
+try:
+    config.ASSIST_BROWSER = "firefox"
+    srv = mcp_of(display=":41")
+    assert srv["env"] == {"DISPLAY": ":41"} and srv["args"][srv["args"].index("--browser") + 1] == "firefox"
+    assert srv["args"][srv["args"].index("--user-data-dir") + 1] == os.path.join(tmp, "profile") and "--output-dir" in srv["args"]
+    assert "env" not in mcp_of()                                         # the laptop: its own screen
+    config.ASSIST_BROWSER = ""
+    srv = mcp_of(display=":43")
+    assert "--browser" not in srv["args"] and srv["env"] == {"DISPLAY": ":43"}
+    assert "--browser" not in mcp_of()["args"]
+finally:
+    config.ASSIST_BROWSER = real_browser
+
+# the homelab's agent never opens your own machines or network (the review page, the browser view, the LAN).
+# No real DNS here: names "resolve" through a fake table (unknown names: no answer, like an offline machine).
+import socket  # noqa: E402
+real_getaddrinfo = socket.getaddrinfo
+FAKE_DNS = {"127.0.0.1.nip.io": "127.0.0.1", "rebind.example.com": "100.98.1.2", "v6.example.com": "::1",
+            "jobs.example.com": "93.184.216.34"}
+
+
+def fake_getaddrinfo(host, *a, **k):
+    if host not in FAKE_DNS:
+        raise socket.gaierror("no such name (test)")
+    ip = FAKE_DNS[host]
+    return [(socket.AF_INET6 if ":" in ip else socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 0))]
+
+
+socket.getaddrinfo = fake_getaddrinfo
+for u in ("http://localhost./", "http://x.ts.net./", "http://x.local./", "http://2130706433/", "http://0x7f.0.0.1/",
+          "http://0177.0.0.1/", "http://127.1/", "http://homelab:8766/", "http://[::ffff:127.0.0.1]/",
+          "http://127.0.0.1.nip.io/", "https://rebind.example.com/", "http://v6.example.com/", "http://224.0.0.1/"):
+    assert assist.own_network(u), u                                  # shorthands, short names, names resolving inward
+assert not assist.own_network("https://jobs.example.com/apply") and not assist.own_network("https://nowhere.example/")
+assert not assist.own_network("https://rebind.example.com/", resolve=False)
+for u in ("http://localhost:8766/", "http://127.0.0.1/", "http://127.9.9.9:80", "http://[::1]/", "http://192.168.1.5/x", "http://10.0.0.2",
+          "http://172.16.4.4", "http://169.254.169.254/latest", "http://0.0.0.0:6081", "http://100.64.0.1:6081/vnc.html",
+          "http://100.127.255.254/", "http://box.ts.net/", "http://printer.local/", "http://nas.lan/", "http://x.localhost/",
+          "http://[fd7a:115c:a1e0::1]/", "http://user@127.0.0.1/", "HTTP://LOCALHOST/"):
+    assert assist.own_network(u), u
+for u in ("http://127.0.0.1\\@example.com/", "http://100.64.0.1:8766\\@example.com/", "http://127.0.0.1\\", "http://loc\talhost/",
+          "http://127.0.0.1\n/", "http://[::1/", "http://[bad/", "", None, "   "):
+    assert assist.own_network(u), repr(u)                            # as a browser reads it; unreadable = own network
+assert not assist.own_network("https://jobs.example.com\\@127.0.0.1/")   # a browser's host there is jobs.example.com
+for u in ("https://acme.wd5.myworkdayjobs.com/en-US/x", "http://8.8.8.8/", "http://100.128.0.1/", "http://100.63.255.255/",
+          "https://localhost.evil.com/", "https://notts.net/", "https://example.com/localhost", "http://192.169.0.1/"):
+    assert not assist.own_network(u), u
+OWN = ["http://100.64.0.1:6081/vnc.html", "http://localhost:8765/", "http://192.168.1.5/"]
+server_before = config.IS_SERVER
+try:
+    config.IS_SERVER = True
+    for u in OWN:
+        blocked(s, B + "browser_navigate", {"url": u}, "own machines")
+        blocked(s, B + "browser_tabs", {"action": "new", "url": u}, "own machines")
+        blocked(s, "WebFetch", {"url": u}, "own machines")
+    ok(s, B + "browser_navigate", {"url": "https://jobs.lever.co/acme/1"})
+    ok(s, B + "browser_tabs", {"action": "new", "url": "https://jobs.lever.co/acme/1"})
+    ok(s, B + "browser_tabs", {"action": "list"})
+    ok(s, "WebFetch", {"url": "https://example.com/about"})
+    ok(s, "WebSearch", {"query": "acme robotics"})
+    blocked(s, B + "browser_navigate", {"url": "file:///etc/passwd"}, "web pages")
+    blocked(s, B + "browser_navigate", {"url": "http://100.64.0.1:8766\\@example.com/"}, "own machines")
+    # a link or a redirect already led the browser to your own network: nothing is clicked or typed there
+    led = {**fresh(), "current_url": "http://100.64.0.1:8766/s/1"}
+    for tool, inp in (("browser_click", {"ref": "e61"}), ("browser_type", {"ref": "e12", "text": "x"}), ("browser_hover", {"ref": "e61"}),
+                      ("browser_fill_form", {"fields": [{"ref": "e12", "type": "textbox", "value": "x"}]}),
+                      ("browser_select_option", {"ref": "e20", "values": ["Maine"]}), ("browser_press_key", {"key": "Tab"}),
+                      ("browser_handle_dialog", {"accept": True})):
+        blocked(led, B + tool, inp, "Go back")
+    ok(led, B + "browser_snapshot", {})
+    ok(led, B + "browser_navigate_back", {})
+    ok(led, B + "browser_navigate", {"url": "https://jobs.lever.co/acme/1"})            # the way out
+    for u in ("http://192.168.0.9/x", "http://localhost:8765/", "http://homelab:8766/", "http://127.0.0.1\\@example.com/"):
+        blocked({**fresh(), "current_url": u}, B + "browser_click", {"ref": "e61"}, "own machines")
+    ok({**fresh(), "current_url": "https://jobs.example.com/apply"}, B + "browser_click", {"ref": "e61"})
+    config.IS_SERVER = False                                              # the laptop: unchanged
+    ok(led, B + "browser_click", {"ref": "e61"})
+    for u in OWN:
+        ok(s, B + "browser_navigate", {"url": u})
+        ok(s, B + "browser_tabs", {"action": "new", "url": u})
+        ok(s, "WebFetch", {"url": u})
+finally:
+    config.IS_SERVER = server_before
+    socket.getaddrinfo = real_getaddrinfo
+
+# Submit approvals on the homelab: the guard opens the question on the review page and waits for the phone's answer
+import threading  # noqa: E402
+import time  # noqa: E402
+from nuauto import review  # noqa: E402
+
+
+def guard(d, tool, inp):
+    """The real PreToolUse hook on the homelab: (stdout, stderr, exit code)."""
+    os.environ[assist.STATE_ENV] = d
+    out, err, real_in = sys.stdout, sys.stderr, sys.stdin
+    sys.stdout, sys.stderr, sys.stdin = io.StringIO(), io.StringIO(), io.StringIO(json.dumps({"tool_name": tool, "tool_input": inp}))
+    code = 0
+    try:
+        assist.hook("pre")
+    except SystemExit as e:
+        code = e.code
+    finally:
+        o, e_ = sys.stdout.getvalue(), sys.stderr.getvalue()
+        sys.stdout, sys.stderr, sys.stdin = out, err, real_in
+        os.environ.pop(assist.STATE_ENV, None)
+    return o, e_, code
+
+
+def new_run(**extra):
+    run = tempfile.mkdtemp()
+    with open(os.path.join(run, "state.json"), "w") as f:
+        json.dump({**fresh(), "company": "Acme", "where": "row 3", "password_sites": [], "slot": 1, **extra}, f)
+    return run
+
+
+def answer_when_asked(run, decision, note="", by="phone", stale=False):
+    """Plays the review page: once the question is there, writes the answer (like review.answer_approval)."""
+    def play():
+        path = os.path.join(run, assist.APPROVAL)
+        for _ in range(100):
+            a = assist.read_json(path)
+            if a:
+                with assist.approval_lock(run):
+                    assist.write_private(os.path.join(run, assist.DECISION), {"id": a["id"], "decision": decision, "by": by,
+                                                                           "note": note, "at": time.time()})
+                return
+            time.sleep(0.05)
+    t = threading.Thread(target=play)
+    t.start()
+    return t
+
+
+def has(run, name):
+    return os.path.exists(os.path.join(run, name))
+
+
+def log_of(run):
+    return open(os.path.join(run, "actions.log")).read()
+
+
+sent, real_discord, real_wait, real_page = [], daily.discord, assist.WAIT, review.page_url
+daily.discord = lambda text: sent.append(text)
+review.page_url = lambda slot=None: "http://100.64.0.1:8766" + (f"/s/{slot}" if slot else "/")
+config.IS_SERVER = True
+assist.WAIT = 1
+SUBMIT = {"ref": "e60"}   # "Submit"
+try:
+    # the laptop is unchanged: an ask goes to Claude Code's own terminal question
+    config.IS_SERVER = False
+    out, err, code = guard(new_run(), B + "browser_click", SUBMIT)
+    assert code == 0 and json.loads(out)["hookSpecificOutput"]["permissionDecision"] == "ask" and sent == []
+    config.IS_SERVER = True
+
+    # (a) approved from the phone: allowed; the question and the answer are gone; the log says who
+    run = new_run()
+    t = answer_when_asked(run, "approve", by="phone")
+    out, err, code = guard(run, B + "browser_click", SUBMIT)
+    t.join()
+    assert code == 0 and json.loads(out)["hookSpecificOutput"]["permissionDecision"] == "allow", (out, err, code)
+    assert "approved on the review page by phone" in out
+    assert not has(run, assist.APPROVAL) and not has(run, assist.DECISION) and not has(run, assist.ATTENTION)
+    assert "APPROVED on the review page by phone" in log_of(run) and "the review page" in log_of(run)
+    assert len(sent) == 1 and "Ready to submit (row 3)" in sent[0] and "click 'Submit'" in sent[0] \
+        and "http://100.64.0.1:8766/s/1" in sent[0], sent
+    assert not has(run, assist.GRANT)
+
+    # (b) declined with a note: blocked, the agent is told the note
+    run = new_run()
+    t = answer_when_asked(run, "decline", note="wrong phone number")
+    out, err, code = guard(run, B + "browser_click", SUBMIT)
+    t.join()
+    assert code == 2 and out == "" and "declined" in err and "wrong phone number" in err and "Don't submit" in err, (out, err, code)
+    assert not has(run, assist.APPROVAL) and not has(run, assist.DECISION)
+    assert "DECLINED on the review page by phone" in log_of(run) and "wrong phone number" in log_of(run)
+
+    # (c) nobody answers: blocked; the question stays on the page, no longer waiting
+    run = new_run()
+    started = time.time()
+    out, err, code = guard(run, B + "browser_click", SUBMIT)
+    assert code == 2 and "hasn't approved" in err and "End your turn" in err and 0.5 < time.time() - started < 10, (err, code)
+    a = assist.read_json(os.path.join(run, assist.APPROVAL))
+    assert a["waiting"] is False and a["what"] == "click 'Submit'" and a["url"] == fresh()["current_url"] and a["id"]
+    assert json.load(open(os.path.join(run, assist.ATTENTION)))["kind"] == "approve"
+    assert "NOT ANSWERED" in log_of(run) and not has(run, assist.GRANT)
+    # the phone approves late: a pass for that one action, and the agent is told to do it
+    typed = []
+    real_type = review.type_into
+    review.type_into = lambda sess, text: typed.append((sess["state"]["tmux"], text))
+    try:
+        stale = {"run": run, "state": {"tmux": "nuauto1"}}
+        assert "gone" in review.answer_approval(stale, "some-other-id", "approve", "phone")   # not this question
+        assert not has(run, assist.GRANT) and typed == []
+        assert review.answer_approval(stale, a["id"], "approve", "phone") == "Approved."
+    finally:
+        review.type_into = real_type
+    g = assist.read_json(os.path.join(run, assist.GRANT))
+    assert g["what"] == a["what"] and g["url"] == a["url"] and g["by"] == "phone" and g["until"] > time.time() + 500
+    assert oct(os.stat(os.path.join(run, assist.GRANT)).st_mode & 0o777) == "0o600"
+    assert not has(run, assist.APPROVAL) and len(typed) == 1 and typed[0][0] == "nuauto1"
+    assert "do exactly that action now" in typed[0][1] and "click 'Submit'" in typed[0][1]
+    assert "REVIEW PAGE approve by phone" in log_of(run)
+    # a different button, or another page, does not use it
+    assert g["fp"] == a["fp"] == assist.typed_print({}) and a["pid"] == os.getpid()
+    mine = {"approvals": [a["id"]]}                                        # this run's own questions
+    other_what = {"what": "click 'Submit Application'", "url": a["url"], "fp": a["fp"]}
+    other_page = {"what": a["what"], "url": a["url"] + "/other", "fp": a["fp"]}
+    assert assist.take_grant(run, other_what, mine) is None and assist.take_grant(run, other_page, mine) is None
+    assert has(run, assist.GRANT)                                          # left for the right action
+    out, err, code = guard(run, B + "browser_click", {"ref": "e90"})       # "Submit Application": asks afresh
+    assert code == 2 and "hasn't approved" in err and not has(run, assist.GRANT)
+    assert assist.read_json(os.path.join(run, assist.APPROVAL))["what"] == "click 'Submit Application'"
+    # the same click again, with the pass: through, once; the pass is used up
+    run2 = new_run(approvals=[g["id"]])
+    assist.write_private(os.path.join(run2, assist.GRANT), {**g})
+    sent.clear()
+    out, err, code = guard(run2, B + "browser_click", SUBMIT)
+    assert code == 0 and out == "" and err == "", (out, err)               # allowed like any other action (no output)
+    assert not has(run2, assist.GRANT) and not has(run2, assist.APPROVAL) and sent == []
+    assert "approved on the review page by phone" in log_of(run2)
+    out, err, code = guard(run2, B + "browser_click", SUBMIT)              # used up: asks (and waits) again
+    assert code == 2 and has(run2, assist.APPROVAL) and len(sent) == 1
+    # another page: the state's page changed since the Approve
+    run3 = new_run(approvals=[g["id"]])
+    assist.write_private(os.path.join(run3, assist.GRANT), {**g, "url": "https://elsewhere.example/apply"})
+    assert guard(run3, B + "browser_click", SUBMIT)[2] == 2
+    # an expired pass does not work, and is removed
+    run4 = new_run(approvals=[g["id"]])
+    assist.write_private(os.path.join(run4, assist.GRANT), {**g, "until": time.time() - 1})
+    assert assist.take_grant(run4, {"what": g["what"], "url": g["url"], "fp": g["fp"]}, {"approvals": [g["id"]]}) is None
+    assert not has(run4, assist.GRANT)
+    assist.write_private(os.path.join(run4, assist.GRANT), {**g, "until": time.time() - 1})
+    assert guard(run4, B + "browser_click", SUBMIT)[2] == 2 and not has(run4, assist.GRANT)
+
+    # a stale answer (an older question's id) never counts, either by the guard or by a new question
+    run5 = new_run()
+    assist.write_private(os.path.join(run5, assist.DECISION), {"id": "older-question", "decision": "approve", "by": "phone"})
+    a5 = {"what": "click 'Submit'", "url": "u", "id": "newer", "why": "w", "since": time.time(), "waiting": True}
+    assist.write_private(os.path.join(run5, assist.APPROVAL), a5)
+    out, sys_out = io.StringIO(), sys.stderr
+    sys.stderr = io.StringIO()
+    try:
+        assist.remote_decision(run5, a5)
+        raise AssertionError("a stale answer let the action through")
+    except SystemExit as e:
+        assert e.code == 2 and "hasn't approved" in sys.stderr.getvalue()
+    finally:
+        sys.stderr = sys_out
+    assert assist.read_json(os.path.join(run5, assist.DECISION))["id"] == "older-question"
+    run6 = new_run()
+    assist.write_private(os.path.join(run6, assist.DECISION), {"id": "older-question", "decision": "approve", "by": "phone"})
+    out, err, code = guard(run6, B + "browser_click", SUBMIT)              # a new question clears it first
+    assert code == 2 and "hasn't approved" in err and not has(run6, assist.DECISION)
+    # an answer for the right question while the guard waits is used even if a stale file came first
+    run7 = new_run()
+    t = answer_when_asked(run7, "approve")
+    assert guard(run7, B + "browser_click", SUBMIT)[2] == 0
+    t.join()
+    # Enter and typing with submit ask the same way
+    run8 = new_run()
+    out, err, code = guard(run8, B + "browser_press_key", {"key": "Enter"})
+    assert code == 2 and assist.read_json(os.path.join(run8, assist.APPROVAL))["what"] == "press Enter"
+    # a denied action never opens a question
+    run9 = new_run()
+    out, err, code = guard(run9, B + "browser_evaluate", {})
+    assert code == 2 and not has(run9, assist.APPROVAL)
+
+    # a pass is the guard's own: a made-up id, or other typed values since, never counts
+    run10 = new_run()
+    GRANT10 = os.path.join(run10, assist.GRANT)
+    tgt = {"what": "click 'Submit'", "url": fresh()["current_url"], "fp": assist.typed_print({})}
+    planted = {"what": tgt["what"], "url": tgt["url"], "id": "made-up", "fp": tgt["fp"], "by": "me", "until": time.time() + 500}
+    assist.write_private(GRANT10, planted)
+    assert assist.take_grant(run10, tgt, {"approvals": ["real"]}) is None and not os.path.exists(GRANT10)   # ignored and removed
+    assist.write_private(GRANT10, planted)
+    assert assist.take_grant(run10, tgt, {}) is None and not os.path.exists(GRANT10)                         # no questions asked at all
+    assist.write_private(GRANT10, planted)
+    assert guard(run10, B + "browser_click", SUBMIT)[2] == 2 and not os.path.exists(GRANT10)                 # asked afresh instead
+    good = {**planted, "id": "q1"}
+    typed_state = {"typed": {"First Name*": "Jan"}}
+    fp2 = assist.typed_print(typed_state)
+    assert fp2 != tgt["fp"] and assist.typed_print({"typed": {}}) == tgt["fp"] == assist.typed_print({})
+    assist.write_private(GRANT10, good)
+    assert assist.take_grant(run10, {**tgt, "fp": fp2}, {"approvals": ["q1"]}) is None and os.path.exists(GRANT10)   # typed since
+    assert assist.take_grant(run10, tgt, {"approvals": ["q1"]})["by"] == "me" and not os.path.exists(GRANT10)   # the right one: once
+    assert assist.take_grant(run10, tgt, {"approvals": ["q1"]}) is None
+    run11 = new_run(approvals=["q1"], typed={"First Name*": "Jan"})                                             # through the hook
+    assist.write_private(os.path.join(run11, assist.GRANT), good)
+    out, err, code = guard(run11, B + "browser_click", SUBMIT)
+    assert code == 2 and "hasn't approved" in err and assist.read_json(os.path.join(run11, assist.APPROVAL))["fp"] == fp2
+    # the guard's questions this run: recorded (the last 20), with the hook's pid
+    st25, rd = fresh(), new_run()
+    ids = [assist.open_approval(rd, st25, tgt, "why") for _ in range(25)]
+    assert len(st25["approvals"]) == 20 and st25["approvals"] == [x["id"] for x in ids][-20:] and ids[-1]["pid"] == os.getpid()
+    assert ids[0]["id"] not in st25["approvals"]
+    # what you approve says which box a key or Enter goes to
+    wst = {**fresh(), "refs": assist.parse_refs(WD_FORM), "typed": {}}
+    assert assist.approval_target(wst, B + "browser_press_key", {"key": "Enter"})["what"] == "press Enter in 'How Did You Hear About Us?*'"
+    assert assist.approval_target(fresh(), B + "browser_press_key", {"key": "Enter"})["what"] == "press Enter"
+    t_ = assist.approval_target(wst, B + "browser_type", {"ref": "w1", "text": "x", "submit": True})
+    assert t_["what"] == "type into 'First Name*' and press Enter" and t_["url"] == wst["current_url"] and t_["fp"] == tgt["fp"]
+    assert assist.approval_target(wst, B + "browser_type", {"ref": "zz", "text": "x"})["what"] == "type into 'a box' and press Enter"
+    assert assist.approval_target({**wst, "typed": {"a": "b"}}, B + "browser_press_key", {"key": "Enter"})["fp"] != tgt["fp"]
+
+    # the page changes after a question: the open question and any pass go (not one the guard still waits on)
+    for tool, inp, changes in ((B + "browser_type", {"ref": "e12", "text": "Jane"}, True),
+                               (B + "browser_fill_form", {"fields": [{"ref": "e12", "type": "textbox", "value": "J"}]}, True),
+                               (B + "browser_select_option", {"ref": "e20", "values": ["Maine"]}, True),
+                               (B + "browser_navigate", {"url": "https://jobs.lever.co/acme/1"}, True),
+                               (B + "browser_navigate_back", {}, True),
+                               (B + "browser_tabs", {"action": "new", "url": "https://jobs.lever.co/acme/1"}, True),
+                               (B + "browser_tabs", {"action": "select", "index": 0}, True),
+                               (B + "browser_tabs", {"action": "close"}, True),
+                               (B + "browser_tabs", {"action": "list"}, False), (B + "browser_snapshot", {}, False),
+                               (B + "browser_click", {"ref": "e61"}, False), (B + "browser_press_key", {"key": "Tab"}, False),
+                               (B + "browser_hover", {"ref": "e61"}, False), (B + "browser_wait_for", {"time": 1}, False)):
+        assert assist.changes_page(tool, inp) is changes, (tool, inp)
+
+    def staged(waiting):
+        r_ = new_run(approvals=["q1"])
+        assist.write_private(os.path.join(r_, assist.APPROVAL), {"id": "q1", "what": "click 'Submit'", "url": tgt["url"],
+                                                                 "waiting": waiting, "since": time.time(), "fp": tgt["fp"]})
+        assist.write_private(os.path.join(r_, assist.SHOT), b"png")
+        assist.write_private(os.path.join(r_, assist.GRANT), good)
+        return r_
+
+    for tool, inp, changes in ((B + "browser_type", {"ref": "e12", "text": "Jane"}, True),
+                               (B + "browser_fill_form", {"fields": [{"ref": "e12", "type": "textbox", "value": "J"}]}, True),
+                               (B + "browser_select_option", {"ref": "e20", "values": ["Maine"]}, True),
+                               (B + "browser_navigate", {"url": "https://jobs.lever.co/acme/1"}, True),
+                               (B + "browser_navigate_back", {}, True),
+                               (B + "browser_tabs", {"action": "new", "url": "https://jobs.lever.co/acme/1"}, True),
+                               (B + "browser_tabs", {"action": "select", "index": 0}, True),
+                               (B + "browser_tabs", {"action": "close"}, True),
+                               (B + "browser_tabs", {"action": "list"}, False), (B + "browser_snapshot", {}, False),
+                               (B + "browser_click", {"ref": "e61"}, False), (B + "browser_press_key", {"key": "Tab"}, False)):
+        rw = staged(False)
+        out, err, code = guard(rw, tool, inp)
+        assert code == 0, (tool, err)
+        gone = not has(rw, assist.APPROVAL) and not has(rw, assist.SHOT) and not has(rw, assist.GRANT)
+        assert gone is changes, (tool, inp, os.listdir(rw))
+        assert ("withdrawn" in log_of(rw)) is changes
+    rw = staged(True)                                                    # the hook that asked is still waiting: its question stays
+    assert guard(rw, B + "browser_type", {"ref": "e12", "text": "Jane"})[2] == 0
+    assert assist.read_json(os.path.join(rw, assist.APPROVAL))["waiting"] is True and not has(rw, assist.GRANT)
+    rw = staged(False)                                                   # an action that is denied changes nothing
+    assert guard(rw, B + "browser_navigate", {"url": "http://localhost:8766/"})[2] == 2 and has(rw, assist.APPROVAL) and has(rw, assist.GRANT)
+    config.IS_SERVER = False                                             # the laptop has none of this
+    rw = staged(False)
+    assert guard(rw, B + "browser_type", {"ref": "e12", "text": "Jane"})[2] == 0 and has(rw, assist.APPROVAL) and has(rw, assist.GRANT)
+    config.IS_SERVER = True
+
+    # approved, but something was typed meanwhile (another of its calls): not what you were shown
+    run12 = new_run()
+
+    def type_then_approve():
+        for _ in range(100):
+            a_ = assist.read_json(os.path.join(run12, assist.APPROVAL))
+            if a_:
+                st_ = assist.read_json(os.path.join(run12, "state.json"))
+                st_["typed"] = {"First Name*": "Mallory"}
+                assist.write_private(os.path.join(run12, "state.json"), st_)
+                with assist.approval_lock(run12):
+                    assist.write_private(os.path.join(run12, assist.DECISION), {"id": a_["id"], "decision": "approve", "by": "phone"})
+                return
+            time.sleep(0.05)
+    t = threading.Thread(target=type_then_approve)
+    t.start()
+    out, err, code = guard(run12, B + "browser_click", SUBMIT)
+    t.join()
+    assert code == 2 and out == "" and "page changed" in err, (out, err, code)
+    assert "APPROVED by phone, but the page changed" in log_of(run12) and "APPROVED on the review page" not in log_of(run12)
+    assert not has(run12, assist.APPROVAL) and not has(run12, assist.DECISION)
+
+    # the hook that asked is gone: Approve then gives a pass (and types the message), never an answer nobody reads
+    def child(argv):
+        return subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", *argv])
+    live_hook, other_proc = child(["hook", "pre"]), child(["hook"])
+    gone_proc = subprocess.Popen([sys.executable, "-c", "pass"])
+    gone_proc.wait()
+    try:
+        time.sleep(0.2)
+        assert review.hook_alive(live_hook.pid) is True and review.hook_alive(None) is True and review.hook_alive(0) is True
+        if os.path.isdir("/proc/self"):  # Linux (the homelab) can tell the hook from another process; macOS only sees it runs
+            assert review.hook_alive(os.getpid()) is False and review.hook_alive(other_proc.pid) is False
+        assert review.hook_alive(gone_proc.pid) is False
+        typed2, real_type2 = [], review.type_into
+        review.type_into = lambda sess, text_: typed2.append(text_)
+        try:
+            cases = ((gone_proc.pid, True), (os.getpid(), True), (live_hook.pid, False), (None, False))
+            if not os.path.isdir("/proc/self"):  # macOS can't tell another live process from the hook: that case is Linux's
+                cases = tuple(c for c in cases if c[0] != os.getpid())
+            for pid_, passes in cases:
+                rr = new_run()
+                aa = {"id": "q9", "what": "click 'Submit'", "url": tgt["url"], "waiting": True, "since": time.time(), "fp": tgt["fp"],
+                      "why": "w", **({"pid": pid_} if pid_ is not None else {})}
+                assist.write_private(os.path.join(rr, assist.APPROVAL), aa)
+                typed2.clear()
+                assert review.answer_approval({"run": rr, "state": {"tmux": "x"}}, "q9", "approve", "phone") == "Approved."
+                assert has(rr, assist.GRANT) is passes and has(rr, assist.DECISION) is not passes, (pid_, os.listdir(rr))
+                assert bool(typed2) is passes
+                if passes:
+                    assert assist.read_json(os.path.join(rr, assist.GRANT))["fp"] == tgt["fp"] and not has(rr, assist.APPROVAL)
+            rr = new_run()                                               # a dead hook and Decline: told not to
+            assist.write_private(os.path.join(rr, assist.APPROVAL), {**aa, "pid": gone_proc.pid})
+            typed2.clear()
+            assert review.answer_approval({"run": rr, "state": {"tmux": "x"}}, "q9", "decline", "phone", "no") == "Declined."
+            assert not has(rr, assist.GRANT) and not has(rr, assist.DECISION) and "declined" in typed2[0]
+        finally:
+            review.type_into = real_type2
+    finally:
+        for h_ in (live_hook, other_proc):
+            h_.kill()
+            h_.wait()
+finally:
+    daily.discord, assist.WAIT, review.page_url, config.IS_SERVER = real_discord, real_wait, real_page, server_before
+    os.environ.pop(assist.STATE_ENV, None)
+
+# a frame with a captcha anywhere in it: all its elements are the captcha's, named or not (2026-10-11)
+FRAMES = f"""### Page state
+- Page URL: https://{H}/careers/job/X_1/apply
+- Page Snapshot:
+```yaml
+- generic [ref=k1]:
+  - textbox "First" [ref=k2]
+  - iframe [ref=k3]:
+    - generic [ref=k4]:
+      - text: Select all images with traffic lights
+      - button [ref=k5]
+      - button [ref=k6]
+      - button "Skip" [ref=k7]
+    - link "Privacy" [ref=k8]
+  - button "Next" [ref=k9]
+  - iframe "Chat widget" [ref=k10]:
+    - textbox "Message" [ref=k11]
+  - iframe [ref=k12]:
+    - button "Verify once there are none left" [ref=k13]
+    - button [ref=k14]
+  - iframe "Help" [ref=k15]:
+    - link "reCAPTCHA terms" [ref=k16]
+    - button [ref=k17]
+  - button "I am human" [ref=k18]
+  - iframe [ref=k20]:
+    - text: Slide to verify
+    - generic [ref=k21]
+  - iframe [ref=k22]:
+    - text: Prove you are human
+    - button [ref=k23]
+  - button "Submit Application" [ref=k19]
+```"""
+fr = assist.parse_refs(FRAMES)
+assert sorted(r for r, v in fr.items() if v.get("captcha")) == sorted(
+    ["k3", "k4", "k5", "k6", "k7", "k8", "k12", "k13", "k14", "k15", "k16", "k17", "k18", "k20", "k21", "k22", "k23"])
+assert not any(fr[r].get("captcha") for r in ("k1", "k2", "k9", "k10", "k11", "k19"))       # outside a captcha frame
+cf = {**fresh(), "refs": fr}
+for ref in ("k5", "k6", "k7", "k14", "k17", "k21", "k23"):                                  # even the unnamed ones
+    blocked(cf, B + "browser_click", {"ref": ref}, "captcha")
+    blocked(cf, B + "browser_hover", {"ref": ref}, "captcha")
+ok(cf, B + "browser_click", {"ref": "k9"})
+ok(cf, B + "browser_type", {"ref": "k2", "text": "Jane"})
+ok(cf, B + "browser_type", {"ref": "k11", "text": "hello"})                                    # an ordinary frame (a chat widget)
+asks(cf, B + "browser_click", {"ref": "k19"}, "submit")
+for name in ("Select all squares with a bus", "select all the images with crosswalks", "Verify once there are none left",
+             "I am human", "Prove you're human", "Human challenge", "Slide to verify", "Slide to complete the puzzle"):
+    assert assist.parse_refs(f'- iframe "x" [ref=f1]:\n  - button "{name}" [ref=f2]\n  - button [ref=f3]')["f3"].get("captcha"), name
+    assert assist.parse_refs(f'- button "{name}" [ref=f2]')["f2"].get("captcha"), name
+for name in ("Select all that apply", "Select a state", "Verify your email", "Slide deck", "I am a student"):
+    assert not assist.parse_refs(f'- iframe "x" [ref=f1]:\n  - button "{name}" [ref=f2]')["f2"].get("captcha"), name
+
+# the browser tool's output folder is its own: never the run folder with the guard's files
+sd2 = tempfile.mkdtemp()
+real_assist_browser = config.ASSIST_BROWSER
+try:
+    config.ASSIST_BROWSER = "firefox"
+    assist.session(sd2, ANSWER_CMD, [tmp], os.path.join(tmp, "profile"), "rules", "row 1", display=":41")
+    srv = json.load(open(os.path.join(sd2, "mcp.json")))["mcpServers"][assist.SERVER]
+    outdir = srv["args"][srv["args"].index("--output-dir") + 1]
+    assert assist.BROWSER_DIR == "browser" and outdir == os.path.join(sd2, "browser") and outdir != sd2 and os.path.isdir(outdir)
+    assert oct(os.stat(outdir).st_mode & 0o777) == "0o700"
+    assert not os.path.exists(os.path.join(outdir, "state.json"))
+finally:
+    config.ASSIST_BROWSER = real_assist_browser
+
+# the end of a session on the homelab: the outcome goes to the queue's records (remote.record_outcome); the laptop is as before
+from nuauto import remote, screen  # noqa: E402
+
+URLS = [f"https://careers{n}.example.com/job" for n in range(8)]
+ws2 = FakeWS([list(sheet.HEADERS)] + [[URLS[n], f"Hornet{n}", "Intern", "Approved", "", ""] for n in range(1, 8)])
+sheet.open_other = lambda interactive=True, create=False: ws2
+
+
+class FakeScreen:
+    def __init__(self, slot, d):
+        self.slot, self.url, self.display, self.password = slot, "http://100.64.0.1:6081/vnc.html", ":41", "pw12345"
+
+    def start(self):
+        return self
+
+    def stop(self):
+        pass
+
+
+outcomes, finished, asked_with = [], [], []
+real_bits = (screen.Screen, remote.record_outcome, assist.ask_line, assist.approved_submit, daily.discord, review.page_url,
+             os.environ.get("TMUX_PANE"))
+screen.Screen = FakeScreen
+remote.record_outcome = lambda tab, rown, url, approved, answer: outcomes.append((tab, rown, url, approved, answer))
+daily.discord = lambda text: finished.append(text)
+review.page_url = lambda slot=None: f"http://100.64.0.1:8766/s/{slot}"
+
+
+def run_end(n, reply, server=True, approved=False, pane="%7"):
+    def fake_ask(prompt, timeout=None):
+        asked_with.append(timeout)
+        if isinstance(reply, BaseException):
+            raise reply
+        return reply
+    assist.ask_line = fake_ask
+    assist.approved_submit = lambda d_: approved
+    if pane is None:
+        os.environ.pop("TMUX_PANE", None)
+    else:
+        os.environ["TMUX_PANE"] = pane
+    config.IS_SERVER = server
+    real_in, sys.stdin = sys.stdin, io.StringIO()
+    sys.stdin.isatty = lambda: True
+    out_, sys.stdout = sys.stdout, io.StringIO()
+    try:
+        assist.run(n, None, other=True)
+    finally:
+        sys.stdin, sys.stdout = real_in, out_
+        config.IS_SERVER = server_before
+    run_d = sorted(p_ for p_ in os.listdir(config.LOGS_DIR) if p_.endswith(f"assist_other_row{n}"))[-1]
+    return os.path.join(config.LOGS_DIR, run_d)
+
+
+def status_of(n):
+    return ws2.values[n - 1][3]
+
+
+try:
+    d1 = run_end(2, "y", approved=True)
+    assert outcomes == [("other", 2, URLS[1], True, "y")] and status_of(2) == "Applied"
+    assert asked_with == [assist.FINISH_WAIT]                                                # the homelab waits, for a day
+    assert json.load(open(os.path.join(d1, "state.json")))["tmux_pane"] == "%7"
+    assert json.load(open(os.path.join(d1, assist.ATTENTION)))["kind"] == "finish"          # the review page asks too
+    assert any("Hornet1" in m and "Did it go through" in m and "8766/s/" in m for m in finished), finished
+    outcomes.clear()
+    run_end(3, "n")
+    assert outcomes == [("other", 3, URLS[2], False, "n")] and status_of(3) == "Approved"
+    d4 = run_end(4, None, approved=True)                                                     # nobody answered in time
+    assert outcomes[-1] == ("other", 4, URLS[3], True, None) and status_of(4) == "Approved"
+    log4 = open(os.path.join(d4, "actions.log")).read()
+    assert "No answer within 24 h" in log4 and "Not submitted" not in log4                  # left as it was, not "no"
+    for n, exc in ((5, KeyboardInterrupt()), (6, EOFError())):
+        run_end(n, exc, approved=True)
+        assert outcomes[-1] == ("other", n, URLS[n - 1], True, None) and status_of(n) == "Approved", (n, outcomes[-1])
+    assert len(outcomes) == 4
+    # the pane the review page types into: only when it is a real pane id
+    for bad in ("x", "%7; kill-server", "", "%"):
+        dd = run_end(7, "n", pane=bad)
+        assert json.load(open(os.path.join(dd, "state.json")))["tmux_pane"] is None, bad
+        ws2.values[6][3] = "Approved"
+    dd = run_end(7, "n", pane=None)
+    assert json.load(open(os.path.join(dd, "state.json")))["tmux_pane"] is None
+    n_before = len(outcomes)
+    # the laptop: nothing recorded, Ctrl+C is still "no", no waiting limit
+    asked_with.clear()
+    for n, reply in ((2, "n"), (3, KeyboardInterrupt()), (4, "n")):
+        ws2.values[n - 1][3] = "Approved"
+        dd = run_end(n, reply, server=False)
+        assert status_of(n) == "Approved" and json.load(open(os.path.join(dd, "state.json")))["tmux_pane"] is None
+        assert "Not submitted" in open(os.path.join(dd, "actions.log")).read()
+    assert len(outcomes) == n_before                                                        # (nothing recorded on the laptop)
+    assert asked_with == [None, None, None]
+finally:
+    (screen.Screen, remote.record_outcome, assist.ask_line, assist.approved_submit, daily.discord, review.page_url,
+     pane_before) = real_bits
+    if pane_before is None:
+        os.environ.pop("TMUX_PANE", None)
+    else:
+        os.environ["TMUX_PANE"] = pane_before
+
+# approved_submit reads the run's own log: an approval on the review page, or a pass that was used
+ad = tempfile.mkdtemp()
+assert assist.approved_submit(ad) is False                                                   # no log
+for text, want in (("2026-10-11  ALLOW mcp__browser__browser_click {}\n", False),
+                   ("2026-10-11  APPROVED on the review page by phone: click 'Submit'\n", True),
+                   ("2026-10-11  ALLOW mcp__browser__browser_click {}  (approved on the review page by phone)\n", True),
+                   ("2026-10-11  DECLINED on the review page by phone: click 'Submit'\n", False),
+                   ("2026-10-11  APPROVED by phone, but the page changed after the question: blocked (click 'Submit')\n", False),
+                   ("2026-10-11  NOT ANSWERED within 9 min: click 'Submit' (still on the review page)\n", False)):
+    with open(os.path.join(ad, "actions.log"), "w") as f:
+        f.write(text)
+    assert assist.approved_submit(ad) is want, text
+
+# accounts.passwords: a login a merge kept a second password for (sync.merge_accounts) hides both from the agent
+pw_path = accounts.PATH
+accounts.PATH = os.path.join(tmp, "accounts-other-pw.json")
+try:
+    assert accounts.passwords(["acme.example"]) == []                                       # no file
+    with open(accounts.PATH, "w") as f:
+        json.dump({"acme.example": {"password": "pw-main-1234", "other_passwords": ["pw-2nd", "pw-third-long"], "jobs": []},
+                   "plain.example": {"password": "pw-plain"}, "empty.example": {"password": "", "other_passwords": None},
+                   "other.example": {"password": "pw-elsewhere", "other_passwords": ["pw-other-site"]}}, f)
+    assert accounts.passwords(["acme.example"]) == ["pw-third-long", "pw-main-1234", "pw-2nd"]    # longest first
+    assert accounts.passwords(["https://acme.example/jobs", "plain.example"]) == ["pw-third-long", "pw-main-1234", "pw-plain", "pw-2nd"]
+    assert accounts.passwords(["empty.example", "nothing.example"]) == []
+    assert "pw-other-site" not in accounts.passwords(["acme.example", "plain.example"])      # only the sites asked about
+    hidden, changed = assist.redact({"text": "typed pw-2nd and pw-main-1234 and pw-third-long"}, accounts.passwords(["acme.example"]))
+    assert changed and "pw-2nd" not in json.dumps(hidden) and "pw-main-1234" not in json.dumps(hidden) and "pw-third" not in json.dumps(hidden)
+finally:
+    accounts.PATH = pw_path
 
 print("All assist (agent guard) checks passed.")

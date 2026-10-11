@@ -8,13 +8,15 @@ This file has the rules. Also read (imported here; update them when you change t
 - @docs/DEPLOY.md (modes, machines, the homelab = prod, Mark-done page, sync, secrets, Google login, health checks, rebuild steps)
 - @docs/PIPELINE.md (how the job pool is built, my bounds, ranking, ratings)
 - @docs/GUI.md (the window `nuauto gui`: screens, setup wizard, health checks, safety model, demo mode, API)
+- @docs/REMOTE.md (the company-site assistant on the homelab: virtual screen + browser view, tmux, what both machines share)
 - @docs/STATUS.md (what is done, what is not yet proven for real, dated decisions; my local log,
   gitignored: keep job/company names and other personal history there, never in tracked files)
 
 WHERE AM I
 - Laptop (Fedora, ~/projects/auto): code is edited here. Interactive commands run here.
 - Homelab (`ssh homelab`; hostname and path in local_config.json) = PROD. Runs the
-  scheduled update, Discord messages and the Mark-done page. config.IS_SERVER is True there.
+  scheduled update, Discord messages and the Mark-done page. config.IS_SERVER is True there. With "remote_assist"
+  (Phase 3, 2026-10-11) also company-site assistant sessions, in tmux (docs/REMOTE.md).
   Code gets there by itself: with "deploy_from_git" (mine, once turned on) the homelab deploys GitHub's main every
   5 minutes (deploy.py, nuauto-deploy.timer); otherwise sync.py copies the laptop's checkout. Never edit it on the
   homelab. Details: docs/DEPLOY.md.
@@ -174,7 +176,13 @@ COMPANY-SITE AGENT (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`;
 - Only for Needs Human rows stopped at an external application (Notes start "External application";
   Workday, Oracle, iCIMS, SuccessFactors...). Never NUworks itself (refused even with --url), never rows
   stopped for something on NUworks (cover letter, transcript...): those are mine (assist.assist_target).
-- Laptop, real terminal, me watching. Starts `claude --model sonnet --effort low --permission-mode default` (never my auto
+- Laptop, real terminal, me watching; or (Phase 3, my call 2026-10-11) the homelab, in a tmux session I attach to, with
+  "remote_assist" on: its browser on a virtual screen I open over Tailscale (screen.py), Discord links me to the review
+  page (review.py, Tailscale only, paired devices only): I answer it, approve or decline each Submit (the guard waits
+  for my tap; a late Approve = a 10-minute pass for that one action) and get captchas there. With "remote_auto" the
+  homelab starts sessions by itself from my approved rows (remote.py: 09:00-22:00, free slots, each row once by itself,
+  never a row or site the laptop holds: claims over ssh). The GUI's Company sites shows them (Homelab assistants: Open its
+  page, Pair this computer). Proven with a practice run on 2026-10-11 (docs/REMOTE.md). Starts `claude --model sonnet --effort low --permission-mode default` (never my auto
   mode: its own check asked about every click; the guard decides; local_config.json "assist_effort":
   low / medium / high; Settings; low is my call, 2026-10-10) with the Playwright MCP browser (profile assist_profile/:
   it holds my company-site logins, treat it as secret), Bash, Read/Glob/Grep and WebSearch/WebFetch (company context,
@@ -206,7 +214,8 @@ COMPANY-SITE AGENT (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`;
   list); not yet on a real application.
 - Accounts (added 2026-10-10, my call): the agent makes the accounts job sites ask for (Workday...), with
   local_config.json "accounts_email" (mine: my Gmail, in local_config only) and a random password per site that NUauto
-  makes (accounts.py; local/accounts.json, 600, under a lock, never synced). It types {{NEW_PASSWORD}} / {{PASSWORD}}
+  makes (accounts.py; local/accounts.json, 600, under a lock, never synced; with
+  remote_assist merged with the homelab's over ssh, sync.share). It types {{NEW_PASSWORD}} / {{PASSWORD}}
   alone into a field the latest snapshot names a password; the guard types the real one (updatedInput) and takes it
   out of the browser tool's replies and snapshots (updatedToolOutput: "<password hidden by NUauto>"), NUauto's run
   logs and, after the session, Claude Code's session log. Never on Google / Microsoft / Apple / LinkedIn / GitHub or
@@ -222,7 +231,8 @@ COMPANY-SITE AGENT (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`;
   forms submit on Enter).
   Buttons with no name but their text (`button: Submit`, Workday) are checked by that text.
 - Email codes and verification links (added 2026-10-11, my call): the agent runs `email --want code|link`; code (mail.py, not
-  the agent) reads my Gmail with its own read-only login (`nuauto login gmail`, local/gmail_token.json, 600, never synced;
+  the agent) reads my Gmail with its own read-only login (`nuauto login gmail`, local/gmail_token.json, 600, never synced (with remote_assist
+  pushed to the homelab);
   `nuauto login google` renews it too), only mail of the last 15 minutes that names the site the agent is on (its company,
   or a link to that very host), and hands back one code, or one link to that same site; nothing else from any message
   reaches the agent or the logs. Never for Google / Microsoft / Apple / LinkedIn / GitHub / Northeastern sign-ins
@@ -230,10 +240,12 @@ COMPANY-SITE AGENT (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`;
   Cloud project, then `nuauto login gmail` (it refuses any Gmail but accounts_email's, and every lookup checks it).
   Checked on my real inbox (2026-10-11): Workday's verification links found, each to its own site; "thanks for
   applying" emails skipped. Not yet seen: an emailed code, and the agent using it in a live application.
-- Mine: email codes it can't find, captchas, approving Submit. After I /exit, the launcher asks "did you submit?"; y =
+- Mine: email codes it can't find, captchas, approving Submit. Captchas are enforced (2026-10-11): the guard refuses any
+  click, typing, hover or key inside one (assist.CAPTCHA, captcha_target); no solving, no disguised browser. After I /exit, the launcher asks "did you submit?"; y =
   Applied (dated today, counts toward the weekly limit), then the same job is submitted on NUworks too by
   apply.submit_nuworks_side (the tested NUworks code; every popup check except the off-site-link stop;
-  outcome appended to Notes; retry: `nuauto assist nuworks <row>`). The agent never touches the sheet.
+  outcome appended to Notes; retry: `nuauto assist nuworks <row>`). On the homelab never: the row's Notes say "NUworks
+  side NOT submitted yet" and the laptop's retry list has it. The agent never touches the sheet.
   Log per run: logs/<stamp>_assist_row<N>/ (actions.log = every guard decision).
 - Side by side (added 2026-10-10, my call): up to 3 sessions at once (assist.slots). Each takes a slot (lock
   local/assist_slot<N>.lock with what runs there; slot 1 = assist_profile/, the others assist_profile_<N>/), a row lock
@@ -286,7 +298,8 @@ src/nuauto/: cli.py (the nuauto command)   config.py (all paths, hosts; reads lo
   browser.py (login/open, domain lock, cookies)   answers.py (answer bank)   jobs.py (pool + viewers)   fields.py (what you study: per-field starting preferences, kinds of work)
   daily.py (homelab update + Discord)   web.py (Mark-done page, homelab)   sync.py (laptop<->homelab)   deploy.py (homelab: deploys main)
   doctor.py (health check)   inspect_form.py (read-only form lister)   assist.py (company-site agent)   accounts.py (its job-site logins)
-  mail.py (the agent's email codes and links: read-only Gmail)
+  mail.py (the agent's email codes and links: read-only Gmail)   screen.py (the homelab assistant's virtual screen + browser view)
+  review.py (the homelab assistant's review page, inside nuauto web)   remote.py (its queue, and claims between the machines)
   setup_sheet.py (sheet setup / `format` restyle)   gui.py (the window's server)   gui_static/ (its page)
   health.py (the checks behind doctor and the GUI)   onboard.py (setup wizard)   demo.py (demo mode fakes)
   window.py (which window) + window_gtk.py (the Linux window, run by the system python3)
@@ -330,6 +343,9 @@ nuauto insights        # pay, places, kinds of work in my pool and applications;
 nuauto selftest        # is this install OK? demo mode end to end in a hidden browser (nothing real touched)
 nuauto assist [<row>]  # company-site agent for a Needs Human row; asks me before any Submit
 nuauto accounts [export [<file>] [--all]]   # the job-site logins the agent made (no passwords shown); Bitwarden's import file
+nuauto review pair [<name>] | devices | unpair <name>   # the homelab assistant's review page: pair my phone (docs/REMOTE.md)
+nuauto review demo                                      # that page with made-up sessions, locally (agents: look at it with this)
+nuauto assist queue | start <nuworks|other> <row>      # (homelab) the assistant's queue / start one row's session in tmux
 nuauto assist other [<row>]                      # same agent for the sheet's Other jobs tab (no NUworks step after)
 nuauto assist other add <url> <company> <title>  # add a job there as Approved
 nuauto sheet add <nuworks|other> <url> [<company> <title>] [--proposed]   # add a job by hand

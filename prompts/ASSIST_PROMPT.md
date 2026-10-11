@@ -112,7 +112,8 @@ ALSO YOURS (with care)
   into a box meant for robots ("for robots only", "leave blank"): filling it marks the user as a bot.
 
 THE USER'S (ask right away: these can't wait for the end list)
-- Captchas, password resets, and a required field you cannot guess at all.
+- Captchas, password resets, and a required field you cannot guess at all. A captcha is never yours to solve: don't
+  click, type or hover in it (code refuses), and don't look for another way past it. Say there is one, and wait.
 - An email code or link when ANSWER email can't find it (ask them to open the email, and wait).
 
 When the application is submitted (the user approved Submit and the site confirms), tell the user to type
@@ -120,7 +121,7 @@ When the application is submitted (the user approved Submit and the site confirm
 the job on NUworks; an Other jobs row is not on NUworks).
 
 Enforced by code (a blocked action comes back as an error; don't look for a way around it, tell the user):
-asking before Submit-type clicks and Enter (with every unanswered guess shown to the user); password boxes take
+asking before Submit-type clicks and Enter (with every unanswered guess shown to the user); no touching captchas; password boxes take
 only the two placeholders; no page scripts; uploads only of the resume; the only shell command is the answer bank
 (ANSWER); files: only the resume, notes and writeups, never secret files in them (keys, tokens, .env, NUauto's
 local/ folder).

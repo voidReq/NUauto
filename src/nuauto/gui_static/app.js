@@ -1041,6 +1041,12 @@ screens.apply = async (view) => {
 // Assistant sessions run side by side (up to d.slots, each in its own terminal window and browser): a row with one
 // running says so instead of offering another; with every slot in use, Start waits.
 function assistantStart(d, r, tab, testid, args) {
+  const remote = (d.homelab || []).find((s) => s.tab === tab && s.row === r.row);
+  if (remote) {  // the homelab's assistant has this row (you answer it on its review page; docs/REMOTE.md)
+    const wait = remote.attention && remote.attention.kind;
+    return el("span", { class: wait ? "chip warn" : "chip ok", testid: `${testid}-homelab`,
+      text: wait ? "assistant on the homelab: waiting for you (its review page)" : "assistant running on the homelab" });
+  }
   const running = (d.sessions || []).find((s) => s.tab === tab && s.row === r.row);
   if (running) {  // a session waiting for you says so (its terminal window has the question or the Submit to approve)
     const wait = running.attention && running.attention.kind;
@@ -1066,8 +1072,30 @@ function assistantsLine(d) {
     (n >= d.slots ? ": finish one (type /exit in its window) to start another." : "; you can start another.") }) : null;
 }
 
+// The homelab's assistants (remote_assist): you answer them on the homelab's review page, in your browser (that page
+// can't live inside this window: it refuses frames, and its pairing cookie belongs to the browser that paired).
+function homelabCard(d) {
+  if (!d.homelab_review) return null;
+  const word = (s) => { const k = s.attention && s.attention.kind;
+    return k === "approve" ? "ready to submit: approve it" : k === "waiting" ? "waiting for you" : k === "finish" ? "ended: did it go through?" : "working"; };
+  return el("div", { class: "card", testid: "homelab-assistants" }, el("h2", { text: "Homelab assistants" }),
+    el("p", { class: "small muted", text: "Sessions running on the homelab. You answer them, approve their Submit and solve captchas on its review page, in your browser (Tailscale on). A browser is paired once: Pair this computer opens a one-time link, then press Pair." }),
+    (d.homelab || []).length ? el("ul", { class: "list" }, ...d.homelab.map((s) => el("li", { testid: `homelab-${s.tab}-${s.row}` },
+      el("div", { class: "what" }, el("b", { text: s.company || "assistant" }), " · ", s.tab === "other" ? `Other jobs row ${s.row}` : `row ${s.row}`,
+        el("div", { class: "small muted", text: `${s.host || ""} · slot ${s.slot}` })),
+      el("div", { class: "row" }, el("span", { class: s.attention ? "chip warn" : "chip ok", text: word(s) }),
+        el("button", { class: "btn small primary", text: "Open its page", onclick: () => openExternal(`${d.homelab_review}/s/${s.slot}`) })))))
+      : el("p", { class: "empty", text: "No assistant is running on the homelab now." }),
+    el("div", { class: "row" },
+      el("button", { class: "btn small", text: "Open the review page", testid: "homelab-open", onclick: () => openExternal(`${d.homelab_review}/`) }),
+      el("button", { class: "btn small", text: "Pair this computer", testid: "homelab-pair", onclick: async () => {
+        const r = await action("review_pair");
+        if (r && r.url) { openExternal(r.url); toast("Opened a pairing link in your browser: press Pair there."); } } })));
+}
+
 function companyCards(d) {
   return [
+    homelabCard(d),
     d.agent.length ? el("div", { class: "card", testid: "company-agent" }, el("h2", { text: "Company sites: ready for the assistant" }),
       el("p", { class: "small muted", text: "Jobs that send you to the company's own site. The assistant (Claude, in a terminal window) fills the application in a visible browser; it asks you before anything is submitted. You solve captchas, open email codes and approve Submit. Several can run at once, each in its own window." }),
       assistantsLine(d),

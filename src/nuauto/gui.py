@@ -577,7 +577,9 @@ def state():
         "demo": config.DEMO, "view": VIEW, "version": __import__("nuauto").__version__,
         "internships": {"on": intern.ENABLED, "term": intern.TERM, "review": intern_count()},
         # which assistant sessions run now (the open Apply screen reloads its lists when this changes)
-        "assistants": ",".join(f"{s.get('tab')}-{s.get('row')}:{s.get('slot')}" for s in assistants()["sessions"]),
+        "assistants": ",".join(f"{s.get('tab')}-{s.get('row')}:{s.get('slot')}" for s in assistants()["sessions"])
+        + "|" + ",".join(f"{s.get('tab')}-{s.get('row')}:{(s.get('attention') or {}).get('kind', '')}"
+                         for s in homelab_assistants()),
         "mode": "homelab" if config.HAS_SERVER else "local", "setup_needed": setup_needed(),
         "rows_loaded": rows is not None, "rows_at": APP.rows_at, "rows_error": APP.rows_error, "week": week_info(rows),
         "counts": {"review": len(todo), "approved": len(approved), "company": len(agent) + len(retry), "site": len(site),
@@ -895,6 +897,14 @@ def act(body):
         health.fix_permissions()
         APP.run_now(["quick"])
         return {}
+    elif kind == "review_pair":  # Pair this computer: a one-time link from the homelab, opened here (you press Pair)
+        if not homelab_review():
+            raise Refused("The homelab assistant is off (remote_assist in local_config.json).")
+        from nuauto import review
+        link = review.pair_link_from_homelab("this computer")
+        if not link:
+            raise Refused("The homelab could not be asked for a pairing link (is it reachable?).")
+        return {"url": link}
     else:
         raise Refused(f"Unknown action {kind!r}.")
     return {"task": task.view()}
@@ -949,9 +959,43 @@ def mark(body):
 # ---------------------------------------------------------------- other jobs (the sheet's Other jobs tab)
 
 def assistants():
-    """The assistant sessions running now (assist.sessions: slot, row, tab, company, host, since) and how many may."""
+    """The assistant sessions running now (assist.sessions: slot, row, tab, company, host, since) and how many may;
+    homelab: the homelab's own sessions (remote_assist), so a row it works on offers no Start here."""
     from nuauto import assist
-    return {"sessions": assist.sessions(), "slots": assist.slots()}
+    return {"sessions": assist.sessions(), "slots": assist.slots(), "homelab": homelab_assistants(),
+            "homelab_review": homelab_review()}
+
+
+def homelab_review():
+    """The homelab assistant's review page (review.py), for the Homelab assistants card; None when there is none to
+    show (no remote_assist, view or demo mode)."""
+    if VIEW or config.DEMO or not config.REMOTE_ASSIST or config.IS_SERVER:
+        return None
+    from nuauto import review
+    url = review.page_url()
+    return url.rstrip("/") if url.startswith("http") else None
+
+
+HOMELAB_EVERY = 60  # seconds between reads of the homelab's sessions (ssh, in the background)
+_homelab = {"at": 0.0, "sessions": [], "busy": False}
+
+
+def homelab_assistants():
+    """The homelab's assistant sessions (remote.homelab_sessions over ssh), read at most every HOMELAB_EVERY seconds in
+    the background (the last answer meanwhile). [] without remote_assist, and in view or demo mode (no ssh there)."""
+    if VIEW or config.DEMO or not config.REMOTE_ASSIST or config.IS_SERVER:
+        return []
+    if time.time() - _homelab["at"] > HOMELAB_EVERY and not _homelab["busy"]:
+        _homelab["busy"] = True
+
+        def read():
+            try:
+                from nuauto import remote
+                _homelab["sessions"] = remote.homelab_sessions()
+            finally:
+                _homelab["at"], _homelab["busy"] = time.time(), False
+        threading.Thread(target=read, daemon=True).start()
+    return _homelab["sessions"]
 
 
 def intern_facts(urls):
@@ -1157,6 +1201,9 @@ def answers_put(body):
         fcntl.flock(lock, fcntl.LOCK_EX)
         if body.get("version") != answers_get(bank)["version"]:
             raise Refused("The answer bank changed since you opened it (a run saved an answer). Reload, then edit again.")
+        # what you deleted here is deleted on the homelab's copy too (sync.share never deletes by itself)
+        answers.forget(bank_path(bank), {answers.norm(e["question"]) for e in answers.load(bank_path(bank))}
+                       - {e["question"] for e in clean})
         answers.save(clean, bank_path(bank))
     return answers_get(bank)
 
@@ -1168,6 +1215,9 @@ def logs():
             path = os.path.join(config.LOGS_DIR, name)
             if os.path.isdir(path):
                 files = sorted(os.listdir(path))
+                shots = os.path.join(path, "browser")  # the assistant's browser tool keeps its screenshots there
+                files += sorted(f"browser/{f}" for f in (os.listdir(shots) if os.path.isdir(shots) else [])
+                                if f.endswith(".png"))
                 out.append({"name": name, "files": [f for f in files if f.endswith((".png", ".log", ".json", ".txt"))
                                                     and f not in ("mcp.json", "settings.json", "state.json")]})
     return {"runs": out}

@@ -39,6 +39,9 @@ MACHINES (homelab mode)
 
 WHAT RUNS ON THE HOMELAB
 Unit files live in this repo (deploy/systemd/) and are installed in ~/.config/systemd/user/.
+- With "remote_assist": company-site assistant sessions in tmux, each with a virtual screen and a browser view on the
+  Tailscale IP; nuauto-assist.timer (every 10 min, `nuauto assist auto`) starts them from the queue when "remote_auto"
+  is on (else it does nothing). Setup, ports, the queue and what is shared: docs/REMOTE.md.
 - nuauto-daily.timer -> nuauto-daily.service: `nuauto daily` at 08:00 and 18:00 New York time
   (+0-15 min random, Persistent=true so a missed run happens at boot). Steps: list -> Claude
   triage -> details -> Claude score -> Claude category -> pool -> notifications (see
@@ -68,7 +71,8 @@ Unit files live in this repo (deploy/systemd/) and are installed in ~/.config/sy
   does not import, or a web that does not come back, is undone and Discord says so once. It waits while an
   update (`nuauto daily`, `nuauto intern update`) runs. Record: local/deployed.json; log: logs/deploy.log.
 - nuauto-web.service: `nuauto web`, always on (Restart=on-failure). Listens on web_listen_host:8765
-  only (web.LISTEN). Serves the signed Discord links: GET = confirm page only, POST (button)
+  only (web.LISTEN). With remote_assist it also serves the assistant's review page on web_listen_host:8766
+  (review.py; never add 8766 to the tunnel: Tailscale only, docs/REMOTE.md). Serves the signed Discord links: GET = confirm page only, POST (button)
   changes the sheet. Every link is HMAC-signed with web_secret.txt for one action on one
   row + job. Log: logs/web.log.
 - Don't also schedule the update on the laptop while the homelab runs it: two runs = double
@@ -83,14 +87,19 @@ SECRETS AND STATE (never print or log any of these; all mode 600)
   discord_webhook.txt   yes     yes      copied by hand
   web_secret.txt        no      yes      created by `nuauto web` on first start. Replacing it breaks
                                          every Mark link already sent.
-  assist_profile/       yes     no       company-site logins of `nuauto assist`; never synced
-  assist_profile_2/, _3/ yes    no       the same, for the 2nd and 3rd assistant running side by side
-  accounts.json         yes     no       the job-site logins the assistant made (email + a password per site); never
+  assist_profile/       yes     (yes)    company-site logins of `nuauto assist`; never synced (with remote_assist the
+                                         homelab has its own)
+  assist_profile_2/, _3/ yes    (yes)    the same, for the 2nd and 3rd assistant running side by side
+  accounts.json         yes     (yes)    the job-site logins the assistant made (email + a password per site); with
+                                         remote_assist merged both ways by sync.share (docs/REMOTE.md), else never
                                          synced; `nuauto accounts export` (or Settings) writes Bitwarden's import file
-  gmail_token.json      yes     no       the read-only Gmail login for the assistant's email codes (`nuauto login gmail`;
-                                         renewed by `nuauto login google`); never synced
+  gmail_token.json      yes     (yes)    the read-only Gmail login for the assistant's email codes (`nuauto login gmail`;
+                                         renewed by `nuauto login google`); with remote_assist sync.push (if newer)
   gui.lock              yes     no       the running GUI (pid, port, a secret that only opens a window); not synced
-  answers.json, profile.json  laptop only in practice (apply runs on the laptop); not synced
+  answers.json, answers_other.json  with remote_assist merged both ways by sync.share (the assistant runs on both
+                                     machines); else laptop only in practice, not synced
+  profile.json          laptop only in practice (apply runs on the laptop); not synced
+  (yes) = only with "remote_assist" (the company-site assistant on the homelab too, docs/REMOTE.md).
 Not secret, gitignored, pushed by sync.push: local_config.json (personal settings),
 docs/STATUS.md (your local log), google_login.txt (date of the last Google login), the resume
 (as local/resume.pdf on the homelab).

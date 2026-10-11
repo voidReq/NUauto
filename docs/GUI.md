@@ -88,6 +88,11 @@ SCREENS
                  in the other tabs (since 2026-10-09 Company sites is a part of Apply; the menu count is Approved + the
                  assistant's rows + retries). Company sites tab (assistants side by side, up to 3: a row with one
                  running shows "assistant running (slot N)" instead of Start, or "assistant waiting for you" / "approve in its window"
+                 (one the homelab runs, remote_assist: "assistant running on the homelab" / "waiting for you (its review page)",
+                 from `nuauto assist sessions` over ssh every minute; never in view or demo mode). With remote_assist a
+                 Homelab assistants card first: the homelab's sessions and what each waits for, Open its page (the
+                 homelab's review page in your browser), Open the review page, Pair this computer (a one-time pairing
+                 link from the homelab over ssh, opened in your browser; POST /api/action review_pair -> {"url"})
                  while it waits for you (assist.sessions attention; a desktop notification says so too); "N of 3 assistants running"; it follows
                  /api/state assistants): Needs Human rows for the assistant (opens
                  `nuauto assist <row>` in a terminal window, or shows the command), "I applied myself", company sites still
@@ -256,7 +261,8 @@ API (JSON; all need the cookie; POSTs need X-NUauto: 1)
   GET  /api/setup            wizard steps; POST /api/setup {"action": ack|client_upload|client_downloads|
                              sheet_create|sheet_link|resume_pick|resume_set|labels_read|label_set|terms_read|
                              prefs_save|discord_save|discord_test|discord_remove|schedule_on|schedule_off|launcher}
-  GET  /api/logs, /api/file?path=   past runs; a screenshot or log under logs/ only
+  GET  /api/logs, /api/file?path=   past runs (the assistant's own screenshots are in a run's browser/); a screenshot or
+                             log under logs/ only
   POST /api/quit
 
 FILES IT WRITES (all under local/, mode 700, except as noted)

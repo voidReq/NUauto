@@ -18,6 +18,7 @@ Tools (each module's own command line; `nuauto <tool>` with no arguments shows i
   nuauto jobs ...        job pool steps (list, triage-export, details, pool, suggest N, stats...)
   nuauto intern ...      Summer 2027 internships from Simplify's list (update, approve, rate, stats, pool, fetch <url>)
   nuauto accounts ...    the logins the assistant made on job sites (list; export: Bitwarden's import file)
+  nuauto review ...      the homelab assistant's review page: pair a phone, list / forget devices (docs/REMOTE.md)
   nuauto answers ...     answer bank (init, list)
   nuauto sheet ...       sheet commands (status; add / move / remove a job by hand)
   nuauto setup-sheet     one-time sheet setup; `format` restyles it
@@ -39,7 +40,8 @@ from nuauto import config
 
 TOOLS = {"jobs": "jobs", "answers": "answers", "sheet": "sheet", "setup-sheet": "setup_sheet",
          "inspect": "inspect_form", "daily": "daily", "web": "web", "health": "health", "demo": "demo",
-         "onboard": "onboard", "selftest": "selftest", "insights": "insights", "intern": "intern", "accounts": "accounts"}
+         "onboard": "onboard", "selftest": "selftest", "insights": "insights", "intern": "intern", "accounts": "accounts",
+         "review": "review"}
 COMMANDS = ("approve", "rate", "apply", "status", "update", "login", "test", "doctor", "assist", "gui", "deploy")
 
 
@@ -137,8 +139,11 @@ def main():
             from nuauto import daily
             sys.exit(daily.main())
         elif cmd == "assist":
-            if config.IS_SERVER:
-                sys.exit("nuauto assist runs on the laptop (visible browser, you at the terminal).")
+            if config.IS_SERVER and not config.REMOTE_ASSIST and rest == ["auto"]:
+                return  # nuauto-assist.timer while the assistant on the homelab is off: nothing to do, no failure
+            if config.IS_SERVER and not config.REMOTE_ASSIST:
+                sys.exit("nuauto assist runs on the laptop (visible browser, you at the terminal). On the homelab only "
+                         "with \"remote_assist\": true in local_config.json (docs/REMOTE.md).")
             from nuauto import assist
             assist.main(rest)
         elif cmd == "login" and rest == ["google"]:
@@ -155,6 +160,8 @@ def main():
                 sys.exit("Log in to Gmail on the laptop (it opens a browser).")
             from nuauto import mail
             mail.login()
+            if laptop and config.REMOTE_ASSIST:
+                sync.push()  # the assistant on the homelab reads its email codes with it too
         elif cmd == "login":
             from nuauto import browser
             browser.cmd_login()
@@ -163,6 +170,8 @@ def main():
     finally:
         if laptop and cmd in ("approve", "rate", "status"):
             sync.push()  # ratings (and a fresh Google token after a re-login) go to the homelab
+        if laptop and cmd == "assist" and rest:
+            sync.share()  # the answers and logins this session saved, for the assistant on the homelab
 
 
 if __name__ == "__main__":
