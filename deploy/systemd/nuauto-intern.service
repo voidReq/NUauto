@@ -1,0 +1,11 @@
+[Unit]
+Description=NUauto: internship update (Simplify's list, postings, Claude triage/score, Discord notifications)
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/projects/auto
+Environment=TZ=America/New_York
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/projects/auto/.venv/bin/nuauto intern update
+TimeoutStartSec=2h
+Nice=10

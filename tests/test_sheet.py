@@ -107,4 +107,25 @@ expect(SheetError, lambda: sheet.resolve_submit(fresh("Needs Human"), 2, "Applie
 # mark_submit_started refuses on a row that is not Approved
 expect(SheetError, lambda: sheet.mark_submit_started(fresh("Proposed"), 2))
 
+# Google allows about 60 reads a minute: every client NUauto makes waits and retries when told to slow down (429)
+import os  # noqa: E402
+import tempfile  # noqa: E402
+import gspread  # noqa: E402
+from nuauto import config  # noqa: E402
+made = []
+real = (gspread.Client, gspread.oauth, config.TOKEN_PATH, config.DEMO, config.find_client_json)
+config.find_client_json = lambda: "client_secret.json"  # (never read: gspread.oauth is a stand-in here)
+tok = os.path.join(tempfile.mkdtemp(), "token.json")
+with open(tok, "w") as f:
+    f.write('{"token": "x", "refresh_token": "y", "client_id": "z", "client_secret": "w", "type": "authorized_user"}')
+gspread.Client = lambda **kw: made.append(("Client", kw.get("http_client")))
+gspread.oauth = lambda **kw: made.append(("oauth", kw.get("http_client")))
+config.TOKEN_PATH, config.DEMO = tok, False
+try:
+    sheet.client(interactive=False)
+    sheet.client(interactive=True)
+finally:
+    gspread.Client, gspread.oauth, config.TOKEN_PATH, config.DEMO, config.find_client_json = real
+assert made == [("Client", gspread.BackOffHTTPClient), ("oauth", gspread.BackOffHTTPClient)], made
+
 print("Submit-safety checks passed.")

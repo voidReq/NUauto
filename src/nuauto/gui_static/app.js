@@ -140,7 +140,10 @@ async function pollState() {
   // the sheet was read again (a run finished, a row was applied, another window changed it): lists show it at once
   const sheetChanged = S.rowsAt !== undefined && S.state.rows_at !== S.rowsAt;
   S.rowsAt = S.state.rows_at;
-  if (sheetChanged && S.screen && S.screen.refresh) S.screen.refresh();
+  // an assistant started or ended (in its own terminal window): the Company sites lists say which rows have one
+  const assistantsChanged = S.assistants !== undefined && S.state.assistants !== S.assistants;
+  S.assistants = S.state.assistants;
+  if ((sheetChanged || assistantsChanged) && S.screen && S.screen.refresh) S.screen.refresh();
   if (S.screen && S.screen.update) S.screen.update(S.state);
   const t = S.state.task;
   if (t && t.state === "running" && !S.taskTimer) pollTask();
@@ -453,7 +456,12 @@ screens.home = (view) => {
             (w.next ? ` · new week ${w.next}` : "") + ` · ${w.total} of ${w.max_total} in total` })),
         el("div", { class: "card stack" }, el("h2", { text: "Next steps" }),
           el("a", { class: "btn big" + (st.counts.review ? " primary" : ""), href: "#/review", testid: "go-review",
+            onclick: () => sessionStorage.setItem("reviewSource", "nuworks"),  // Review remembers its list: this button is the co-ops
             text: st.counts.review ? `Review ${plural(st.counts.review, "new job")}` : "Nothing new to review" }),
+          st.internships && st.internships.on && st.internships.review > 0 ?
+            el("a", { class: "btn big" + (st.counts.review || st.counts.approved ? "" : " primary"), href: "#/review", testid: "go-review-intern",
+              onclick: () => sessionStorage.setItem("reviewSource", "intern"),
+              text: `Review ${plural(st.internships.review, "internship")}` }) : null,
           el("a", { class: "btn big" + (st.counts.approved && !st.counts.review ? " primary" : ""), href: "#/apply", testid: "go-apply",
             text: st.counts.approved ? `Apply to ${st.counts.approved} approved` : "No approved jobs waiting" }),
           el("button", { class: "btn", testid: "btn-update", disabled: !!(st.task && st.task.state === "running"),
@@ -487,7 +495,8 @@ function todoList(items) {
       el("div", { class: "row" }, dueChip(t), el("a", { class: "btn small", href: "#/company", text: "Open" })));
     return el("li", { testid: `todo-urgent-${t.id}` },
       el("div", { class: "what" }, el("b", { text: t.title }), " · ", t.company, el("span", { class: "muted", text: ` · ${t.match}%` })),
-      el("div", { class: "row" }, dueChip(t), el("a", { class: "btn small", href: "#/review", text: "Review" })));
+      el("div", { class: "row" }, dueChip(t), el("a", { class: "btn small", href: "#/review", text: "Review",
+        onclick: () => sessionStorage.setItem("reviewSource", "nuworks") })));  // these urgent jobs are co-ops
   }));
 }
 
@@ -500,10 +509,13 @@ function markRow(kind, t, tab) {  // tab "other": a row of the sheet's Other job
   });
 }
 
-// ---- Review (approve, or rate only)
+// ---- Review (approve, or rate only). Two sources when internships are on (state.internships, intern.py): NUworks co-ops,
+// and the term's internships from Simplify's list, whose Approve adds a row to the sheet's Other jobs tab.
 screens.review = async (view) => {
   let mode = sessionStorage.getItem("reviewMode") || "approve";
-  let jobs = [], i = 0, card = null, history = {}, shown = 0, total = 0, resumeId = null, listed = 0;
+  const interns = (S.state && S.state.internships) || { on: false };
+  let source = interns.on && sessionStorage.getItem("reviewSource") === "intern" ? "intern" : "nuworks";
+  let jobs = [], i = 0, card = null, history = {}, shown = 0, total = 0, resumeId = null, listed = 0, loadSeq = 0;
   let q = sessionStorage.getItem("reviewQ") || "", category = sessionStorage.getItem("reviewCat") || "";
   const cards = new Map();  // job id -> promise of its card (the next ones are fetched ahead)
   let queue = Promise.resolve();  // decisions are sent to the server one at a time, behind the screen
@@ -519,6 +531,11 @@ screens.review = async (view) => {
   const seg = el("div", { class: "seg", role: "group", "aria-label": "Mode" },
     el("button", { "aria-pressed": String(mode === "approve"), testid: "mode-approve", text: "Approve", onclick: () => setMode("approve") }),
     el("button", { "aria-pressed": String(mode === "rate"), testid: "mode-rate", text: "Rate only", onclick: () => setMode("rate") }));
+  // where the jobs come from: only there when internships are on; the choice is remembered for the session.
+  // "wrap": below ~360 px the two buttons stack instead of breaking a label in the middle
+  const sourceSeg = interns.on ? el("div", { class: "seg wrap", role: "group", "aria-label": "Source" },
+    el("button", { "aria-pressed": String(source === "nuworks"), testid: "source-nuworks", text: "NUworks co-ops", onclick: () => setSource("nuworks") }),
+    el("button", { "aria-pressed": String(source === "intern"), testid: "source-intern", text: `${interns.term} internships`, onclick: () => setSource("intern") })) : null;
   // search: words or "quoted phrases" (all must appear in the posting), and/or one kind of work
   const search = el("input", { type: "search", class: "grow", testid: "review-search", value: q, placeholder: 'Search: words or "a phrase"',
     "aria-label": "Search the jobs to review" });
@@ -527,7 +544,8 @@ screens.review = async (view) => {
   search.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(() => setFilter(search.value.trim(), category), 300); });
   search.addEventListener("keydown", (e) => { if (e.key === "Escape") { search.value = ""; setFilter("", category); search.blur(); } });
   cat.addEventListener("change", () => setFilter(q, cat.value));
-  fill(view, el("div", { class: "row between toolbar" }, seg, el("span", { class: "small muted", id: "review-pos" })),
+  fill(view, el("div", { class: "row between toolbar" }, sourceSeg ? el("div", { class: "row" }, sourceSeg, seg) : seg,
+      el("span", { class: "small muted", id: "review-pos" })),
     el("div", { class: "row toolbar" }, search, cat), body);
 
   const listMode = () => !!q;  // a text search shows every match as a card; no search = one job at a time
@@ -555,14 +573,27 @@ screens.review = async (view) => {
     load();
   }
 
+  function setSource(s) {  // the other list: its own queue, so the resume position (a job of the old list) is dropped
+    if (s === source) return;
+    source = s;
+    sessionStorage.setItem("reviewSource", s);
+    resumeId = null;
+    sourceSeg.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.testid === `source-${s}`)));
+    load();
+  }
+
   async function load() {
+    const mine = ++loadSeq;  // only the newest load may show its list (an older, slower answer is dropped)
+    jobs = []; i = 0; card = null; shown++;  // while it loads, no key decides on the old list (and no card of it comes back)
     fill(body, el("p", { class: "empty", text: "Loading the review list…" }));
-    const params = new URLSearchParams({ mode, q, category });
+    await queue;  // decisions still being written go first: the server decides on its last list, which this one replaces
+    const params = new URLSearchParams({ mode, q, category, source });
     try {
       const r = await api.get(`/api/review?${params}`);
+      if (mine !== loadSeq || !body.isConnected) return;
       jobs = r.jobs; total = r.total; i = 0; listed = 0; cards.clear(); drawCategories(r.categories);
       if (!q && resumeId) { i = Math.max(0, jobs.findIndex((x) => x.id === resumeId)); resumeId = null; }
-    } catch (e) { fill(body, el("div", { class: "note fail", text: e.message })); return; }
+    } catch (e) { if (mine === loadSeq && body.isConnected) fill(body, el("div", { class: "note fail", text: e.message })); return; }
     show();
   }
 
@@ -577,11 +608,14 @@ screens.review = async (view) => {
       return;
     }
     if (i >= jobs.length) {
+      const toSites = mode === "approve" && source === "intern";  // approved internships wait in the Other jobs tab
       fill(body, el("div", { class: "card", testid: "review-empty" }, el("h2", { text: jobs.length ? "That's all of them" : "Nothing new to review" }),
-        el("p", { class: "muted", text: mode === "approve" ? "Approved jobs are in your sheet. Apply to them next." :
-          "Ratings teach the ranking your taste (it needs 5 yes and 5 no)." }),
+        el("p", { class: "muted", text: mode !== "approve" ? "Ratings teach the ranking your taste (it needs 5 yes and 5 no)." :
+          toSites ? "Approved internships are in the Other jobs tab. Apply to them in Apply > Company sites." :
+          "Approved jobs are in your sheet. Apply to them next." }),
         el("div", { class: "row" }, jobs.length ? el("button", { class: "btn", text: "Back one", onclick: () => { i = Math.max(0, i - 1); show(); } }) : null,
-          el("a", { class: "btn primary", href: mode === "approve" ? "#/apply" : "#/home", text: mode === "approve" ? "Go to Apply" : "Done" }))));
+          el("a", { class: "btn primary", href: toSites ? "#/company" : mode === "approve" ? "#/apply" : "#/home",
+            text: toSites ? "Go to Company sites" : mode === "approve" ? "Go to Apply" : "Done" }))));
       return;
     }
     const j = jobs[i], mine = ++shown;
@@ -632,7 +666,7 @@ screens.review = async (view) => {
     card.append(el("div", { class: "row inline-decide" },
       mode === "approve" ? b("Approve", "approve", "primary", "btn-approve") : b("Would apply", "yes", "primary", "btn-yes"),
       b(mode === "approve" ? "Not for me" : "Wouldn't", "no", "", "btn-no"),
-      el("a", { class: "btn ghost", href: c.url, target: "_blank", rel: "noopener noreferrer", text: "Open on NUworks" })));
+      el("a", { class: "btn ghost", href: c.url, target: "_blank", rel: "noopener noreferrer", testid: "btn-open", text: openLabel(c) })));
     fill(slot, card);
   }
 
@@ -650,7 +684,7 @@ screens.review = async (view) => {
       mode === "approve" ? b("Approve", "Y", "approve", "primary", "btn-approve") : b("Would apply", "Y", "yes", "primary", "btn-yes"),
       b(mode === "approve" ? "Not for me" : "Wouldn't", "N", "no", "", "btn-no"),
       b("Skip", "S", "skip", "", "btn-skip"), b("Back", "U", "back", "ghost", "btn-back"),
-      el("a", { class: "btn ghost", href: card.url, target: "_blank", rel: "noopener noreferrer", testid: "btn-open" }, "Open on NUworks", el("kbd", { text: "O" })));
+      el("a", { class: "btn ghost", href: card.url, target: "_blank", rel: "noopener noreferrer", testid: "btn-open" }, openLabel(card), el("kbd", { text: "O" })));
   }
 
   // The next job shows at once; the sheet / ratings write happens behind it (one at a time, in order).
@@ -667,20 +701,22 @@ screens.review = async (view) => {
   }
 
   // Sends one decision for job j. Returns false when nothing needed sending (already approved and approved again).
+  // An approved internship's row is in the Other jobs tab: the server says so (tab "other") and both undo calls repeat it.
   function submit(j, decision, onfail) {
     const before = history[j.id], oldRating = j.rating;
     if (before && before.decision === "approve" && decision === "approve") return false;  // already in the sheet
-    const entry = { decision, row: null, previous: before ? before.previous : null };
+    const entry = { decision, row: null, tab: null, previous: before ? before.previous : null };
     history[j.id] = entry;
     j.rating = decision === "no" ? 0 : 1;
     let undone = false;
     queue = queue.then(async () => {
       if (before && before.row && decision !== "approve") {  // changed your mind about an approved job
-        await api.post("/api/undo", { id: j.id, row: before.row, previous: before.previous });
+        await api.post("/api/undo", { id: j.id, row: before.row, previous: before.previous, tab: before.tab || undefined });
         undone = true;
       }
       const r = await api.post("/api/decide", { id: j.id, decision, mode });
       entry.row = r.row;
+      entry.tab = r.tab || null;
       if (!before) entry.previous = r.previous;
       pollState();
     }).catch((e) => {
@@ -691,14 +727,14 @@ screens.review = async (view) => {
       fail(e);
     });
     if (decision === "approve") {
-      toast("Approved: adding it to the sheet.", { action: "Undo", onaction: async () => {
+      toast(source === "intern" ? "Approved: adding it to the Other jobs tab." : "Approved: adding it to the sheet.", { action: "Undo", onaction: async () => {
         try {
           await queue;
           if (entry.failed) return;
-          await api.post("/api/undo", { id: j.id, row: entry.row, previous: entry.previous });
+          await api.post("/api/undo", { id: j.id, row: entry.row, previous: entry.previous, tab: entry.tab || undefined });
           delete history[j.id];
           j.rating = oldRating;
-          toast("Undone: the row is back to Proposed.");
+          toast(entry.tab === "other" ? "Undone: the row is back to Proposed (Other jobs tab)." : "Undone: the row is back to Proposed.");
           pollState();
         } catch (e) { fail(e); }
       } });
@@ -739,18 +775,36 @@ screens.review = async (view) => {
   };
   document.addEventListener("keydown", keys);
   await load();
-  return { leave: () => { document.removeEventListener("keydown", keys); queue.then(() => api.post("/api/review/done", {})).catch(() => {}); } };
+  return { leave: () => {
+    document.removeEventListener("keydown", keys);
+    // ratings to the homelab; never in view mode (it refuses every POST, which the page would read as a dead server)
+    if (!(S.state && S.state.view)) queue.then(() => api.post("/api/review/done", {})).catch(() => {});
+  } };
 };
 
+// The open-the-posting button: an internship's posting is on the company's own site, a co-op's on NUworks.
+const openLabel = (c) => c && c.source === "simplify" ? "Open posting" : "Open on NUworks";
+
+// What a decided job's chip says; an internship's row is in the Other jobs tab.
+function decidedText(mine) {
+  if (mine.decision !== "approve") return `you said ${mine.decision}`;
+  return mine.row ? `approved · ${mine.tab === "other" ? "Other jobs row" : "row"} ${mine.row}` : "approved";
+}
+
 function jobCard(c, j, mine, compact) {  // compact: the posting is cut short, with a button for the rest
-  const margin = c.match - c.threshold;
+  // An internship whose posting could not be read has no match, threshold or description (c.unread): say so, no margin math.
+  const unscored = c.match === null || c.match === undefined;
+  const margin = unscored || c.threshold == null ? null : c.match - c.threshold;
   const facts = [
-    ["Match", el("span", {}, el("span", { class: "match " + (margin >= 15 ? "good" : "ok"), text: `${c.match}%` }),
-      el("span", { class: "muted", text: ` · needs ${c.threshold}%` }))],
-    ["Score", el("span", {}, c.score, c.taste !== null && c.taste !== undefined ?
+    ["Match", unscored ? el("span", { class: "muted", text: "not scored (the posting could not be read)" }) :
+      el("span", {}, el("span", { class: "match " + (margin !== null && margin >= 15 ? "good" : "ok"), text: `${c.match}%` }),
+        c.threshold != null ? el("span", { class: "muted", text: ` · needs ${c.threshold}%` }) : null)],
+    unscored ? null : ["Score", el("span", {}, c.score, c.taste !== null && c.taste !== undefined ?
       el("span", { class: "muted", text: ` · your taste ${Math.round(c.taste * 100)}%` }) : null)],
     j.order ? ["Order", el("span", { class: "muted", testid: "job-order", text: j.order })] : null,
+    c.posted_text ? ["Posted", c.posted_text.replace(/^(posted|posting) /i, "")] : null,  // "posted 5 days ago" reads "5 days ago" there
     ["Closes", el("span", { class: c.soon ? "chip warn" : "", text: c.closes_text })],
+    c.year_text ? ["Who can apply", c.year_text] : null,  // the posting's own words about class year / degree
     ["Pay", c.pay || "not listed"],
     c.external ? ["Apply", el("span", { class: "chip warn", text: `Also on the company site? "${c.external}"` })] : null,
     c.flags.length ? ["Flags", el("span", { class: "row" }, ...c.flags.map((f) => el("span", { class: "chip", text: f })))] : null,
@@ -769,13 +823,13 @@ function jobCard(c, j, mine, compact) {  // compact: the posting is cut short, w
   return el("article", { class: "card job", testid: "job-card", "data-job": c.id },
     el("div", { class: "row between" }, el("div", { class: "row" }, el("span", { class: "chip accent", text: c.category_label || c.category.replace("_", " ") }),
       c.tag ? el("span", { class: "chip", text: c.tag }) : null, j.soon ? el("span", { class: "chip warn", text: "closing soon" }) : null,
-      mine ? el("span", { class: "chip ok", text: mine.decision === "approve" ? `approved · row ${mine.row}` : `you said ${mine.decision}` }) :
+      mine ? el("span", { class: "chip ok", text: decidedText(mine) }) :
         j.rating === 1 ? el("span", { class: "chip ok", text: "rated yes" }) : j.rating === 0 ? el("span", { class: "chip", text: "rated no" }) : null)),
     el("h2", { text: c.title, testid: "job-title" }),
     el("div", { class: "meta", text: `${c.company} · ${c.location || "location not listed"}` }),
     el("dl", { class: "facts" }, ...facts.flatMap(([k, v]) => [el("dt", { text: k }), el("dd", {}, v)])),
-    c.why ? el("div", { class: "why" }, el("b", { text: "Why: " }), c.why) : null,
-    compact ? clamped(el("div", { class: "desc" }, desc(c.description), c.qualifications.length ? [el("h3", { text: "Qualifications" }), desc(c.qualifications)] : null)) :
+    c.why ? el("div", { class: "why" }, el("b", { text: c.unread ? "Could not read it: " : "Why: " }), c.why) : null,
+    compact && !c.unread ? clamped(el("div", { class: "desc" }, desc(c.description), c.qualifications.length ? [el("h3", { text: "Qualifications" }), desc(c.qualifications)] : null)) :
     el("div", { class: "desc" }, desc(c.description), c.qualifications.length ? [el("h3", { text: "Qualifications" }), desc(c.qualifications)] : null));
 }
 
@@ -984,13 +1038,37 @@ screens.apply = async (view) => {
 
 // ---- Company sites (a tab of the Apply screen): Needs Human rows for the assistant, company sites still owed, and
 // the NUworks side to send again (only the sections that have rows show); then Other jobs (always shown).
+// Assistant sessions run side by side (up to d.slots, each in its own terminal window and browser): a row with one
+// running says so instead of offering another; with every slot in use, Start waits.
+function assistantStart(d, r, tab, testid, args) {
+  const running = (d.sessions || []).find((s) => s.tab === tab && s.row === r.row);
+  if (running) return el("span", { class: "chip ok", testid: `${testid}-running`, text: `assistant running (slot ${running.slot})` });
+  const full = (d.sessions || []).length >= (d.slots || 1);
+  return el("button", { class: "btn small primary", text: "Start assistant", testid, disabled: full || (args.disabled || false),
+    title: full ? `${d.slots} assistants are running (the most at once): finish one first` : "", onclick: (e) => {
+      // a few seconds greyed out: a second click would start the same job twice (and each start reads the sheet)
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      btn.textContent = "Starting…";
+      setTimeout(() => { if (btn.isConnected) { btn.disabled = false; btn.textContent = "Start assistant"; } }, 5000);
+      action("assist", args.body);
+    } });
+}
+
+function assistantsLine(d) {
+  const n = (d.sessions || []).length;
+  return n ? el("p", { class: "small", testid: "assistants-running", text: `${n} of ${d.slots} assistants running` +
+    (n >= d.slots ? ": finish one (type /exit in its window) to start another." : "; you can start another.") }) : null;
+}
+
 function companyCards(d) {
   return [
     d.agent.length ? el("div", { class: "card", testid: "company-agent" }, el("h2", { text: "Company sites: ready for the assistant" }),
-      el("p", { class: "small muted", text: "Jobs that send you to the company's own site. The assistant (Claude, in a terminal window) fills the application in a visible browser; it asks you before anything is submitted. You sign in, solve captchas and approve Submit." }),
+      el("p", { class: "small muted", text: "Jobs that send you to the company's own site. The assistant (Claude, in a terminal window) fills the application in a visible browser; it asks you before anything is submitted. You solve captchas, open email codes and approve Submit. Several can run at once, each in its own window." }),
+      assistantsLine(d),
       el("ul", { class: "list" }, ...d.agent.map((r) => el("li", { testid: `company-${r.row}` },
         el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title, jobFacts(r), el("div", { class: "small muted", text: r.host })),
-        el("div", { class: "row" }, dueChip(r), el("button", { class: "btn small primary", text: "Start assistant", testid: `assist-${r.row}`, onclick: () => action("assist", { row: r.row }) }),
+        el("div", { class: "row" }, dueChip(r), assistantStart(d, r, "jobs", `assist-${r.row}`, { body: { row: r.row } }),
           linkOut(r.target, "Open site"),
           el("button", { class: "btn small", text: "I applied myself", onclick: () => markRow("applied", r) })))))) : null,
     d.site.length ? el("div", { class: "card" }, el("h2", { text: "Submitted on NUworks; the company site still wants you" }),
@@ -1023,11 +1101,14 @@ function otherCard(d) {
   if (d.error) return el("div", { class: "card", testid: "other-jobs" }, head, el("div", { class: "note fail", text: d.error }));
   return el("div", { class: "card", testid: "other-jobs" }, head,
     el("p", { class: "small muted", text: `Approved rows of your sheet's "${d.tab}" tab; no weekly or total limit. The assistant answers from your Other jobs answers first, then your NUworks ones (not the NUworks-only ones: co-op dates and term). When you tell it the application went through, the row becomes Applied; nothing is sent to NUworks. Applied and other rows: the Sheet screen.` }),
+    assistantsLine(d),
     d.ready.length ? el("ul", { class: "list" }, ...d.ready.map((r) => el("li", { testid: `other-${r.row}` },
-      el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title, el("div", { class: "small muted", text: r.host || r.why })),
+      el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title,
+        r.match != null ? jobFacts(r) : null,  // an internship from Simplify's list: its match % and pay
+        r.posted_text ? el("div", { class: "small muted", text: r.posted_text }) : null,
+        el("div", { class: "small muted", text: r.host || r.why })),
       el("div", { class: "row" },
-        el("button", { class: "btn small primary", text: "Start assistant", testid: `other-assist-${r.row}`, disabled: !r.target,
-          onclick: () => action("assist", { row: r.row, tab: "other" }) }),
+        assistantStart(d, r, "other", `other-assist-${r.row}`, { disabled: !r.target, body: { row: r.row, tab: "other" } }),
         r.target ? linkOut(r.target, "Open site") : null,
         el("button", { class: "btn small", text: "I applied myself", testid: `other-mark-${r.row}`, onclick: () => markRow("applied", r, "other") }))))) :
       el("p", { class: "empty", text: d.exists ? `Nothing Approved in the ${d.tab} tab.` : "No jobs yet. Add one with Add a job." }));
@@ -1359,6 +1440,7 @@ screens.settings = async (view) => {
           el("label", { class: "field" }, "Weekly limit counts from", el("span", { class: "muted small", text: "Fixed 7-day weeks from this day. Empty: any rolling 7 days." }), week),
           el("div", {}, el("button", { class: "btn primary", text: "Save", testid: "settings-save", onclick: async () => {
             try { d = await api.post("/api/settings", { resume_label: label.value, week_start: week.value, max_per_week: cap.value }); toast("Saved."); pollState(); draw(); } catch (e) { fail(e); } } })))),
+      assistantCard(),
       el("div", { class: "card stack" }, el("h2", { text: "Setup" }),
         el("p", { class: "small muted", text: "Google client, sheet, resume, NUworks, preferences, notifications: each step checked." }),
         el("div", { class: "row" }, el("a", { class: "btn", href: "#/setup", text: "Open setup" }),
@@ -1370,6 +1452,45 @@ screens.settings = async (view) => {
           d.tools.claude ? [" · claude: ", el("code", { text: d.tools.claude })] : " · claude not found"),
         el("div", {}, el("button", { class: "btn danger", text: "Quit NUauto", testid: "btn-quit", onclick: () => confirmBox("Quit NUauto?",
           "Closes this window's server. A running job is stopped first (like Ctrl+C).", "Quit", async () => { await api.post("/api/quit", {}).catch(() => {}); gone("NUauto has quit. Start it again from your apps menu, or run nuauto gui."); }, { danger: true }) }))));
+  }
+  // The company-site assistant (nuauto assist): the email for the accounts it makes, how hard it thinks, the folders it
+  // may read, and its logins (one per job site; the passwords never reach this page) as Bitwarden's import file.
+  function assistantCard() {
+    const s = d.settings;
+    const email = el("input", { type: "email", value: s.accounts_email || "", placeholder: "you@example.com",
+      "aria-label": "Account email", testid: "set-accounts-email" });
+    const effort = el("select", { "aria-label": "Assistant effort", testid: "set-assist-effort" },
+      ...d.efforts.map((e) => el("option", { value: e, text: e })));
+    effort.value = d.efforts.includes(s.assist_effort) ? s.assist_effort : d.efforts[0];
+    const folders = el("textarea", { rows: "3", "aria-label": "Folders the assistant may read", testid: "set-read-paths" });
+    folders.value = (s.assist_read_paths || []).join("\n");
+    const L = d.logins;
+    const exportBtn = el("button", { class: "btn small", testid: "btn-export-logins", disabled: !L.new,
+      text: L.new ? `Export ${plural(L.new, "new login")} for Bitwarden` : "No new logins to export", onclick: async () => {
+        try {
+          const r = await api.post("/api/logins/export", {});
+          d.logins = r.logins;
+          modal((box, close) => box.append(el("h2", { text: `${plural(r.count, "login")} exported` }),
+            el("p", {}, "Saved to ", el("code", { text: r.path }), " (only you can read it). Import it in Bitwarden: the web vault, ",
+              el("b", { text: "Tools > Import data" }), ", format ", el("b", { text: "Bitwarden (json)" }), ". Then delete the file:"),
+            el("pre", { class: "log", text: `rm ${r.path}` }),
+            el("div", { class: "foot" }, el("span"), el("button", { class: "btn primary", text: "Done", onclick: close }))), { label: "Logins exported", testid: "export-dialog" });
+          draw();
+        } catch (e) { fail(e); }
+      } });
+    return el("div", { class: "card stack", testid: "assistant-settings" }, el("h2", { text: "Company-site assistant" }),
+      el("label", { class: "field" }, "Account email", el("span", { class: "muted small", text: "For the accounts it makes on job sites (Workday and others). Each site gets its own random password; the assistant never sees it." }), email),
+      el("label", { class: "field" }, "Effort", el("span", { class: "muted small", text: "How hard it thinks (Claude Code's effort). Nothing is submitted without your review either way." }), effort),
+      el("label", { class: "field" }, "Folders it may read", el("span", { class: "muted small", text: "Your projects and writeups, one per line: for longer answers. Keys, tokens, .env files and NUauto's own logins are never read." }), folders),
+      el("div", { class: "row between" }, el("span", { class: "small muted", testid: "logins-count",
+        text: L.sites ? `Logins it made: ${plural(L.sites, "site")}${L.new ? `, ${L.new} not exported yet` : ", all exported"}` : "No logins made yet." }), exportBtn),
+      el("div", {}, el("button", { class: "btn primary", text: "Save", testid: "assistant-save", onclick: async () => {
+        try {
+          d = await api.post("/api/settings", { accounts_email: email.value, assist_effort: effort.value,
+            assist_read_paths: folders.value.split("\n").map((x) => x.trim()).filter(Boolean) });
+          toast("Saved."); draw();
+        } catch (e) { fail(e); }
+      } })));
   }
   await reload();
   return { health: draw };

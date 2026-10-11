@@ -78,6 +78,21 @@ try:
     assert status == 403 and b"private" not in data, (status, data)
     assert open(config.ANSWERS_PATH).read().count("1 Secret Street") == 1  # the file itself is untouched
 
+    # the page: leaving Review sends nothing in view mode (a refused POST would read as a dead server)
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as pw:
+        b = pw.firefox.launch(headless=True)
+        page = b.new_page()
+        page.goto(URL)
+        page.wait_for_selector("text=View only")
+        posts = []
+        page.on("request", lambda r: posts.append(r.url) if r.method == "POST" else None)
+        for screen in ("review", "apply", "home"):
+            page.goto(URL.split("?")[0] + f"#/{screen}")
+            page.wait_for_timeout(1500)
+        assert page.locator("text=NUauto is not available").count() == 0 and posts == [], posts
+        b.close()
+
     status, _ = request("POST", "/api/quit")
     assert status == 200
     p.wait(timeout=30)

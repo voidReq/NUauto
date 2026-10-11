@@ -49,16 +49,23 @@ Unit files live in this repo (deploy/systemd/) and are installed in ~/.config/sy
   external Needs Human rows) with signed Mark links.
   If the scan fails (e.g. NUworks too slow; a page load gets one retry after 60s), the morning
   reminders still go out, from the sheet and the last saved pool.
-  Claude runs as `claude -p --model sonnet` with Read/Write only, one call per batch file in work/.
+  Claude runs as `claude -p --model sonnet`, one call per batch file, shut in work/ (it runs there and may read and
+  write only there: no shell, web or MCP tools; the batches hold web text, job postings, so nothing in one can reach
+  local/, the code or your home).
   Headless browser; never applies to anything.
 - nuauto-weekly.timer -> nuauto-weekly.service: `nuauto daily weekly`, Sunday 19:00 New York time
   (Discord check-in).
+- nuauto-intern.timer -> nuauto-intern.service: `nuauto intern update` every 2 hours (:40 on even hours New York,
+  +0-10 min), when local_config.json has "internships" (docs/PIPELINE.md, SUMMER INTERNSHIPS): Simplify's list,
+  postings from the companies' own job sites (plain requests and a hidden browser, no login), Claude triage / score /
+  category, Discord for new pool internships. `nuauto daily` runs the same update after the NUworks one; a lock keeps
+  it to one at a time. Off: it does nothing (the update says so). The laptop's `nuauto intern update` starts it here.
 - nuauto-deploy.timer -> nuauto-deploy.service: `nuauto deploy` every 5 minutes (deploy_from_git only): looks at
   GitHub's main; a new commit is unpacked aside, imported as a check, then its changed files are copied in, the
   package is reinstalled if pyproject.toml changed, changed unit files are installed (daemon-reload, timers
   restarted, new ones enabled) and nuauto-web restarts only if web.py or a module it uses changed. A commit that
-  does not import, or a web that does not come back, is undone and Discord says so once. It waits while the
-  update (`nuauto daily`) runs. Record: local/deployed.json; log: logs/deploy.log.
+  does not import, or a web that does not come back, is undone and Discord says so once. It waits while an
+  update (`nuauto daily`, `nuauto intern update`) runs. Record: local/deployed.json; log: logs/deploy.log.
 - nuauto-web.service: `nuauto web`, always on (Restart=on-failure). Listens on web_listen_host:8765
   only (web.LISTEN). Serves the signed Discord links: GET = confirm page only, POST (button)
   changes the sheet. Every link is HMAC-signed with web_secret.txt for one action on one
@@ -76,6 +83,9 @@ SECRETS AND STATE (never print or log any of these; all mode 600)
   web_secret.txt        no      yes      created by `nuauto web` on first start. Replacing it breaks
                                          every Mark link already sent.
   assist_profile/       yes     no       company-site logins of `nuauto assist`; never synced
+  assist_profile_2/, _3/ yes    no       the same, for the 2nd and 3rd assistant running side by side
+  accounts.json         yes     no       the job-site logins the assistant made (email + a password per site); never
+                                         synced; `nuauto accounts export` (or Settings) writes Bitwarden's import file
   gui.lock              yes     no       the running GUI (pid, port, a secret that only opens a window); not synced
   answers.json, profile.json  laptop only in practice (apply runs on the laptop); not synced
 Not secret, gitignored, pushed by sync.push: local_config.json (personal settings),
@@ -166,5 +176,5 @@ SET UP (OR REBUILD) A HOMELAB
 5. Laptop: `nuauto login` (copies the NUworks session).
 6. Units: scp deploy/systemd/* homelab:.config/systemd/user/
           ssh homelab 'sudo loginctl enable-linger $USER'   # asks for the sudo password
-          ssh homelab 'systemctl --user daemon-reload && systemctl --user enable --now nuauto-daily.timer nuauto-weekly.timer nuauto-web.service'
+          ssh homelab 'systemctl --user daemon-reload && systemctl --user enable --now nuauto-daily.timer nuauto-weekly.timer nuauto-intern.timer nuauto-web.service'
 7. Laptop: `nuauto doctor`, then `nuauto update` to see one full run.

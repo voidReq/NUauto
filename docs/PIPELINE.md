@@ -1,4 +1,5 @@
-JOB POOL (jobs.py, rebuilt 2026-10-02; the rules in code = RULES in src/nuauto/jobs.py)
+JOB POOL (jobs.py, rebuilt 2026-10-02; the rules in code = RULES in src/nuauto/jobs.py; the Summer internships pool,
+intern.py: SUMMER INTERNSHIPS below)
 Runs automatically on the homelab twice a day (`nuauto daily`, see docs/DEPLOY.md). Each step does
 only new work. By hand (see the src/nuauto/jobs.py docstring for every step):
   nuauto jobs stats     nuauto jobs pool     nuauto jobs suggest 5
@@ -81,6 +82,39 @@ MY RATINGS (taste model)
   trains, it also mixes in the jobs it is least sure about.
 - Viewer keys: j/k scroll, space/b page, g/G top/bottom, y/n rate (overwrites an earlier
   answer), s skip, u back one job, o open in browser, q quit.
+
+SUMMER INTERNSHIPS (intern.py + postings.py, added 2026-10-10; `nuauto intern ...`)
+A second pool for jobs that are not on NUworks: SimplifyJobs' Summer 2027 list (github.com/SimplifyJobs/
+Summer2027-Internships, dev branch, .github/scripts/listings.json; their own scripts only build the README).
+On when local_config.json has "internships" (an object; {} = defaults: term "Summer 2027", the list's URL, per run
+300 postings read by plain requests, 40 by the hidden browser, 120 scored). Mine: on (2026-10-10).
+- Runs: the homelab every 2 hours (nuauto-intern.timer, :40 on even hours New York) and after each NUworks update
+  (daily.py); one at a time (data/intern/update.lock). The list changes every 30 min; it is downloaded only when it
+  changed (ETag). Each step does only new work, a limited amount per run: the first runs work through the backlog
+  (about 2,100 open listings on 2026-10-10), best titles and newest first.
+- Steps: 1. the list: listings for the term that Simplify shows; one Simplify closes (or drops) stays, inactive.
+  Rules: open, and open to undergraduates (degrees lists Bachelor's, or none). 2. Claude triage on titles
+  (prompts/INTERN_TRIAGE_PROMPT.md, same student / keep / drop text as the co-ops): drops only clearly unrelated
+  roles; kept ones get a fit (high/medium/low), which only orders the reading. 3. each posting read from the
+  company's own job site (postings.py, no login): the site's public job data (Workday, Greenhouse, Lever, Ashby,
+  SmartRecruiters, Oracle, Eightfold, Workable, iCIMS), else the page's schema.org JobPosting data, else the page's
+  text, else the page in a hidden browser (fresh, no profile, no images; pages built by JavaScript). Read-only GETs,
+  1 s apart per site, never to a non-public address (checked after redirects too). A posting no way could read in 3
+  runs (each with the browser) shows in Review after the scored ones, unscored: none is dropped for being unreadable.
+  4. Claude score (prompts/INTERN_SCORE_PROMPT.md): the same match formula as the co-ops, plus year_req, who may
+  apply compared with your standing DURING the internship (a sophomore now = a rising junior then): ok = your bar,
+  one_year_up = threshold_above, two_years_up / grad = dropped; the sentence used is kept (year_text). 4b. Claude
+  category (CATEGORY_PROMPT.md). 5. pool: same bars and bonuses as the co-ops (Boston +10, category, tags);
+  flags: posted 45+ days ago, US citizens only, mentions graduation, vague posting, a year further along.
+- Sample test 2026-10-10: 69 of 78 random listings read by plain requests, the rest by the hidden browser (39 of 39 in
+  a run with it).
+- Review (GUI: the source switch; terminal: `nuauto intern approve` / `rate`): ordered like the co-ops (score, then
+  half taste once trained: the model learns from co-op and internship decisions together; one data/ratings.json, ids
+  "s..."). Approve = an Approved row in the Other jobs tab (Notes "Summer 2027 internship (Simplify's list); match
+  ..."), so no weekly or total cap; Undo = that row back to Proposed (Review then shows it first again).
+  Apply: `nuauto assist other <row>` (the company-site agent).
+- Data: data/intern/ (listings, source, triage, details/, failed, scores, categories, category_sets, pool, scans).
+  Discord: new pool internships after a run; the morning message adds the last day's internship counts.
 
 RESUME
 - The PDF at local_config.json resume_path (the only file in its folder). The homelab

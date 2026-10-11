@@ -2,7 +2,8 @@
 
 Starts `nuauto gui --demo`-style (a demo folder, then `nuauto gui --no-open`) and checks: the local server's
 security rules, its API, the single-instance lock, and the main flows in headless Firefox (Review -> approve,
-Apply -> a question -> submitted, Answers, Settings, Quit). No network: everything runs on demo.py's fakes.
+Apply -> a question -> submitted, Answers, Settings, Quit, Review's internship list -> the Other jobs tab; the last
+also starts a second server with internships off). No network: everything runs on demo.py's fakes.
 """
 import http.client
 import json
@@ -56,6 +57,31 @@ def post(path, body, expect=200):
     status, _, data = request("POST", path, body)
     assert status == expect, (path, status, data[:300])
     return json.loads(data)
+
+
+@__import__("contextlib").contextmanager
+def hold_slot(n, info):
+    """Hold assistant slot n's lock, as a running `nuauto assist` does (assist.take_slot), with what runs there."""
+    import fcntl
+    os.makedirs(os.path.join(STATE, "local"), exist_ok=True)
+    with open(os.path.join(STATE, "local", f"assist_slot{n}.lock"), "a+") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        f.seek(0)
+        f.truncate()
+        f.write(json.dumps({**info, "slot": n, "pid": os.getpid(), "since": "2026-10-10T12:00"}))
+        f.flush()
+        yield
+
+
+def eventually(check, what, seconds=20):
+    """check() until it returns something truthy (the page writes a decision behind the screen); that value."""
+    end = time.time() + seconds
+    while time.time() < end:
+        got = check()
+        if got:
+            return got
+        time.sleep(0.2)
+    raise AssertionError(f"timed out waiting for: {what}")
 
 
 try:
@@ -127,6 +153,29 @@ try:
     post("/api/decide", {"id": "nope", "decision": "approve", "mode": "approve"}, expect=409)
     post("/api/decide", {"id": rev["jobs"][1]["id"], "decision": "approve", "mode": "rate"}, expect=409)
 
+    # internships (intern.py): Review's second list, from Simplify's list. Read-only here; approving one is in the page below
+    assert get("/api/state")["internships"] == {"on": True, "term": "Summer 2027", "review": 5}  # 4 scored + 1 unreadable
+    irev = get("/api/review?mode=approve&source=intern")
+    assert irev["source"] == "intern" and rev["source"] == "nuworks", (irev["source"], rev["source"])
+    inames = [j["title"] for j in irev["jobs"]]
+    assert irev["total"] == len(inames) == 5 and inames[0] == "Firmware Engineering Intern", inames
+    assert inames[-1] == "Robotics Software Intern" and irev["jobs"][-1]["match"] is None, irev["jobs"][-1]  # unreadable: last
+    assert all(isinstance(j["match"], int) for j in irev["jobs"][:-1]) and "could not be read" in irev["jobs"][-1]["order"], irev["jobs"]
+    HARBOR, PINE = "https://jobs.example-ats.com/harbor/4101", "https://jobs.example-ats.com/pine/4106"
+    icard = get("/api/job/" + irev["jobs"][0]["id"])
+    assert icard["source"] == "simplify" and icard["url"] == HARBOR and icard["match"] == 82 and not icard["unread"], icard
+    assert icard["external"] is None and icard["posted_text"].startswith("posted ") and icard["year_text"] == "", icard
+    iunread = get("/api/job/" + irev["jobs"][-1]["id"])  # no match, no threshold, nothing to read: the page must cope
+    assert iunread["unread"] and iunread["url"] == PINE and iunread["match"] is None and iunread["threshold"] is None, iunread
+    assert iunread["description"] == [] and iunread["qualifications"] == [] and iunread["score"].startswith("not scored"), iunread
+    # search, kind of work and rate mode work on it like on the co-ops
+    assert [j["title"] for j in get("/api/review?mode=approve&source=intern&q=" + urllib.parse.quote('"harbor embedded"'))["jobs"]] == ["Firmware Engineering Intern"]
+    assert [j["title"] for j in get("/api/review?mode=approve&source=intern&category=security")["jobs"]] == ["Security Engineering Intern"]
+    irate = get("/api/review?mode=rate&source=intern")
+    assert irate["source"] == "intern" and irate["jobs"] and "Robotics Software Intern" not in [j["title"] for j in irate["jobs"]], irate
+    assert get("/api/review?mode=approve")["source"] == "nuworks"  # no source = the co-ops (their list is the server's again)
+    post("/api/decide", {"id": irev["jobs"][0]["id"], "decision": "approve", "mode": "approve"}, expect=409)  # not in this list
+
     bank = get("/api/answers")
     entries = bank["entries"]
     post("/api/answers", {"entries": entries + [dict(entries[0])], "version": bank["version"]}, expect=409)  # duplicate
@@ -136,6 +185,34 @@ try:
     saved = post("/api/answers", {"entries": edited, "version": bank["version"]})
     assert saved["entries"][0]["answer"] == "Demo S. Student"
     post("/api/settings", {"week_start": "next tuesday"}, expect=409)
+    # the company-site assistant: account email, effort, the folders it may read; its logins as Bitwarden's import file
+    s0 = get("/api/settings")
+    assert s0["logins"] == {"sites": 0, "new": 0} and s0["efforts"] == ["low", "medium", "high"], s0
+    post("/api/settings", {"accounts_email": "not an email"}, expect=409)
+    post("/api/settings", {"assist_effort": "max"}, expect=409)
+    s1 = post("/api/settings", {"accounts_email": " demo.student@example.com ", "assist_effort": "medium",
+                                "assist_read_paths": ["/tmp/notes", " "]})["settings"]
+    assert (s1["accounts_email"], s1["assist_effort"], s1["assist_read_paths"]) == ("demo.student@example.com", "medium", ["/tmp/notes"]), s1
+    post("/api/logins/export", {}, expect=409)  # nothing to export yet
+    FAKE_PW = "Xy9!demo-not-real"
+    with open(os.path.join(STATE, "local", "accounts.json"), "w") as f:
+        json.dump({"acme.wd5.myworkdayjobs.com": {"site": "acme.wd5.myworkdayjobs.com", "url": "https://acme.wd5.myworkdayjobs.com/",
+                                                  "email": "demo.student@example.com", "password": FAKE_PW, "company": "Acme",
+                                                  "created": "2026-10-10T12:00", "jobs": [], "exported": False}}, f)
+    s2 = get("/api/settings")
+    assert s2["logins"] == {"sites": 1, "new": 1} and FAKE_PW not in json.dumps(s2)  # counts only: the page never gets a password
+    exp = post("/api/logins/export", {})
+    assert exp["count"] == 1 and exp["logins"] == {"sites": 1, "new": 0} and exp["path"].startswith(STATE), exp  # demo: never ~/Downloads
+    assert os.stat(exp["path"]).st_mode & 0o777 == 0o600 and json.load(open(exp["path"]))["items"][0]["login"]["password"] == FAKE_PW
+    post("/api/logins/export", {}, expect=409)  # exported already
+    assert post("/api/logins/export", {"every": True})["count"] == 1
+    post("/api/settings", {"accounts_email": "", "assist_effort": "low", "assist_read_paths": []})  # back as they were
+    # assistants side by side: a running one (its slot's lock held, as by a live `nuauto assist`) shows on its row
+    assert get("/api/company")["sessions"] == [] and get("/api/company")["slots"] == 3 and get("/api/state")["assistants"] == ""
+    with hold_slot(1, {"row": 7, "tab": "other", "company": "Basalt Bio", "host": "jobs.example.net"}):
+        assert [(s["slot"], s["row"], s["tab"]) for s in get("/api/other")["sessions"]] == [(1, 7, "other")]
+        assert get("/api/state")["assistants"] == "other-7:1"
+    assert get("/api/other")["sessions"] == [] and get("/api/state")["assistants"] == ""  # it ended: the slot is free
     for bad in (0, 31, "lots", 2.5, True, None):
         post("/api/settings", {"max_per_week": bad}, expect=409)
     assert post("/api/settings", {"max_per_week": "7"})["max_per_week"] == 7
@@ -186,7 +263,7 @@ try:
     assert r["demo"] and r["command"].endswith("assist other 2"), r
     # no tab yet: adding the first job makes it (headers, then the job as row 2)
     os.remove(other_file)
-    assert get("/api/other") == {"exists": False, "tab": "Other jobs", "ready": [], "applied": [], "rest": []}
+    assert get("/api/other") == {"exists": False, "tab": "Other jobs", "ready": [], "applied": [], "rest": [], "sessions": [], "slots": 3}
     assert post("/api/other/add", {"url": "https://jobs.example.net/2", "company": "Cinder", "title": "Intern"})["row"] == 2
     rows = json.load(open(other_file))["rows"]
     assert rows[0] == ["URL", "Company", "Title", "Status", "Notes", "Date"] and rows[1][3] == "Approved", rows
@@ -263,6 +340,17 @@ try:
             break
         time.sleep(0.2)
     assert get("/api/state")["week"] == week_before
+
+    # an approved internship's Undo still works after the list moved on (approved = in the sheet = not in the next list)
+    beacon = next(j for j in get("/api/review?mode=approve&source=intern")["jobs"] if j["title"] == "Frontend Engineering Intern")
+    done = post("/api/decide", {"id": beacon["id"], "decision": "approve", "mode": "approve"})
+    assert done["tab"] == "other" and done["row"], done
+    assert beacon["id"] not in [j["id"] for j in get("/api/review?mode=approve&source=intern")["jobs"]]  # the list moved on
+    post("/api/undo", {"id": beacon["id"], "row": done["row"], "previous": done["previous"], "tab": "other"})
+    assert json.load(open(other_file))["rows"][done["row"] - 1][3] == "Proposed"
+    post("/api/undo", {"id": "s" + "0" * 32, "row": done["row"], "previous": None, "tab": "other"}, expect=409)  # not a listing
+    post("/api/sheet", {"action": "remove", "tab": "other", "row": done["row"], "url": "https://jobs.example-ats.com/beacon/4105"})
+    assert get("/api/state")["internships"]["review"] == 5  # back in Review (its row cleared), counted again
 
     # the Other jobs answers: their own bank; answers.json marks NUworks-only entries (default list or own flag)
     main_bank = get("/api/answers")
@@ -547,6 +635,238 @@ fetch("{target}", {{method: "POST", credentials: "include", body: {json.dumps(bo
         page.wait_for_selector("[data-testid=terminal-command]")
         assert page.inner_text("[data-testid=terminal-command]").endswith("assist other 3")
         page.keyboard.press("Escape")
+
+        # ---- Review's second list: the term's internships (Simplify's list). Approve adds a row to the Other jobs tab (not
+        # the NUworks one); the posting is the company's own page ("Open posting"). Search, kinds of work, keys, list mode
+        # and rate mode work as on the co-ops; the one whose posting could not be read is last and has nothing to score.
+        def other_row(url):  # the Other jobs tab's row for a link, read fresh from the sheet
+            tab = get("/api/other")
+            return next((r for r in tab["ready"] + tab["applied"] + tab["rest"] if r["url"] == url), None)
+
+        def review_again():  # a new Review screen: its cards are fetched again, its list is the server's current one
+            page.click("[data-testid=nav-home]")
+            page.click("[data-testid=nav-review]")
+        other_rows = lambda: json.load(open(other_file))["rows"]
+        filled = lambda: sum(1 for r in other_rows()[1:] if any(c.strip() for c in r))  # rows with something in them (cleared ones are blank)
+        ratings_now = lambda: json.load(open(os.path.join(STATE, "data", "ratings.json")))
+        iid = {j["title"]: j["id"] for j in irev["jobs"]}
+        harbor_first = "() => document.querySelector('[data-testid=job-title]')?.innerText === 'Firmware Engineering Intern'"
+        no_junk = lambda text: not re.search(r"\b(null|undefined|NaN)\b", text)
+        page.click("[data-testid=nav-review]")  # Review opens on the co-ops; the switch next to Approve / Rate only shows the internships
+        page.wait_for_selector("[data-testid=source-nuworks][aria-pressed=true]")
+        assert page.get_attribute("[data-testid=source-intern]", "aria-pressed") == "false"
+        assert page.inner_text("[data-testid=source-nuworks]") == "NUworks co-ops"
+        assert page.inner_text("[data-testid=source-intern]") == "Summer 2027 internships"
+        page.wait_for_selector("[data-testid=job-card]")
+        assert page.inner_text("[data-testid=btn-open]").startswith("Open on NUworks")
+        page.click("[data-testid=source-intern]")
+        page.wait_for_selector("[data-testid=source-intern][aria-pressed=true]")
+        page.wait_for_function(harbor_first)
+        assert page.get_attribute("[data-testid=source-nuworks]", "aria-pressed") == "false"
+        assert page.evaluate("sessionStorage.getItem('reviewSource')") == "intern"
+        # its card: the posting is on the company's own site; the facts say when it was posted
+        assert page.get_attribute("[data-testid=btn-open]", "href") == HARBOR
+        assert page.inner_text("[data-testid=btn-open]").startswith("Open posting") and "NUworks" not in page.inner_text(".decide")
+        facts = page.inner_text("[data-testid=job-card] .facts")
+        assert f"{icard['match']}% · needs {icard['threshold']}%" in facts and "Posted" in facts, facts
+        assert icard["posted_text"].removeprefix("posted ") in facts and "Who can apply" not in facts, facts
+        assert no_junk(page.inner_text("[data-testid=job-card]"))
+
+        # "Who can apply": the posting's own words, a row only when it has some. The demo's postings have none, so the page's
+        # own jobCard() builds this card twice, as the server sent it and with some added (a card is only DOM nodes)
+        built = page.evaluate("""async (id) => {
+            const c = await window.NUauto.api.get('/api/job/' + id);
+            const labels = (card) => [...card.querySelectorAll('.facts dt')].map((n) => n.textContent);
+            const withYear = window.jobCard({ ...c, year_text: "Rising seniors pursuing a Bachelor's degree" }, {}, null);
+            const dt = [...withYear.querySelectorAll('.facts dt')].find((n) => n.textContent === 'Who can apply');
+            return { plain: labels(window.jobCard(c, {}, null)), added: labels(withYear), words: dt && dt.nextElementSibling.textContent };
+        }""", icard["id"])
+        assert "Who can apply" not in built["plain"] and built["plain"][:2] == ["Match", "Score"], built
+        assert built["words"] == "Rising seniors pursuing a Bachelor's degree", built
+        assert built["added"].index("Closes") < built["added"].index("Who can apply") < built["added"].index("Pay"), built
+        page.set_viewport_size({"width": 420, "height": 900})  # phone width: the two switches wrap, nothing sticks out sideways
+        page.wait_for_timeout(200)
+        assert page.evaluate("document.documentElement.scrollWidth") <= 420
+        page.set_viewport_size({"width": 1200, "height": 900})
+        # Today: a button for the internships; it opens Review on them even when the co-ops were the last list shown
+        # (the co-ops' button stays as it was)
+        page.click("[data-testid=source-nuworks]")
+        page.wait_for_selector("[data-testid=source-nuworks][aria-pressed=true]")
+        page.click("[data-testid=nav-home]")
+        assert get("/api/state")["internships"]["review"] == 5  # 4 scored + the unreadable one
+        page.wait_for_function("() => document.querySelector('[data-testid=go-review-intern]')?.innerText === 'Review 5 internships'")
+        page.click("[data-testid=go-review-intern]")
+        page.wait_for_selector("[data-testid=source-intern][aria-pressed=true]")
+        page.wait_for_function(harbor_first)
+
+        # Approve (button): the row goes to the Other jobs tab, behind the screen; the next job shows at once
+        assert other_row(HARBOR) is None
+        n_before = filled()
+        page.click("[data-testid=btn-approve]")
+        approved = page.locator("[data-testid=toast]", has_text="Approved: adding it to the Other jobs tab.")
+        approved.wait_for()
+        page.wait_for_function("() => document.querySelector('[data-testid=job-title]').innerText !== 'Firmware Engineering Intern'")
+        added = eventually(lambda: other_row(HARBOR), "the approved internship in the Other jobs tab")
+        assert added["status"] == "Approved" and added["notes"].startswith("Summer 2027 internship (Simplify's list)"), added
+        assert (added["company"], added["title"]) == ("Harbor Embedded", "Firmware Engineering Intern"), added
+        harbor_row = added["row"]
+        assert filled() == n_before + 1 and other_rows()[harbor_row - 1][0] == HARBOR
+        assert HARBOR not in [r["url"] for r in get("/api/sheet")["tabs"]["nuworks"]["rows"]]  # the Other jobs tab, not the NUworks one
+        assert HARBOR in [r["url"] for r in get("/api/other")["ready"]]  # ready for the assistant
+        page.wait_for_function("() => window.NUauto.S.state.internships.review === 4")  # the page has the answer (the row) by now
+        page.keyboard.press("u")  # back: the decided job says where its row is
+        page.wait_for_function(harbor_first)
+        assert page.inner_text("[data-testid=job-card] .chip.ok") == f"approved · Other jobs row {harbor_row}"
+        # Undo (the toast): the same row goes back to Proposed, and the request says it is in the Other jobs tab
+        with page.expect_request(lambda r: r.url.endswith("/api/undo") and r.method == "POST") as undo:
+            approved.locator("button", has_text="Undo").click()
+        assert undo.value.post_data_json == {"id": icard["id"], "row": harbor_row, "previous": None, "tab": "other"}, undo.value.post_data_json
+        page.locator("[data-testid=toast]", has_text="Undone: the row is back to Proposed (Other jobs tab).").wait_for()
+        eventually(lambda: (r := other_row(HARBOR)) and r["status"] == "Proposed" and r["row"] == harbor_row, "the row back to Proposed")
+        assert filled() == n_before + 1
+        # a new Review: it shows first, flagged; Approve (y) turns that same row Approved again (no second row)
+        review_again()
+        page.wait_for_function(harbor_first)
+        facts = page.inner_text("[data-testid=job-card] .facts")
+        assert f"already Proposed (Other jobs row {harbor_row})" in facts and "your Proposed row in the Other jobs tab" in facts, facts
+        page.keyboard.press("y")
+        page.locator("[data-testid=toast]", has_text="Approved: adding it to the Other jobs tab.").last.wait_for()
+        again = eventually(lambda: (r := other_row(HARBOR)) and r["status"] == "Approved" and r, "the same row Approved again")
+        assert again["row"] == harbor_row and filled() == n_before + 1, (again, filled(), n_before)
+        assert sum(r[0] == HARBOR for r in other_rows()) == 1  # no second row for it
+        assert not any(r["url"] == HARBOR and r["row"] != harbor_row for r in get("/api/other")["ready"])
+
+        # the one whose posting could not be read: no match to show, no margin math, nothing about it throws; it is last
+        page.select_option("[data-testid=review-category]", "uncategorized")
+        page.wait_for_function("() => document.querySelector('[data-testid=job-title]')?.innerText === 'Robotics Software Intern'")
+        facts = page.inner_text("[data-testid=job-card] .facts")
+        assert "not scored (the posting could not be read)" in facts and "Score" not in facts and "needs" not in facts, facts
+        assert "Could not read it:" in page.inner_text("[data-testid=job-card] .why") and no_junk(page.inner_text("[data-testid=job-card]"))
+        assert page.get_attribute("[data-testid=btn-open]", "href") == PINE
+        page.select_option("[data-testid=review-category]", "")
+
+        # a search shows every match as its own card, with its own buttons; the unreadable one is last, with nothing to cut short
+        listed = [j["title"] for j in get("/api/review?mode=approve&source=intern&q=intern")["jobs"]]
+        assert listed[-1] == "Robotics Software Intern" and "Firmware Engineering Intern" not in listed, listed  # Approved: in the sheet
+        page.fill("[data-testid=review-search]", "intern")
+        page.wait_for_function("n => document.querySelectorAll('[data-testid=review-list] [data-testid=btn-approve]').length === n", arg=len(listed))
+        assert page.locator("[data-testid=review-list] [data-testid=job-title]").all_inner_texts() == listed
+        assert set(page.locator("[data-testid=review-list] [data-testid=btn-open]").all_inner_texts()) == {"Open posting"}
+        assert page.locator("[data-testid=review-list] [data-testid=btn-open]").evaluate_all(
+            "links => links.every(a => a.href.startsWith('https://jobs.example-ats.com/'))")
+        assert page.locator("[data-testid=review-list] [data-testid=job-expand]").count() == len(listed) - 1
+        page.set_viewport_size({"width": 420, "height": 900})
+        page.wait_for_timeout(200)
+        assert page.evaluate("document.documentElement.scrollWidth") <= 420
+        page.set_viewport_size({"width": 1200, "height": 900})
+        # ...Approve there, then change your mind (Not for me): that undo says "other" too; the row is Proposed, rated no
+        sec_slot = page.locator(f"[data-testid=review-list] .slot[data-job='{iid['Security Engineering Intern']}']")
+        sec_url = get("/api/job/" + iid["Security Engineering Intern"])["url"]
+        sec_slot.locator("[data-testid=btn-approve]").click()
+        sec_slot.locator("[data-testid=list-decided]").wait_for()
+        sec_row = eventually(lambda: other_row(sec_url), "Security approved in the Other jobs tab")
+        assert sec_row["status"] == "Approved" and sec_row["notes"].startswith("Summer 2027 internship (Simplify's list)"), sec_row
+        sec_slot.locator("button", has_text="Change").click()
+        with page.expect_request(lambda r: r.url.endswith("/api/undo") and r.method == "POST") as undo:
+            sec_slot.locator("[data-testid=btn-no]").click()
+        assert undo.value.post_data_json["tab"] == "other" and undo.value.post_data_json["row"] == sec_row["row"], undo.value.post_data_json
+        eventually(lambda: (r := other_row(sec_url)) and r["status"] == "Proposed", "Security back to Proposed")
+        eventually(lambda: ratings_now().get(iid["Security Engineering Intern"], {}).get("label") == 0, "Security rated no")
+        # rate mode: yes / no ratings only, the sheet stays as it is
+        page.click("[data-testid=mode-rate]")
+        page.wait_for_selector("[data-testid=review-list] [data-testid=btn-yes]")
+        rate_slot = page.locator("[data-testid=review-list] .slot").first
+        rated = rate_slot.get_attribute("data-job")
+        assert rated in iid.values() and rated not in (iid["Robotics Software Intern"], iid["Firmware Engineering Intern"])
+        sheet_now = other_rows()
+        rate_slot.locator("[data-testid=btn-yes]").click()
+        eventually(lambda: ratings_now().get(rated, {}).get("label") == 1, "an internship rated yes")
+        assert other_rows() == sheet_now
+        page.click("[data-testid=mode-approve]")
+        # ...and when the list is done: where the approved ones are
+        page.fill("[data-testid=review-search]", "")
+        page.wait_for_selector("[data-testid=review-list]", state="detached")
+        left = len(get("/api/review?mode=approve&source=intern")["jobs"])
+        page.click("h1, #page-title")  # focus off the search box: the keys work
+        for _ in range(left + 2):
+            page.keyboard.press("s")
+            page.wait_for_timeout(150)
+        page.wait_for_selector("[data-testid=review-empty]")
+        assert page.inner_text("[data-testid=review-empty] p") == "Approved internships are in the Other jobs tab. Apply to them in Apply > Company sites."
+        assert page.get_attribute("[data-testid=review-empty] a", "href") == "#/company"
+        page.click("[data-testid=review-empty] a")  # the Company sites tab of Apply: the Other jobs card is there
+        page.wait_for_function("() => location.hash === '#/apply'")
+        page.wait_for_selector("[data-testid=tab-company][aria-selected=true]")
+        page.wait_for_selector(f"[data-testid=other-{harbor_row}]")
+        # the internship's row shows its match % and pay; with an assistant on it (another window), the row says so
+        # instead of offering a second one, and offers Start again once that one ends
+        assert "82% match" in page.inner_text(f"[data-testid=other-{harbor_row}] [data-testid=job-facts]")
+        with hold_slot(2, {"row": harbor_row, "tab": "other", "company": "Harbor Embedded", "host": "jobs.example-ats.com"}):
+            page.wait_for_selector(f"[data-testid=other-assist-{harbor_row}-running]", timeout=20000)
+            assert page.inner_text(f"[data-testid=other-assist-{harbor_row}-running]") == "assistant running (slot 2)"
+            assert "1 of 3 assistants running" in page.inner_text("[data-testid=assistants-running]")
+        page.wait_for_selector(f"[data-testid=other-assist-{harbor_row}]", timeout=20000)
+        # Start: greyed out for a few seconds (a second click would start the same job twice), then back
+        start = page.locator(f"[data-testid=other-assist-{harbor_row}]")
+        start.click()
+        assert start.is_disabled() and start.inner_text() == "Starting…"
+        page.locator("[data-testid=terminal-command]").wait_for()  # demo: the command it would run in a terminal
+        assert page.inner_text("[data-testid=terminal-command]").endswith(f"assist other {harbor_row}")
+        page.keyboard.press("Escape")
+        page.wait_for_function(f"() => !document.querySelector('[data-testid=other-assist-{harbor_row}]').disabled", timeout=10000)
+        # Today's co-op button opens the co-ops (the choice is remembered, so it says which); the internships stay one click away
+        page.click("[data-testid=nav-home]")
+        page.wait_for_function("() => document.querySelector('[data-testid=go-review-intern]')?.innerText === 'Review 3 internships'")
+        page.click("[data-testid=go-review]")
+        page.wait_for_selector("[data-testid=source-nuworks][aria-pressed=true]")
+        assert page.evaluate("sessionStorage.getItem('reviewSource')") == "nuworks"
+        coops = get("/api/state")["counts"]["review"]
+        assert coops, "the demo still has co-ops to review"
+        page.wait_for_selector("[data-testid=job-card]")
+        assert page.inner_text("[data-testid=btn-open]").startswith("Open on NUworks")
+        facts = page.inner_text("[data-testid=job-card] .facts")
+        assert "Posted" not in facts and "Who can apply" not in facts and "needs" in facts, facts
+        page.click("h1, #page-title")  # ...and when their list is done: their own wording and link, not the internships'
+        for _ in range(coops + 2):
+            page.keyboard.press("s")
+            page.wait_for_timeout(150)
+        page.wait_for_selector("[data-testid=review-empty]")
+        assert page.inner_text("[data-testid=review-empty] p") == "Approved jobs are in your sheet. Apply to them next."
+        assert page.get_attribute("[data-testid=review-empty] a", "href") == "#/apply"
+        page.click("[data-testid=source-intern]")  # the choice is kept for the session
+        page.wait_for_selector("[data-testid=source-intern][aria-pressed=true]")
+        page.reload()
+        page.wait_for_selector("[data-testid=source-intern][aria-pressed=true]")
+        page.click("[data-testid=source-nuworks]")
+        # internships off (no "internships" in local_config.json): no switch, no Today button, the server refuses the list, and a
+        # remembered "intern" is ignored: always the co-ops. Its own demo folder and server
+        off_state = tempfile.mkdtemp(prefix="nuauto-test-gui-off-")
+        off_env = {**ENV, "NUAUTO_STATE_DIR": off_state}
+        subprocess.run([PY, "-m", "nuauto.demo", "setup"], env=off_env, check=True, cwd=ROOT)
+        off_config = os.path.join(off_state, "local", "local_config.json")
+        config = json.load(open(off_config))
+        del config["internships"]
+        json.dump(config, open(off_config, "w"))
+        off = subprocess.Popen([PY, "-m", "nuauto", "gui", "--no-open"], env=off_env, cwd=ROOT, stdout=subprocess.PIPE,
+                               stderr=open(os.path.join(off_state, "gui-stderr.log"), "w"), text=True)
+        try:
+            off_page = page.context.new_page()
+            off_page.goto(json.loads(off.stdout.readline())["url"])
+            off_page.wait_for_selector("[data-testid=week]")
+            assert off_page.evaluate("window.NUauto.S.state.internships") == {"on": False, "term": "Summer 2027", "review": 0}
+            assert off_page.locator("[data-testid=go-review-intern]").count() == 0
+            assert off_page.evaluate("fetch('/api/review?mode=approve&source=intern').then((r) => r.status)") == 409
+            off_page.evaluate("sessionStorage.setItem('reviewSource', 'intern')")  # as if remembered from when they were on
+            with off_page.expect_request(lambda r: "/api/review?" in r.url) as asked:
+                off_page.click("[data-testid=nav-review]")
+            assert "source=nuworks" in asked.value.url and "source=intern" not in asked.value.url, asked.value.url
+            off_page.wait_for_selector("[data-testid=mode-approve]")
+            assert off_page.locator("[data-testid=source-intern]").count() == 0 and off_page.locator("[data-testid=source-nuworks]").count() == 0
+            off_page.close()
+        finally:
+            off.terminate()
+            off.wait(timeout=30)
+
         page.click("[data-testid=nav-settings]")
         page.wait_for_selector("[data-testid=check-google]")
         page.click("[data-testid=btn-quit]")

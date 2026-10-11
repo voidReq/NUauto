@@ -13,9 +13,11 @@ config.DATA_DIR = os.path.join(tmp, "data")
 config.LOGS_DIR = os.path.join(tmp, "logs")
 
 from nuauto import daily  # noqa: E402
+from nuauto import intern  # noqa: E402
 from nuauto import sheet  # noqa: E402
 from nuauto import web  # noqa: E402
 
+intern.ENABLED = False  # your own settings may turn internships on: daily.main must not run that update here (network)
 daily.LOG_PATH = os.path.join(config.LOGS_DIR, "test.txt")
 sent = []
 daily.notify = lambda title, body="": sent.append((title, body))
@@ -49,9 +51,28 @@ lines = body.split("\n")
 assert title == "NUauto morning" and lines[:2] == ["SUMMARY", "Only you can finish:"], sent[-1]
 assert "Co3" in lines[2] and "Co4" in lines[3] and "Mark" not in body, body
 
+# a batch's Claude is shut in work/ (the batches hold web text: job postings, Simplify's list): it runs there, may read
+# and edit only there (Edit rules cover Write; never a bare Write, which would allow every path), no shell, web or MCP
+config.WORK_DIR = os.path.join(tmp, "work")
+seen = {}
+real_run = daily.subprocess.run
+daily.subprocess.run = lambda cmd, **kw: seen.update(cmd=cmd, **kw) or type("R", (), {"returncode": 0, "stdout": "ok", "stderr": ""})()
+try:
+    assert daily.run_claude("TRIAGE_PROMPT.md", os.path.join(config.WORK_DIR, "triage_in_001.json")) is None
+finally:
+    daily.subprocess.run = real_run
+cmd = seen["cmd"]
+assert seen["cwd"] == config.WORK_DIR and os.path.isdir(config.WORK_DIR), seen.get("cwd")
+allowed = cmd[cmd.index("--allowedTools") + 1: cmd.index("--disallowedTools")]
+assert allowed == ["Read(./**)", "Edit(./**)"], allowed
+assert cmd[cmd.index("--tools") + 1: cmd.index("--allowedTools")] == ["Read", "Write", "Edit"]
+assert cmd[cmd.index("--disallowedTools") + 1: cmd.index("--permission-mode")] == ["Bash", "WebFetch", "WebSearch"]
+assert "--strict-mcp-config" in cmd and cmd[cmd.index("--permission-mode") + 1] == "acceptEdits"
+assert not any(a in ("Write", "Read", "Edit") for a in allowed)  # no bare (every path) allow
+
 # a Claude login error (auth status said logged in, the call itself failed) -> the "logged out" message, no import
 calls = []
-daily.run_claude = lambda prompt, b: calls.append(b) or "Failed to authenticate: OAuth session expired and could not be refreshed"
+daily.run_claude = lambda prompt, b, extra=None: calls.append(b) or "Failed to authenticate: OAuth session expired and could not be refreshed"
 def no_import():
     raise AssertionError("must not import after a login error")
 sent.clear()
@@ -62,7 +83,7 @@ assert len(sent) == 1 and sent[0][0] == "NUauto: Claude Code is logged out", sen
 assert "claude auth login" in sent[0][1] and "OAuth session expired" in sent[0][1], sent
 
 # another Claude error: the import's problems, with what Claude said in front
-daily.run_claude = lambda prompt, b: "API Error: 529 Overloaded"
+daily.run_claude = lambda prompt, b, extra=None: "API Error: 529 Overloaded"
 def missing():
     raise SystemExit("Not imported:\n  missing triage_out_001.json")
 sent.clear()
