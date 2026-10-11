@@ -1,7 +1,8 @@
 # The packaged NUauto: an AppImage per Linux architecture and a DMG per Mac architecture. Built and smoke-tested on
-# every pull request (the files are kept as build artifacts of the run: nothing is published) and on every push of a
-# version tag (git tag v0.3.0 && git push origin v0.3.0), which also attaches them to a GitHub Release.
-# Also runnable by hand from the default branch (Actions > release > Run workflow).
+# every pull request (the files are kept as build artifacts of the run: nothing is published; the Intel Mac app, the
+# slowest build at about 5 minutes, is skipped there) and on every push of a version tag (git tag v0.3.0 &&
+# git push origin v0.3.0), which builds all four and attaches them to a GitHub Release.
+# Also runnable by hand, all four (Actions > release > Run workflow).
 name: release
 on:
   push:
@@ -10,12 +11,18 @@ on:
   workflow_dispatch:
 permissions:
   contents: write
+concurrency:
+  # a new push to a pull request stops that pull request's older run
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   build:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, ubuntu-22.04-arm, macos-15, macos-15-intel]
+        os: ${{ fromJSON(github.event_name == 'pull_request'
+          && '["ubuntu-22.04", "ubuntu-22.04-arm", "macos-15"]'
+          || '["ubuntu-22.04", "ubuntu-22.04-arm", "macos-15", "macos-15-intel"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     steps:

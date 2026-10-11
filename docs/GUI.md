@@ -17,8 +17,8 @@ WHAT IT IS
 - Linux and macOS. Install: install.sh (uv brings Python 3.12; Playwright's Firefox; the `nuauto` command in
   ~/.local/bin; an app icon). The homelab never runs it (it refuses there).
 
-PACKAGED APP (packaging/; .github/workflows/release.yml builds and smoke-tests it on every pull request, and publishes
-it as a GitHub release on every v* tag)
+PACKAGED APP (packaging/; .github/workflows/release.yml builds and smoke-tests it on every pull request (all but the
+Intel Mac app, the slowest build), and builds all four and publishes them as a GitHub release on every v* tag)
 - Linux: an AppImage per architecture (built on Ubuntu 22.04: runs on distributions from 2022 on). macOS: a DMG with
   NUauto.app per architecture (wheels for macOS 12+). PyInstaller, one folder: its own Python 3.12 and libraries, the
   code, prompts/, the page and window_gtk.py. Not signed by Apple: the first open needs Privacy & Security > Open
@@ -214,7 +214,8 @@ VIEW MODE (`nuauto gui --view`; gui.VIEW; added 2026-10-09 so an agent can look 
 - Tests (in `nuauto test`): test_gui.py (security rules, API, single instance, the main flows in headless
   Firefox, Review's internship list: approve / undo / the unreadable one / internships off), test_setup.py (each wizard step's checks, then the wizard end to end), test_demo.py (the real apply.py
   on the fake pages: Ctrl+C and GUI-gone stops, cap refusal, NUworks re-login states), test_health.py.
-- CI: .github/workflows/tests.yml runs `nuauto test` on Ubuntu and macOS.
+- CI: .github/workflows/tests.yml runs `nuauto test` on Ubuntu and macOS for every pull request and every push to main
+  (a newer push to a pull request stops its older run).
 
 API (JSON; all need the cookie; POSTs need X-NUauto: 1)
   GET  /api/state            counts, week, to-do, last scan, setup_needed, the current task; internships {on, term,
@@ -269,5 +270,5 @@ NOT YET PROVEN FOR REAL (only in demo mode so far)
   reads against the real NUworks; the systemd/launchd toggle.
 - The packaged app on a real desktop other than Fedora 44 (containers ran it on Ubuntu 22.04/24.04, Debian 12, Fedora
   and Arch; its own window was rendered on GTK 4 and on GTK 3 / Ubuntu 22.04 with a virtual X server). The macOS app
-  on a real Mac: CI builds both (Apple Silicon, Intel) and runs their self-test, but nobody has opened one yet. No
+  on a real Mac: CI builds both (Apple Silicon on every pull request, Intel on v* tags) and runs their self-test, but nobody has opened one yet. No
   release has been published (that takes a v* tag).

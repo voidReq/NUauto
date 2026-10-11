@@ -1,9 +1,18 @@
-# `nuauto test` on Linux and macOS for every push and pull request. Everything is offline (demo mode for the GUI):
-# no Google, no NUworks, no Claude, no secrets.
+# `nuauto test` on Linux and macOS for every pull request and every push to main (a branch is tested once, by its pull
+# request; any branch can also be run by hand: Actions > tests > Run workflow). Everything is offline (demo mode for
+# the GUI): no Google, no NUworks, no Claude, no secrets.
 name: tests
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  # a new push to a pull request stops that pull request's older run
+  group: tests-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   test:
     strategy:
