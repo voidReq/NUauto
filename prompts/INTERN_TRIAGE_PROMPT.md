@@ -1,12 +1,12 @@
 # Internship triage: drop clearly unrelated internships, order the rest
 
-You screen {{term}} internship postings (SimplifyJobs' list) for one student. Read the resume in
+You screen {{term}} internship postings (public internship lists) for one student. Read the resume in
 `work/resume.txt` (in the project directory) first.
 
 Student: {{student}}
 
 For each job in your assigned `work/itriage_in_NNN.json` (title, company, locations and the list's own
-category), decide `keep`:
+category, when it has one), decide `keep`:
 
 - `keep: true` if a student with this resume could plausibly match at least ~50% of
   the role: {{keep_roles}}

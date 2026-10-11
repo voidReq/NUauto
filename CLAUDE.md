@@ -41,7 +41,7 @@ HARD LIMITS
   7 days. Mine: week_start 2026-10-06 (reset because I started applying late), then every 7 days.
   Approved rows beyond the cap just wait for the next week.
   Both caps count the main (NUworks) tab only: the Other jobs tab has no cap (my call, 2026-10-07). Summer
-  internships (Simplify's list, intern.py) go in the Other jobs tab: no weekly or total cap either; Approved ones
+  internships (Simplify's and vanshb03's lists, intern.py) go in the Other jobs tab: no weekly or total cap either; Approved ones
   can be applied to as much as I want (my call, 2026-10-10).
 - One application at a time on NUworks (apply.py: one browser, one row after another). Company sites: up to 3 assistant
   sessions side by side (my call, 2026-10-10; local_config.json "assist_slots" 1-3), each in its own terminal window and
@@ -262,7 +262,7 @@ src/nuauto/: cli.py (the nuauto command)   config.py (all paths, hosts; reads lo
   window.py (which window) + window_gtk.py (the Linux window, run by the system python3)
   insights.py (pay, places, kinds of work, sheet statuses: the GUI's Insights screen and `nuauto insights`)
   manage.py (add / move / remove sheet rows by hand: the GUI's Sheet screen and `nuauto sheet add|move|remove`)
-  intern.py (Summer internships from Simplify's list: the second pool, docs/PIPELINE.md)   postings.py (reads a posting
+  intern.py (Summer internships from Simplify's and vanshb03's lists, a job on both kept once: the second pool, docs/PIPELINE.md)   postings.py (reads a posting
   from a company's own job site, no login: job-site JSON, page data, hidden browser; never a non-public address)
   Imports are always absolute: `from nuauto import sheet` (test_sync enforces it).
 prompts/ (TRIAGE_, SCORE_, CATEGORY_PROMPT.md: Claude batch prompts; INTERN_TRIAGE_, INTERN_SCORE_PROMPT.md: the
@@ -306,7 +306,7 @@ nuauto sheet move <nuworks|other> <row> [<new url>]  # to the other tab;  nuauto
 nuauto answers list    # answer bank; edit with: nvim local/answers.json
 nuauto setup-sheet format          # restyle the sheet (formatting only, safe to re-run)
 nuauto jobs stats | pool | suggest 5
-nuauto intern update [--here] | approve | rate | stats | pool   # Summer internships (Simplify's list); approve -> Other jobs tab
+nuauto intern update [--here] | approve | rate | stats | pool   # Summer internships (Simplify's + vanshb03's lists); approve -> Other jobs tab
 nuauto intern fetch <url> [--browser]                 # read one posting from its job site now (nothing saved)
 nuauto daily [weekly] / nuauto web # what the homelab's timers / Mark-done service run
 python -m nuauto.<module> ...      # any module's own command line (same as the nuauto tools)

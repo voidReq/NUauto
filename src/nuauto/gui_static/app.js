@@ -510,7 +510,7 @@ function markRow(kind, t, tab) {  // tab "other": a row of the sheet's Other job
 }
 
 // ---- Review (approve, or rate only). Two sources when internships are on (state.internships, intern.py): NUworks co-ops,
-// and the term's internships from Simplify's list, whose Approve adds a row to the sheet's Other jobs tab.
+// and the term's internships (Simplify's and vanshb03's lists), whose Approve adds a row to the sheet's Other jobs tab.
 screens.review = async (view) => {
   let mode = sessionStorage.getItem("reviewMode") || "approve";
   const interns = (S.state && S.state.internships) || { on: false };

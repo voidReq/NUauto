@@ -56,7 +56,8 @@ Unit files live in this repo (deploy/systemd/) and are installed in ~/.config/sy
 - nuauto-weekly.timer -> nuauto-weekly.service: `nuauto daily weekly`, Sunday 19:00 New York time
   (Discord check-in).
 - nuauto-intern.timer -> nuauto-intern.service: `nuauto intern update` every 2 hours (:40 on even hours New York,
-  +0-10 min), when local_config.json has "internships" (docs/PIPELINE.md, SUMMER INTERNSHIPS): Simplify's list,
+  +0-10 min), when local_config.json has "internships" (docs/PIPELINE.md, SUMMER INTERNSHIPS): Simplify's and vanshb03's lists
+  (the same job on both kept once),
   postings from the companies' own job sites (plain requests and a hidden browser, no login), Claude triage / score /
   category, Discord for new pool internships. `nuauto daily` runs the same update after the NUworks one; a lock keeps
   it to one at a time. Off: it does nothing (the update says so). The laptop's `nuauto intern update` starts it here.

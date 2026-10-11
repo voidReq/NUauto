@@ -96,7 +96,19 @@ default the co-ops' bar). Mine: on (2026-10-10), threshold 60 (2026-10-11; the c
   (daily.py); one at a time (data/intern/update.lock). The list changes every 30 min; it is downloaded only when it
   changed (ETag). Each step does only new work, a limited amount per run: the first runs work through the backlog
   (about 2,100 open listings on 2026-10-10), best titles and newest first.
-- Steps: 1. the list: listings for the term that Simplify shows; one Simplify closes (or drops) stays, inactive.
+- Two lists (added 2026-10-11, my request): Simplify's and vanshb03's Summer 2027 list (github.com/vanshb03/
+  Summer2027-Internships, same file format; no term per listing, only a season: "Summer" on a list whose address says
+  2027). Settings "lists": {"simplify": url, "vansh": url} ("" = not read); both on by default. Each is downloaded only
+  when it changed; one that can't be read is skipped. The same job on both is kept once (intern.mark_dupes): the
+  listing seen first (the same day: Simplify's) stays, the other gets dup_of and is left out of everything. The same
+  job = the same posting link (no www / case / tracking / trailing /apply / locale), or the same company and job number
+  in the link on another host (.../careers-home/jobs/91180 = .../jobs/91180?icims=1), or the
+  same company ("Acme Capital" = "Acme Capital University") and title (punctuation, season, year and
+  internship/intern ignored) in the same place (a shared state, or "United States" / none on one side; Chicago and
+  London differ) while the first one is open. A link or number several titles on one list share is a careers page, not
+  a job. Once a duplicate, always. Ids: "s..." Simplify's, "sv..." vanshb03's. On 2026-10-11 vanshb03's list (last
+  changed 2026-08-23) had 218 open Summer listings: 126 already on Simplify's, 92 new.
+- Steps: 1. the lists: listings for the term that each list shows; one its list closes (or drops) stays, inactive.
   Rules: open, and open to undergraduates (degrees lists Bachelor's, or none). 2. Claude triage on titles
   (prompts/INTERN_TRIAGE_PROMPT.md, same student / keep / drop text as the co-ops): drops only clearly unrelated
   roles; kept ones get a fit (high/medium/low), which only orders the reading. 3. each posting read from the
@@ -116,7 +128,7 @@ default the co-ops' bar). Mine: on (2026-10-10), threshold 60 (2026-10-11; the c
 - Review (GUI: the source switch; terminal: `nuauto intern approve` / `rate`): ordered like the co-ops (score, then
   half taste once trained: the model learns from co-op and internship decisions together; one data/ratings.json, ids
   "s..."). Approve = an Approved row in the Other jobs tab (Notes "Summer 2027 internship (Simplify's list); match
-  ..."), so no weekly or total cap; Undo = that row back to Proposed (Review then shows it first again).
+  ...", or vanshb03's list), so no weekly or total cap; Undo = that row back to Proposed (Review then shows it first again).
   Apply: `nuauto assist other <row>` (the company-site agent).
 - Data: data/intern/ (listings, source, triage, details/, failed, scores, categories, category_sets, pool, scans).
   Discord: new pool internships after a run; the morning message adds the last day's internship counts.

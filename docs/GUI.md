@@ -54,7 +54,7 @@ SCREENS
                  Undo puts the row back to Proposed; Not for me (n) rates it no; Skip (s); Back (u); Open (o).
                  Rate only mode: yes/no ratings for the taste model, nothing in the sheet.
                  Source switch, only when internships are on ("internships" in local_config.json, intern.py): "NUworks
-                 co-ops" / "<term> internships" (Simplify's list; the postings are on the companies' own sites). Remembered
+                 co-ops" / "<term> internships" (Simplify's and vanshb03's lists; the postings are on the companies' own sites). Remembered
                  for the session (default co-ops; Today's "Review N internships" picks the internships, its co-op button the
                  co-ops); changing it reloads the list. Everything above works the same on the internships, except: Approve
                  adds an Approved row to the sheet's Other jobs tab (apply there from Apply > Company sites; no weekly cap),
@@ -224,7 +224,7 @@ API (JSON; all need the cookie; POSTs need X-NUauto: 1)
   GET  /api/review?mode=&q=&category=&source=   the review queue (q / category narrow it; total, categories = the whole
                              queue; source=intern: the internships, else the co-ops; the reply says "source"; an internship
                              that could not be read has match null and comes last); GET /api/job/<id> one card (an
-                             internship's adds source "simplify", url = the posting, posted_text, year_text, unread)
+                             internship's adds source "simplify" (any list), url = the posting, posted_text (with its list), year_text, unread)
   POST /api/decide           {"id", "mode", "decision": approve|yes|no} -> {"row", "previous"}; an internship's approve adds
                              "tab": "other" (its row is in the Other jobs tab)
   POST /api/undo             {"id", "row", "previous"} (an internship also needs "tab": "other": its row goes back to
