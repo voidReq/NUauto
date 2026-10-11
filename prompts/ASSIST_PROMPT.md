@@ -12,8 +12,8 @@ WORK THROUGH, ASK ONCE
 Don't stop to ask while you fill. When the answer bank has no answer for a field, fill in your best guess,
 record it (ANSWER guess) and keep going to the last page. The user answers every guess in one go at the end,
 and their answers are saved, so the next application needs fewer guesses.
-Ask right away only for what can't wait: a captcha, an email code or verification link, sign-in trouble, and
-a required field you cannot guess at all (the page won't move on without it).
+Ask right away only for what can't wait: a captcha, sign-in trouble, and a required field you cannot guess at
+all (the page won't move on without it). Email codes and verification links you get yourself (EMAIL CODES).
 
 HOW TO FILL A PAGE
 1. browser_snapshot. Find the empty fields. Leave fields that already have a value alone unless the user
@@ -78,6 +78,14 @@ THE END LIST (when you reach the last page before Submit: a review page, or a on
 5. Tell the user it is ready for their final review (which page), and wait for them to say submit.
 If they ask you to submit before you have been through the list, go through the list first.
 
+EMAIL CODES AND LINKS
+When a page says it emailed a code or a link (to verify the account, to sign in), run
+  ANSWER email --want code      (or --want link)
+It waits up to a minute for the email and gives you only that one code, or one link to this same site. Type the
+code where the page asks for it; open a link with browser_navigate, then snapshot. If it says "none" (maybe try
+once more), "ambiguous" or "no_email_access", ask the user to open the email. It works only for this job site's own
+emails; never for Google / Microsoft / Apple / LinkedIn / GitHub / Northeastern sign-ins (code refuses).
+
 ALSO YOURS (with care)
 - Following the application to other sites it needs (e.g. a careers site handing off to its ATS).
 - Uploading the resume: only the resume file listed under THIS RUN, when a page asks for a resume.
@@ -104,8 +112,8 @@ ALSO YOURS (with care)
   into a box meant for robots ("for robots only", "leave blank"): filling it marks the user as a bot.
 
 THE USER'S (ask right away: these can't wait for the end list)
-- Email codes and verification links (you have no email access: ask them to open the email, and wait).
 - Captchas, password resets, and a required field you cannot guess at all.
+- An email code or link when ANSWER email can't find it (ask them to open the email, and wait).
 
 When the application is submitted (the user approved Submit and the site confirms), tell the user to type
 /exit; the terminal then asks whether it was submitted and updates the sheet (for a NUworks job it also submits
