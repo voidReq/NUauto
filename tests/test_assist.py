@@ -465,6 +465,7 @@ class FakeWS:
 from nuauto import browser  # noqa: E402
 
 config.LOGS_DIR, config.ASSIST_PROFILE_DIR, config.LAPTOP_RESUME = os.path.join(tmp, "logs"), os.path.join(tmp, "prof"), RESUME
+config.RESUME_PATH = RESUME  # assist.run reads the resume from RESUME_PATH (the homelab has its copy there)
 config.ASSIST_READ_PATHS = []
 posting = "https://careers.example.com/jobs/4821"
 full_week = [list(sheet.HEADERS)] + [[f"https://x/{i}", "Co", "Job", "Applied", "", __import__("datetime").date.today().isoformat()]
@@ -866,5 +867,144 @@ holder.kill()
 holder.wait()
 os.environ.pop(assist.STATE_ENV)
 assert attention("stop", {}) == ""                               # outside a session: nothing, no error
+
+def blocked(state, tool, inp, needle=""):  # (the name was used for the NUworks-side check further up)
+    verdict, why = assist.decide(state, tool, inp)
+    assert verdict == "deny" and needle.lower() in why.lower(), (tool, inp, verdict, why)
+
+
+# captchas (2026-10-11): an element named like one, or anything inside a captcha frame, is the user's: never clicked,
+# typed in or hovered; the rest of the page works as before
+CAPTCHA_SNAP = f"""### Page state
+- Page URL: https://{H}/careers/job/X_1/apply
+- Page Snapshot:
+```yaml
+- generic [ref=c1]:
+  - textbox "First Name*" [ref=c2]
+  - checkbox "I'm not a robot" [ref=c3]
+  - iframe "reCAPTCHA" [ref=c4]:
+    - checkbox "I'm not a robot" [ref=c5]
+    - button "Get an audio challenge" [ref=c6]
+    - generic [ref=c7]:
+      - textbox "Type the text" [active] [ref=c8]
+  - textbox "Last Name*" [ref=c9]
+  - iframe "Widget containing checkbox for hCaptcha security challenge" [ref=c10]:
+    - checkbox "hCaptcha checkbox" [ref=c11]
+  - button "Verify you are human" [ref=c12]
+  - button "Next" [ref=c13]
+  - iframe "Ad" [ref=c14]:
+    - link "Learn more" [ref=c15]
+  - button "Submit Application" [ref=c16]
+```"""
+cp = {**fresh(), "refs": assist.parse_refs(CAPTCHA_SNAP)}
+marked = sorted(r for r, v in cp["refs"].items() if v.get("captcha"))
+assert marked == ["c10", "c11", "c12", "c3", "c4", "c5", "c6", "c7", "c8"], marked  # frames + everything under them
+assert "captcha" not in cp["refs"]["c2"] and "captcha" not in cp["refs"]["c9"]     # same / lower indent after a frame: not marked
+assert "captcha" not in cp["refs"]["c13"] and "captcha" not in cp["refs"]["c15"] and "captcha" not in cp["refs"]["c1"]
+assert cp["refs"]["c3"] == {"role": "checkbox", "name": "I'm not a robot", "captcha": True}
+for name in ("Verify you are human", "Verify that you're a human", "Are you a robot?", "Human verification", "Press & hold",
+             "Cloudflare Turnstile", "hCaptcha checkbox", "Security check", "Arkose Labs challenge"):
+    assert assist.parse_refs(f'- checkbox "{name}" [ref=z1]')["z1"].get("captcha"), name
+for name in ("First Name", "Verify your email address", "Robotics experience", "Humane Society volunteer"):
+    assert "captcha" not in assist.parse_refs(f'- textbox "{name}" [ref=z1]')["z1"], name
+assert assist.parse_refs('- iframe [ref=f1]:\n  - button "Go" [ref=f2]')["f2"] == {"role": "button", "name": "Go"}  # no name: not one
+# the guard: any action on a captcha ref is refused, whatever the tool
+for ref in ("c3", "c5", "c6", "c8", "c11", "c12"):
+    for tool in ("browser_click", "browser_hover", "browser_type", "browser_select_option"):
+        blocked(cp, B + tool, {"ref": ref, "text": "x", "values": ["x"]}, "captcha")
+    blocked(cp, B + "browser_click", {"target": ref}, "captcha")
+blocked(cp, B + "browser_fill_form", {"fields": [{"ref": "c2", "type": "textbox", "value": "Jane"},
+                                                 {"ref": "c5", "type": "checkbox", "value": "true"}]}, "captcha")
+blocked(cp, B + "browser_press_key", {"key": "Space"}, "captcha")                       # the focused element is in the captcha
+assert "captcha" in assist.decide(cp, B + "browser_click", {"ref": "c12"})[1].lower() and "wait" in assist.CAPTCHA_DENY
+# the rest of the page behaves as before
+ok(cp, B + "browser_type", {"ref": "c2", "text": "Jane"})
+ok(cp, B + "browser_type", {"ref": "c9", "text": "Doe"})
+ok(cp, B + "browser_click", {"ref": "c13"})
+ok(cp, B + "browser_click", {"ref": "c15"})
+ok(cp, B + "browser_fill_form", {"fields": [{"ref": "c2", "type": "textbox", "value": "Jane"}]})
+asks(cp, B + "browser_click", {"ref": "c16"}, "submit")
+nofocus = {**cp, "refs": {r: {k: v for k, v in info.items() if k != "active"} for r, info in cp["refs"].items()}}
+asks(nofocus, B + "browser_press_key", {"key": "Enter"}, "enter")                    # no captcha focused: Enter asks as before
+ok(nofocus, B + "browser_press_key", {"key": "Tab"})
+focus_normal = {**cp, "refs": {**cp["refs"], "c8": {k: v for k, v in cp["refs"]["c8"].items() if k != "active"},
+                               "c2": {**cp["refs"]["c2"], "active": True}}}
+ok(focus_normal, B + "browser_press_key", {"key": "Tab"})                             # focus on a normal box: fine
+ok(cp, B + "browser_snapshot", {})
+ok(cp, B + "browser_navigate", {"url": "https://other.example/"})
+
+# on the homelab the "needs you" news goes to Discord (no desktop there): with how to reach the terminal and the browser
+import nuauto.daily as daily  # noqa: E402
+sent, real_discord, real_server = [], daily.discord, config.IS_SERVER
+daily.discord = lambda text: sent.append(text)
+shown.clear()
+VIEW = "http://100.64.0.1:6081/vnc.html?autoconnect=1&resize=scale"
+try:
+    config.IS_SERVER = True
+    d = tempfile.mkdtemp()
+    with open(os.path.join(d, "state.json"), "w") as f:
+        json.dump({**fresh(), "company": "Acme", "where": "Other jobs row 7", "password_sites": [], "tmux": "nuauto1",
+                   "view_url": VIEW}, f)
+    os.environ[assist.STATE_ENV] = d
+    assert attention("stop", {"last_assistant_message": "There is a captcha on this page.\nPlease solve it."}) == ""
+    assert len(sent) == 1 and shown == [], (sent, shown)
+    assert "tmux attach -t nuauto1" in sent[0] and VIEW in sent[0] and "Acme" in sent[0] and "Other jobs row 7" in sent[0]
+    assert "There is a captcha on this page." in sent[0] and "Please solve it" not in sent[0]
+    assert json.load(open(os.path.join(d, assist.ATTENTION)))["kind"] == "waiting"
+    attention("stop", {})
+    assert len(sent) == 1                                                # the same news within a minute: once
+    attention("notification", {"message": "Claude needs your permission to use mcp__browser__browser_click",
+                               "notification_type": "permission_prompt"})
+    assert len(sent) == 2 and "Approve or decline" in sent[1] and "tmux attach -t nuauto1" in sent[1] and VIEW in sent[1]
+    # no tmux in the state: still sent, without the attach hint
+    d2 = tempfile.mkdtemp()
+    with open(os.path.join(d2, "state.json"), "w") as f:
+        json.dump({**fresh(), "company": "Beta", "where": "row 3", "password_sites": [], "view_url": VIEW}, f)
+    os.environ[assist.STATE_ENV] = d2
+    attention("stop", {})
+    assert len(sent) == 3 and "tmux" not in sent[2] and VIEW in sent[2] and "Beta" in sent[2]
+    d3 = tempfile.mkdtemp()                                              # no view either: the message still goes
+    with open(os.path.join(d3, "state.json"), "w") as f:
+        json.dump({**fresh(), "company": "Gamma", "where": "row 4", "password_sites": []}, f)
+    os.environ[assist.STATE_ENV] = d3
+    attention("stop", {})
+    assert len(sent) == 4 and "Gamma" in sent[3] and "Browser (Tailscale)" not in sent[3] and shown == []
+    # on the laptop: the desktop notification, nothing to Discord
+    config.IS_SERVER = False
+    d4 = tempfile.mkdtemp()
+    with open(os.path.join(d4, "state.json"), "w") as f:
+        json.dump({**fresh(), "company": "Delta", "where": "row 5", "password_sites": [], "tmux": "nuauto1", "view_url": VIEW}, f)
+    os.environ[assist.STATE_ENV] = d4
+    attention("stop", {})
+    assert len(sent) == 4 and len(shown) == 1 and "tmux" not in shown[0][1] and VIEW not in shown[0][1]
+finally:
+    daily.discord, config.IS_SERVER = real_discord, real_server
+    os.environ.pop(assist.STATE_ENV, None)
+title, body = assist.attention_text("waiting", "row 1", "Acme", "hi", {"tmux": "nuauto2", "view_url": VIEW})
+assert title == "NUauto: Acme" and "ssh homelab -t tmux attach -t nuauto2" in body and body.endswith(VIEW)
+assert assist.attention_text("waiting", "row 1", "Acme", "hi")[1] == "The assistant is waiting for you in its terminal window (row 1): hi"
+
+# the browser's settings in mcp.json: the screen it draws on, and which browser
+sd = tempfile.mkdtemp()
+real_browser = config.ASSIST_BROWSER
+
+
+def mcp_of(**kw):
+    assist.session(sd, ANSWER_CMD, [tmp], os.path.join(tmp, "profile"), "rules", "row 1", **kw)
+    return json.load(open(os.path.join(sd, "mcp.json")))["mcpServers"][assist.SERVER]
+
+
+try:
+    config.ASSIST_BROWSER = "firefox"
+    srv = mcp_of(display=":41")
+    assert srv["env"] == {"DISPLAY": ":41"} and srv["args"][srv["args"].index("--browser") + 1] == "firefox"
+    assert srv["args"][srv["args"].index("--user-data-dir") + 1] == os.path.join(tmp, "profile") and "--output-dir" in srv["args"]
+    assert "env" not in mcp_of()                                         # the laptop: its own screen
+    config.ASSIST_BROWSER = ""
+    srv = mcp_of(display=":43")
+    assert "--browser" not in srv["args"] and srv["env"] == {"DISPLAY": ":43"}
+    assert "--browser" not in mcp_of()["args"]
+finally:
+    config.ASSIST_BROWSER = real_browser
 
 print("All assist (agent guard) checks passed.")

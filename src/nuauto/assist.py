@@ -74,6 +74,11 @@ CLICK_ROLES = {"button", "link", "menuitem", "tab", "option"}  # with no name, t
 WEB_TOOLS = {"WebSearch", "WebFetch"}  # looking things up (the company, the role): read-only
 # A box meant for bots only (Workday: "Enter website. This input is for robots only, do not enter if you're human"):
 # filling it marks you as a bot. Never typed into; and it doesn't count as a question on the page.
+# A captcha, or anything inside one (its box, its pictures, its "Verify" button): the user solves those themselves.
+# The agent never clicks, types or hovers in one (decide refuses); it tells the user and waits.
+CAPTCHA = re.compile(r"captcha|not a robot|verify (that )?you(?:'re| are) (a )?human|are you (a )?(human|robot)|"
+                     r"human verification|security (check|challenge)|press (and|&) hold|turnstile|challenge-platform|"
+                     r"arkose|funcaptcha|geetest", re.I)
 HONEYPOT = re.compile(r"robots? only|for robots|do not (fill|enter|type)|leave (this )?(field |box )?(blank|empty)|honey ?pot", re.I)
 ACCOUNT_FIELD = re.compile(r"e-?mail|user ?name|user ?id|login|password|passcode", re.I)
 SIGN_IN_SUBMIT = {"submit", "confirm"}  # the SUBMIT_RE names a sign-in page's own button may have
@@ -149,6 +154,7 @@ def parse_refs(text):
     of the label-like line right above it at the same depth (e.g. a question paragraph, then its textbox):
     read from the page, never from the agent."""
     out, above = {}, {}  # above: indent -> text of the latest label-like sibling line
+    captcha_at = None  # indent of the captcha frame (or box) we are inside, if any: everything deeper is the captcha's
     for line in text.splitlines():
         m = REF_LINE.match(line)
         t = None if m else TEXT_LINE.match(line)
@@ -157,6 +163,8 @@ def parse_refs(text):
         indent = len((m or t).group("indent"))
         for k in [k for k in above if k > indent]:
             del above[k]
+        if captcha_at is not None and indent <= captcha_at:
+            captcha_at = None
         if t:
             above[indent] = t.group("text").strip()
             continue
@@ -168,6 +176,10 @@ def parse_refs(text):
         if not name and role in CLICK_ROLES and inline:  # `button [ref=e9]: Submit` (no name, only its text): the text
             name = inline
         out[m.group("ref")] = {"role": role, "name": name}
+        if captcha_at is not None or CAPTCHA.search(name):
+            out[m.group("ref")]["captcha"] = True
+            if captcha_at is None and (role == "iframe" or m.group("tail").rstrip().endswith(":")):
+                captcha_at = indent  # a captcha's frame or box: its children are the captcha too
         if "[active]" in m.group("attrs") + m.group("tail"):  # the element that has the keyboard focus
             out[m.group("ref")]["active"] = True
         if role in LABEL_ROLES and inline:
@@ -383,6 +395,25 @@ def workday(state):
     return any(h == d or h.endswith("." + d) for d in WORKDAY)
 
 
+CAPTCHA_DENY = ("That is a captcha (or part of one): captchas are the user's to solve, never yours. Don't click, type or "
+                "hover in it, and don't look for another way to get past it. Tell the user there is a captcha on this "
+                "page and wait until they say it is done; then take a new snapshot.")
+
+
+def captcha_target(state, name, inp):
+    """The captcha element (per the latest snapshot) this action would touch, or None."""
+    refs = state["refs"]
+    if name in ("browser_click", "browser_type", "browser_hover", "browser_select_option"):
+        targets = [refs.get(ref_of(inp) or "")]
+    elif name == "browser_fill_form":
+        targets = [refs.get(ref_of(f) or "") for f in inp.get("fields", [])]
+    elif name == "browser_press_key":  # a key goes to the element that has the focus
+        targets = [r for r in refs.values() if r.get("active")]
+    else:
+        return None
+    return next((t for t in targets if t and t.get("captcha")), None)
+
+
 def placeholder_of(value):
     """The password placeholder this value is ("" for none); None when it mixes one with other text."""
     v = str(value or "")
@@ -431,6 +462,8 @@ def decide(state, tool, inp):
     name = tool[len(prefix):]
     if name not in TOOLS:
         return deny(f"{name} is not allowed (no page scripts: they could submit behind the review).")
+    if captcha_target(state, name, inp):
+        return deny(CAPTCHA_DENY)
     if name in ("browser_navigate", "browser_tabs") and inp.get("url"):
         scheme = urlparse(inp["url"]).scheme
         return ALLOW if scheme in ("http", "https") else deny(f"Only web pages, not {scheme}: links.")
@@ -999,12 +1032,29 @@ def clear_attention(d):
         pass
 
 
-def attention_text(kind, where, company, message=""):
-    """(title, body) of the desktop notification."""
+def attention_text(kind, where, company, message="", homelab=None):
+    """(title, body) of the notification. homelab: {"tmux", "view_url"} for a session on the homelab (Discord)."""
     title = f"NUauto: {company or 'assistant'}"
+    window = "its terminal window" if not homelab else \
+        "its terminal on the homelab" + (f" (ssh homelab -t tmux attach -t {homelab['tmux']})" if homelab.get("tmux") else "")
     if kind == "approve":
-        return title, f"Approve or decline in its terminal window ({where}): it wants to submit or press Enter."
-    return title, f"The assistant is waiting for you in its terminal window ({where})" + (f": {message}" if message else ".")
+        body = f"Approve or decline in {window} ({where}): it wants to submit or press Enter."
+    else:
+        body = f"The assistant is waiting for you in {window} ({where})" + (f": {message}" if message else ".")
+    if homelab and homelab.get("view_url"):
+        body += f"\nBrowser (Tailscale): {homelab['view_url']}"
+    return title, body
+
+
+def tmux_session():
+    """The tmux session this runs in (how you reach a homelab assistant's terminal), or None."""
+    if not os.environ.get("TMUX"):
+        return None
+    try:
+        r = subprocess.run(["tmux", "display-message", "-p", "#S"], capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return r.stdout.strip() or None
 
 
 def attention_main(kind):
@@ -1045,6 +1095,12 @@ def attention_main(kind):
                        "said": said}, f)
         log(d, f"needs you: {kind}")
         if old.get("kind") == kind and now - old.get("time", 0) < REMIND:
+            return
+        if config.IS_SERVER:  # no desktop there: your Discord, like the update's messages
+            from nuauto import daily
+            title, body = attention_text(kind, st.get("where", ""), st.get("company", ""), said,
+                                         {"tmux": st.get("tmux"), "view_url": st.get("view_url")})
+            daily.discord(f"**{title}**\n{body}")
             return
         from nuauto import health
         health.desktop_notify(*attention_text(kind, st.get("where", ""), st.get("company", ""), said))
@@ -1157,10 +1213,13 @@ def rules_text(answer_cmd):
         return f.read().replace("ANSWER ", " ".join(shlex.quote(a) for a in answer_cmd) + " ")
 
 
-def context_text(where, row, url, other, resume, read_roots, answer_cmd, writeups=()):
+def context_text(where, row, url, other, resume, read_roots, answer_cmd, writeups=(), view_url=None):
     email = accounts.account_email()
     return (f"\n\nTHIS RUN\n{where.capitalize()}: {row.company} | {row.title}\nPosting: {url}\n"
-            + (OTHER_NOTE if other else "") +
+            + (OTHER_NOTE if other else "")
+            + (f"This browser runs on the user's homelab, not in front of them: they see and use it at {view_url} "
+               "(give them that link whenever they have to do something in the browser, like a captcha).\n"
+               if view_url else "") +
             f"Resume file (the only file you may upload): {resume or 'not found'}\n"
             f"Account email (for any account a site needs): {email or 'not set: ask the user'}\n"
             "If you have no browser tools yet, they are still connecting: run the answer-bank command with "
@@ -1173,11 +1232,16 @@ def context_text(where, row, url, other, resume, read_roots, answer_cmd, writeup
             f"Email codes and links: {' '.join(shlex.quote(a) for a in answer_cmd)} email --want code|link")
 
 
-def session(d, answer_cmd, read_roots, profile, prompt, where):
+def session(d, answer_cmd, read_roots, profile, prompt, where, display=None):
     """The `claude` command for one agent session in run folder d (and its mcp.json / settings.json there): Sonnet at
     effort(), the browser (its profile), the answer bank, web lookups, the notes; every browser, Bash, file and web call
-    goes through the guard (hook pre), every browser reply through hook post; a guard that fails or times out blocks."""
-    mcp = {"mcpServers": {SERVER: {"command": "npx", "args": [MCP_PACKAGE, "--user-data-dir", profile, "--output-dir", d]}}}
+    goes through the guard (hook pre), every browser reply through hook post; a guard that fails or times out blocks.
+    display: the homelab's virtual screen the browser opens on (screen.py), else this computer's own."""
+    browser = ["--browser", config.ASSIST_BROWSER] if config.ASSIST_BROWSER else []
+    mcp = {"mcpServers": {SERVER: {"command": "npx", "args": [MCP_PACKAGE, *browser, "--user-data-dir", profile,
+                                                              "--output-dir", d]}}}
+    if display:
+        mcp["mcpServers"][SERVER]["env"] = {"DISPLAY": display}
     hook_cmd = " ".join(shlex.quote(a) for a in answer_cmd) + " hook"
     guard = lambda kind: [{"type": "command", "command": f"{hook_cmd} {kind}", "timeout": 60, "onFailure": "block"}]  # noqa: E731
     # "needs you": Claude Code's own events (never the agent): its turn ended (it waits for your reply), or it shows a
@@ -1237,31 +1301,48 @@ def run(number, url_override, other=False):
     _relabel(slot_lock, {"row": number, "tab": tab, "company": row.company, "host": host(url), "slot": slot,
                          "pid": os.getpid(), "run": d, "since": __import__("datetime").datetime.now().isoformat(timespec="minutes")})
     answer_cmd = answer_prefix()
-    read_roots = [os.path.realpath(r) for r in [*config.ASSIST_READ_PATHS, *config.ASSIST_WRITEUPS, config.LAPTOP_RESUME]
+    # The resume: yours on the laptop; on the homelab the copy the laptop pushes (local/resume.pdf).
+    resume_src = config.RESUME_PATH
+    read_roots = [os.path.realpath(r) for r in [*config.ASSIST_READ_PATHS, *config.ASSIST_WRITEUPS, resume_src]
                   if os.path.exists(r)]
     writeups = [os.path.realpath(r) for r in config.ASSIST_WRITEUPS if os.path.exists(r)]
-    resume = upload_copy(config.LAPTOP_RESUME, d) if os.path.exists(config.LAPTOP_RESUME) else None
+    resume = upload_copy(resume_src, d) if os.path.exists(resume_src) else None
+    view = None
+    if config.IS_SERVER:  # no monitor: the browser draws on a virtual screen you can open on your phone (screen.py)
+        from nuauto import screen
+        try:
+            view = screen.Screen(slot, d).start()
+        except screen.ScreenError as e:
+            sys.exit(str(e))
     state = {"current_url": url, "refs": {}, "issued": {}, "issued_values": [], "answer_cmd": answer_cmd,
              "read_roots": read_roots, "protected": protected_dirs(read_roots),
-             "resume_src": os.path.realpath(config.LAPTOP_RESUME), "resume": resume, "tab": "other" if other else "jobs",
+             "resume_src": os.path.realpath(resume_src), "resume": resume, "tab": "other" if other else "jobs",
              "company": row.company, "job_title": row.title, "job_url": url, "password_sites": [],
-             "guesses": {}, "typed": {}, "account_email": accounts.account_email() or "", "where": where}
+             "guesses": {}, "typed": {}, "account_email": accounts.account_email() or "", "where": where,
+             "slot": slot, "view_url": view.url if view else None, "tmux": tmux_session() if view else None}
     with open(os.path.join(d, "state.json"), "w") as f:
         json.dump(state, f)
     profile = slot_profile(slot)
     os.makedirs(profile, mode=0o700, exist_ok=True)
     cmd = session(d, answer_cmd, read_roots, profile, rules_text(answer_cmd) + context_text(
-        where, row, url, other, resume, read_roots, answer_cmd, writeups), where)
+        where, row, url, other, resume, read_roots, answer_cmd, writeups, view.url if view else None), where,
+        view.display if view else None)
     log_.write(f"{where.capitalize()}: {row.company} | {row.title} -> {host(url)} (assistant slot {slot} of {slots()})")
+    if view:  # the password only here, on your screen: never in a log or a Discord message
+        log_.write(f"The browser, on your phone or laptop (Tailscale on): {view.url}")
+        print(f"  Its password (this run only): {view.password}")
     log_.write("Starting the agent. Captchas, email codes and Submit are yours. Type /exit in the session when done.")
     import time
     started = time.time()
     try:
-        subprocess.run(cmd, env={**os.environ, STATE_ENV: d}, cwd=config.STATE_DIR)
+        subprocess.run(cmd, env={**os.environ, STATE_ENV: d, **({"DISPLAY": view.display} if view else {})},
+                       cwd=config.STATE_DIR)
     except KeyboardInterrupt:
         pass
     finally:
         after_session(d, started, log_)
+        if view:
+            view.stop()
     try:
         while True:
             reply = input(f"\nDid you press Submit for {where} ({row.company}) and see the confirmation? "
@@ -1276,8 +1357,19 @@ def run(number, url_override, other=False):
     ws = sheet.open_other() if other else sheet.open_worksheet()
     sheet.mark_applied_by_hand(ws, row.number, row.url, how="on the company site (nuauto assist; you pressed Submit)")
     log_.write(f"{where.capitalize()} marked Applied (dated today).")
-    if not other:  # an Other jobs tab job is not on NUworks: nothing more to send
-        nuworks_side(ws, row.number)
+    if other:  # an Other jobs tab job is not on NUworks: nothing more to send
+        return
+    if config.IS_SERVER:  # NUworks submits only with you at the laptop (a terminal or the GUI), never from the homelab
+        sheet.append_note(ws, row.number, row.url, HOMELAB_NUWORKS_NOTE.format(row=row.number))
+        log_.write(f"The NUworks side is left for the laptop: `nuauto assist nuworks {row.number}` there, or the GUI's "
+                   "Apply > Company sites.")
+        return
+    nuworks_side(ws, row.number)
+
+
+# In Notes after a homelab run of a NUworks job; "NUworks side NOT submitted" puts the row in the GUI's retry list.
+HOMELAB_NUWORKS_NOTE = ("NUworks side NOT submitted yet (the company site was done on the homelab, which never submits on "
+                        "NUworks): run `nuauto assist nuworks {row}` on the laptop, or Apply > Company sites.")
 
 
 def nuworks_side_blocked(notes):
@@ -1375,6 +1467,8 @@ def main(argv):
     if len(args) == 2 and args[0] == "nuworks" and args[1].isdigit():  # retry / catch up the NUworks side
         from nuauto import apply
         from nuauto import sheet
+        if config.IS_SERVER:
+            sys.exit("The NUworks side runs on the laptop (you at a terminal or the GUI), never on the homelab.")
         apply.refuse_unattended(ui)  # a real NUworks submit: you at a terminal or the GUI, never an agent
         return nuworks_side(sheet.open_worksheet(), int(args[1]), answers.JsonIO() if ui == "json" else None)
     if len(args) == 1 and args[0].isdigit():

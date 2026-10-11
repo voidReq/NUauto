@@ -39,6 +39,8 @@ MACHINES (homelab mode)
 
 WHAT RUNS ON THE HOMELAB
 Unit files live in this repo (deploy/systemd/) and are installed in ~/.config/systemd/user/.
+- With "remote_assist": company-site assistant sessions you start in tmux (`nuauto assist ...`; no unit), each with a
+  virtual screen and a browser view on the Tailscale IP. Setup, ports and what is shared: docs/REMOTE.md.
 - nuauto-daily.timer -> nuauto-daily.service: `nuauto daily` at 08:00 and 18:00 New York time
   (+0-15 min random, Persistent=true so a missed run happens at boot). Steps: list -> Claude
   triage -> details -> Claude score -> Claude category -> pool -> notifications (see
@@ -83,14 +85,19 @@ SECRETS AND STATE (never print or log any of these; all mode 600)
   discord_webhook.txt   yes     yes      copied by hand
   web_secret.txt        no      yes      created by `nuauto web` on first start. Replacing it breaks
                                          every Mark link already sent.
-  assist_profile/       yes     no       company-site logins of `nuauto assist`; never synced
-  assist_profile_2/, _3/ yes    no       the same, for the 2nd and 3rd assistant running side by side
-  accounts.json         yes     no       the job-site logins the assistant made (email + a password per site); never
+  assist_profile/       yes     (yes)    company-site logins of `nuauto assist`; never synced (with remote_assist the
+                                         homelab has its own)
+  assist_profile_2/, _3/ yes    (yes)    the same, for the 2nd and 3rd assistant running side by side
+  accounts.json         yes     (yes)    the job-site logins the assistant made (email + a password per site); with
+                                         remote_assist merged both ways by sync.share (docs/REMOTE.md), else never
                                          synced; `nuauto accounts export` (or Settings) writes Bitwarden's import file
-  gmail_token.json      yes     no       the read-only Gmail login for the assistant's email codes (`nuauto login gmail`;
-                                         renewed by `nuauto login google`); never synced
+  gmail_token.json      yes     (yes)    the read-only Gmail login for the assistant's email codes (`nuauto login gmail`;
+                                         renewed by `nuauto login google`); with remote_assist sync.push (if newer)
   gui.lock              yes     no       the running GUI (pid, port, a secret that only opens a window); not synced
-  answers.json, profile.json  laptop only in practice (apply runs on the laptop); not synced
+  answers.json, answers_other.json  with remote_assist merged both ways by sync.share (the assistant runs on both
+                                     machines); else laptop only in practice, not synced
+  profile.json          laptop only in practice (apply runs on the laptop); not synced
+  (yes) = only with "remote_assist" (the company-site assistant on the homelab too, docs/REMOTE.md).
 Not secret, gitignored, pushed by sync.push: local_config.json (personal settings),
 docs/STATUS.md (your local log), google_login.txt (date of the last Google login), the resume
 (as local/resume.pdf on the homelab).

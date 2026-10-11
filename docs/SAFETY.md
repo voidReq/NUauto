@@ -51,7 +51,7 @@ BROWSER (browser.py, config.py)
 - Only one process on browser_profile/ (apply, the update, login, the GUI's NUworks check) | browser.lock_profile (flock on local/browser_profile.lock, from launch to close; a failed launch releases it); the GUI's background check gives way to your runs | test_browser (profile lock)
 
 COMPANY-SITE AGENT (assist.py, prompts/ASSIST_PROMPT.md)
-- Needs you: Claude Code's Stop / Notification / UserPromptSubmit hooks only write the run's attention.json and show a desktop notification; they never answer, block or change a turn (no output, always exit 0), and the agent can't run them (not an answer-bank command) | assist.attention_main | test_assist; the hooks' real inputs checked in Claude Code 2.1.296
+- Needs you: Claude Code's Stop / Notification / UserPromptSubmit hooks only write the run's attention.json and show a desktop notification (on the homelab a Discord message: the tmux attach command and the browser view's link, never its password); they never answer, block or change a turn (no output, always exit 0), and the agent can't run them (not an answer-bank command) | assist.attention_main | test_assist; the hooks' real inputs checked in Claude Code 2.1.296
 - Side by side: at most assist.slots() (3) sessions; one per row and one per job site at a time (locks held by the
   launcher for the whole run, freed if it dies); each slot its own browser profile | assist.take_slot, take_site,
   run (row lock), slot_profile | test_assist (slots, sites, a slot held by another process), test_gui (the rows say so)
@@ -64,6 +64,17 @@ COMPANY-SITE AGENT (assist.py, prompts/ASSIST_PROMPT.md)
   other box on the page (a question), or another name ("Apply", "Submit Application"), still asks | assist.sign_in_page |
   test_assist (Workday's real sign-in markup)
 - Never types into a bot trap ("for robots only", "leave blank": filling it marks you as a bot) | assist.decide | test_assist
+- Never touches a captcha: any click, typing, hover, option or key on a captcha element, or on anything inside a captcha's
+  frame or box, is refused; the user solves it (on the homelab, in the browser view) | assist.CAPTCHA, parse_refs,
+  captcha_target, decide | test_assist
+- On the homelab (remote_assist only): the browser view listens on web_listen_host (the Tailscale IP; never every
+  address), the shared screen itself on 127.0.0.1 only, behind a password made per run that is shown only in the
+  session's terminal; the agent reads only the writeups copy and the resume; never a NUworks submit there (the row is
+  left for the laptop) | screen.listen_host, commands; config (IS_SERVER read paths); assist.run, assist.main |
+  test_screen, test_assist
+- The answer banks and job-site logins shared with the homelab: merged under each file's lock, a login never dropped,
+  sent as JSON over ssh and never printed; the writeups copy holds only files the agent may read | sync.share,
+  merge_bank, merge_accounts, notes_files | test_share
 - Enter key and type(submit=true) ask first | assist.decide (ENTER_KEYS, browser_type) | test_assist
 - Except on a sign-in page (assist.sign_in_page) or the job's own posting before anything is filled in (assist.posting_page:
   the row's link, a language part like /en-US/ aside, no form boxes on it but a job search box): there Enter, and the

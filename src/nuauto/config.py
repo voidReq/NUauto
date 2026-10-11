@@ -101,6 +101,17 @@ IS_SERVER = HAS_SERVER and socket.gethostname() == SERVER_HOSTNAME
 # Off by default: then sync.push copies the laptop's code, as before. deploy_repo: another fork's URL.
 DEPLOY_FROM_GIT = bool(LOCAL.get("deploy_from_git")) and HAS_SERVER
 DEPLOY_REPO = LOCAL.get("deploy_repo") or f"https://github.com/{REPO}.git"
+# The company-site assistant on the homelab too (`nuauto assist` there, in tmux; docs/REMOTE.md). Off unless true.
+REMOTE_ASSIST = bool(LOCAL.get("remote_assist")) and HAS_SERVER
+# The homelab's copy of your writeups: sync.push puts each assist_writeups folder in ~/nuauto-notes/<its name> there.
+# The agent on the homelab reads only those and the resume (never ~/projects there: that holds the live NUauto).
+NOTES_COPY_DIR = os.path.expanduser("~/nuauto-notes")
+if IS_SERVER:
+    ASSIST_WRITEUPS = [os.path.join(NOTES_COPY_DIR, os.path.basename(p.rstrip(os.sep))) for p in ASSIST_WRITEUPS]
+    ASSIST_READ_PATHS = []
+# The assistant's browser (Playwright MCP --browser): the laptop's default is your Chrome; the homelab has no Chrome,
+# so it uses Playwright's own Firefox (already set up there for the update's NUworks reads).
+ASSIST_BROWSER = LOCAL.get("assist_browser") or ("firefox" if IS_SERVER else "")
 DISCORD_WEBHOOK_PATH = os.path.join(LOCAL_DIR, "discord_webhook.txt")  # secret, mode 600, never print
 
 WEB_SECRET_PATH = os.path.join(LOCAL_DIR, "web_secret.txt")  # homelab only: signs the Mark links; secret

@@ -137,8 +137,9 @@ def main():
             from nuauto import daily
             sys.exit(daily.main())
         elif cmd == "assist":
-            if config.IS_SERVER:
-                sys.exit("nuauto assist runs on the laptop (visible browser, you at the terminal).")
+            if config.IS_SERVER and not config.REMOTE_ASSIST:
+                sys.exit("nuauto assist runs on the laptop (visible browser, you at the terminal). On the homelab only "
+                         "with \"remote_assist\": true in local_config.json (docs/REMOTE.md).")
             from nuauto import assist
             assist.main(rest)
         elif cmd == "login" and rest == ["google"]:
@@ -155,6 +156,8 @@ def main():
                 sys.exit("Log in to Gmail on the laptop (it opens a browser).")
             from nuauto import mail
             mail.login()
+            if laptop and config.REMOTE_ASSIST:
+                sync.push()  # the assistant on the homelab reads its email codes with it too
         elif cmd == "login":
             from nuauto import browser
             browser.cmd_login()
@@ -163,6 +166,8 @@ def main():
     finally:
         if laptop and cmd in ("approve", "rate", "status"):
             sync.push()  # ratings (and a fresh Google token after a re-login) go to the homelab
+        if laptop and cmd == "assist" and rest:
+            sync.share()  # the answers and logins this session saved, for the assistant on the homelab
 
 
 if __name__ == "__main__":
