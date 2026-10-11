@@ -216,7 +216,9 @@ def fingerprint(categories):
     return ",".join(sorted(c["key"] for c in categories))
 
 
-ENGINEERING = fingerprint(ENGINEERING_CATEGORIES)  # what jobs sorted before fields existed were sorted into
+# what jobs sorted before category_sets.json (2026-10-10) were sorted into: the engineering kinds of that day. Fixed,
+# not fingerprint(ENGINEERING_CATEGORIES): when those change, such jobs are sorted again like any other.
+LEGACY = "data_ml,embedded,fullstack_web,hardware,it,other,robotics_test,security,software,systems"
 
 
 def render_categories(categories):

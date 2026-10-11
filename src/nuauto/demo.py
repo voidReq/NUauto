@@ -464,6 +464,7 @@ def setup(state_names=()):
     jobs.save("triage.json", {i: {"keep": True, "why": "demo"} for i in listed})
     jobs.save("scores.json", scores)
     jobs.save("categories.json", cats)
+    jobs.save("category_sets.json", {i: jobs.CATEGORY_SET for i in cats})
     jobs.save("pool.json", jobs.build_pool())
     jobs.save("ratings.json", {})
     from datetime import datetime
@@ -514,6 +515,7 @@ def update():
     jobs.save("list.json", listed)
     jobs.save("scores.json", scores)
     jobs.save("categories.json", cats)
+    jobs.save("category_sets.json", {i: jobs.CATEGORY_SET for i in cats})
     pool = jobs.build_pool()
     jobs.save("pool.json", pool)
     scans = jobs.load("scans.json", [])
