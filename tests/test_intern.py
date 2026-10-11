@@ -524,6 +524,14 @@ assert "for students a year further along (in text)" in {r["id"]: r for r in poo
 jobs.save("ratings.json", {})
 ok_, thr, flags = intern.entry_rules(listings[ID(8)], {"description": "x", "qualifications": ""}, {"year_req": "ok"}, "other")
 assert ok_ and thr == 65 and "posted 90 days ago" in flags and "vague posting, low confidence" in flags, flags
+# the internships' own bar ("threshold" in "internships"): only theirs; a kind's lower bar still wins; a year up stays higher
+intern.SETTINGS["threshold"] = 55
+for cat, req, want in (("other", "ok", 55), ("security", "ok", 55), ("other", "one_year_up", 90)):
+    assert intern.entry_rules(listings[ID(8)], {"description": "x", "qualifications": ""}, {"year_req": req}, cat)[1] == want
+intern.SETTINGS["threshold"] = 62
+assert intern.entry_rules(listings[ID(8)], {"description": "x", "qualifications": ""}, {"year_req": "ok"}, "security")[1] == 60
+intern.SETTINGS["threshold"] = None
+assert jobs.PREFS["threshold"] == 65  # the co-ops keep theirs
 ok_, thr, flags = intern.entry_rules(listings[ID(10)], {"description": "graduating in 2027", "qualifications": ""},
                                      {"year_req": "ok", "met": ["a"] * 4}, "embedded", TODAY)
 assert ok_ and "US citizens only" in flags and "mentions graduation 2027" in flags, flags

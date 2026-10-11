@@ -272,7 +272,7 @@ JOBS = [
          majors=["Khoury College of Computer Sciences/Computer Science"], skills=["Verilog"]),
     _job("900106", "Data Analyst Co-op", "Fern Data Co", "Providence, RI, USA", "US-RI", "data_ml", 67, 25,
          "Python and statistics match; SQL is partial.", "plain", skills=["Python", "SQL"], pay=""),
-    _job("900107", "Web Developer Co-op", "Beacon Web Studio", "New York, NY, USA", "US-NY", "fullstack_web", 72, 18,
+    _job("900107", "Web Developer Co-op", "Beacon Web Studio", "New York, NY, USA", "US-NY", "frontend", 72, 18,
          "JavaScript projects fit, but the role is front-end focused.", "plain", skills=["JavaScript", "React"]),
     _job("900108", "IT Support Co-op", "Summit IT", "Burlington, MA, USA", "US-MA", "it", 66, 40,
          "Help desk and Linux admin experience apply.", "cover", skills=["Linux"], vague=True),
@@ -336,7 +336,7 @@ INTERNSHIPS = [
     (2, "Lumen Security", "Security Engineering Intern", ["Cambridge, MA", "NYC"], "Software", 74, "ok", "security"),
     (3, "Cobalt Systems", "Systems Software Intern", ["Austin, TX"], "Software", 88, "one_year_up", "systems"),
     (4, "Quarry Hardware", "Hardware Validation Intern", ["San Jose, CA"], "Hardware", 69, "ok", "hardware"),
-    (5, "Beacon Web Studio", "Frontend Engineering Intern", ["Remote in USA"], "Software", 71, "ok", "fullstack_web"),
+    (5, "Beacon Web Studio", "Frontend Engineering Intern", ["Remote in USA"], "Software", 71, "ok", "frontend"),
     (6, "Pine Robotics", "Robotics Software Intern", ["Pittsburgh, PA"], "Software", None, None, None),
 ]
 INTERN_DESCRIPTION = """About the internship
