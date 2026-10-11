@@ -38,6 +38,7 @@ DEFAULTS = {
     "fetch_per_run": 300,   # postings read per run by plain requests (about a second each)
     "browser_per_run": 40,  # ...and by the hidden browser, for pages built by JavaScript (10-20 s each)
     "score_per_run": 120,   # postings Claude scores per run (20 per call, about 3 minutes each)
+    "threshold": None,      # match % to enter the pool; None = the co-ops' bar (preferences "threshold")
 }
 _CFG = config.LOCAL.get("internships")
 ENABLED = isinstance(_CFG, dict) or _CFG is True
@@ -426,9 +427,10 @@ def entry_rules(listing, d, score, cat, today=None):
     keep, _ = rules(listing)
     if not keep:
         return False, None, []
-    threshold, flags = jobs.PREFS["threshold"], []
-    if cat in jobs.PREFS["category_threshold"]:
-        threshold = jobs.PREFS["category_threshold"][cat]
+    base = jobs.PREFS["threshold"] if SETTINGS["threshold"] is None else int(SETTINGS["threshold"])
+    threshold, flags = base, []
+    if cat in jobs.PREFS["category_threshold"]:  # a lower bar for the kinds you care most about
+        threshold = min(base, jobs.PREFS["category_threshold"][cat])
     req = score.get("year_req") or "ok"
     if req in ("two_years_up", "grad"):
         return False, None, []

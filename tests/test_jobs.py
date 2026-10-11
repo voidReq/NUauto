@@ -75,10 +75,12 @@ assert "vague posting, low confidence" not in jobs.pool_entry_rules(d(), {"class
 assert jobs.pool_entry_rules(d(), {"class_req": "none"}, "security")[1] == 60
 assert jobs.pool_entry_rules(d(), {"class_req": "junior_plus"}, "security")[1] == 90
 assert jobs.pool_entry_rules(d(), {"class_req": "none"}, "embedded")[1] == 65
-# ranking: bonuses, full-stack always last
+# ranking: bonuses, front-end -20 and always last; full-stack ranks like any software job
 assert jobs.category_bonus("security") == 20 and jobs.category_bonus("embedded") == 15 and jobs.category_bonus("software") == 0
-rows = [{"category": "fullstack_web", "rank": 120}, {"category": "software", "rank": 60}, {"category": "security", "rank": 90}]
-assert [r["category"] for r in sorted(rows, key=jobs.pool_sort_key)] == ["security", "software", "fullstack_web"]
+assert jobs.category_bonus("frontend") == -20 and jobs.category_bonus("fullstack_web") == 0
+rows = [{"category": "frontend", "rank": 120}, {"category": "software", "rank": 60}, {"category": "security", "rank": 90},
+        {"category": "fullstack_web", "rank": 80}]
+assert [r["category"] for r in sorted(rows, key=jobs.pool_sort_key)] == ["security", "fullstack_web", "software", "frontend"]
 # rating order: one per category in turn, best-first; no job twice
 P = [{"id": "s1", "category": "security"}, {"id": "s2", "category": "security"}, {"id": "s3", "category": "security"},
      {"id": "e1", "category": "embedded"}, {"id": "w1", "category": "fullstack_web"}, {"id": "h1", "category": "hardware"}]
@@ -101,9 +103,12 @@ assert jobs.category_bonus("embedded") == 15 and jobs.category_bonus("hardware")
 R = {"match": 73, "bonus": 10, "category": "security", "tag": "AR/XR", "rank": 108}
 assert jobs.rank_text(R) == f"108 = 73% match + 10 {jobs.PREFS['home_label']} + 20 security + 5 AR/XR"
 assert jobs.rank_text({"match": 70, "bonus": 0, "category": "other", "tag": None, "rank": 70}) == "70"
+assert jobs.rank_text({"match": 93, "bonus": 10, "category": "frontend", "tag": None, "rank": 83}) == \
+    f"83 = 93% match + 10 {jobs.PREFS['home_label']} - 20 frontend"
 assert jobs.order_text(dict(R, taste=0.62), "pool") == "half score, half taste: (108 + 62) / 2 = 85"
 assert jobs.order_text(R, "pool").startswith("by score")
-assert jobs.order_text(dict(R, category="fullstack_web"), "pool").endswith("always after the rest")
+assert jobs.order_text(dict(R, category="frontend"), "pool").endswith("always after the rest")
+assert jobs.order_text(dict(R, category="fullstack_web"), "pool").startswith("by score")
 assert jobs.order_text(R, "urgent").startswith("closing within") and jobs.order_text(R, "proposed").startswith("your Proposed")
 # description headers and bullets
 assert jobs.is_header("Responsibilities:") and jobs.is_header("WHAT YOU'LL DO") and jobs.is_header("What You'll Bring")

@@ -116,7 +116,7 @@ for key in fields.FIELDS:
     assert jobs.RATE_ORDER[-1] == "uncategorized" and set(jobs.RATE_ORDER) == set(jobs.CATEGORIES) | {"uncategorized"}
     assert jobs.category_label(jobs.CATEGORIES[0]) == fields.FIELDS[key]["categories"][0]["label"]
 jobs.set_prefs(None)
-assert jobs.CATEGORIES[0] == "security" and jobs.RATE_ORDER[-2:] == ["fullstack_web", "uncategorized"]
+assert jobs.CATEGORIES[0] == "security" and jobs.RATE_ORDER[-2:] == ["frontend", "uncategorized"]
 # kinds of work you write yourself: a key from the name, Other added, each one checked
 mine = onboard.check_prefs({**jobs.DEFAULTS, "category_bonus": {}, "category_threshold": {}, "rank_last": [],
                             "categories": [{"label": "Data Journalism!", "description": "newsroom data work"}, {"label": "", "description": ""}]})

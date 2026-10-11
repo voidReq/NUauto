@@ -28,9 +28,13 @@ ENGINEERING_CATEGORIES = [
     {"key": "robotics_test", "label": "Robotics / test",
      "description": "robotics, controls, autonomy, hardware test/validation, test\n"
                     "  automation of physical systems, lab/manufacturing test engineering."},
+    {"key": "frontend", "label": "Front-end / UI",
+     "description": "the job is mainly the user-facing side: front-end web development,\n"
+                    "  UI/UX engineering, web design, design systems, mobile app screens. If the\n"
+                    "  back end is a big part of the job too, choose `fullstack_web`."},
     {"key": "fullstack_web", "label": "Web / full-stack",
-     "description": "the job is mainly web/app development: full-stack, front-end,\n"
-                    "  web back-end/APIs for web products, UI, mobile apps."},
+     "description": "the job is mainly web/app products end to end or their back end:\n"
+                    "  full-stack, web back-end/APIs for web products, mobile apps beyond the screens."},
     {"key": "software", "label": "Software",
      "description": "other software engineering (tools, internal software, backend that is\n"
                     "  not mainly web, general SWE) that fits none of the above."},
@@ -63,9 +67,10 @@ FIELDS = {
                       "  hospitality.",
         "major_words": ["college of engineering", "electrical"],
         "categories": ENGINEERING_CATEGORIES,
-        "category_bonus": {"security": 20, "embedded": 15, "hardware": 10, "systems": 10, "robotics_test": 10},
+        "category_bonus": {"security": 20, "embedded": 15, "hardware": 10, "systems": 10, "robotics_test": 10,
+                           "frontend": -20},
         "category_threshold": {"security": 60},
-        "rank_last": ["fullstack_web"],
+        "rank_last": ["frontend"],
     },
     "business": {
         "label": "Business",
