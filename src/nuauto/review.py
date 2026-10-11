@@ -235,6 +235,27 @@ def terminal(s):
     return text.rstrip()
 
 
+def mark_laptop(s, by):
+    """You chose "do it on the laptop": the run won't ask "Did it go through?" (assist.LAPTOP_FILE), and the sheet row
+    gets the mark the homelab's queue keeps off (sheet.mark_on_laptop). Returns what to tell you."""
+    from nuauto import assist
+    from nuauto import sheet
+    st = s["state"]
+    assist.write_private(os.path.join(s["run"], assist.LAPTOP_FILE), {"by": by, "at": time.time()})
+    assist.log(s["run"], f"REVIEW PAGE: do it on the laptop (by {by})")
+    try:
+        ws = sheet.open_other(interactive=False) if st.get("tab") == "other" else sheet.open_worksheet(interactive=False)
+        number = s["info"].get("row")
+        row = next((r for r in sheet.read_rows(ws) if r.number == number), None)
+        if row is None or (st.get("row_url") and row.url != st["row_url"]) or \
+                (not st.get("row_url") and row.company != st.get("company")):
+            return "Left for the laptop, but its sheet row has changed: mark it yourself."
+        sheet.mark_on_laptop(ws, number, row.url, "the site showed it a sign-in page with no way in")
+    except Exception as e:  # the queue still knows (its record): never again by itself
+        return f"Left for the laptop; the sheet could not be marked ({type(e).__name__})."
+    return "Left for the laptop: marked in your sheet, and the homelab won't start it again."
+
+
 def hook_alive(pid):
     """True while the guard's hook that asked is still waiting (that process, still the hook). No pid: assume so."""
     if not pid:
@@ -339,33 +360,44 @@ def form(action, token, inner, **hidden):
 
 
 def queue_part(token):
-    """The queue (remote.py): what starts by itself next, and why the others wait; Start now for a row that waits for
-    you (it still needs a free slot and its job site free)."""
+    """The queue (remote.py), best first: what starts next by itself, and Start now on every row you can start right now
+    (each judged on its own: a free slot and its job site free); "waiting for a free slot" only when none is free."""
+    from nuauto import assist
     from nuauto import remote
     try:
-        go, rest = remote.queue_now()
+        inputs = remote.queue_inputs()
     except Exception as e:
         return f"<p class=dim>Queue not readable now ({esc(type(e).__name__)}).</p>"
-    from nuauto import assist
+    cands, free = inputs[0], inputs[4]
     a, b = remote.hours()
-    auto = "on" if config.LOCAL.get("remote_auto") else "off (\"remote_auto\" in local_config.json)"
+    auto_on = bool(config.LOCAL.get("remote_auto"))
+    auto = "on" if auto_on else "off (\"remote_auto\" in local_config.json)"
+    go_auto, rest_auto = remote.plan(*inputs)  # what the timer would start (it hands the free slots out in order)
+    by_itself = {(c["tab"], c["row"]): why for c, why in go_auto + rest_auto}
     here = {(x.get("tab"), x.get("row")): x.get("slot") for x in assist.sessions()}  # sessions on the homelab now
     lines = []
-    for c, why in (go + rest)[:12]:
-        startable = why is None or why.startswith("started by itself once")  # (the rest can't start even by hand)
-        button = form("/start", token, "<button data-busy=Starting>Start now</button>", tab=c["tab"], row=c["row"]) \
-            if startable else ""
-        slot = here.get((c["tab"], c["row"]))
-        if slot:  # its session: one tap away
-            line = f"<a class=ok href='/s/{int(slot)}'>A session is working on it: open it &rarr;</a>"
-        elif why == "a session is on it":
+    for c in cands[:12]:
+        key = (c["tab"], c["row"])
+        why_hand = remote.can_start(c, inputs)
+        button = ""
+        if here.get(key):  # its session: one tap away
+            line = f"<a class=ok href='/s/{int(here[key])}'>A session is working on it: open it &rarr;</a>"
+        elif why_hand == "a session is on it":
             line = "<span class=ok>The laptop's assistant is working on it</span>"
+        elif why_hand is None:
+            button = form("/start", token, "<button data-busy=Starting>Start now</button>", tab=c["tab"], row=c["row"])
+            first = by_itself.get(key)
+            text = ("starts next by itself" if auto_on and first is None else
+                    "had a session already: start it yourself" if first and first.startswith("had a session") else
+                    "ready to start")
+            line = f"<span class=dim>{esc(text)}</span>"
         else:
-            line = f"<span class=dim>{esc(why or 'starts next')}</span>"
+            line = f"<span class=dim>{esc(why_hand)}</span>"
         lines.append(f"<div class=card><b>{esc(c['company'])}</b> <span class=dim>{esc(c['title'])} | "
                      f"{'Other jobs' if c['tab'] == 'other' else 'NUworks'} row {c['row']} | {esc(c['host'])}</span>"
                      f"<div>{line}</div>{button}</div>")
-    return (f"<h3>Queue</h3><p class=dim>Starts by itself: {esc(auto)}, {a}:00-{b}:00 New York time.</p>"
+    slots_text = f"{free} slot{'s' if free != 1 else ''} free" if free else "every slot is in use"
+    return (f"<h3>Queue</h3><p class=dim>Starts by itself: {esc(auto)}, {a}:00-{b}:00 New York time. {slots_text}.</p>"
             + ("".join(lines) or "<p class=dim>Nothing approved is waiting.</p>"))
 
 
@@ -432,7 +464,8 @@ def session_page(s, token, flash=""):
         parts.append("<div class='card finish' id=finish><b>The session ended. Did you approve Submit and did the site "
                      "confirm the application?</b><p class=dim>Yes marks the row Applied (dated today).</p>"
                      + form(f"/s/{slot}/finish", token, "<button class=go name=a value=y data-busy=Saving>Yes, it went through</button>"
-                            "<button class=no name=a value=n data-busy=Saving>No</button>") + "</div>")
+                            "<button class=no name=a value=n data-busy=Saving>No</button>"
+                            "<button class=no name=a value=laptop data-busy=Saving>No: do it on the laptop</button>") + "</div>")
     if chat:
         now = ("<p class=working>Working on it… (this page updates by itself when it answers)</p>" if word == "working"
                else "<p class=dim>Waiting for your answer.</p>" if word == "waiting" else "")
@@ -441,7 +474,10 @@ def session_page(s, token, flash=""):
                             "<button data-busy=Sending>Send</button>")
                      + "<p class=dim>Done (it submitted, or you stop here)? End the session; then it asks whether it "
                        "went through.</p>"
-                     + form(f"/s/{slot}/key", token, "<button class=no name=k value=exit data-busy=Ending>End session</button>")
+                     + form(f"/s/{slot}/key", token, "<button class=no name=k value=exit data-busy=Ending>End session</button>"
+                            "<button class=no name=k value=laptop data-busy=Ending>End: do it on the laptop</button>")
+                     + "<p class=dim>On the laptop: a site that refuses the homelab's browser (a sign-in page with no "
+                       "way in). The row is marked in your sheet; the homelab never starts it again.</p>"
                      + "</div>")
     return layout(f"NUauto: {st.get('company') or 'assistant'}", "".join(parts), version(s), f"/s/{slot}/v",
                   scroll="approve" if a else "finish" if word == "finish" else "reply" if chat else "")
@@ -604,6 +640,9 @@ class Handler(BaseHTTPRequestHandler):
                 type_into(s, f["text"][:MAX_REPLY])
                 assist.log(s["run"], f"REVIEW PAGE reply by {by} ({len(f['text'])} characters)")
                 msg = "Sent."
+            elif sub == "/finish" and f.get("a") == "laptop" and s["attention"].get("kind") == "finish":
+                msg = mark_laptop(s, by)
+                type_into(s, "n")
             elif sub == "/finish" and f.get("a") in ("y", "n") and s["attention"].get("kind") == "finish":
                 type_into(s, f["a"])
                 assist.log(s["run"], f"REVIEW PAGE did it go through: {f['a']} (by {by})")
@@ -611,6 +650,9 @@ class Handler(BaseHTTPRequestHandler):
             elif sub == "/key" and f.get("k") == "interrupt":
                 _tmux("send-keys", "-t", target(s), "Escape")
                 msg = "Interrupted."
+            elif sub == "/key" and f.get("k") == "laptop" and status(s)[0] != "prompt":
+                msg = mark_laptop(s, by)
+                type_into(s, "/exit")
             elif sub == "/key" and f.get("k") == "exit" and status(s)[0] == "prompt":
                 msg = "Not sent: Claude Code is asking something in its terminal (answer it there)."
             elif sub == "/key" and f.get("k") == "exit":
@@ -625,16 +667,18 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def start_now(f, by):
-    """Start now (the index's queue): one row the queue would start if you asked (remote.plan, manual: the start-once
-    rule doesn't apply; free slot, free job site, caps and an unanswered approved Submit still do)."""
+    """Start now (the index's queue): one row you can start right now (remote.can_start: a free slot, its job site free,
+    the caps, its records, the laptop mark; the start-once rule doesn't apply to you)."""
     from nuauto import remote
     tab, row = f.get("tab"), f.get("row", "")
     if tab not in ("jobs", "other") or not row.isdigit():
         return "Nothing to do."
-    go, rest = remote.queue_now(manual=True)
-    c = next((c for c, _ in go if c["tab"] == tab and c["row"] == int(row)), None)
+    inputs = remote.queue_inputs()
+    c = next((x for x in inputs[0] if x["tab"] == tab and x["row"] == int(row)), None)
     if not c:
-        why = next((w for x, w in rest if x["tab"] == tab and x["row"] == int(row)), "it is not in the queue")
+        return "Not started: it is not in the queue (not Approved, or not a company-site application)."
+    why = remote.can_start(c, inputs)
+    if why:
         return f"Not started: {why}."
     why = remote.start(c["tab"], c["row"])
     if why:
@@ -718,7 +762,7 @@ def demo(port=0):
         f.flush()
         locks.append(f)
     import nuauto.remote as remote
-    remote.queue_now = lambda manual=False: ([], [])  # no sheet here
+    remote.queue_inputs = lambda: ([], [], [], {}, 0, None)  # no sheet here
     link = make_pairing("demo")
     print(json.dumps({"url": link, "port": port, "state_dir": config.STATE_DIR}), flush=True)
     serve()

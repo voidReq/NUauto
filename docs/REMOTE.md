@@ -53,8 +53,14 @@ THE QUEUE (remote.py; nuauto-assist.timer every 10 minutes runs `nuauto assist a
   closing within a week, then match % (the "match NN%" in Notes), then sheet order. Into free slots (assist_slots),
   one session per job site, never a row or site the laptop holds (claims). NUworks rows only while the weekly cap and
   the total leave room, counting the NUworks sessions already running on either machine (each may submit one).
-- Each row starts by itself once (local/assist_auto.json). A session that ended without "Applied" leaves its row for
-  you: Start now on the review page (it lists the queue and why each row waits), or `nuauto assist start other 12`.
+- A row that has had a session (started by the queue or by you) never starts again by itself (local/assist_auto.json):
+  if it ended without "Applied", it waits for you: Start now on the review page (it lists the queue and why each row
+  waits), or `nuauto assist start other 12`.
+- Some sites refuse an automated browser (they show it a sign-in page with no way to register). End such a session
+  with "End: do it on the laptop" (or "No: do it on the laptop" at "Did it go through?"): no question after, and the
+  row's Notes get "DO ON THE LAPTOP..." (assist.LAPTOP_MARK, at the end): the homelab never starts it again, and the
+  laptop's GUI shows "do it on the laptop" on it (start the assistant there, or apply yourself). NUauto never disguises
+  its browser to get past such a site.
 - A session where you approved a Submit but nobody answered "Did it go through?" (24 h, or Ctrl+C) is never started
   again, not even by Start now: check the site and mark the row, or `nuauto assist start other 12 --again`.
 - The record file can't be read: the queue starts nothing until you fix or remove it (it could start a row twice).

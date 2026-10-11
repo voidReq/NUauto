@@ -180,8 +180,10 @@ COMPANY-SITE AGENT (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`;
   "remote_assist" on: its browser on a virtual screen I open over Tailscale (screen.py), Discord links me to the review
   page (review.py, Tailscale only, paired devices only): I answer it, approve or decline each Submit (the guard waits
   for my tap; a late Approve = a 10-minute pass for that one action) and get captchas there. With "remote_auto" the
-  homelab starts sessions by itself from my approved rows (remote.py: 09:00-22:00, free slots, each row once by itself,
-  never a row or site the laptop holds: claims over ssh). The GUI's Company sites shows them (Homelab assistants: Open its
+  homelab starts sessions by itself from my approved rows (remote.py: 09:00-22:00, free slots, never a row that had a
+  session before, never a row or site the laptop holds: claims over ssh). A site that refuses the homelab's browser
+  (a fake sign-in page): "End: do it on the laptop" marks the row's Notes (assist.LAPTOP_MARK); the homelab skips it
+  and the GUI shows "do it on the laptop" (my request, 2026-10-11; no disguising the browser). The GUI's Company sites shows them (Homelab assistants: Open its
   page, Pair this computer). Everything optional and set in the GUI too (my request, for other users: setup's optional
   steps and Settings: Assistant on your homelab, Password manager (Bitwarden) with its status chip). Proven with a
   practice run on 2026-10-11 (docs/REMOTE.md). Starts `claude --model sonnet --effort low --permission-mode default` (never my auto
@@ -231,7 +233,11 @@ COMPANY-SITE AGENT (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`;
   and Bitwarden doesn't have yet straight into my vault with `bw` (I unlock it: BW_SESSION; NUauto never sees my master
   password; passwords only on bw's stdin; folder "NUauto job sites"; one already there not added twice; with a homelab
   both machines' logins). Sites: the host; on Workday's shared hosts (wd1.myworkdaysite.com/.../recruiting/<company>)
-  host/<company>; my own login on another domain counts for the whole domain (account.amazon.jobs = amazon.jobs).
+  host/<company>; my own login on another domain counts for the whole domain (account.amazon.jobs = amazon.jobs). A
+  sign-in page on yet another address (Amazon jobs' passport.amazon.com): the guard names my own login(s) sharing a
+  company word with it and refuses both a sign-in and a new account; the agent runs `link-login <site>`, which the guard
+  asks me first (terminal / review page), then my login works there too ("also" in accounts.json). Never a login chosen
+  by the agent alone (my call, 2026-10-11).
 - Sign-in pages (added 2026-10-10, my call): a sign-in / create-account page's own "Submit" doesn't ask (the latest
   snapshot has a password box and only account boxes: assist.sign_in_page); any question on the page, or "Apply" /
   "Submit Application", still asks. The agent never types into a bot trap ("for robots only"). Also my call

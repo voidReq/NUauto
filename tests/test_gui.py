@@ -316,6 +316,18 @@ try:
     assert get("/api/state")["week"] == week_before  # the Other jobs tab has no weekly / total cap
     r = post("/api/action", {"kind": "assist", "args": {"row": 2, "tab": "other"}})
     assert r["demo"] and r["command"].endswith("assist other 2"), r
+    # a row marked "do it on the laptop" (assist.LAPTOP_MARK at the end of its Notes) says so on every list that shows rows
+    LAPTOP = "DO ON THE LAPTOP: the homelab's browser was refused"
+    data = json.load(open(other_file))
+    assert all(x["on_laptop"] is False for x in other["ready"] + other["applied"])
+    data["rows"][1][4] = f"match 90% | {LAPTOP} (the site showed it a sign-in page with no way in)"
+    json.dump(data, open(other_file, "w"))
+    marked = get("/api/other")
+    assert [(x["row"], x["on_laptop"]) for x in marked["ready"]] == [(2, True)] and marked["applied"][0]["on_laptop"] is False, marked
+    assert marked["ready"][0]["notes"].startswith("match 90% | DO ON THE LAPTOP")
+    data["rows"][1][4] = ""
+    json.dump(data, open(other_file, "w"))
+    assert get("/api/other")["ready"][0]["on_laptop"] is False
     # no tab yet: adding the first job makes it (headers, then the job as row 2)
     os.remove(other_file)
     assert get("/api/other") == {"exists": False, "tab": "Other jobs", "ready": [], "applied": [], "rest": [], "sessions": [], "slots": 3, "homelab": [], "homelab_review": None}
@@ -494,6 +506,29 @@ try:
         assert page.locator("[data-testid=nav-company]").count() == 0 and page.locator("[data-testid=nav-other]").count() == 0
         assert "match" in page.inner_text("[data-testid=company-agent] [data-testid=job-facts] >> nth=0")  # match / pay there too
         page.wait_for_selector("[data-testid=other-jobs]")  # Other jobs is a card in Company sites
+        # a row marked "do it on the laptop" shows a chip next to its Start assistant button (the others do not)
+        ready_now = get("/api/other")["ready"]
+        assert ready_now, "the demo's Other jobs tab has an Approved row here"
+        target = ready_now[0]["row"]
+        other_data = json.load(open(other_file))
+        old_notes = other_data["rows"][target - 1][4]
+        other_data["rows"][target - 1][4] = (old_notes + " | " if old_notes else "") + LAPTOP + " (the site showed it a sign-in page with no way in)"
+        json.dump(other_data, open(other_file, "w"))
+        try:
+            page.reload()
+            page.click("[data-testid=tab-company]")
+            page.wait_for_selector(f"[data-testid=other-assist-{target}-laptop]")
+            chip = page.locator(f"[data-testid=other-assist-{target}-laptop]")
+            assert chip.inner_text() == "do it on the laptop" and "warn" in chip.get_attribute("class")
+            assert page.locator(f"[data-testid=other-{target}] [data-testid=other-assist-{target}]").count() == 1  # Start is still there
+            assert page.locator("[data-testid^=other-assist-][data-testid$=-laptop]").count() == 1                # only the marked row
+        finally:
+            other_data["rows"][target - 1][4] = old_notes
+            json.dump(other_data, open(other_file, "w"))
+        page.reload()
+        page.click("[data-testid=tab-company]")
+        page.wait_for_selector("[data-testid=other-jobs]")
+        assert page.locator("[data-testid$=-laptop]").count() == 0
         page.click("[data-testid=tab-manual]")  # rows only you can finish on NUworks
         if get("/api/company")["other"]:
             page.wait_for_selector("[data-testid=manual-nuworks]")

@@ -105,7 +105,9 @@ ALSO YOURS (with care)
   never see it: replies and snapshots show "<password hidden by NUauto>" where it is (that means the box holds
   it; don't type it again). To sign in to a site where NUauto made an account
   before, or where the user has their own account (THIS RUN says so, or code tells you: then use the email it
-  names, never make a new account there), type exactly {{PASSWORD}}. Never type anything else into a password box, and never use "Sign in with
+  names, never make a new account there), type exactly {{PASSWORD}}. If code says the user has their own login that
+  may be for this page (a company whose sign-in lives on another address, like Amazon jobs'), and this page is that
+  company's sign-in, run ANSWER link-login <that site> (the user is asked to confirm), then type {{PASSWORD}} again. Never type anything else into a password box, and never use "Sign in with
   Google / Microsoft / LinkedIn / Apple" buttons (ask the user). If the site says the account already exists,
   sign in with {{PASSWORD}}; if code says it has no login for the site, ask the user. If a confirm box's name
   does not say "password", code refuses: tell the user. A sign-in or create-account page's own button is yours to

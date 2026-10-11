@@ -107,6 +107,56 @@ expect(SheetError, lambda: sheet.resolve_submit(fresh("Needs Human"), 2, "Applie
 # mark_submit_started refuses on a row that is not Approved
 expect(SheetError, lambda: sheet.mark_submit_started(fresh("Proposed"), 2))
 
+# mark_on_laptop: the mark goes at the END of Notes (NUworks "External application" notes must keep starting the cell),
+# only on Approved / Needs Human rows, once, and only on the row that still holds the job
+from nuauto import assist  # noqa: E402
+
+
+class CellWS(FakeWS):
+    """update() writes the one cell it is given (E7 = column E, row 7), as Google does; every call is recorded."""
+    def __init__(self, values):
+        super().__init__(values)
+        self.calls = []
+
+    def update(self, range_name, values, value_input_option=None):
+        self.calls.append((range_name, values, value_input_option))
+        col = ord(range_name[0]) - ord("A")
+        self.values[int(range_name[1:]) - 1][col] = values[0][0]
+
+
+def laptop_ws(status="Needs Human", notes="External application: acme.example -> https://acme.example/j | match 80%", n=3):
+    rows = [HEADERS] + [["https://x/%d" % i, "Co", "Job", "Approved", "", ""] for i in range(1, n)]
+    return CellWS(rows + [["https://x/job", "Acme", "Intern", status, notes, "2026-10-01"]])
+
+
+ws = laptop_ws()
+sheet.mark_on_laptop(ws, 4, "https://x/job")
+cell = ws.values[3][4]
+assert cell == "External application: acme.example -> https://acme.example/j | match 80% | " + assist.LAPTOP_MARK, cell
+assert cell.startswith("External application") and ws.values[3][3] == "Needs Human" and ws.values[3][5] == "2026-10-01"
+assert ws.calls == [("E4", [[cell]], "RAW")] and ws.values[1][4] == ""                  # one cell, raw, only that row
+sheet.mark_on_laptop(ws, 4, "https://x/job", "again")                                    # once: nothing more is written
+sheet.mark_on_laptop(ws, 4, "https://x/job")
+assert len(ws.calls) == 1 and ws.values[3][4] == cell and cell.count(assist.LAPTOP_MARK) == 1
+ws = laptop_ws("Approved", "match 90%")                                                  # Approved rows (the Other jobs tab)
+sheet.mark_on_laptop(ws, 4, "https://x/job", "the site showed it a sign-in page with no way in")
+assert ws.values[3][4] == f"match 90% | {assist.LAPTOP_MARK} (the site showed it a sign-in page with no way in)" and ws.values[3][3] == "Approved"
+ws = laptop_ws("Approved", "")                                                           # no notes: no stray separator
+sheet.mark_on_laptop(ws, 4, "https://x/job")
+assert ws.values[3][4] == assist.LAPTOP_MARK
+ws = laptop_ws("Approved", "")
+sheet.mark_on_laptop(ws, 4, "https://x/job", "why")
+assert ws.values[3][4] == f"{assist.LAPTOP_MARK} (why)"
+for status in ("Applied", "Failed", "Proposed"):                                         # other statuses: refused, nothing written
+    ws = laptop_ws(status, "x")
+    expect(SheetError, lambda: sheet.mark_on_laptop(ws, 4, "https://x/job"))
+    assert ws.calls == [] and ws.values[3][4] == "x", status
+ws = laptop_ws()
+expect(SheetError, lambda: sheet.mark_on_laptop(ws, 4, "https://x/another-job"))        # the row now holds another job
+expect(SheetError, lambda: sheet.mark_on_laptop(ws, 9, "https://x/job"))                 # no such row (shifted)
+expect(SheetError, lambda: sheet.mark_on_laptop(ws, 2, "https://x/job"))                 # row 2 holds another job
+assert ws.calls == []
+
 # Google allows about 60 reads a minute: every client NUauto makes waits and retries when told to slow down (429)
 import os  # noqa: E402
 import tempfile  # noqa: E402

@@ -8,6 +8,7 @@ import http.client
 import io
 import json
 import os
+import re
 import shlex
 import socket
 import subprocess
@@ -32,7 +33,7 @@ os.makedirs(config.LOCAL_DIR, mode=0o700, exist_ok=True)
 from nuauto import assist, jobs, remote, review, sheet  # noqa: E402
 
 REAL_FLAGS = (config.IS_SERVER, config.REMOTE_ASSIST)
-ORIG = {n: getattr(remote, n) for n in ("queue_now", "start", "in_hours", "ended", "record_started", "STARTUP_CHECK", "AUTO_PATH")}
+ORIG = {n: getattr(remote, n) for n in ("queue_now", "queue_inputs", "start", "in_hours", "ended", "record_started", "STARTUP_CHECK", "AUTO_PATH")}
 
 
 def restore(*names):
@@ -97,7 +98,14 @@ assert order == [("jobs", 3), ("jobs", 2), ("jobs", 11), ("other", 2), ("jobs", 
                  ("jobs", 10), ("other", 8)], order
 c3 = cands[0]
 assert c3 == {"tab": "jobs", "row": 3, "url": "https://beta.icims.com/job/1", "host": "beta.icims.com", "company": "Co3",
-              "title": "Intern", "closes": TODAY + timedelta(days=2), "match": 50}
+              "title": "Intern", "closes": TODAY + timedelta(days=2), "match": 50, "laptop": False}
+# the laptop mark in a row's Notes (assist.LAPTOP_MARK) shows as "laptop" on that candidate, on either tab
+laptop_notes = ext("acme.wd5.myworkdayjobs.com") + " | match 80% | " + assist.LAPTOP_MARK + " (why)"
+lc = remote.candidates([row(2, "Needs Human", notes=laptop_notes), row(3, "Needs Human", notes=ext("b.example") + " | match 70%")],
+                       [row(2, "Approved", "https://jobs.lever.co/a/1", "match 90% | " + assist.LAPTOP_MARK),
+                        row(3, "Approved", "https://jobs.example.org/2", "match 90%")], None, TODAY)
+assert {(c["tab"], c["row"]): c["laptop"] for c in lc} == {("jobs", 2): True, ("jobs", 3): False, ("other", 2): True, ("other", 3): False}
+assert all(c["laptop"] is False for c in cands)
 nothing_urgent = [(c["tab"], c["row"]) for c in remote.candidates(main_rows, other_rows, None, TODAY)]   # no closing dates known
 assert nothing_urgent[:5] == [("other", 2), ("jobs", 4), ("jobs", 9), ("other", 3), ("jobs", 2)], nothing_urgent   # best match, NUworks first, sheet order
 assert ("jobs", 5) in nothing_urgent                                    # (no date known: not past its deadline)
@@ -131,12 +139,60 @@ go, rest = remote.plan([a, b], [{"tab": "other", "row": 1, "host": "z.com"}], []
 assert [x for x, _ in go] == [a, b]
 once = {"jobs-1": {"url": a["url"], "auto": True}, "other-2": {"url": "https://old.example/was-here", "auto": True}}
 go, rest = remote.plan([a, b], [], [], once, 5)                               # started once: only if the URL matches
-assert [x for x, _ in go] == [b] and rest == [(a, "started by itself once already: yours to start now")]
+assert [x for x, _ in go] == [b] and rest == [(a, "had a session already: yours to start now")]
 go, rest = remote.plan([a, b], [], [], once, 5, manual=True)                  # by hand: the start-once rule doesn't apply
 assert [x for x, _ in go] == [a, b] and rest == []
-# a row started by hand before (auto False), not approved: the queue may still start it
-assert [x for x, _ in remote.plan([a], [], [], {"jobs-1": {"url": a["url"], "auto": False}}, 5)[0]] == [a]
+# a row started by hand before (auto False) counts too: any earlier session of that URL, the queue never starts it again
+go, rest = remote.plan([a], [], [], {"jobs-1": {"url": a["url"], "auto": False}}, 5)
+assert go == [] and rest == [(a, "had a session already: yours to start now")]
+assert [x for x, _ in remote.plan([a], [], [], {"jobs-1": {"url": a["url"], "auto": False}}, 5, manual=True)[0]] == [a]
+assert [x for x, _ in remote.plan([a], [], [], {"jobs-1": {"url": "https://elsewhere/1", "auto": False}}, 5)[0]] == [a]  # another job
+assert [x for x, _ in remote.plan([a], [], [], {"jobs-1": {"url": a["url"]}}, 5)[0]] == []   # a record with no "auto" at all
 assert [x for x, _ in remote.plan([a], [], [], {"jobs-1": {"url": a["url"], "auto": True, "approved": False, "answer": "n"}}, 5)[0]] == []
+# "do it on the laptop": a marked candidate, or a record whose answer is "laptop" (same URL), is never started, even by hand
+LAPTOP_WHY = "marked: do it on the laptop (the homelab's browser was refused there)"
+USED_ = "this week's (or the total) NUworks applications are used up"
+lap = {**a, "laptop": True}
+for manual in (False, True):
+    go, rest = remote.plan([lap, b], [], [], {}, 5, manual=manual)
+    assert [x for x, _ in go] == [b] and rest == [(lap, LAPTOP_WHY)], manual
+    rec_lap = {"jobs-1": {"url": a["url"], "auto": True, "approved": False, "answer": "laptop"}}
+    go, rest = remote.plan([a, b], [], [], rec_lap, 5, manual=manual)
+    assert [x for x, _ in go] == [b] and rest == [(a, LAPTOP_WHY)], manual
+    # the approved Submit whose answer is "laptop" is not an unknown outcome
+    go, rest = remote.plan([a], [], [], {"jobs-1": {"url": a["url"], "auto": True, "approved": True, "answer": "laptop"}}, 5, manual=manual)
+    assert go == [] and rest == [(a, LAPTOP_WHY)] and rest[0][1] != remote.OUTCOME_UNKNOWN, manual
+    # a row reused for another job: its old "laptop" answer is not this job's
+    assert [x for x, _ in remote.plan([a], [], [], {"jobs-1": {**rec_lap["jobs-1"], "url": "https://elsewhere/1"}}, 5, manual=manual)[0]] == [a]
+assert [x["row"] for x, _ in remote.plan([{**a, "laptop": False}], [], [], {}, 5)[0]] == [1]
+# order of reasons: a session on the row first, then the laptop mark, before unknown outcome / earlier session / limit / host / slots
+go, rest = remote.plan([lap], [{"tab": "jobs", "row": 1, "host": "z.com"}], [], {}, 5, jobs_left=0)
+assert rest == [(lap, "a session is on it")]
+go, rest = remote.plan([lap], [], [], {"jobs-1": {"url": a["url"], "auto": True, "approved": True, "answer": None}}, 0, jobs_left=0)
+assert rest == [(lap, LAPTOP_WHY)]
+# a skipped laptop row takes no slot and its host stays free
+go, rest = remote.plan([lap, d, b], [], [], {}, 1)
+assert [x for x, _ in go] == [d] and rest == [(lap, LAPTOP_WHY), (b, "waiting for a free slot")]
+# any earlier session counts (a record exists for the URL), whoever started it; by hand it goes
+for rec in ({"url": a["url"]}, {"url": a["url"], "auto": False}, {"url": a["url"], "auto": True, "approved": False, "answer": "n"},
+            {"url": a["url"], "approved": True, "answer": "y"}):
+    go, rest = remote.plan([a], [], [], {"jobs-1": rec}, 5)
+    assert go == [] and rest == [(a, "had a session already: yours to start now")], rec
+    assert [x for x, _ in remote.plan([a], [], [], {"jobs-1": rec}, 5, manual=True)[0]] == [a], rec
+# can_start: one row judged on its own (plan with manual=True for that row alone), not behind the rows ahead of it
+inp = lambda **kw: ([], kw.get("running", []), kw.get("claims", []), kw.get("records", {}), kw.get("free", 2), kw.get("left"))  # noqa: E731
+assert remote.can_start(a, inp()) is None and remote.can_start(b, inp()) is None
+assert remote.can_start(a, inp(free=0)) == "waiting for a free slot"
+assert remote.can_start(a, inp(running=[{"tab": "other", "row": 9, "host": "a.com"}])) == "another session is on a.com"
+assert remote.can_start(b, inp(running=[{"tab": "other", "row": 9, "host": "a.com"}])) is None        # only that site's rows
+assert remote.can_start(a, inp(claims=[{"tab": "other", "row": 9, "host": "a.com"}])) == "another session is on a.com"
+assert remote.can_start(a, inp(running=[{"tab": "jobs", "row": 1, "host": "z.com"}])) == "a session is on it"
+assert remote.can_start(a, inp(left=0)) == USED_ and remote.can_start(b, inp(left=0)) is None
+assert remote.can_start(lap, inp()) == LAPTOP_WHY
+assert remote.can_start(a, inp(records={"jobs-1": {"url": a["url"], "auto": True}})) is None          # by hand: earlier session is fine
+assert remote.can_start(a, inp(records={"jobs-1": {"url": a["url"], "approved": True, "answer": None}})) == remote.OUTCOME_UNKNOWN
+assert remote.can_start(a, inp(records={"jobs-1": {"url": a["url"], "answer": "laptop"}})) == LAPTOP_WHY
+assert remote.can_start(d, inp()) is None and remote.can_start(a, inp()) is None                      # the same site, none running: each alone
 # the NUworks applications left (week and total): NUworks-tab rows only, one used per row started
 j1, j2, j3 = cand("jobs", 31, "j1.com"), cand("jobs", 32, "j2.com"), cand("jobs", 33, "j3.com")
 USED = "this week's (or the total) NUworks applications are used up"
@@ -156,8 +212,10 @@ assert [x for x, _ in go] == [b] and rest == [(a, remote.OUTCOME_UNKNOWN)]
 assert remote.plan([a], [], [], unk, 5, manual=True) == ([], [(a, remote.OUTCOME_UNKNOWN)])
 assert "--again" in remote.OUTCOME_UNKNOWN and "check the site" in remote.OUTCOME_UNKNOWN
 assert [x for x, _ in remote.plan([a], [], [], {"jobs-1": {**unk["jobs-1"], "url": "https://elsewhere/1"}}, 5)[0]] == [a]   # another job
-for ans in ("y", "n"):
-    got, _ = remote.plan([a], [], [], {"jobs-1": {**unk["jobs-1"], "answer": ans, "auto": False}}, 5)
+for ans in ("y", "n"):  # settled: no longer "unknown" (by hand it starts; the queue still leaves it to you: it had a session)
+    got, rest = remote.plan([a], [], [], {"jobs-1": {**unk["jobs-1"], "answer": ans, "auto": False}}, 5)
+    assert got == [] and rest == [(a, "had a session already: yours to start now")], ans
+    got, _ = remote.plan([a], [], [], {"jobs-1": {**unk["jobs-1"], "answer": ans, "auto": False}}, 5, manual=True)
     assert [x for x, _ in got] == [a], ans
 assert [x for x, _ in remote.plan([a], [], [], {"jobs-1": {"url": a["url"], "approved": True, "answer": "y", "auto": True}}, 5, manual=True)[0]] == [a]
 # the order of reasons: a busy row first, then the unknown outcome, then start-once, the application limit, the host, the slots
@@ -166,12 +224,12 @@ assert rest == [(a, "a session is on it")]
 go, rest = remote.plan([a], [], [], {"jobs-1": {**unk["jobs-1"]}}, 5, jobs_left=0)
 assert rest == [(a, remote.OUTCOME_UNKNOWN)]
 go, rest = remote.plan([a], [], [], once, 5, jobs_left=0)
-assert rest == [(a, "started by itself once already: yours to start now")]
+assert rest == [(a, "had a session already: yours to start now")]
 go, rest = remote.plan([a], [{"tab": "other", "row": 9, "host": "a.com"}], [], {}, 0, jobs_left=0)
 assert rest == [(a, USED)]
 # a skipped row does not take a slot or its host
 go, rest = remote.plan([a, d, b], [], [], once, 1)
-assert [x for x, _ in go] == [d] and [w for _, w in rest] == ["started by itself once already: yours to start now", "waiting for a free slot"]
+assert [x for x, _ in go] == [d] and [w for _, w in rest] == ["had a session already: yours to start now", "waiting for a free slot"]
 
 # ---- the NUworks applications left: the week's cap and the total, minus sessions on either machine
 real_max_total, real_local = sheet.MAX_TOTAL, config.LOCAL
@@ -277,6 +335,12 @@ try:
     remote.record_outcome("other", 51, cx["url"], True, "y")                             # said: it went through
     assert remote._read_auto()["other-51"]["answer"] == "y"
     assert [x for x, _ in remote.plan([cx], [], [], remote._read_auto(), 5, manual=True)[0]] == [cx]
+    remote.record_outcome("other", 51, cx["url"], True, "laptop")                        # chose "do it on the laptop" after approving a Submit
+    rec = remote._read_auto()["other-51"]
+    assert rec["approved"] is True and rec["answer"] == "laptop"
+    go, rest = remote.plan([cx], [], [], remote._read_auto(), 5, manual=True)
+    assert go == [] and rest[0][1].startswith("marked: do it on the laptop") and rest[0][1] != remote.OUTCOME_UNKNOWN
+    remote.record_outcome("other", 51, cx["url"], True, "y")
     remote.record_started(cx, auto=False)                                                # by hand, the same job: auto stays, a new try
     rec = remote._read_auto()["other-51"]
     assert rec["auto"] is True and rec["approved"] is False and rec["answer"] is None
@@ -335,9 +399,17 @@ try:
         config.LOCAL = {**config.LOCAL, "max_per_week": 3}                               # 2 applied this week: 1 left
         with open(remote.AUTO_PATH, "w") as f:
             json.dump({"jobs-2": {"url": "https://g1.example/job/1", "auto": True}}, f)
+        inputs = remote.queue_inputs()                                                   # what the queue decides from
+        cands_, running_, claims_, records_, free_, left_ = inputs
+        assert [(c["tab"], c["row"]) for c in cands_] == [("jobs", 2), ("jobs", 3), ("other", 9)]
+        assert running_ == [] and claims_ == [] and records_["jobs-2"]["auto"] is True and free_ == assist.slots() and left_ == 1
+        assert [c["laptop"] for c in cands_] == [False] * 3
+        assert remote.queue_now() == remote.plan(*inputs) and remote.queue_now(manual=True) == remote.plan(*inputs, True)
+        # can_start judges one row on its own: row 2 (a record) by hand yes, row 3 yes (the one application left), both
+        assert [remote.can_start(c, inputs) for c in cands_ if c["row"] in (2, 3)] == [None, None]
         go, rest = remote.queue_now()
         assert [(c["tab"], c["row"]) for c, _ in go] == [("jobs", 3), ("other", 9)]
-        assert [(c["row"], w) for c, w in rest] == [(2, "started by itself once already: yours to start now")]
+        assert [(c["row"], w) for c, w in rest] == [(2, "had a session already: yours to start now")]
         go, rest = remote.queue_now(manual=True)                                          # by hand: row 2 is allowed, 3 is out of applications
         assert [(c["tab"], c["row"]) for c, _ in go] == [("jobs", 2), ("other", 9)]
         assert rest[0][0]["row"] == 3 and "used up" in rest[0][1]
@@ -472,11 +544,22 @@ try:
     assert code is None and json.loads(out) == [{"slot": 1, "row": 3, "tab": "other", "company": "Acme", "host": "h",
                                                  "attention": {"kind": "waiting"}}]
     assist.sessions = real_sessions
-    # queue prints what the queue holds
-    remote.queue_now = lambda manual=False: ([(cand("other", 5, "e.com"), None)], [(cand("jobs", 1, "a.com"), "waiting for a free slot")])
+    # queue prints every row best first with what you can do now (the same view as the review page)
+    qa, qb, qc = cand("other", 5, "e.com"), cand("jobs", 1, "a.com"), {**cand("other", 6, "f.com"), "laptop": True}
+    remote.queue_inputs = lambda: ([qa, qb, qc], [], [], {}, 1, None)
     code, out = run_main(["queue"])
-    assert code is None and "Starts by itself: off" in out and "9:00-22:00" in out and "row 5" in out and "waiting for a free slot" in out
-    assert "next" in out
+    assert code is None and "Starts by itself: off" in out and "9:00-22:00" in out and "1 slot free" in out, out
+    lines = {int(re.search(r"row (\d+)", ln).group(1)): ln for ln in out.splitlines() if " row " in ln}
+    assert sorted(lines) == [1, 5, 6] and all("ready (start it yourself)" in lines[n] for n in (1, 5)), lines   # both startable by hand
+    assert "marked: do it on the laptop" in lines[6]
+    config.LOCAL = {**config.LOCAL, "remote_auto": True}
+    code, out = run_main(["queue"])
+    lines = {int(re.search(r"row (\d+)", ln).group(1)): ln for ln in out.splitlines() if " row " in ln}
+    assert "next by itself" in lines[5] and "ready (start it yourself)" in lines[1], lines   # one free slot: the timer takes the first
+    config.LOCAL = {k: v for k, v in config.LOCAL.items() if k != "remote_auto"}
+    remote.queue_inputs = lambda: ([qa, qb], [], [], {}, 0, None)
+    code, out = run_main(["queue"])
+    assert "0 slots free" in out and out.count("waiting for a free slot") == 2
     # start <tab> <row>
     started_with = []
     remote.start = lambda tab, rown: started_with.append((tab, rown)) or "tmux is not installed"
@@ -512,7 +595,7 @@ try:
         remote.AUTO_PATH = saved_path
 finally:
     assist.sessions = real_sessions
-restore('queue_now', 'start')       # the module's own again
+restore('queue_now', 'queue_inputs', 'start')       # the module's own again
 
 # ---- start(): the tmux command, then a real tmux
 real_which, real_self_cmd = remote.shutil.which, config.self_cmd
@@ -671,7 +754,7 @@ try:
     assert run_auto() == "" and sent == []
     # the written record makes plan() leave those rows to you
     go, rest = remote.plan([ca, cb], [], [], remote._read_auto(), 5)
-    assert [x for x, _ in go] == [cb] and "started by itself once" in rest[0][1]
+    assert [x for x, _ in go] == [cb] and "had a session already" in rest[0][1]
 finally:
     daily.discord, review.page_url = real_daily, real_page
     restore("queue_now", "in_hours", "start", "ended", "STARTUP_CHECK", "AUTO_PATH")
@@ -850,47 +933,107 @@ def req(method, path, form=None, cookie=None, headers=None):
 KEY = review.pair(parse_qs(urlparse(review.make_pairing("phone")).query)["c"][0], "Phone")
 TOKEN = review.form_token(KEY)
 c1 = {**cand("other", 12, "a.example"), "company": "Acme <i>Co</i>"}
-c2, c3, c4, c5 = cand("jobs", 13, "b.example"), cand("other", 14, "c.example"), cand("other", 15, "d.example"), cand("jobs", 16, "e.example")
-c6 = cand("other", 17, "f.example")
-W_BUSY, W_ONCE, W_SLOT, W_USED = ("another session is on b.example", "started by itself once already: yours to start now",
-                                  "waiting for a free slot", "this week's (or the total) NUworks applications are used up")
-AUTO_VIEW = ([(c1, None)], [(c2, W_BUSY), (c3, W_ONCE), (c4, W_SLOT), (c5, W_USED), (c6, remote.OUTCOME_UNKNOWN)])
-MANUAL_VIEW = ([(c1, None), (c3, None)], [(c2, W_BUSY), (c4, W_SLOT), (c5, W_USED), (c6, remote.OUTCOME_UNKNOWN)])
-asked = []
+c2, c3, c4, c5 = cand("other", 13, "b.example"), cand("other", 14, "c.example"), cand("other", 15, "d.example"), cand("jobs", 16, "e.example")
+c6, c7 = cand("other", 17, "f.example"), {**cand("other", 18, "g.example"), "laptop": True}
+W_LAPTOP = "marked: do it on the laptop (the homelab's browser was refused there)"
+W_BUSY, W_ONCE = "another session is on b.example", "had a session already: start it yourself"
+W_SLOT, W_USED = "waiting for a free slot", "this week's (or the total) NUworks applications are used up"
+RECORDS = {"other-14": {"url": c3["url"], "auto": True},                                  # c3 had a session
+           "other-17": {"url": c6["url"], "auto": True, "approved": True, "answer": None}}   # c6: Submit approved, outcome unknown
+# the inputs the queue decides from: (candidates, running, claims, records, free slots, NUworks applications left)
+RUNNING_B = [{"tab": "jobs", "row": 50, "host": "b.example"}]
+INPUTS = [([c1, c2, c3, c4, c5, c6, c7], RUNNING_B, [], RECORDS, 2, 0)]
 
 
-def queue_view(manual=False):
-    asked.append(manual)
-    return MANUAL_VIEW if manual else AUTO_VIEW
+def inputs_now():
+    got = INPUTS[0]
+    if isinstance(got, Exception):
+        raise got
+    return got
 
 
-remote.queue_now = queue_view
+remote.queue_inputs = inputs_now
 started_now, recorded = [], []
 remote.start = lambda tab, rown: started_now.append((tab, rown)) or None
 remote.record_started = lambda c, auto=True: recorded.append((c, auto))
-assert not hasattr(review, "remote_state")                                            # one rule: remote.plan, manual
+
+
+def cards(page):
+    """{row: its card's text} of the queue part of the index page."""
+    return {int(m.group(1)): m.group(0) for m in re.finditer(
+        r"<div class=card><b>.*?(?:NUworks|Other jobs) row (\d+).*?(?=<div class=card><b>|\Z)", page, re.S)}
+
+
+def start_rows(page):
+    return sorted(int(x) for x in re.findall(r"name=row value='(\d+)'", page))
+
+
+def set_inputs(cands, running=(), claims=(), records=None, free=2, left=None):
+    INPUTS[0] = (list(cands), list(running), list(claims), records or {}, free, left)
+
+
 try:
+    # two free slots, a session on b.example, no NUworks applications left: each row is judged on its own
     page = req("GET", "/", cookie=KEY)[2]
-    assert "<h3>Queue</h3>" in page and "Starts by itself: off" in page and "9:00-22:00" in page
-    assert "Acme &lt;i&gt;Co&lt;/i&gt;" in page and "<i>Co</i>" not in page and "starts next" in page
-    assert page.count("Start now") == 2                                       # c1 (next) and c3 (yours to start now) only
-    assert "name=row value='12'" in page and "name=row value='14'" in page and "name=tab value='other'" in page
-    for n in (13, 15, 16, 17):
-        assert f"name=row value='{n}'" not in page                            # busy, slot, used up, outcome unknown: no button
-    assert W_BUSY in page and W_SLOT in page and "used up" in page and "nobody said whether it went through" in page
+    assert "<h3>Queue</h3>" in page and "Starts by itself: off" in page and "9:00-22:00" in page and "2 slots free" in page
+    assert "Acme &lt;i&gt;Co&lt;/i&gt;" in page and "<i>Co</i>" not in page
+    assert start_rows(page) == [12, 14, 15] and page.count("Start now") == 3        # c1, c3 (had a session) and c4: all startable
+    assert "name=tab value='other'" in page
+    cs = cards(page)
+    assert sorted(cs) == [12, 13, 14, 15, 16, 17, 18], sorted(cs)                      # candidate order, every row shown
+    assert "ready to start" in cs[12] and "starts next by itself" not in cs[12]       # remote_auto is off
+    assert W_BUSY in cs[13] and "Start now" not in cs[13]
+    assert W_ONCE in cs[14] and "Start now" in cs[14]
+    assert "ready to start" in cs[15] and "Start now" in cs[15]                          # no longer "waiting for a free slot"
+    assert "used up" in cs[16] and "nobody said whether it went through" in cs[17] and W_LAPTOP.split(" (")[0] in cs[18]
+    assert all("Start now" not in cs[n] for n in (13, 16, 17, 18))
     config.LOCAL = {**config.LOCAL, "remote_auto": True, "remote_hours": [8, 20]}
     page = req("GET", "/", cookie=KEY)[2]
+    cs = cards(page)
     assert "Starts by itself: on" in page and "8:00-20:00" in page
+    assert "starts next by itself" in cs[12] and "starts next by itself" in cs[15] and W_ONCE in cs[14]   # (the timer's own plan)
     config.LOCAL = {k: v for k, v in config.LOCAL.items() if k not in ("remote_auto", "remote_hours")}
-    remote.queue_now = lambda manual=False: ([(cand("other", n, f"h{n}.example"), None) for n in range(20, 40)], [])
-    assert req("GET", "/", cookie=KEY)[2].count("Start now") == 12              # the first twelve
-    remote.queue_now = lambda manual=False: ([], [])
+
+    # 2 free slots, 4 eligible rows on different hosts: all four get Start now (it used to be only the top two)
+    four = [cand("other", n, f"h{n}.example") for n in (21, 22, 23, 24)]
+    set_inputs(four, free=2)
+    page = req("GET", "/", cookie=KEY)[2]
+    assert start_rows(page) == [21, 22, 23, 24] and "2 slots free" in page and "waiting for a free slot" not in page
+    # none free: no button anywhere, each says waiting for a free slot
+    set_inputs(four, free=0)
+    page = req("GET", "/", cookie=KEY)[2]
+    assert start_rows(page) == [] and "Start now" not in page and "every slot is in use" in page
+    assert page.count("waiting for a free slot") == 4
+    set_inputs(four, free=1)
+    page = req("GET", "/", cookie=KEY)[2]
+    assert start_rows(page) == [21, 22, 23, 24] and "1 slot free" in page and "1 slots" not in page
+    # two rows on one site with nothing running: both can be started individually (starting one blocks the other after)
+    same = [cand("other", 31, "same.example"), cand("other", 32, "same.example")]
+    set_inputs(same, free=2)
+    page = req("GET", "/", cookie=KEY)[2]
+    assert start_rows(page) == [31, 32]
+    # a running session's site blocks only that site's rows
+    mixed = [cand("other", 41, "h1.example"), cand("other", 42, "h2.example"), cand("jobs", 43, "h1.example")]
+    set_inputs(mixed, running=[{"tab": "other", "row": 99, "host": "h1.example"}], free=2)
+    page = req("GET", "/", cookie=KEY)[2]
+    cs = cards(page)
+    assert start_rows(page) == [42] and page.count("another session is on h1.example") == 2
+    assert "Start now" in cs[42] and "another session is on h1.example" in cs[41] and "another session is on h1.example" in cs[43]
+    set_inputs(mixed, claims=[{"tab": "other", "row": 77, "host": "h2.example"}], free=2)   # the laptop's claim: the same
+    assert start_rows(req("GET", "/", cookie=KEY)[2]) == [41, 43]
+    # a NUworks row with the applications used up cannot start; an Other jobs row can
+    set_inputs([cand("jobs", 51, "j.example"), cand("other", 52, "k.example")], free=2, left=0)
+    assert start_rows(req("GET", "/", cookie=KEY)[2]) == [52]
+    # the first twelve only
+    set_inputs([cand("other", n, f"h{n}.example") for n in range(20, 40)], free=5)
+    assert req("GET", "/", cookie=KEY)[2].count("Start now") == 12
+    set_inputs([])
     assert "Nothing approved is waiting" in req("GET", "/", cookie=KEY)[2]
-    remote.queue_now = lambda manual=False: (_ for _ in ()).throw(RuntimeError("sheet"))
+    INPUTS[0] = RuntimeError("sheet")
     assert "Queue not readable now (RuntimeError)" in req("GET", "/", cookie=KEY)[2]
-    remote.queue_now = lambda manual=False: (_ for _ in ()).throw(remote.RecordError("assist_auto.json can't be read"))
+    INPUTS[0] = remote.RecordError("assist_auto.json can't be read")
     assert "Queue not readable now (RecordError)" in req("GET", "/", cookie=KEY)[2]
-    remote.queue_now = queue_view
+    INPUTS[0] = (([c1, c2, c3, c4, c5, c6, c7], RUNNING_B, [], RECORDS, 2, 0))
 
     def post_start(form, token=TOKEN, **kw):
         r = req("POST", "/start", form={"t": token, **form}, cookie=KEY, **kw)
@@ -902,21 +1045,26 @@ try:
     assert req("POST", "/start", form={"t": TOKEN, "tab": "other", "row": "12"})[0] == 403
     assert post_start({"tab": "other", "row": "12"}, headers={"Origin": "http://evil.example"})[0] == 403
     assert started_now == []
-    # a row the queue would start: recorded as started by hand (auto False), asked for as "manual"
-    asked.clear()
+    # a row you can start: recorded as started by hand (auto False)
     code, where = post_start({"tab": "other", "row": "12"})
     assert code == 303 and where == "/?m=Started Acme <i>Co</i>." and started_now == [("other", 12)] and recorded == [(c1, False)]
-    assert asked == [True]
-    # one that waits for you (started once by itself): the manual view lets it go
+    # one with an earlier session (the queue leaves it to you): you may
     started_now.clear(); recorded.clear()
     assert "Started" in post_start({"tab": "other", "row": "14"})[1] and started_now == [("other", 14)] and recorded == [(c3, False)]
+    # a row behind others in the queue starts too (not only the top `free` ones)
+    started_now.clear(); recorded.clear()
+    assert "Started" in post_start({"tab": "other", "row": "15"})[1] and started_now == [("other", 15)] and recorded == [(c4, False)]
     started_now.clear(); recorded.clear()
     # the others say why, and nothing starts
-    for form, why in (({"tab": "jobs", "row": "13"}, W_BUSY), ({"tab": "other", "row": "15"}, W_SLOT), ({"tab": "jobs", "row": "16"}, W_USED),
-                      ({"tab": "other", "row": "17"}, remote.OUTCOME_UNKNOWN)):
+    for form, why in (({"tab": "other", "row": "13"}, W_BUSY), ({"tab": "jobs", "row": "16"}, W_USED),
+                      ({"tab": "other", "row": "17"}, remote.OUTCOME_UNKNOWN), ({"tab": "other", "row": "18"}, W_LAPTOP)):
         assert post_start(form)[1] == f"/?m=Not started: {why}.", form
+    set_inputs([c1, c4], free=0)                                                     # no free slot: the row's own reason
+    assert post_start({"tab": "other", "row": "15"})[1] == f"/?m=Not started: {W_SLOT}."
+    INPUTS[0] = (([c1, c2, c3, c4, c5, c6, c7], RUNNING_B, [], RECORDS, 2, 0))
+    gone = "/?m=Not started: it is not in the queue (not Approved, or not a company-site application)."
     for form in ({"tab": "other", "row": "999"}, {"tab": "jobs", "row": "12"}):
-        assert post_start(form)[1] == "/?m=Not started: it is not in the queue.", form
+        assert post_start(form)[1] == gone, form
     for form in ({"tab": "bogus", "row": "12"}, {"tab": "other", "row": "x"}, {"tab": "other"}, {"row": "12"}, {}):
         assert post_start(form)[1] == "/?m=Nothing to do.", form
     assert started_now == [] and recorded == []
@@ -933,7 +1081,7 @@ try:
     assert "<script>x</script>" not in page and "&lt;script&gt;x&lt;/script&gt;" in page
 finally:
     srv.shutdown()
-    restore("queue_now", "start", "record_started")
+    restore("queue_inputs", "start", "record_started")
 
 # ---- gui.homelab_assistants: a cached background read
 from nuauto import gui  # noqa: E402
@@ -1043,5 +1191,84 @@ for f in ("actions.log", "state.json", "browser/page-1.png", "browser/page.md", 
 listed = next(r for r in gui.logs()["runs"] if r["name"] == os.path.basename(run_d))["files"]
 assert listed == ["actions.log", "browser/page-1.png"], listed
 assert gui.log_file(os.path.join(run_d, "browser", "page-1.png")).endswith("page-1.png")
+
+# ---- assist.run_locked on the homelab: "do it on the laptop" (laptop.json in the run folder) skips the finish question
+import glob  # noqa: E402
+
+from nuauto import screen  # noqa: E402
+
+LAPTOP_SESSION = ("import json, os; open(os.path.join(os.environ[%r], %r), 'w').write('{}')" % (assist.STATE_ENV, assist.LAPTOP_FILE))
+patched = {"screen.Screen": screen.Screen, "session": assist.session, "ask_line": assist.ask_line, "approved": assist.approved_submit,
+           "outcome": remote.record_outcome, "discord": daily.discord, "page_url": review.page_url,
+           "open_other": sheet.open_other, "open_worksheet": sheet.open_worksheet}
+stopped, asked_line, outcomes, pings = [], [], [], []
+
+
+class FakeScreen:
+    def __init__(self, slot, run_dir):
+        self.display, self.url, self.password = ":99", "http://100.64.0.1:6081/vnc.html", "viewpass"
+
+    def start(self):
+        return self
+
+    def stop(self):
+        stopped.append(1)
+
+
+def drive(session_code, server=True, answer="n", approved=False):
+    """One run_locked on a fresh row; the session is a tiny python that runs session_code in the run folder."""
+    stopped.clear(), asked_line.clear(), outcomes.clear(), pings.clear()
+    screen.Screen = FakeScreen
+    assist.session = lambda d, *a, **k: [sys.executable, "-c", session_code]
+    assist.ask_line = lambda prompt, timeout=None: asked_line.append(prompt) or answer
+    assist.approved_submit = lambda d: approved
+    remote.record_outcome = lambda tab, rown, url, approved, answer: outcomes.append((tab, rown, url, approved, answer))
+    daily.discord = lambda text: pings.append(text)
+    review.page_url = lambda slot=None: "http://100.64.0.1:8766/"
+    sheet.open_other = sheet.open_worksheet = lambda *a, **k: (_ for _ in ()).throw(AssertionError("the sheet is not touched"))
+    r_ = sheet.Row(5, "https://jobs.example.org/the-row", "LapCo", "Intern", "Approved", "", "")
+    slot, lock = assist.take_slot({"row": 5, "tab": "other"})
+    before = set(glob.glob(os.path.join(config.LOGS_DIR, "*assist_other_row5")))
+    config.IS_SERVER = server
+    out, sys.stdout = sys.stdout, io.StringIO()
+    try:
+        assist.run_locked(5, True, r_, "https://jobs.example.org/apply-page", "other row 5", "other", slot, lock)
+    finally:
+        sys.stdout = out
+        config.IS_SERVER = REAL_FLAGS[0]
+        lock.close()
+    (run_dir,) = set(glob.glob(os.path.join(config.LOGS_DIR, "*assist_other_row5"))) - before
+    return run_dir
+
+
+try:
+    time.sleep(1.1)  # run folders are named by the second
+    run_dir = drive(LAPTOP_SESSION)
+    assert asked_line == [] and pings == [], (asked_line, pings)                         # no question, no Discord ping
+    assert not os.path.exists(os.path.join(run_dir, assist.ATTENTION)), "no finish attention"
+    assert outcomes == [("other", 5, "https://jobs.example.org/apply-page", False, "laptop")], outcomes
+    assert "left for the laptop" in open(os.path.join(run_dir, "actions.log")).read() and stopped == [1]
+    state = json.load(open(os.path.join(run_dir, "state.json")))
+    assert state["row_url"] == "https://jobs.example.org/the-row" and state["job_url"] == "https://jobs.example.org/apply-page", state
+    # an approved Submit and then "laptop": recorded as both
+    time.sleep(1.1)
+    drive(LAPTOP_SESSION, approved=True)
+    assert outcomes == [("other", 5, "https://jobs.example.org/apply-page", True, "laptop")] and asked_line == []
+    # no laptop.json: the question as before, the finish attention and the ping, the answer recorded
+    time.sleep(1.1)
+    run_dir = drive("pass", answer="n")
+    assert len(asked_line) == 1 and "Did you press Submit" in asked_line[0] and len(pings) == 1 and "Did it go through" in pings[0]
+    assert json.load(open(os.path.join(run_dir, assist.ATTENTION)))["kind"] == "finish"
+    assert outcomes == [("other", 5, "https://jobs.example.org/apply-page", False, "n")], outcomes
+    # not on the homelab (no browser view): a laptop.json is not looked for; the question is asked and nothing is recorded
+    time.sleep(1.1)
+    drive(LAPTOP_SESSION, server=False, answer="n")
+    assert len(asked_line) == 1 and outcomes == [] and pings == []
+finally:
+    screen.Screen, assist.session, assist.ask_line, assist.approved_submit = (patched["screen.Screen"], patched["session"],
+                                                                              patched["ask_line"], patched["approved"])
+    remote.record_outcome, daily.discord, review.page_url = patched["outcome"], patched["discord"], patched["page_url"]
+    sheet.open_other, sheet.open_worksheet = patched["open_other"], patched["open_worksheet"]
+    config.IS_SERVER = REAL_FLAGS[0]
 
 print("All remote checks passed.")

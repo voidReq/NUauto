@@ -87,12 +87,12 @@ def candidates(main_rows, other_rows, closes=None, today=None):
             if day and day < today:
                 continue  # past its deadline
             out.append({"tab": "jobs", "row": r.number, "url": url, "host": assist.host(url), "company": r.company,
-                        "title": r.title, "closes": day, "match": match_of(r.notes)})
+                        "title": r.title, "closes": day, "match": match_of(r.notes), "laptop": assist.LAPTOP_MARK in r.notes})
     for r in other_rows or []:
         url, _ = assist.other_target(r)
         if url:
             out.append({"tab": "other", "row": r.number, "url": url, "host": assist.host(url), "company": r.company,
-                        "title": r.title, "closes": None, "match": match_of(r.notes)})
+                        "title": r.title, "closes": None, "match": match_of(r.notes), "laptop": assist.LAPTOP_MARK in r.notes})
     urgent = lambda c: c["closes"] is not None and (c["closes"] - today).days <= jobs.URGENT_DAYS  # noqa: E731
     return sorted(out, key=lambda c: (not urgent(c), c["closes"] if urgent(c) else date.max, -c["match"],
                                       c["tab"] != "jobs", c["row"]))
@@ -116,10 +116,12 @@ def plan(cands, running, claims, records, free, jobs_left=None, manual=False):
         same = rec.get("url") == c["url"]  # a row reused for another job starts fresh
         if (c["tab"], c["row"]) in busy_rows:
             why = "a session is on it"
-        elif same and rec.get("approved") and rec.get("answer") not in ("y", "n"):
+        elif c.get("laptop") or (same and rec.get("answer") == "laptop"):
+            why = "marked: do it on the laptop (the homelab's browser was refused there)"
+        elif same and rec.get("approved") and rec.get("answer") not in ("y", "n", "laptop"):
             why = OUTCOME_UNKNOWN
-        elif same and rec.get("auto") and not manual:
-            why = "started by itself once already: yours to start now"
+        elif same and not manual:  # any earlier session (yours or the queue's): never again by itself
+            why = "had a session already: yours to start now"
         elif c["tab"] == "jobs" and jobs_left is not None and jobs_left <= 0:
             why = "this week's (or the total) NUworks applications are used up"
         elif c["host"] in busy_hosts:
@@ -329,8 +331,9 @@ def record_outcome(tab, row, url, approved, answer):
         print(f"(could not record how this session ended: {e})")
 
 
-def queue_now(manual=False):
-    """(go, rest): what the queue would start now and why the others wait (homelab). manual: for Start now."""
+def queue_inputs():
+    """What the queue decides from (homelab): (candidates best first, running sessions, the laptop's claims, records,
+    free slots, NUworks applications left). One sheet read."""
     from nuauto import apply
     from nuauto import assist
     from nuauto import sheet
@@ -342,8 +345,21 @@ def queue_now(manual=False):
         other_rows = []
     running, claims = assist.sessions(), live_claims()
     free = max(0, assist.slots() - len(running))
-    return plan(candidates(main_rows, other_rows, apply.row_closes), running, claims, _read_auto(), free,
-                jobs_left(main_rows, running, claims), manual)
+    return (candidates(main_rows, other_rows, apply.row_closes), running, claims, _read_auto(), free,
+            jobs_left(main_rows, running, claims))
+
+
+def queue_now(manual=False):
+    """(go, rest): what the queue would start now and why the others wait (homelab). manual: you start them."""
+    return plan(*queue_inputs(), manual)
+
+
+def can_start(c, inputs):
+    """Why you can't start this one row by hand right now, or None: judged on its own (a free slot, its job site free,
+    the caps, its records, the laptop mark), not behind the rows ahead of it in the queue."""
+    _, running, claims, records, free, left = inputs
+    go, rest = plan([c], running, claims, records, free, left, manual=True)
+    return None if go else rest[0][1]
 
 
 def jobs_left(main_rows, running, claims):
@@ -419,12 +435,18 @@ def main(argv):
     if not config.REMOTE_ASSIST:
         sys.exit("Turn on \"remote_assist\" in local_config.json first (docs/REMOTE.md).")
     if argv == ["queue"]:
-        go, rest = queue_now()
+        inputs = queue_inputs()
+        go, rest = plan(*inputs)
+        by_itself = {(c["tab"], c["row"]): why for c, why in go + rest}
         a, b = hours()
+        free = inputs[4]
         print(f"Starts by itself: {'on' if config.LOCAL.get('remote_auto') else 'off (remote_auto)'}, {a}:00-{b}:00"
-              f"{'' if in_hours() else ' (outside those hours now)'}")
-        for c, why in go + rest:
-            print(f"  {c['company'][:28]:28} {c['tab']:5} row {c['row']:<4} {c['host'][:34]:34} {why or 'next'}")
+              f"{'' if in_hours() else ' (outside those hours now)'}; {free} slot{'s' if free != 1 else ''} free")
+        for c in inputs[0]:
+            hand, auto_ = can_start(c, inputs), by_itself.get((c["tab"], c["row"]))
+            text = ("next by itself" if auto_ is None and config.LOCAL.get("remote_auto") else "ready (start it yourself)") \
+                if hand is None else hand
+            print(f"  {c['company'][:28]:28} {c['tab']:5} row {c['row']:<4} {c['host'][:34]:34} {text}")
         return
     if argv[:1] == ["start"] and len(argv) in (3, 4) and argv[1] in TABS and argv[2].isdigit() and \
             argv[3:] in ([], ["--again"]):
