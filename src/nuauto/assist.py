@@ -1479,7 +1479,6 @@ def session(d, answer_cmd, read_roots, profile, prompt, where, display=None):
 
 def run(number, url_override, other=False):
     """other: a row of the Other jobs tab (no weekly / total cap, nothing sent to NUworks afterwards)."""
-    from nuauto import browser
     from nuauto import sheet
     if not sys.stdin.isatty():
         sys.exit("nuauto assist needs a real terminal (you talk to the agent and confirm Submit).")
@@ -1505,6 +1504,33 @@ def run(number, url_override, other=False):
     if site_lock is None:
         sys.exit(f"Another assistant is working on {host(url)} right now (two could make the same account there at "
                  "once). Start this one when it is done.")
+    # the other machine (remote.py): the homelab never starts a row or site the laptop holds; the laptop asks first
+    claim_held = False
+    if config.IS_SERVER:
+        from nuauto import remote
+        why = remote.claimed(tab, number, host(url))
+        if why:
+            sys.exit(f"Not started: {why}. Finish it there first.")
+    elif config.REMOTE_ASSIST:
+        from nuauto import remote
+        ok, note = remote.claim_on_homelab(tab, number, host(url))
+        if not ok:
+            sys.exit(f"Not started: {note}. Finish it there first (the review page, or its tmux session).")
+        claim_held = True
+        if note:
+            print(f"(Note: {note}.)")
+    try:
+        return run_locked(number, other, row, url, where, tab, slot, slot_lock)
+    finally:
+        if claim_held:
+            remote.unclaim_on_homelab(tab, number)
+
+
+def run_locked(number, other, row, url, where, tab, slot, slot_lock):
+    """The session itself, once run() holds this row, a slot and the job site (and, from the laptop, the homelab's
+    claim): the agent in this terminal, then "Did you press Submit?"."""
+    from nuauto import browser
+    from nuauto import sheet
     log_ = browser.RunLog(f"assist_{'other_' if other else ''}row{number}")
     d = log_.dir
     _relabel(slot_lock, {"row": number, "tab": tab, "company": row.company, "host": host(url), "slot": slot,
@@ -1561,8 +1587,11 @@ def run(number, url_override, other=False):
                       f"{review.page_url(slot)}")
     try:
         while True:
-            reply = input(f"\nDid you press Submit for {where} ({row.company}) and see the confirmation? "
-                          "[y = yes / n = no]: ").strip().lower()
+            reply = ask_line(f"\nDid you press Submit for {where} ({row.company}) and see the confirmation? "
+                             "[y = yes / n = no]: ", FINISH_WAIT if view else None)
+            if reply is None:
+                log_.write(f"No answer within {FINISH_WAIT // 3600} h: {where} left as it was (check it yourself).")
+                reply = "n"
             if reply in ("y", "n"):
                 break
     except (KeyboardInterrupt, EOFError):
@@ -1581,6 +1610,25 @@ def run(number, url_override, other=False):
                    "Apply > Company sites.")
         return
     nuworks_side(ws, row.number)
+
+
+FINISH_WAIT = 24 * 3600  # (homelab) how long "Did you press Submit?" waits for your answer before leaving the row as it was
+
+
+def ask_line(prompt, timeout=None):
+    """input(), lowercased; with a timeout (seconds): None when nothing came in time."""
+    if timeout is None:
+        return input(prompt).strip().lower()
+    import select
+    print(prompt, end="", flush=True)
+    ready, _, _ = select.select([sys.stdin], [], [], timeout)
+    if not ready:
+        print()
+        return None
+    line = sys.stdin.readline()
+    if not line:
+        raise EOFError
+    return line.strip().lower()
 
 
 # In Notes after a homelab run of a NUworks job; "NUworks side NOT submitted" puts the row in the GUI's retry list.
@@ -1678,6 +1726,9 @@ def main(argv):
         sys.exit(__doc__)
     if not args:
         return list_rows()
+    if args[0] in ("auto", "queue", "start", "sessions", "claim", "unclaim"):  # the homelab's queue and claims
+        from nuauto import remote
+        return remote.main(args)
     if args[0] == "other":
         return main_other(args[1:], url)
     if len(args) == 2 and args[0] == "nuworks" and args[1].isdigit():  # retry / catch up the NUworks side

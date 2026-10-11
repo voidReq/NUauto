@@ -1,6 +1,6 @@
 REMOTE: the company-site assistant on the homelab (Phase 3)
-(Keep this current when you change it. Code: screen.py, review.py, the IS_SERVER parts of assist.py, sync.share /
-push_notes.)
+(Keep this current when you change it. Code: screen.py, review.py, remote.py, the IS_SERVER parts of assist.py,
+sync.share / push_notes.)
 
 WHAT IT IS
 - `nuauto assist [other] <row>` runs on the homelab too, inside a tmux session, so an application can go on with the
@@ -9,8 +9,8 @@ WHAT IT IS
 - 3a: you start a session by hand over ssh, in tmux. 3b: you answer it, approve or decline its Submit, and get the
   captcha hand-off on the review page, from your phone; Discord links you there. The terminal (tmux attach) still
   works for anything else.
-- Next: 3c sessions that start by themselves from the Approved rows, and a claim so the laptop and the homelab never
-  work the same row; 3d demo mode for the review page.
+- 3c: sessions start by themselves from your approved rows (the queue), and a claim keeps the laptop and the homelab
+  off each other's rows and job sites. Next: 3d demo mode for the review page.
 
 WHAT STAYS THE SAME
 - Nothing is submitted without your OK: the same guard (assist.decide) catches every Submit-type click and Enter. On
@@ -42,15 +42,36 @@ PAIR YOUR PHONE (once per device)
   Open the printed link on the phone, Tailscale on, and press Pair (within 10 minutes; the link works once).
   nuauto review devices / nuauto review unpair <name>|--all
 
-RUN ONE
-  ssh -t homelab 'tmux new -s nuauto1 "cd ~/projects/auto && .venv/bin/nuauto assist other 12"'
-  Leave it running: Ctrl+b then d. Back to it: ssh -t homelab tmux attach -t nuauto1 (a phone ssh app works too).
+THE QUEUE (remote.py; nuauto-assist.timer every 10 minutes runs `nuauto assist auto`)
+- On with "remote_auto": true (and remote_assist). Hours: "remote_hours": [9, 22] (the default: 09:00-22:00 New York
+  time), so no pings at night.
+- What it starts: Approved rows of the Other jobs tab and Needs Human rows stopped at a company site, best first:
+  closing within a week, then match % (the "match NN%" in Notes), then sheet order. Into free slots (assist_slots),
+  one session per job site, NUworks rows only under the weekly cap, never a row or site the laptop holds (claims).
+- Each row starts by itself once (local/assist_auto.json). A session that ended without "Applied" leaves its row for
+  you: Start now on the review page (it lists the queue and why each row waits), or `nuauto assist start other 12`.
+- Each session runs in tmux, named nuauto-<nuworks|other>-<row>, in its own systemd scope (it outlives the timer):
+  ssh -t homelab tmux attach -t nuauto-other-12      (Ctrl+b then d to leave it running)
+- `nuauto assist queue` (homelab) shows what it would start and why the others wait.
+
+CLAIMS (the laptop and the homelab)
+- A laptop session first asks the homelab over ssh for a claim on its row and job site (`nuauto assist claim` there):
+  refused if the homelab runs that row or site. Held until the laptop session ends (or 12 h), in local/assist_claims/
+  on the homelab; the queue and the homelab's sessions keep off it. Homelab unreachable: the laptop goes ahead and says so.
+- The laptop's GUI reads the homelab's sessions every minute (`nuauto assist sessions` over ssh): a row the homelab
+  works on shows "assistant running on the homelab" (or "waiting for you") instead of Start.
+
+RUN ONE BY HAND
+  ssh -t homelab 'cd ~/projects/auto && .venv/bin/nuauto assist start other 12'     (in tmux, as the queue would)
+  or in a tmux session of your own: ssh -t homelab 'tmux new -s mine "cd ~/projects/auto && .venv/bin/nuauto assist other 12"'
+  Leave it running: Ctrl+b then d. Back to it: ssh -t homelab tmux attach -t <its name> (a phone ssh app works too).
 - At the start the terminal shows the browser view's link, http://<web_listen_host>:6081/vnc.html... (slot 1; 6082,
   6083 for slots 2, 3), and its password for this run only (shown nowhere else: not in a log, not on Discord).
 - Discord says when the session waits for you (a question, the end list, a captcha), wants to Submit, or ended: the
   company, the agent's first line, the review page's link (and the tmux attach command).
 - Ends like on the laptop: /exit (or End session on the page), then "Did you press Submit...?" (the page's Yes / No
-  types the answer there) y = Applied. The virtual screen stops with it.
+  types the answer there) y = Applied. The virtual screen stops with it. No answer in 24 h: the row stays as it was
+  (check it yourself) and the slot is free again.
 
 THE REVIEW PAGE (review.py; http://<web_listen_host>:8766/, inside nuauto-web, only with remote_assist)
 - One page per running session (/s/<slot>):
@@ -66,8 +87,11 @@ THE REVIEW PAGE (review.py; http://<web_listen_host>:8766/, inside nuauto-web, o
   Its terminal      the last lines (this run's site passwords taken out); Interrupt (Esc), End session (/exit).
   Ended             Did it go through? Yes / No (typed into the launcher's question).
 - Paired devices only: a cookie with a random key (HttpOnly, SameSite=Strict; the homelab keeps its hash in
-  local/review_devices.json); this server's own Host; on every POST a token made from the key and a matching Origin.
+  local/review_devices.json); this server's own Host; on every POST a token made from the key and a matching Origin
+  (Referrer-Policy same-origin: with no-referrer browsers send "Origin: null" and every button would be refused).
   Discord links carry no power by themselves. Each answer goes in the run's actions.log with the device name.
+- `nuauto review demo` (any computer): the page with three made-up sessions on 127.0.0.1 (prints a pairing link);
+  nothing real is read or sent. Agents look at the page with it (phone width, light / dark), like `nuauto gui --demo`.
 - The agent on the homelab never opens your own network: localhost, the LAN, Tailscale addresses (so not this page,
   not the browser view) are refused in its browser and WebFetch (assist.own_network).
 
@@ -86,11 +110,11 @@ WHAT LIVES WHERE (with remote_assist)
        a folder over 50 MB is skipped. The agent there reads only these and the resume (local/resume.pdf), never the
        homelab's ~/projects (the live NUauto is there).
   assist_profile*/ (site cookies)    each machine its own, never copied; the agent signs in again with the saved login.
-  slots, row and site locks          each machine its own. Until 3c's claim: don't start the same row, or two sessions on
-       the same job site, on both machines at once.
+  slots, row and site locks          each machine its own; across the two, the claims above.
 
 PORTS (homelab; slot n = 1..3)
-  review page http://<web_listen_host>:8766 (in nuauto-web; the Mark-done tunnel forwards 8765 only)
+  review page http://<web_listen_host>:8766 (in nuauto-web; the Mark-done tunnel forwards 8765 only); its index lists
+  the running sessions and the queue (Start now)
   virtual screen :40+n (Xvfb, -nolisten tcp)   VNC 127.0.0.1:5940+n (x11vnc -localhost: never on the network)
   browser view http://<web_listen_host>:6080+n/vnc.html (websockify + noVNC; Tailscale only; a password per run)
   The run folder's screen.log has the three programs' output; local/screen<n>.json their pids (a crashed run's are

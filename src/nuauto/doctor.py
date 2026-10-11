@@ -21,7 +21,7 @@ from nuauto import sync
 
 UNITS = ["nuauto-daily.timer", "nuauto-weekly.timer", "nuauto-web.service"]
 WEB_FILES = ("web.py", "config.py", "sheet.py", "jobs.py",  # nuauto-web needs a restart when these change (= deploy.WEB_CODE)
-             "review.py", "assist.py", "screen.py", "accounts.py", "answers.py")
+             "review.py", "assist.py", "screen.py", "accounts.py", "answers.py", "remote.py")
 JSON = "--json" in sys.argv
 fails = []
 results = []  # every say(), for --json

@@ -82,6 +82,11 @@ COMPANY-SITE AGENT (assist.py, prompts/ASSIST_PROMPT.md)
   and a matching Origin on every POST; run folders under logs/ only; site passwords taken out of the terminal it shows;
   the agent's browser and WebFetch never open the user's own network there | review.Handler, pair, device, form_token,
   session, terminal; assist.own_network | test_review, test_assist
+- The homelab's queue starts only approved rows (Other jobs Approved, Needs Human stopped at a company site), only with
+  remote_assist and remote_auto, in remote_hours, into free slots, one per job site, NUworks rows under the weekly cap,
+  each row once by itself (a session that ended without Applied waits for the user: no repeat, so no second submit);
+  never a row or site the laptop claimed; the laptop's sessions ask the homelab first | remote.plan, candidates, auto,
+  claim, claimed, claim_on_homelab; assist.run | test_remote
 - The answer banks and job-site logins shared with the homelab: merged under each file's lock, a login never dropped,
   sent as JSON over ssh and never printed; the writeups copy holds only files the agent may read | sync.share,
   merge_bank, merge_accounts, notes_files | test_share

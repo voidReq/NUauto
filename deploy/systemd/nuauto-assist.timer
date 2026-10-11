@@ -1,0 +1,9 @@
+[Unit]
+Description=NUauto: the homelab assistant's queue every 10 minutes (does nothing unless remote_auto is on)
+
+[Timer]
+OnCalendar=*:0/10
+RandomizedDelaySec=1m
+
+[Install]
+WantedBy=timers.target

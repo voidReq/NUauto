@@ -208,11 +208,12 @@ try:
     assert post("/api/logins/export", {"every": True})["count"] == 1
     post("/api/settings", {"accounts_email": "", "assist_effort": "low", "assist_read_paths": []})  # back as they were
     # assistants side by side: a running one (its slot's lock held, as by a live `nuauto assist`) shows on its row
-    assert get("/api/company")["sessions"] == [] and get("/api/company")["slots"] == 3 and get("/api/state")["assistants"] == ""
+    # (the state string is "<this computer's>|<the homelab's>": empty on both sides without remote_assist)
+    assert get("/api/company")["sessions"] == [] and get("/api/company")["slots"] == 3 and get("/api/state")["assistants"] == "|"
     with hold_slot(1, {"row": 7, "tab": "other", "company": "Basalt Bio", "host": "jobs.example.net"}):
         assert [(s["slot"], s["row"], s["tab"]) for s in get("/api/other")["sessions"]] == [(1, 7, "other")]
-        assert get("/api/state")["assistants"] == "other-7:1"
-    assert get("/api/other")["sessions"] == [] and get("/api/state")["assistants"] == ""  # it ended: the slot is free
+        assert get("/api/state")["assistants"] == "other-7:1|"
+    assert get("/api/other")["sessions"] == [] and get("/api/state")["assistants"] == "|"  # it ended: the slot is free
     for bad in (0, 31, "lots", 2.5, True, None):
         post("/api/settings", {"max_per_week": bad}, expect=409)
     assert post("/api/settings", {"max_per_week": "7"})["max_per_week"] == 7
@@ -263,7 +264,7 @@ try:
     assert r["demo"] and r["command"].endswith("assist other 2"), r
     # no tab yet: adding the first job makes it (headers, then the job as row 2)
     os.remove(other_file)
-    assert get("/api/other") == {"exists": False, "tab": "Other jobs", "ready": [], "applied": [], "rest": [], "sessions": [], "slots": 3}
+    assert get("/api/other") == {"exists": False, "tab": "Other jobs", "ready": [], "applied": [], "rest": [], "sessions": [], "slots": 3, "homelab": []}
     assert post("/api/other/add", {"url": "https://jobs.example.net/2", "company": "Cinder", "title": "Intern"})["row"] == 2
     rows = json.load(open(other_file))["rows"]
     assert rows[0] == ["URL", "Company", "Title", "Status", "Notes", "Date"] and rows[1][3] == "Approved", rows

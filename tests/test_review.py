@@ -160,7 +160,7 @@ try:
         h = r[1]
         assert h["cache-control"] == "no-store" and h["x-frame-options"] == "DENY" and h["x-content-type-options"] == "nosniff"
         assert "default-src 'none'" in h["content-security-policy"] and "frame-ancestors 'none'" in h["content-security-policy"]
-        assert h["referrer-policy"] == "no-referrer"
+        assert h["referrer-policy"] == "same-origin"   # (no-referrer makes Firefox send "Origin: null" on form posts)
 
     # the list: this session only (the other's run folder is outside logs/), names escaped
     r = req("GET", "/", cookie=KEY)
@@ -301,6 +301,100 @@ try:
         finally:
             subprocess.run(["tmux", "kill-session", "-t", f"={TMUX_NAME}"], capture_output=True)
 
+    # the page in a real browser: Firefox's own form posts (Origin, cookies, redirects), not just hand-made requests
+    try:
+        from playwright.sync_api import sync_playwright
+        pw = sync_playwright().start()
+        try:
+            browser = pw.firefox.launch(headless=True)
+        except Exception:
+            pw.stop()
+            raise
+    except Exception as e_:
+        print(f"(skipped the browser checks: Firefox could not start: {type(e_).__name__})")
+        browser = None
+    if browser:
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+        decision_path = os.path.join(run, assist.DECISION)
+        for name in (assist.DECISION, assist.SHOT):
+            if os.path.exists(os.path.join(run, name)):
+                os.remove(os.path.join(run, name))
+        assist.write_private(os.path.join(run, assist.APPROVAL), approval)
+        assist.write_private(os.path.join(run, assist.ATTENTION), {"kind": "waiting", "since": time.time(), "time": time.time(), "said": ""})
+        assist.write_private(os.path.join(run, assist.MESSAGE), b"Please answer this question <b>now</b>")
+        typed_in_browser = []
+        real_type_into = review.type_into
+        review.type_into = lambda sess, text_: typed_in_browser.append((sess["slot"], text_))   # no tmux for the browser checks
+        evil = None
+        try:
+            page = browser.new_context().new_page()
+            # pairing through the form: GET shows it, the button pairs this browser
+            before = device_count()
+            page.goto(review.make_pairing("tablet"))
+            assert page.locator("input[name=name]").count() == 1 and device_count() == before
+            page.fill("input[name=name]", "Test Browser")
+            page.click("button:has-text('Pair')")
+            page.wait_for_selector("text=Paired")
+            assert device_count() == before + 1 and "Test Browser" in [d_["name"] for d_ in assist.read_json(review.DEVICES).values()]
+            cookies = {c_["name"]: c_ for c_ in page.context.cookies()}
+            assert cookies[review.COOKIE]["httpOnly"] and cookies[review.COOKIE]["sameSite"] == "Strict"
+            # the session page, then Approve (a real form post: its Origin must be accepted)
+            page.goto(f"{ORIGIN}/s/1")
+            page.wait_for_selector("text=Approve: submit")
+            assert "&lt;b&gt;" not in page.inner_text("body") and "<b>now</b>" in page.inner_text("body")   # shown as text
+            page.click("text=Approve: submit")
+            page.wait_for_selector("text=Approved.")
+            dec = assist.read_json(decision_path)
+            assert dec["decision"] == "approve" and dec["by"] == "Test Browser" and dec["id"] == "ap1", dec
+            os.remove(decision_path)
+            # Decline with a note, the same way
+            page.fill("input[name=note]", "not this one")
+            page.click("button:has-text('Decline')")
+            page.wait_for_selector("text=Declined.")
+            dec = assist.read_json(decision_path)
+            assert dec["decision"] == "decline" and dec["note"] == "not this one" and dec["by"] == "Test Browser"
+            os.remove(decision_path)
+            # Reply: typed into the terminal (recorded here)
+            page.goto(f"{ORIGIN}/s/1")
+            page.fill("textarea[name=text]", "hello from firefox")
+            page.click("button:has-text('Send')")
+            page.wait_for_selector("text=Sent.")
+            assert typed_in_browser == [(1, "hello from firefox")], typed_in_browser
+            assert "REVIEW PAGE reply by Test Browser (18 characters)" in open(os.path.join(run, "actions.log")).read()
+            # the index and its Start now flash come back through the browser too
+            page.goto(f"{ORIGIN}/")
+            assert page.locator("a[href='/s/1']").count() == 1
+            # a page on another origin cannot press the buttons, even with this browser's cookie (and a valid token)
+            attack_html = (f"<form method=post action='{ORIGIN}/s/1/approve'><input name=t value='{token}'>"
+                           "<input name=id value='ap1'><input name=d value='approve'><button id=go>go</button></form>").encode()
+
+            class Evil(BaseHTTPRequestHandler):
+                def do_GET(self):
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html")
+                    self.send_header("Content-Length", str(len(attack_html)))
+                    self.end_headers()
+                    self.wfile.write(attack_html)
+
+                def log_message(self, *a):
+                    pass
+            evil = HTTPServer(("127.0.0.1", 0), Evil)
+            threading.Thread(target=evil.serve_forever, daemon=True).start()
+            page.goto(f"http://127.0.0.1:{evil.server_address[1]}/")
+            assert not os.path.exists(decision_path)
+            with page.expect_navigation():
+                page.click("#go")
+            assert "Wrong origin" in page.inner_text("body") and not os.path.exists(decision_path)
+            # a page that is not a form post at all (a link followed) never changes anything
+            page.goto(f"{ORIGIN}/s/1/approve")
+            assert not os.path.exists(decision_path)
+        finally:
+            review.type_into = real_type_into
+            browser.close()
+            pw.stop()
+            if evil:
+                evil.shutdown()
+
     # unpairing: the cookie stops working
     config.IS_SERVER, config.REMOTE_ASSIST = True, True
     import io
@@ -310,11 +404,16 @@ try:
         said = sys.stdout.getvalue()
         review.main(["devices"])
         listing = sys.stdout.getvalue()
+        review.main(["unpair", "--all"])
+        review.main(["devices"])
+        empty = sys.stdout.getvalue()
         review.main(["pair", "tablet"])
         paired = sys.stdout.getvalue()
     finally:
         sys.stdout = out
-    assert "Forgot 1 device." in said and "No paired devices" in listing and f"{ORIGIN}/pair?c=" in paired
+    assert "Forgot 1 device." in said and (not browser or "Test Browser" in listing) and "Forgot" in empty
+    assert "No paired devices" in empty and f"{ORIGIN}/pair?c=" in paired
+    assert device_count() == 0
     assert req("GET", "/", cookie=KEY)[0] == 403 and req("POST", "/s/1/approve", form=answer, cookie=KEY)[0] == 403
 finally:
     for h in holders:

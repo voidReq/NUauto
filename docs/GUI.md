@@ -88,6 +88,8 @@ SCREENS
                  in the other tabs (since 2026-10-09 Company sites is a part of Apply; the menu count is Approved + the
                  assistant's rows + retries). Company sites tab (assistants side by side, up to 3: a row with one
                  running shows "assistant running (slot N)" instead of Start, or "assistant waiting for you" / "approve in its window"
+                 (one the homelab runs, remote_assist: "assistant running on the homelab" / "waiting for you (its review page)",
+                 from `nuauto assist sessions` over ssh every minute; never in view or demo mode)
                  while it waits for you (assist.sessions attention; a desktop notification says so too); "N of 3 assistants running"; it follows
                  /api/state assistants): Needs Human rows for the assistant (opens
                  `nuauto assist <row>` in a terminal window, or shows the command), "I applied myself", company sites still

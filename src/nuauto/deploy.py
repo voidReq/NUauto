@@ -30,10 +30,10 @@ UNIT_SRC = "deploy/systemd"
 WEB_CODE = ["src/nuauto/web.py", "src/nuauto/config.py", "src/nuauto/sheet.py", "src/nuauto/jobs.py",
             # the assistant's review page runs inside nuauto-web too (remote_assist)
             "src/nuauto/review.py", "src/nuauto/assist.py", "src/nuauto/screen.py", "src/nuauto/accounts.py",
-            "src/nuauto/answers.py"]
+            "src/nuauto/answers.py", "src/nuauto/remote.py"]
 # Imported from the new code before anything is copied (the modules the homelab runs; not the GUI's).
 MODULES = ["cli", "config", "sheet", "jobs", "daily", "web", "doctor", "sync", "deploy", "browser", "health", "intern",
-           "postings", "assist", "review", "screen"]
+           "postings", "assist", "review", "screen", "remote"]
 UNIT_DIR = os.path.expanduser("~/.config/systemd/user")
 STATE_PATH = os.path.join(config.LOCAL_DIR, "deployed.json")
 LOG_PATH = os.path.join(config.LOGS_DIR, "deploy.log")

@@ -577,7 +577,9 @@ def state():
         "demo": config.DEMO, "view": VIEW, "version": __import__("nuauto").__version__,
         "internships": {"on": intern.ENABLED, "term": intern.TERM, "review": intern_count()},
         # which assistant sessions run now (the open Apply screen reloads its lists when this changes)
-        "assistants": ",".join(f"{s.get('tab')}-{s.get('row')}:{s.get('slot')}" for s in assistants()["sessions"]),
+        "assistants": ",".join(f"{s.get('tab')}-{s.get('row')}:{s.get('slot')}" for s in assistants()["sessions"])
+        + "|" + ",".join(f"{s.get('tab')}-{s.get('row')}:{(s.get('attention') or {}).get('kind', '')}"
+                         for s in homelab_assistants()),
         "mode": "homelab" if config.HAS_SERVER else "local", "setup_needed": setup_needed(),
         "rows_loaded": rows is not None, "rows_at": APP.rows_at, "rows_error": APP.rows_error, "week": week_info(rows),
         "counts": {"review": len(todo), "approved": len(approved), "company": len(agent) + len(retry), "site": len(site),
@@ -949,9 +951,32 @@ def mark(body):
 # ---------------------------------------------------------------- other jobs (the sheet's Other jobs tab)
 
 def assistants():
-    """The assistant sessions running now (assist.sessions: slot, row, tab, company, host, since) and how many may."""
+    """The assistant sessions running now (assist.sessions: slot, row, tab, company, host, since) and how many may;
+    homelab: the homelab's own sessions (remote_assist), so a row it works on offers no Start here."""
     from nuauto import assist
-    return {"sessions": assist.sessions(), "slots": assist.slots()}
+    return {"sessions": assist.sessions(), "slots": assist.slots(), "homelab": homelab_assistants()}
+
+
+HOMELAB_EVERY = 60  # seconds between reads of the homelab's sessions (ssh, in the background)
+_homelab = {"at": 0.0, "sessions": [], "busy": False}
+
+
+def homelab_assistants():
+    """The homelab's assistant sessions (remote.homelab_sessions over ssh), read at most every HOMELAB_EVERY seconds in
+    the background (the last answer meanwhile). [] without remote_assist, and in view or demo mode (no ssh there)."""
+    if VIEW or config.DEMO or not config.REMOTE_ASSIST or config.IS_SERVER:
+        return []
+    if time.time() - _homelab["at"] > HOMELAB_EVERY and not _homelab["busy"]:
+        _homelab["busy"] = True
+
+        def read():
+            try:
+                from nuauto import remote
+                _homelab["sessions"] = remote.homelab_sessions()
+            finally:
+                _homelab["at"], _homelab["busy"] = time.time(), False
+        threading.Thread(target=read, daemon=True).start()
+    return _homelab["sessions"]
 
 
 def intern_facts(urls):

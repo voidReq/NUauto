@@ -1,0 +1,11 @@
+[Unit]
+Description=NUauto: start company-site assistant sessions from the queue (remote_assist + remote_auto only; docs/REMOTE.md)
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/projects/auto
+Environment=TZ=America/New_York
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+# Each session runs in tmux in its own systemd scope (remote.start), so it outlives this run.
+ExecStart=%h/projects/auto/.venv/bin/nuauto assist auto
+TimeoutStartSec=5m

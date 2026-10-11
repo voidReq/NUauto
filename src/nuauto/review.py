@@ -21,7 +21,8 @@ themselves. Every answer goes in the run's actions.log with the device's name.
   nuauto review pair [<name>] [--discord]   a pairing link (printed; --discord also posts it)
   nuauto review devices                     the paired devices
   nuauto review unpair <name>|--all         forget a device (its cookie stops working)
-On the laptop these run on the homelab over ssh.
+  nuauto review demo [<port>]               the page with made-up sessions, on this computer (prints a pairing link)
+On the laptop these run on the homelab over ssh (all but demo).
 """
 import hashlib
 import hmac
@@ -37,7 +38,7 @@ import time
 from contextlib import contextmanager
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 from nuauto import config
 
@@ -161,6 +162,8 @@ def status(s):
         return "finish", "The session ended: did it go through?"
     if a:
         return "approve", f"Ready to submit: {a.get('what', '')}"
+    if att == "approve":  # Claude Code's own permission prompt (its Notification hook), not a Submit of the guard's
+        return "prompt", "Claude Code asks something in its terminal: answer it there"
     if att == "waiting":
         return "waiting", "Waiting for your answer"
     return "working", "Working"
@@ -247,7 +250,7 @@ def answer_approval(s, approval_id, decision, by, note=""):
 CSS = """body{font:16px/1.45 system-ui,sans-serif;max-width:46rem;margin:0 auto;padding:1rem;color:#1d1d1f;background:#fafafa}
 a{color:#0b5cad}.card{background:#fff;border:1px solid #ddd;border-radius:.6rem;padding:.8rem 1rem;margin:.8rem 0}
 .chip{display:inline-block;padding:.1rem .5rem;border-radius:1rem;font-size:.8rem;background:#eee}
-.approve{background:#fde2e1}.waiting{background:#fff1c2}.finish{background:#dff3e3}
+.approve,.prompt{background:#fde2e1}.waiting{background:#fff1c2}.finish{background:#dff3e3}
 button{font:inherit;padding:.6rem 1.1rem;border:0;border-radius:.5rem;background:#0b5cad;color:#fff;margin:.2rem .3rem .2rem 0}
 button.no{background:#777}button.go{background:#1a7f37}textarea,input[type=text]{font:inherit;width:100%;box-sizing:border-box;padding:.5rem}
 pre{white-space:pre-wrap;word-break:break-word;background:#f3f3f3;padding:.6rem;border-radius:.4rem;font-size:.85rem}
@@ -277,6 +280,27 @@ def form(action, token, inner, **hidden):
     return f"<form method=post action='{esc(action)}'>{fields}{inner}</form>"
 
 
+def queue_part(token):
+    """The queue (remote.py): what starts by itself next, and why the others wait; Start now for a row that waits for
+    you (it still needs a free slot and its job site free)."""
+    from nuauto import remote
+    try:
+        go, rest = remote.queue_now()
+    except Exception as e:
+        return f"<p class=dim>Queue not readable now ({esc(type(e).__name__)}).</p>"
+    a, b = remote.hours()
+    auto = "on" if config.LOCAL.get("remote_auto") else "off (\"remote_auto\" in local_config.json)"
+    lines = []
+    for c, why in (go + rest)[:12]:
+        startable = why is None or why.startswith("started by itself once")
+        button = form("/start", token, "<button>Start now</button>", tab=c["tab"], row=c["row"]) if startable else ""
+        lines.append(f"<div class=card><b>{esc(c['company'])}</b> <span class=dim>{esc(c['title'])} | "
+                     f"{'Other jobs' if c['tab'] == 'other' else 'NUworks'} row {c['row']} | {esc(c['host'])}</span>"
+                     f"<div class=dim>{esc(why or 'starts next')}</div>{button}</div>")
+    return (f"<h3>Queue</h3><p class=dim>Starts by itself: {esc(auto)}, {a}:00-{b}:00 New York time.</p>"
+            + ("".join(lines) or "<p class=dim>Nothing approved is waiting.</p>"))
+
+
 def index_page(token):
     items = []
     for s in sessions():
@@ -286,7 +310,7 @@ def index_page(token):
                      f"<span class='chip {word}'>{esc(text)}</span><div class=dim>{esc(st.get('job_title'))} | "
                      f"{esc(st.get('where'))} | slot {s['slot']}</div></div>")
     body = "<h2>NUauto assistants</h2>" + ("".join(items) or "<p class=dim>No assistant is running on the homelab.</p>")
-    return layout("NUauto assistants", body)
+    return layout("NUauto assistants", body + queue_part(token))
 
 
 def session_page(s, token, flash=""):
@@ -312,10 +336,15 @@ def session_page(s, token, flash=""):
                                    "<button class=go name=d value=approve>Approve: submit</button>"
                                    "<input type=text name=note placeholder='Note for the agent (when you decline)'>"
                                    "<button class=no name=d value=decline>Decline</button>", id=a["id"]) + "</div>")
+    if word == "prompt":
+        parts.append("<div class='card approve'><b>Claude Code is asking something in its terminal</b> (a permission "
+                     "question, not a Submit of the guard's). The reply box is off until it is answered, because Enter "
+                     "would pick its first option. Answer it in the terminal: "
+                     f"<code>ssh -t homelab tmux attach -t {esc(st.get('tmux') or '?')}</code></div>")
     if s["message"] and word != "finish":
         parts.append(f"<div class='card {'waiting' if word == 'waiting' else ''}'><b>Its last message</b>"
                      f"<pre>{esc(s['message'])}</pre></div>")
-    if word != "finish":
+    if word not in ("finish", "prompt"):
         parts.append("<div class=card><b>Reply</b> <span class=dim>(typed into its terminal)</span>"
                      + form(f"/s/{slot}/reply", token, "<textarea name=text rows=4 maxlength=4000></textarea>"
                             "<button>Send</button>") + "</div>")
@@ -356,7 +385,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Frame-Options", "DENY")
-        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Referrer-Policy", "same-origin")  # no-referrer would make form posts say "Origin: null"
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; "
                                                     "img-src 'self'; connect-src 'self'; form-action 'self'; "
@@ -410,7 +439,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, layout("Not paired", "<h2>Not paired</h2><p>This device is not paired with NUauto. "
                                           "On the laptop: <code>nuauto review pair</code>, then open its link here.</p>"))
         if u.path == "/":
-            return self._send(200, index_page(form_token(key)))
+            flash = f"<div class=card><b>{esc(q['m'])}</b></div>" if q.get("m") else ""
+            return self._send(200, index_page(form_token(key)).replace("<h2>NUauto assistants</h2>",
+                                                                       "<h2>NUauto assistants</h2>" + flash, 1))
         slot, sub = self._session(u.path)
         s = session(slot) if slot else None
         if not s:
@@ -450,6 +481,8 @@ class Handler(BaseHTTPRequestHandler):
         key, dev = self._who()
         if not dev or not hmac.compare_digest(f.get("t", ""), form_token(key)):
             return self._send(403, "Not allowed.", "text/plain")
+        if u.path == "/start":
+            return self._redirect("/?m=" + quote(start_now(f, dev["name"])))
         slot, sub = self._session(u.path)
         s = session(slot) if slot else None
         if not s:
@@ -459,6 +492,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if sub == "/approve" and f.get("d") in ("approve", "decline"):
                 msg = answer_approval(s, f.get("id", ""), f["d"], by, f.get("note", ""))
+            elif sub == "/reply" and status(s)[0] == "prompt":
+                msg = "Not sent: Claude Code is asking something in its terminal (answer it there)."
             elif sub == "/reply" and f.get("text", "").strip():
                 type_into(s, f["text"][:MAX_REPLY])
                 assist.log(s["run"], f"REVIEW PAGE reply by {by} ({len(f['text'])} characters)")
@@ -470,6 +505,8 @@ class Handler(BaseHTTPRequestHandler):
             elif sub == "/key" and f.get("k") == "interrupt":
                 _tmux("send-keys", "-t", target(s), "Escape")
                 msg = "Interrupted."
+            elif sub == "/key" and f.get("k") == "exit" and status(s)[0] == "prompt":
+                msg = "Not sent: Claude Code is asking something in its terminal (answer it there)."
             elif sub == "/key" and f.get("k") == "exit":
                 type_into(s, "/exit")
                 assist.log(s["run"], f"REVIEW PAGE ended the session (by {by})")
@@ -478,8 +515,37 @@ class Handler(BaseHTTPRequestHandler):
                 msg = "Nothing to do."
         except (ValueError, OSError, subprocess.TimeoutExpired) as e:
             msg = f"Could not do that: {e}"
-        from urllib.parse import quote
         return self._redirect(f"/s/{slot}?m={quote(msg)}")
+
+
+def start_now(f, by):
+    """Start now (the index's queue): one row the queue lists, when a slot and its job site are free."""
+    from nuauto import remote
+    tab, row = f.get("tab"), f.get("row", "")
+    if tab not in ("jobs", "other") or not row.isdigit():
+        return "Nothing to do."
+    go, rest = remote.queue_now()
+    c = next((c for c, why in go + rest if c["tab"] == tab and c["row"] == int(row)
+              and (why is None or why.startswith("started by itself once"))), None)
+    if not c:
+        return "That row can't start now (no free slot, its site is busy, or it is not in the queue)."
+    if c not in [x for x, _ in go]:  # it waits for you (started by itself once): still needs a free slot
+        go_any, _ = remote.plan([c], *remote_state())
+        if not go_any:
+            return "No free slot, or its job site is busy: try again when a session ends."
+    why = remote.start(c["tab"], c["row"])
+    if why:
+        return f"Not started: {why}"
+    remote.record_started(c)
+    return f"Started {c['company']}."
+
+
+def remote_state():
+    """(running, claims, started={}, free) for remote.plan: a row you start by hand ignores the start-once rule."""
+    from nuauto import assist
+    from nuauto import remote
+    running = assist.sessions()
+    return running, remote.live_claims(), {}, max(0, assist.slots() - len(running))
 
 
 def serve():
@@ -487,9 +553,73 @@ def serve():
     ThreadingHTTPServer((listen_host(), PORT), Handler).serve_forever()
 
 
+# ---------- demo: the page with made-up sessions, on this computer (for looking at it; nothing real) ----------
+
+DEMO_SESSIONS = [
+    {"company": "Acme Robotics", "job_title": "Embedded Software Intern", "where": "Other jobs row 12",
+     "approval": {"what": "click 'Submit Application'", "url": "https://acme.wd1.myworkdayjobs.com/en-US/careers/job/apply",
+                  "why": "clicking 'Submit Application' may SUBMIT the application. Approve only after the user has "
+                         "reviewed every page.\nNOT CONFIRMED BY YOU (the agent's guesses: say No and ask it for its list):"
+                         "\n  - Earliest start date = 'May 2027' (the posting's term)"},
+     "message": "Everything is filled in. It is ready for your review on the last page (Review)."},
+    {"company": "Beacon Systems", "job_title": "Hardware Test Intern", "where": "Other jobs row 15",
+     "message": "Please confirm these guesses (reply with changes, or OK):\n1. Graduation date = May 2029 (resume)\n"
+                "2. Willing to relocate = Yes (no info)\n3. Essay \"Why Beacon?\" (draft, 120 words):\n   I have built ..."},
+    {"company": "Cobalt Labs", "job_title": "Security Engineering Co-op", "where": "row 31", "finish": True},
+]
+
+
+def demo(port=0):
+    """`nuauto review demo`: the review page on 127.0.0.1 with DEMO_SESSIONS, in a temp folder; prints a link that
+    pairs the browser that opens it. Nothing real is read or sent (no tmux: Reply etc. say they could not)."""
+    import tempfile
+    if not os.environ.get("NUAUTO_REVIEW_DEMO"):
+        state = tempfile.mkdtemp(prefix="nuauto-review-demo-")
+        os.makedirs(os.path.join(state, "local"), mode=0o700)
+        with open(os.path.join(state, "local", "local_config.json"), "w") as f:
+            json.dump({**config.LOCAL, "web_listen_host": "127.0.0.1", "server_hostname": "", "remote_assist": False}, f)
+        env = {**os.environ, "NUAUTO_STATE_DIR": state, "NUAUTO_REVIEW_DEMO": "1"}
+        os.execve(sys.executable, [sys.executable, "-m", "nuauto.review", "demo", str(port)], env)
+    import fcntl
+    import socket
+    from nuauto import assist
+    global PORT
+    if not port:
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            port = sock.getsockname()[1]
+    PORT = port
+    locks = []
+    for n, x in enumerate(DEMO_SESSIONS, 1):
+        d = os.path.join(config.LOGS_DIR, f"demo_assist_{n}")
+        os.makedirs(d, mode=0o700, exist_ok=True)
+        assist.write_private(os.path.join(d, "state.json"), {"company": x["company"], "job_title": x["job_title"],
+                                                             "where": x["where"], "slot": n, "tmux": None})
+        if x.get("message"):
+            assist.write_private(os.path.join(d, assist.MESSAGE), x["message"].encode())
+        if x.get("approval"):
+            assist.write_private(os.path.join(d, assist.APPROVAL), {**x["approval"], "id": f"demo{n}", "waiting": True,
+                                                                     "since": time.time()})
+        kind = "finish" if x.get("finish") else "approve" if x.get("approval") else "waiting"
+        assist.write_private(os.path.join(d, assist.ATTENTION), {"kind": kind, "since": time.time(), "said": ""})
+        f = open(os.path.join(config.LOCAL_DIR, f"assist_slot{n}.lock"), "a+")
+        fcntl.flock(f, fcntl.LOCK_EX)
+        f.write(json.dumps({"slot": n, "row": 10 + n, "tab": "other", "company": x["company"], "host": "demo",
+                            "run": d, "since": "10:00"}))
+        f.flush()
+        locks.append(f)
+    import nuauto.remote as remote
+    remote.queue_now = lambda: ([], [])  # no sheet here
+    link = make_pairing("demo")
+    print(json.dumps({"url": link, "port": port, "state_dir": config.STATE_DIR}), flush=True)
+    serve()
+
+
 # ---------- command line ----------
 
 def main(argv):
+    if argv[:1] == ["demo"]:  # anywhere, nothing real: the page with made-up sessions
+        return demo(int(argv[1]) if len(argv) > 1 and argv[1].isdigit() else 0)
     if not config.IS_SERVER:  # the laptop: the same command on the homelab (the devices live there)
         if not config.HAS_SERVER:
             sys.exit("The review page runs on the homelab (docs/REMOTE.md).")
