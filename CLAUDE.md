@@ -182,7 +182,9 @@ COMPANY-SITE AGENT (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`;
   for my tap; a late Approve = a 10-minute pass for that one action) and get captchas there. With "remote_auto" the
   homelab starts sessions by itself from my approved rows (remote.py: 09:00-22:00, free slots, each row once by itself,
   never a row or site the laptop holds: claims over ssh). The GUI's Company sites shows them (Homelab assistants: Open its
-  page, Pair this computer). Proven with a practice run on 2026-10-11 (docs/REMOTE.md). Starts `claude --model sonnet --effort low --permission-mode default` (never my auto
+  page, Pair this computer). Everything optional and set in the GUI too (my request, for other users: setup's optional
+  steps and Settings: Assistant on your homelab, Password manager (Bitwarden) with its status chip). Proven with a
+  practice run on 2026-10-11 (docs/REMOTE.md). Starts `claude --model sonnet --effort low --permission-mode default` (never my auto
   mode: its own check asked about every click; the guard decides; local_config.json "assist_effort":
   low / medium / high; Settings; low is my call, 2026-10-10) with the Playwright MCP browser (profile assist_profile/:
   it holds my company-site logins, treat it as secret), Bash, Read/Glob/Grep and WebSearch/WebFetch (company context,
@@ -221,6 +223,15 @@ COMPANY-SITE AGENT (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`;
   logs and, after the session, Claude Code's session log. Never on Google / Microsoft / Apple / LinkedIn / GitHub or
   Northeastern sign-ins (accounts.never). `nuauto accounts export` (or Settings) writes Bitwarden's import file (one
   login per site, matched on its host; the jobs in its notes). Proven end to end with a real session on a local page.
+  My own logins (added 2026-10-11, my request: my Workday and Amazon jobs accounts are in Bitwarden): `nuauto accounts
+  import <file>|- --only <text>` takes only the Bitwarden logins whose address has that text (best: `bw list items
+  --search myworkday | nuauto accounts import - --only myworkday`, no whole-vault export); saved "own" in accounts.json
+  (they replace one NUauto made there), used with {{PASSWORD}} and the email they hold, never a new account on that
+  site, never exported back. `nuauto accounts export --bitwarden` (my request, 2026-10-11) puts the logins NUauto made
+  and Bitwarden doesn't have yet straight into my vault with `bw` (I unlock it: BW_SESSION; NUauto never sees my master
+  password; passwords only on bw's stdin; folder "NUauto job sites"; one already there not added twice; with a homelab
+  both machines' logins). Sites: the host; on Workday's shared hosts (wd1.myworkdaysite.com/.../recruiting/<company>)
+  host/<company>; my own login on another domain counts for the whole domain (account.amazon.jobs = amazon.jobs).
 - Sign-in pages (added 2026-10-10, my call): a sign-in / create-account page's own "Submit" doesn't ask (the latest
   snapshot has a password box and only account boxes: assist.sign_in_page); any question on the page, or "Apply" /
   "Submit Application", still asks. The agent never types into a bot trap ("for robots only"). Also my call
@@ -343,6 +354,8 @@ nuauto insights        # pay, places, kinds of work in my pool and applications;
 nuauto selftest        # is this install OK? demo mode end to end in a hidden browser (nothing real touched)
 nuauto assist [<row>]  # company-site agent for a Needs Human row; asks me before any Submit
 nuauto accounts [export [<file>] [--all]]   # the job-site logins the agent made (no passwords shown); Bitwarden's import file
+nuauto accounts import <file>|- --only <text>   # my own logins from Bitwarden for those sites (bw list items --search ...)
+nuauto accounts export --bitwarden              # NUauto's new logins straight into my vault (bw unlocked by me; no file)
 nuauto review pair [<name>] | devices | unpair <name>   # the homelab assistant's review page: pair my phone (docs/REMOTE.md)
 nuauto review demo                                      # that page with made-up sessions, locally (agents: look at it with this)
 nuauto assist queue | start <nuworks|other> <row>      # (homelab) the assistant's queue / start one row's session in tmux

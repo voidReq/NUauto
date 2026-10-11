@@ -275,6 +275,7 @@ class App:
         "firefox": (["firefox"], 86400, 2),
         "discord": (["discord"], 6 * 3600, 3),
         "homelab": (["homelab"], 900, 3),
+        "bitwarden": (["bitwarden"], 900, 4),
         "nuworks": (["nuworks"], 6 * 3600, 8),
         "claude_live": (["claude_live"], 86400, 45),
         "app": (["app_update"], 86400, 30),
@@ -897,6 +898,29 @@ def act(body):
         health.fix_permissions()
         APP.run_now(["quick"])
         return {}
+    elif kind in ("bitwarden_add", "bitwarden_import", "bitwarden_login", "bitwarden_install"):
+        # in a terminal window: Bitwarden asks for your master password itself (bw unlock); NUauto never sees it, and
+        # the unlocked session stays in that window
+        nuauto = shlex.quote(config.self_exe())
+        unlock = 'BW_SESSION="$(bw unlock --raw)" && export BW_SESSION && '
+        if kind == "bitwarden_install":
+            return open_terminal("npm install -g @bitwarden/cli && bw login",
+                                 "Installing Bitwarden's command line (npm), then logging in to it.")
+        if kind == "bitwarden_login":
+            return open_terminal("bw login", "Log in to Bitwarden's command line (your Bitwarden email and master password, "
+                                 "typed into Bitwarden itself).")
+        if kind == "bitwarden_add":
+            return open_terminal(unlock + f"{nuauto} accounts export --bitwarden",
+                                 "Unlock Bitwarden here: it asks for your master password itself (NUauto never sees it). "
+                                 "Then NUauto adds the logins it made to your vault.")
+        texts = [t.strip() for t in args.get("only") or read_local().get("bitwarden_import") or [] if str(t).strip()]
+        if not texts or not all(IMPORT_TEXT.match(t) for t in texts):
+            raise Refused("Which logins? One or more site texts like myworkday or amazon.jobs.")
+        write_local({"bitwarden_import": texts})
+        return open_terminal(unlock + "bw sync && " + " && ".join(
+            f"bw list items --search {shlex.quote(t)} | {nuauto} accounts import - --only {shlex.quote(t)}" for t in texts),
+            "Unlock Bitwarden here: it asks for your master password itself (NUauto never sees it). Then NUauto takes "
+            "only your logins whose address has: " + ", ".join(texts))
     elif kind == "review_pair":  # Pair this computer: a one-time link from the homelab, opened here (you press Pair)
         if not homelab_review():
             raise Refused("The homelab assistant is off (remote_assist in local_config.json).")
@@ -1262,6 +1286,7 @@ def logins_export(body):
 
 
 def settings_get():
+    from nuauto import onboard
     cfg = read_local()
     return {"settings": {k: cfg.get(k, "" if k != "assist_read_paths" else []) for k in PUBLIC_SETTINGS},
             "max_per_week": sheet.max_per_week(), "max_per_week_ceiling": sheet.MAX_PER_WEEK_CEILING,
@@ -1269,7 +1294,9 @@ def settings_get():
             "client_json": health.client_json_found(), "google_login": os.path.exists(config.TOKEN_PATH),
             "tools": {name: config.tool_path(name) for name in ("claude", "npx")},
             "paths": {"state": config.STATE_DIR, "logs": config.LOGS_DIR}, "demo": config.DEMO,
-            "efforts": list(EFFORTS), "logins": logins_summary()}
+            "efforts": list(EFFORTS), "logins": logins_summary(),
+            "password_manager": onboard.password_manager({c.id: c for c in APP.checks()}),
+            "homelab_assistant": onboard.homelab_assistant()}
 
 
 def write_local(updates):
@@ -1294,9 +1321,30 @@ def apply_config(cfg):
     config.LAPTOP_RESUME = os.path.expanduser(cfg.get("resume_path") or "")
     config.RESUME_PATH = config.LAPTOP_RESUME if os.path.exists(config.LAPTOP_RESUME) else \
         os.path.join(config.LOCAL_DIR, "resume.pdf")
+    config.REMOTE_ASSIST = bool(cfg.get("remote_assist")) and config.HAS_SERVER
+
+
+IMPORT_TEXT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{1,59}$")  # Bitwarden's search and --only from Settings: one word,
+# never starting with "-" (it would read as an option)
+
+
+def remote_changed(old):
+    """After the homelab assistant's settings changed: the homelab gets them (sync.push), and its review page starts or
+    stops with remote_assist (nuauto-web reads it at its start). In the background: Settings answers at once."""
+    if not config.HAS_SERVER or config.IS_SERVER or config.DEMO:
+        return
+    from nuauto import sync
+
+    def push():
+        sync.push()
+        if bool(read_local().get("remote_assist")) != bool(old):
+            sync.remote("systemctl --user restart nuauto-web", "restart the homelab's web page")
+        APP.run_now(["homelab"])
+    threading.Thread(target=push, daemon=True).start()
 
 
 def settings_put(body):
+    from nuauto import onboard
     updates = {}
     if "week_start" in body:
         v = str(body["week_start"] or "").strip()
@@ -1332,9 +1380,42 @@ def settings_put(body):
         if body["assist_effort"] not in EFFORTS:
             raise Refused(f"The assistant's effort is one of {', '.join(EFFORTS)}.")
         updates["assist_effort"] = body["assist_effort"]
+    if "password_manager" in body:
+        if body["password_manager"] not in ("", "bitwarden"):
+            raise Refused("The password manager is Bitwarden, or none.")
+        updates["password_manager"] = body["password_manager"]
+    if "bitwarden_import" in body:
+        texts = body["bitwarden_import"]
+        if not isinstance(texts, list) or not all(isinstance(t, str) for t in texts) or \
+                not all(IMPORT_TEXT.match(t.strip()) for t in texts if t.strip()):
+            raise Refused("Each site text is one word like myworkday or amazon.jobs (letters, digits, dots, dashes).")
+        updates["bitwarden_import"] = [t.strip() for t in texts if t.strip()]
+    remote_keys = {"remote_assist", "remote_auto", "remote_hours", "assist_slots"} & set(body)
+    if remote_keys and not onboard.homelab_assistant()["available"]:
+        raise Refused("The assistant on a homelab needs a homelab (server_hostname in local_config.json; docs/DEPLOY.md).")
+    for k in ("remote_assist", "remote_auto"):
+        if k in body:
+            if not isinstance(body[k], bool):
+                raise Refused(f"{k} is on or off.")
+            updates[k] = body[k]
+    if "remote_hours" in body:
+        h = body["remote_hours"]
+        if not (isinstance(h, list) and len(h) == 2 and all(isinstance(x, int) and not isinstance(x, bool) for x in h)
+                and 0 <= h[0] < h[1] <= 24):
+            raise Refused("Hours are from and to, 0-24, from before to.")
+        updates["remote_hours"] = h
+    if "assist_slots" in body:
+        n = body["assist_slots"]
+        if not isinstance(n, int) or isinstance(n, bool) or not 1 <= n <= 3:
+            raise Refused("Assistants at once: 1, 2 or 3.")
+        updates["assist_slots"] = n
+    old_remote = read_local().get("remote_assist")
     if updates:
         write_local(updates)
-    APP.run_now(["quick"])
+        apply_config(read_local())
+    if remote_keys:
+        remote_changed(old_remote)
+    APP.run_now(["quick", "bitwarden"] if {"password_manager"} & set(updates) else ["quick"])
     return settings_get()
 
 

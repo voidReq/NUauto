@@ -14,6 +14,7 @@ tmp = tempfile.mkdtemp()
 config.ANSWERS_PATH = os.path.join(tmp, "answers.json")
 config.OTHER_ANSWERS_PATH = os.path.join(tmp, "answers_other.json")  # never the real banks
 config.LOCAL_DIR = os.path.join(tmp, "local")  # the session locks (slots, sites, rows) and the bank's lock: never the real local/
+config.REMOTE_ASSIST, config.IS_SERVER = False, False  # your own settings (a homelab, remote_assist) never leak in
 
 from nuauto import answers  # noqa: E402
 from nuauto import assist  # noqa: E402

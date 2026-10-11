@@ -291,15 +291,28 @@ def answer_approval(s, approval_id, decision, by, note=""):
 CSS = """body{font:16px/1.45 system-ui,sans-serif;max-width:46rem;margin:0 auto;padding:1rem;color:#1d1d1f;background:#fafafa}
 a{color:#0b5cad}.card{background:#fff;border:1px solid #ddd;border-radius:.6rem;padding:.8rem 1rem;margin:.8rem 0}
 .chip{display:inline-block;padding:.1rem .5rem;border-radius:1rem;font-size:.8rem;background:#eee}
+button:disabled{opacity:.6}button.busy::after{content:"";display:inline-block;width:.8em;height:.8em;margin-left:.5em;
+border:2px solid currentColor;border-right-color:transparent;border-radius:50%;vertical-align:-.1em;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}.working::before{content:"";display:inline-block;width:.7em;height:.7em;margin-right:.4em;
+border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .8s linear infinite}
 .approve,.prompt{background:#fde2e1}.waiting{background:#fff1c2}.finish{background:#dff3e3}
 button{font:inherit;padding:.6rem 1.1rem;border:0;border-radius:.5rem;background:#0b5cad;color:#fff;margin:.2rem .3rem .2rem 0}
 button.no{background:#777}button.go{background:#1a7f37}textarea,input[type=text]{font:inherit;width:100%;box-sizing:border-box;padding:.5rem}
 pre{white-space:pre-wrap;word-break:break-word;background:#f3f3f3;padding:.6rem;border-radius:.4rem;font-size:.85rem}
-img{max-width:100%;border:1px solid #ccc;border-radius:.3rem}.dim{color:#777;font-size:.9rem}
+img{max-width:100%;border:1px solid #ccc;border-radius:.3rem}.dim{color:#777;font-size:.9rem}.ok{color:#1a7f37;font-weight:600}
 @media (prefers-color-scheme:dark){body{background:#151515;color:#eee}.card{background:#1f1f1f;border-color:#333}
-pre{background:#262626}.chip{background:#333}.approve{background:#5a1f1d}.waiting{background:#4d3f0d}.finish{background:#1e4227}a{color:#7ab4ff}}"""
+pre{background:#262626}.chip{background:#333}.ok{color:#4ac26b}.approve{background:#5a1f1d}.waiting{background:#4d3f0d}.finish{background:#1e4227}a{color:#7ab4ff}}"""
 
-POLL_JS = """const v = document.body.dataset.v, u = document.body.dataset.poll, at = document.body.dataset.scroll;
+POLL_JS = """// A tapped button shows it is working until the next page loads (its name/value still goes with the form).
+document.addEventListener("submit", (e) => {
+  const f = e.target, b = e.submitter;
+  if (f.dataset.sent) { e.preventDefault(); return; }  // a second tap while the first is on its way
+  f.dataset.sent = "1";
+  if (b && b.name) { const h = document.createElement("input"); h.type = "hidden"; h.name = b.name; h.value = b.value; f.append(h); }
+  if (b) { b.textContent = b.dataset.busy || "Working"; b.classList.add("busy"); }
+  setTimeout(() => f.querySelectorAll("button").forEach((x) => { x.disabled = true; }), 0);
+});
+const v = document.body.dataset.v, u = document.body.dataset.poll, at = document.body.dataset.scroll;
 if (at && document.getElementById(at)) document.getElementById(at).scrollIntoView({block: at === "approve" ? "start" : "end"});
 if (u) setInterval(async () => {
   if ([...document.querySelectorAll("textarea,input[type=text]")].some(e => e.value)) return;
@@ -331,15 +344,25 @@ def queue_part(token):
         go, rest = remote.queue_now()
     except Exception as e:
         return f"<p class=dim>Queue not readable now ({esc(type(e).__name__)}).</p>"
+    from nuauto import assist
     a, b = remote.hours()
     auto = "on" if config.LOCAL.get("remote_auto") else "off (\"remote_auto\" in local_config.json)"
+    here = {(x.get("tab"), x.get("row")): x.get("slot") for x in assist.sessions()}  # sessions on the homelab now
     lines = []
     for c, why in (go + rest)[:12]:
         startable = why is None or why.startswith("started by itself once")  # (the rest can't start even by hand)
-        button = form("/start", token, "<button>Start now</button>", tab=c["tab"], row=c["row"]) if startable else ""
+        button = form("/start", token, "<button data-busy=Starting>Start now</button>", tab=c["tab"], row=c["row"]) \
+            if startable else ""
+        slot = here.get((c["tab"], c["row"]))
+        if slot:  # its session: one tap away
+            line = f"<a class=ok href='/s/{int(slot)}'>A session is working on it: open it &rarr;</a>"
+        elif why == "a session is on it":
+            line = "<span class=ok>The laptop's assistant is working on it</span>"
+        else:
+            line = f"<span class=dim>{esc(why or 'starts next')}</span>"
         lines.append(f"<div class=card><b>{esc(c['company'])}</b> <span class=dim>{esc(c['title'])} | "
                      f"{'Other jobs' if c['tab'] == 'other' else 'NUworks'} row {c['row']} | {esc(c['host'])}</span>"
-                     f"<div class=dim>{esc(why or 'starts next')}</div>{button}</div>")
+                     f"<div>{line}</div>{button}</div>")
     return (f"<h3>Queue</h3><p class=dim>Starts by itself: {esc(auto)}, {a}:00-{b}:00 New York time.</p>"
             + ("".join(lines) or "<p class=dim>Nothing approved is waiting.</p>"))
 
@@ -353,7 +376,15 @@ def index_page(token):
                      f"<span class='chip {word}'>{esc(text)}</span><div class=dim>{esc(st.get('job_title'))} | "
                      f"{esc(st.get('where'))} | slot {s['slot']}</div></div>")
     body = "<h2>NUauto assistants</h2>" + ("".join(items) or "<p class=dim>No assistant is running on the homelab.</p>")
-    return layout("NUauto assistants", body + queue_part(token))
+    # it reloads by itself when a session starts, ends or wants something (a started one shows up without a reload)
+    return layout("NUauto assistants", body + queue_part(token), index_version(), "/v")
+
+
+def index_version():
+    """Changes when a session starts or ends, or what one wants changes (cheap: no sheet read; the list polls it)."""
+    parts = [[x["slot"], x["info"].get("tab"), x["info"].get("row"), x["attention"].get("kind"),
+              (x["approval"] or {}).get("id"), (x["approval"] or {}).get("waiting")] for x in sessions()]
+    return hashlib.sha256(json.dumps(parts).encode()).hexdigest()[:16]
 
 
 def session_page(s, token, flash=""):
@@ -373,7 +404,7 @@ def session_page(s, token, flash=""):
                      f"password <code>{esc(view.get('password'))}</code></p>"
                      f"<img src='/s/{slot}/shot.png?live={int(time.time())}' alt='the screen now'></div>")
     parts.append(f"<div class=card><b>Its terminal</b><pre>{esc(terminal(s)) or '(not readable)'}</pre>"
-                 + form(f"/s/{slot}/key", token, "<button class=no name=k value=interrupt>Interrupt (Esc)</button>")
+                 + form(f"/s/{slot}/key", token, "<button class=no name=k value=interrupt data-busy=Interrupting>Interrupt (Esc)</button>")
                  + "</div>")
     if s["message"] and word != "finish":
         parts.append(f"<div class='card {'waiting' if word == 'waiting' else ''}'><b>Its latest message</b>"
@@ -392,21 +423,23 @@ def session_page(s, token, flash=""):
                      + (f"<img src='/s/{slot}/shot.png?a={esc(a['id'])}' alt='the screen when it asked'>"
                         if os.path.exists(os.path.join(s["run"], "approval.png")) else "")
                      + late + form(f"/s/{slot}/approve", token,
-                                   "<button class=go name=d value=approve>Approve: submit</button>"
+                                   "<button class=go name=d value=approve data-busy=Approving>Approve: submit</button>"
                                    "<input type=text name=note placeholder='Note for the agent (when you decline)'>"
-                                   "<button class=no name=d value=decline>Decline</button>", id=a["id"]) + "</div>")
+                                   "<button class=no name=d value=decline data-busy=Declining>Decline</button>", id=a["id"]) + "</div>")
     if word == "finish":
         parts.append("<div class='card finish' id=finish><b>The session ended. Did you approve Submit and did the site "
                      "confirm the application?</b><p class=dim>Yes marks the row Applied (dated today).</p>"
-                     + form(f"/s/{slot}/finish", token, "<button class=go name=a value=y>Yes, it went through</button>"
-                            "<button class=no name=a value=n>No</button>") + "</div>")
+                     + form(f"/s/{slot}/finish", token, "<button class=go name=a value=y data-busy=Saving>Yes, it went through</button>"
+                            "<button class=no name=a value=n data-busy=Saving>No</button>") + "</div>")
     if chat:
-        parts.append("<div class=card id=reply><b>Reply</b> <span class=dim>(typed into its terminal)</span>"
+        now = ("<p class=working>Working on it… (this page updates by itself when it answers)</p>" if word == "working"
+               else "<p class=dim>Waiting for your answer.</p>" if word == "waiting" else "")
+        parts.append("<div class=card id=reply>" + now + "<b>Reply</b> <span class=dim>(typed into its terminal)</span>"
                      + form(f"/s/{slot}/reply", token, "<textarea name=text rows=4 maxlength=4000></textarea>"
-                            "<button>Send</button>")
+                            "<button data-busy=Sending>Send</button>")
                      + "<p class=dim>Done (it submitted, or you stop here)? End the session; then it asks whether it "
                        "went through.</p>"
-                     + form(f"/s/{slot}/key", token, "<button class=no name=k value=exit>End session</button>")
+                     + form(f"/s/{slot}/key", token, "<button class=no name=k value=exit data-busy=Ending>End session</button>")
                      + "</div>")
     return layout(f"NUauto: {st.get('company') or 'assistant'}", "".join(parts), version(s), f"/s/{slot}/v",
                   scroll="approve" if a else "finish" if word == "finish" else "reply" if chat else "")
@@ -503,6 +536,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._redirect("/") if dev else self._send(200, pair_page(q.get("c", "")))
         if not dev:
             return self._send(403, layout("Not paired", NOT_PAIRED))
+        if u.path == "/v":
+            return self._send(200, index_version(), "text/plain")
         if u.path == "/":
             flash = f"<div class=card><b>{esc(q['m'])}</b></div>" if q.get("m") else ""
             return self._send(200, index_page(form_token(key)).replace("<h2>NUauto assistants</h2>",

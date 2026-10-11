@@ -677,7 +677,44 @@ def steps(checks):
     add("extras", "Notifications, automatic updates, app icon", False, "Optional.", optional=True,
         discord=os.path.exists(config.DISCORD_WEBHOOK_PATH), scheduler=kind, scheduled=scheduler_enabled() if kind else False,
         homelab=config.HAS_SERVER, launcher=launcher_exists(), mac=sys.platform == "darwin", mac_app=bool(mac_app()))
+    pm = password_manager(checks)
+    add("password_manager", "Password manager (Bitwarden)", pm["on"] and (pm["check"] or {}).get("status") == health.OK,
+        "Optional. Your own job-site logins for the assistant, and the ones it makes put into your vault.",
+        optional=True, **pm)
+    ha = homelab_assistant()
+    if ha["available"]:
+        add("homelab_assistant", "Assistant on your homelab", ha["on"], "Optional. Company-site applications go on with "
+            "this computer off; you answer and approve from your phone.", optional=True, **ha)
     return out
+
+
+def password_manager(checks):
+    """Settings' and setup's Password manager part (optional; local_config "password_manager"): no secrets."""
+    from nuauto import accounts
+    cfg = local_config()
+    c = checks.get("bitwarden")
+    try:
+        with open(accounts.PATH) as f:
+            own = sum(1 for a in json.load(f).values() if a.get("own"))
+    except (OSError, ValueError):
+        own = 0
+    return {"on": cfg.get("password_manager") == "bitwarden", "check": c.to_dict() if c else None,
+            "waiting": accounts.waiting(), "own": own, "only": cfg.get("bitwarden_import") or ["myworkday"],
+            "bw": not config.DEMO and bool(shutil.which("bw") or config.tool_path("bw"))}
+
+
+def homelab_assistant():
+    """Settings' and setup's Assistant on your homelab part (optional; homelab mode only, docs/REMOTE.md)."""
+    from nuauto import remote
+    cfg = local_config()
+    slots = cfg.get("assist_slots")
+    from nuauto import review
+    on = bool(cfg.get("remote_assist"))
+    url = review.page_url() if on else ""
+    return {"available": bool(config.HAS_SERVER and not config.IS_SERVER and not config.FROZEN),
+            "on": on, "auto": bool(cfg.get("remote_auto")), "hours": list(remote.hours()),
+            "slots": slots if isinstance(slots, int) and not isinstance(slots, bool) and 1 <= slots <= 3 else 3,
+            "review_url": url.rstrip("/") if url.startswith("http") else None}
 
 
 def complete(step_list):

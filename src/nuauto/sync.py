@@ -184,7 +184,12 @@ def merge_accounts(mine, theirs):
         if a is None or b is None or a == b:
             out[site] = a or b
             continue
-        first, second = sorted((a, b), key=lambda x: x.get("created") or "")
+        # your own login (imported) always stays the site's login (two of yours: the newer import); else the earlier one
+        own = [x for x in (a, b) if x.get("own")]
+        if len(own) == 1:
+            first, second = own[0], (b if own[0] is a else a)
+        else:
+            first, second = sorted((a, b), key=lambda x: x.get("created") or "", reverse=bool(own))
         login = dict(first)
         login["jobs"] = list(first.get("jobs") or []) + [j for j in second.get("jobs") or []
                                                         if j.get("url") not in {x.get("url") for x in first.get("jobs") or []}]

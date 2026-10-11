@@ -278,6 +278,14 @@
       return [box];
     },
 
+    password_manager(s, redraw) {
+      return [passwordManagerPanel(s.data, () => redraw())];
+    },
+
+    homelab_assistant(s, redraw) {
+      return [homelabAssistantPanel(s.data, () => redraw())];
+    },
+
     extras(s, redraw) {
       const d = s.data;
       const url = el("input", { type: "text", placeholder: "https://discord.com/api/webhooks/…", "aria-label": "Discord webhook", testid: "setup-discord-url" });
@@ -354,7 +362,7 @@
     }
     await load(true);
     // re-check the steps when a run ends, or when a check they show changes (not on every poll: typing is kept)
-    const watched = () => S.checks.filter((c) => ["firefox", "claude", "nuworks", "google", "resume"].includes(c.id))
+    const watched = () => S.checks.filter((c) => ["firefox", "claude", "nuworks", "google", "resume", "bitwarden"].includes(c.id))
       .map((c) => `${c.id}:${c.status}`).join(",");
     let seen = watched();
     return {

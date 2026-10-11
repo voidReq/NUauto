@@ -227,6 +227,10 @@ const FIXES = {
   open_sheet: () => { if (S.state && S.state.sheet_url) openExternal(S.state.sheet_url); },
   update: () => action("update"),
   open_release: () => openExternal("https://github.com/voidReq/NUauto/releases/latest"),
+  bitwarden_add: () => action("bitwarden_add"),
+  bitwarden_login: () => action("bitwarden_login"),
+  bitwarden_install: () => confirmBox("Install Bitwarden's command line?", "This runs npm install -g @bitwarden/cli in a terminal window, then bw login (you type your Bitwarden email and master password into Bitwarden there, never into NUauto).",
+    "Install", () => action("bitwarden_install")),
 };
 
 function fixButton(c, cls = "btn small") {
@@ -249,13 +253,14 @@ function renderShell() {
   fill($("#side-foot"), el("div", { text: `v${st.version}` + (st.mode === "homelab" ? " · homelab" : "") }));
 }
 
-const STRIP = ["google", "sheet", "nuworks", "claude", "homelab"];
+const STRIP = ["google", "sheet", "nuworks", "claude", "homelab", "bitwarden"];
+const HIDDEN_WHEN_OFF = new Set(["homelab", "bitwarden"]);  // optional parts: no chip until you use them
 const SHORT = { ok: "OK", warn: "Check", fail: "Problem", busy: "Busy", unknown: "…", off: "Off" };
 
 function renderHealth() {
   const strip = $("#health");
   const by = Object.fromEntries(S.checks.map((c) => [c.id, c]));
-  const dots = STRIP.filter((id) => by[id] && !(id === "homelab" && by[id].status === "off")).map((id) => {
+  const dots = STRIP.filter((id) => by[id] && !(HIDDEN_WHEN_OFF.has(id) && by[id].status === "off")).map((id) => {
     const c = by[id];
     return el("button", { class: `dot ${c.status}`, testid: `health-${id}`, title: c.detail, "aria-label": `${c.title}: ${c.detail}`,
       onclick: (e) => { e.stopPropagation(); healthPopover(c); } }, el("i"), el("span", { text: c.title }));
@@ -266,7 +271,8 @@ function renderHealth() {
 }
 
 // The check groups (gui.App.GROUPS) a status chip's Check now runs again
-const RECHECK = { google: ["quick", "sheet"], sheet: ["sheet"], nuworks: ["quick", "nuworks"], claude: ["claude"], homelab: ["homelab"] };
+const RECHECK = { google: ["quick", "sheet"], sheet: ["sheet"], nuworks: ["quick", "nuworks"], claude: ["claude"], homelab: ["homelab"],
+  bitwarden: ["bitwarden"] };
 
 function healthPopover(c) {
   document.querySelectorAll(".popover").forEach((p) => p.remove());
@@ -1454,7 +1460,7 @@ screens.settings = async (view) => {
     fill(view, 
       el("div", { class: "card", testid: "all-checks" }, el("div", { class: "row between" }, el("h2", { text: "Health" }),
         el("button", { class: "btn small", text: "Run all checks now", testid: "btn-run-checks", onclick: async () => {
-          await api.post("/api/health/run", { groups: ["quick", "sheet", "claude", "firefox", "discord", "homelab", "nuworks"] }).catch(fail);
+          await api.post("/api/health/run", { groups: ["quick", "sheet", "claude", "firefox", "discord", "homelab", "bitwarden", "nuworks"] }).catch(fail);
           toast("Checking…"); setTimeout(pollHealth, 1500); setTimeout(pollHealth, 6000); } })),
         el("ul", { class: "list" }, ...S.checks.map((c) => el("li", { testid: `check-${c.id}` }, el("div", { class: "what" },
           el("span", { class: `chip ${c.status}`, text: SHORT[c.status] || c.status }), " ", el("b", { text: c.title }), " ",
@@ -1474,6 +1480,10 @@ screens.settings = async (view) => {
           el("div", {}, el("button", { class: "btn primary", text: "Save", testid: "settings-save", onclick: async () => {
             try { d = await api.post("/api/settings", { resume_label: label.value, week_start: week.value, max_per_week: cap.value }); toast("Saved."); pollState(); draw(); } catch (e) { fail(e); } } })))),
       assistantCard(),
+      el("div", { class: "card stack", testid: "pm-settings" }, el("h2", { text: "Password manager" }),
+        passwordManagerPanel(d.password_manager, (r) => { if (r) { d = r; draw(); } else reload(); })),
+      d.homelab_assistant.available ? el("div", { class: "card stack", testid: "ha-settings" }, el("h2", { text: "Assistant on your homelab" }),
+        homelabAssistantPanel(d.homelab_assistant, (r) => { if (r) { d = r; draw(); } else reload(); })) : null,
       el("div", { class: "card stack" }, el("h2", { text: "Setup" }),
         el("p", { class: "small muted", text: "Google client, sheet, resume, NUworks, preferences, notifications: each step checked." }),
         el("div", { class: "row" }, el("a", { class: "btn", href: "#/setup", text: "Open setup" }),
@@ -1528,6 +1538,73 @@ screens.settings = async (view) => {
   await reload();
   return { health: draw };
 };
+
+// ---- Optional parts, the same in Settings and in setup: your password manager, and the assistant on a homelab.
+// done(newSettings) after a change (Settings redraws with it; setup reloads its steps); done() to reload.
+
+async function saveSettings(body, message, done) {
+  try { const r = await api.post("/api/settings", body); toast(message); done(r); } catch (e) { fail(e); }
+}
+
+function passwordManagerPanel(pm, done) {
+  const chk = pm.check;
+  const only = el("input", { type: "text", value: (pm.only || []).join(", "), placeholder: "myworkday, amazon.jobs",
+    "aria-label": "Your own logins: words in their addresses", testid: "pm-only" });
+  return el("div", { class: "stack", testid: "pm-panel" },
+    el("p", { class: "small muted", text: "Optional. With Bitwarden, the assistant signs in with your own job-site logins (your Workday accounts, say) instead of making new ones, and the logins it does make go into your vault. NUauto uses Bitwarden's command line (bw): you unlock it yourself in a terminal window, so NUauto never sees your master password." }),
+    el("div", { class: "row between" }, el("div", { class: "row" }, el("b", { text: "Bitwarden" }),
+      el("span", { class: `chip ${pm.on ? (chk ? chk.status : "unknown") : "off"}`, testid: "pm-status",
+        text: pm.on ? (chk ? SHORT[chk.status] || chk.status : "checking…") : "not used" })),
+      el("button", { class: "btn small" + (pm.on ? "" : " primary"), testid: "pm-toggle", text: pm.on ? "Stop using it" : "Use Bitwarden",
+        onclick: () => saveSettings({ password_manager: pm.on ? "" : "bitwarden" }, pm.on ? "Bitwarden: not used." : "Bitwarden: on.", done) })),
+    pm.on && chk ? el("p", { class: "small", text: chk.detail }) : null,
+    pm.on ? [
+      !pm.bw ? el("div", { class: "row between" }, el("span", { class: "small", text: "First, Bitwarden's command line (bw)." }),
+        el("button", { class: "btn small primary", text: "Install it", testid: "pm-install", onclick: FIXES.bitwarden_install })) : null,
+      el("div", { class: "row between" }, el("span", { class: "small", testid: "pm-waiting", text: pm.waiting ?
+          `${plural(pm.waiting, "login")} NUauto made ${pm.waiting === 1 ? "waits" : "wait"} to go into your vault.` : "Every login NUauto made is in your vault." }),
+        el("button", { class: "btn small" + (pm.waiting ? " primary" : ""), testid: "pm-add", disabled: !pm.bw || !pm.waiting,
+          text: pm.waiting ? `Add ${pm.waiting} to Bitwarden` : "Nothing to add", onclick: () => action("bitwarden_add") })),
+      el("label", { class: "field" }, "Your own logins",
+        el("span", { class: "muted small", text: "Sites where you already have an account saved in Bitwarden: words their addresses contain, comma-separated (myworkday for Workday, amazon.jobs). Only those logins are taken, never the rest of your vault." +
+          (pm.own ? ` You have ${plural(pm.own, "login")} of yours in NUauto now.` : "") }), only),
+      el("div", { class: "row" },
+        el("button", { class: "btn small", testid: "pm-import", disabled: !pm.bw, text: "Import my logins", onclick: () =>
+          action("bitwarden_import", { only: only.value.split(",").map((t) => t.trim()).filter(Boolean) }) }),
+        el("button", { class: "btn small ghost", text: "Check now", onclick: async () => {
+          await api.post("/api/health/run", { groups: ["bitwarden"] }).catch(fail);
+          setTimeout(() => { pollHealth(); done(); }, 3000); } })),
+    ] : null);
+}
+
+function homelabAssistantPanel(ha, done) {
+  if (!ha.available) return null;
+  const from = el("input", { type: "number", min: "0", max: "23", step: "1", value: String(ha.hours[0]), "aria-label": "From (hour)", testid: "ha-from" });
+  const to = el("input", { type: "number", min: "1", max: "24", step: "1", value: String(ha.hours[1]), "aria-label": "To (hour)", testid: "ha-to" });
+  const slots = el("select", { "aria-label": "Assistants at once", testid: "ha-slots" }, ...[1, 2, 3].map((n) => el("option", { value: String(n), text: String(n) })));
+  slots.value = String(ha.slots);
+  return el("div", { class: "stack", testid: "ha-panel" },
+    el("p", { class: "small muted", text: "Optional, with a homelab. Company-site applications run there too, in a virtual browser, so they go on with this computer off. Discord tells you when one needs you; you answer it, approve each Submit and solve captchas on its review page (over Tailscale, from your phone or this computer). The homelab needs a few packages once: docs/REMOTE.md." }),
+    el("div", { class: "row between" }, el("div", { class: "row" }, el("b", { text: "Assistant on the homelab" }),
+      el("span", { class: `chip ${ha.on ? "ok" : "off"}`, text: ha.on ? "on" : "off", testid: "ha-status" })),
+      el("button", { class: "btn small" + (ha.on ? "" : " primary"), testid: "ha-toggle", text: ha.on ? "Turn off" : "Turn on",
+        onclick: () => saveSettings({ remote_assist: !ha.on }, ha.on ? "Off: the homelab runs no assistant." : "On: the homelab can run the assistant.", done) })),
+    ha.on ? [
+      el("div", { class: "row between" }, el("span", { class: "small", text: ha.auto ? "It starts sessions by itself from your approved rows." : "You start each session yourself (the review page's queue, or Company sites here)." }),
+        el("button", { class: "btn small", testid: "ha-auto", text: ha.auto ? "Stop starting by itself" : "Start sessions by itself",
+          onclick: () => saveSettings({ remote_auto: !ha.auto }, ha.auto ? "It no longer starts sessions by itself." : "It starts sessions by itself now, in its hours.", done) })),
+      el("label", { class: "field" }, "Its hours", el("span", { class: "muted small", text: "When it may start sessions by itself, New York time (so no pings at night)." }),
+        el("div", { class: "row" }, "from", from, "to", to)),
+      el("label", { class: "field" }, "Assistants at once", el("span", { class: "muted small", text: "On each machine, 1 to 3." }), slots),
+      el("div", { class: "row" }, el("button", { class: "btn small primary", text: "Save", testid: "ha-save", onclick: () =>
+        saveSettings({ remote_hours: [Number(from.value), Number(to.value)], assist_slots: Number(slots.value) }, "Saved.", done) })),
+      el("div", { class: "row" },
+        el("button", { class: "btn small", text: "Pair this computer", testid: "ha-pair", onclick: async () => {
+          const r = await action("review_pair");
+          if (r && r.url) { openExternal(r.url); toast("Opened a pairing link in your browser: press Pair there."); } } }),
+        ha.review_url ? el("button", { class: "btn small ghost", text: "Open the review page", onclick: () => openExternal(`${ha.review_url}/`) }) : null),
+    ] : null);
+}
 
 // ---- Setup (filled in by the wizard code in setup.js)
 screens.setup = async (view) => {

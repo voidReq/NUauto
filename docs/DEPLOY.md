@@ -90,7 +90,8 @@ SECRETS AND STATE (never print or log any of these; all mode 600)
   assist_profile/       yes     (yes)    company-site logins of `nuauto assist`; never synced (with remote_assist the
                                          homelab has its own)
   assist_profile_2/, _3/ yes    (yes)    the same, for the 2nd and 3rd assistant running side by side
-  accounts.json         yes     (yes)    the job-site logins the assistant made (email + a password per site); with
+  accounts.json         yes     (yes)    the job-site logins the assistant made (email + a password per site), and your
+                                         own ones imported from Bitwarden (`nuauto accounts import`); with
                                          remote_assist merged both ways by sync.share (docs/REMOTE.md), else never
                                          synced; `nuauto accounts export` (or Settings) writes Bitwarden's import file
   gmail_token.json      yes     (yes)    the read-only Gmail login for the assistant's email codes (`nuauto login gmail`;
