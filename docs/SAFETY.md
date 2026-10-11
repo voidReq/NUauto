@@ -90,8 +90,8 @@ COMPANY-SITE AGENT (assist.py, prompts/ASSIST_PROMPT.md)
 - No page scripts; only tools in assist.TOOLS | assist.decide | test_assist
 - Navigation only to http(s) | assist.decide | test_assist
 - Uploads: only the run's copy of the resume (logs/<run>/upload/, resolved path) | assist.decide (browser_file_upload) | test_assist
-- Bash: only the answer-bank command (answer|save|once|alias|blank|wait), no shell operators | assist.check_bash | test_assist
-- Read/Glob/Grep only inside the resume and local_config.json assist_read_paths; symlinks resolved | assist.check_read, assist.under | test_assist
+- Bash: only the answer-bank command (answer|guess|guesses|save|once|confirm|alias|blank|wait), no shell operators | assist.check_bash | test_assist
+- Read/Glob/Grep only inside the resume and local_config.json assist_read_paths / assist_writeups; symlinks resolved | assist.check_read, assist.under | test_assist
 - Never read inside them: NUauto's local/ folders (this one and any checkout's, found at start), .ssh/.gnupg/.git/...,
   key / token / cookie / password / .env files; Grep may not search a folder holding a local/ | assist.secret_path,
   protected_dirs, check_read | test_assist
@@ -100,7 +100,9 @@ COMPANY-SITE AGENT (assist.py, prompts/ASSIST_PROMPT.md)
   assist.session | test_assist (the settings it writes)
 - Saved/once answers: one line, max 300 chars, must equal an option; already-saved answers are not overwritten; always_ask / voluntary pages are never saved | assist.valid_answer, assist.bank | test_assist
 - Voluntary / EEO pages always ask the user | assist.page_always_asks, assist.lookup | test_assist
-- Unknown label: the agent gets the saved answers to infer from (not always_ask, not leave-blank), then aliases the label; anything else it asks | assist.lookup, assist.saved_answers | test_assist (what is handed out); the inference itself is prompt-only
+- Unknown label: the agent gets the saved answers to infer from (not always_ask, not leave-blank), then aliases the label; anything else it guesses (below) | assist.lookup, assist.saved_answers | test_assist (what is handed out); the inference itself is prompt-only
+- Guesses (2026-10-11): recorded with a reason, one line, an option when there are options; never over a saved answer, one given this run, or a leave-blank one; settled only by the user's answer at the end (save / once / confirm / blank / alias); an essay is confirmed, never saved | assist.record_guess, settle, guess_list | test_assist
+- Every Submit-type question (click, Enter, type submit) lists the open guesses, the answers the user changed, how many were confirmed, and values typed with no saved answer or guess behind them (the guard's own record: type / fill_form / select_option; searches, password placeholders and tick boxes left out) | assist.submit_ask, review_lines, unexplained, record_typed | test_assist; shown in full in Claude Code's confirmation (checked 2.1.296); a real Sonnet session on a local form; that the agent records every guess it types is prompt-only, the typed-values list is the check
 - Guard crash blocks the action | assist.hook_main (exit 2) | no test
 - Rows the agent may take: Needs Human + "External application"; never NUworks (even with --url) | assist.assist_target | test_assist
 - Sheet touched only by the launcher, after you answer y; agent has no sheet access | assist.run (mark_applied_by_hand), tools limited to the list above | test_assist (target rules only; the y/n flow is not tested)
