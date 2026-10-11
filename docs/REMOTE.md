@@ -39,7 +39,9 @@ Off again: "remote_assist": false (the homelab then refuses `nuauto assist`; its
 
 PAIR YOUR PHONE (once per device)
   nuauto review pair phone          (laptop or homelab; --discord also posts the link to your Discord)
-  Open the printed link on the phone, Tailscale on, and press Pair (within 10 minutes; the link works once).
+  Open the printed link on the phone, Tailscale on, and press Pair (within 10 minutes; the link works once). Pair the
+  browser you will use: a link tapped in Discord opens in Discord's own browser, which keeps its own cookies (copy it
+  into Safari / Chrome instead). Each browser is paired once; then bookmark http://<web_listen_host>:8766/ there.
   nuauto review devices / nuauto review unpair <name>|--all
 
 THE QUEUE (remote.py; nuauto-assist.timer every 10 minutes runs `nuauto assist auto`)

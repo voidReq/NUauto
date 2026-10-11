@@ -409,6 +409,13 @@ def session_page(s, token, flash=""):
                   scroll="approve" if a else "reply" if chat else "")
 
 
+NOT_PAIRED = ("<h2>Not paired</h2><p>This browser is not paired with NUauto. Make a pairing link (<code>nuauto review "
+              "pair</code>, or <code>nuauto review pair --discord</code>) and open it in this browser.</p><p class=dim>"
+              "Paired a moment ago? A link opened from Discord (or another app) may have opened in that app's own "
+              "browser, which keeps its own cookies: copy the link into your phone's browser (Safari, Chrome) and pair "
+              "there; each browser is paired once.</p>")
+
+
 def pair_page(code, done=None):
     if done is True:
         home = page_url()
@@ -492,8 +499,7 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/pair":  # already paired (an old pairing link opened again): straight to the page
             return self._redirect("/") if dev else self._send(200, pair_page(q.get("c", "")))
         if not dev:
-            return self._send(403, layout("Not paired", "<h2>Not paired</h2><p>This device is not paired with NUauto. "
-                                          "On the laptop: <code>nuauto review pair</code>, then open its link here.</p>"))
+            return self._send(403, layout("Not paired", NOT_PAIRED))
         if u.path == "/":
             flash = f"<div class=card><b>{esc(q['m'])}</b></div>" if q.get("m") else ""
             return self._send(200, index_page(form_token(key)).replace("<h2>NUauto assistants</h2>",
@@ -684,7 +690,9 @@ def main(argv):
         print(f"Open this on the device to pair (once, within {PAIR_TTL // 60} minutes; Tailscale on):\n  {link}")
         if "--discord" in argv:
             from nuauto import daily
-            daily.discord(f"**NUauto: pair a device**\nOpen on your phone (once, {PAIR_TTL // 60} minutes): {link}")
+            daily.discord(f"**NUauto: pair a device**\nCopy this into your phone's browser (Safari, Chrome) rather than "
+                          "tapping it: Discord's own browser keeps its own cookies. Once, within "
+                          f"{PAIR_TTL // 60} minutes, then bookmark the page there: {link}")
         return
     if argv == ["devices"]:
         try:
