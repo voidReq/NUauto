@@ -168,6 +168,9 @@ def status(s):
     a, att = s["approval"], s["attention"].get("kind")
     if att == "finish":
         return "finish", "The session ended: did it go through?"
+    if att == "answered":  # your Yes / No is typed in; the launcher is marking the sheet and closing the run
+        return "answered", ("You said it went through: marking it Applied" if s["attention"].get("answer") == "y"
+                            else "You said it didn't go through: leaving the row as it was")
     if a:
         return "approve", f"Ready to submit: {a.get('what', '')}"
     if att == "approve":  # Claude Code's own permission prompt (its Notification hook), not a Submit of the guard's
@@ -277,6 +280,17 @@ def terminal(s):
     for p in accounts.passwords(s["state"].get("password_sites") or []):
         text = text.replace(p, assist.HIDDEN)
     return text.rstrip()
+
+
+def answered(s, answer):
+    """Your answer to "Did it go through?" is typed in: the page says so (not the question again) until the run ends."""
+    from nuauto import assist
+    assist.write_private(os.path.join(s["run"], assist.ATTENTION), {"kind": "answered", "answer": answer,
+                                                                      "since": time.time(), "said": ""})
+
+
+def st_company(s):
+    return s["state"].get("company") or "the job"
 
 
 def mark_laptop(s, by):
@@ -492,7 +506,7 @@ def session_page(s, token, flash=""):
     opens at the bottom part (the Submit question when there is one)."""
     st, a, word = s["state"], s["approval"], status(s)[0]
     slot = s["slot"]
-    chat = word not in ("finish", "prompt")
+    chat = word not in ("finish", "prompt", "answered")
     note = f"<div class=card><b>{esc(flash)}</b></div>" if flash else ""
     parts = [f"<p><a href='/'>&larr; all</a></p><h2>{esc(st.get('company'))}</h2>"
              f"<div class=dim>{esc(st.get('job_title'))} | {esc(st.get('where'))} | slot {slot}</div>"]
@@ -505,10 +519,13 @@ def session_page(s, token, flash=""):
     parts.append(f"<div class=card><b>Its terminal</b><pre id=live-term>{esc(terminal(s)) or '(not readable)'}</pre>"
                  + form(f"/s/{slot}/key", token, "<button class=no name=k value=interrupt data-busy=Interrupting>Interrupt (Esc)</button>")
                  + "</div>")
-    if s["message"] and word != "finish":
+    if s["message"] and word not in ("finish", "answered"):
         parts.append(f"<div class='card {'waiting' if word == 'waiting' else ''}'><b>Its latest message</b>"
                      f"<pre>{esc(s['message'])}</pre></div>")
     parts.append(note)
+    if word == "answered":
+        parts.append(f"<div class='card finish'><p class=working>{esc(status(s)[1])}… this session closes in a moment.</p>"
+                     "<p><a href='/'>All sessions</a></p></div>")
     if word == "prompt":
         parts.append("<div class='card approve'><b>Claude Code is asking something in its terminal</b> (a permission "
                      "question, not a Submit of the guard's). The reply box is off until it is answered, because Enter "
@@ -718,10 +735,17 @@ class Handler(BaseHTTPRequestHandler):
             elif sub == "/finish" and f.get("a") == "laptop" and s["attention"].get("kind") == "finish":
                 msg = mark_laptop(s, by)
                 type_into(s, "n")
+                answered(s, "n")
+                return self._redirect("/?m=" + quote(msg))
             elif sub == "/finish" and f.get("a") in ("y", "n") and s["attention"].get("kind") == "finish":
                 type_into(s, f["a"])
+                answered(s, f["a"])
                 assist.log(s["run"], f"REVIEW PAGE did it go through: {f['a']} (by {by})")
-                msg = "Thanks." if f["a"] == "y" else "Left as it was."
+                msg = (f"Thanks: {st_company(s)} is marked Applied." if f["a"] == "y" else
+                       f"{st_company(s)}: left as it was.")
+                return self._redirect("/?m=" + quote(msg))  # its session closes in a moment: back to the list
+            elif sub == "/finish" and s["attention"].get("kind") == "answered":
+                return self._redirect("/?m=" + quote("Already answered: its session is closing."))
             elif sub == "/key" and f.get("k") == "interrupt":
                 _tmux("send-keys", "-t", target(s), "Escape")
                 msg = "Interrupted."

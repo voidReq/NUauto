@@ -112,7 +112,8 @@ THE REVIEW PAGE (review.py; http://<web_listen_host>:8766/, inside nuauto-web, o
   The browser       the browser view's link and password, and the screen now (it and the terminal refresh in place every
                     4 s while it works). A captcha: solve it there, reply "done".
   Its terminal      the last lines (this run's site passwords taken out); Interrupt (Esc), End session (/exit).
-  Ended             Did it go through? Yes / No (typed into the launcher's question).
+  Ended             Did it go through? Yes / No (typed into the launcher's question). One tap: the page goes back to
+                    the list and says your answer ("marking it Applied") until the run closes, never the question again.
 - Paired devices only: a cookie with a random key (HttpOnly, SameSite=Strict; the homelab keeps its hash in
   local/review_devices.json); this server's own Host; on every POST a token made from the key and a matching Origin
   (Referrer-Policy same-origin: with no-referrer browsers send "Origin: null" and every button would be refused).
