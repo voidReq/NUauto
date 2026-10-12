@@ -184,8 +184,8 @@ try:
     from nuauto import remote  # noqa: E402
 
     def cand(row, host):
-        return {"tab": "other", "row": row, "url": "https://x.example/a", "host": host, "company": "Q Co", "title": "T",
-                "closes": None, "match": 50}
+        return {"tab": "other", "row": row, "url": "https://x.example/a", "row_url": "https://x.example/a", "host": host,
+                "company": "Q Co", "title": "T", "closes": None, "match": 50}
     real_queue = remote.queue_inputs
     remote.queue_inputs = lambda: ([cand(7, "acme.example"), cand(9, "b.example"), cand(11, "c.example")],
                                    [{"tab": "other", "row": 7, "host": "acme.example"}],           # slot 1's session (row 7)
@@ -196,6 +196,21 @@ try:
         assert "The laptop's assistant is working on it" in page_q              # row 9: a laptop claim, no session here
         assert page_q.count("Start now") == 1 and "name=row value='11'" in page_q   # only row 11 can start
         assert "1 slot free" not in page_q and "2 slots free" in page_q
+        # Drop (not applying): only on rows no session works on; the row becomes Failed through sheet.drop, with the reason
+        assert page_q.count("action='/drop'") == 1 and "<option value=duplicate>" in page_q
+        from nuauto import sheet  # noqa: E402
+        dropped, real = [], (sheet.open_other, sheet.drop)
+        sheet.open_other = lambda interactive=True: "ws"
+        sheet.drop = lambda ws, n, url, why: dropped.append((ws, n, url, why))
+        try:
+            f = {"tab": "other", "row": "11", "url": "https://x.example/a", "why": "duplicate"}
+            assert review.drop_now(f, "phone").startswith("Dropped Q Co") and dropped == [("ws", 11, "https://x.example/a", "duplicate")]
+            assert review.drop_now({**f, "row": "7"}, "phone").startswith("Not dropped: an assistant")    # slot 1's session
+            assert review.drop_now({**f, "row": "9"}, "phone").startswith("Not dropped: an assistant")    # the laptop's claim
+            assert review.drop_now({**f, "url": "https://other.example/"}, "phone").startswith("Not dropped: it is not")
+            assert review.drop_now({**f, "why": "bored"}, "phone") == "Nothing to do." and len(dropped) == 1
+        finally:
+            sheet.open_other, sheet.drop = real
     finally:
         remote.queue_inputs = real_queue
 

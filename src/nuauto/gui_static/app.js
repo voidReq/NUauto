@@ -515,6 +515,22 @@ function markRow(kind, t, tab) {  // tab "other": a row of the sheet's Other job
   });
 }
 
+// Drop: you won't apply (closed, a duplicate, a bad location): the row becomes Failed with the reason in its Notes,
+// leaves every queue and stays in the sheet as your record (sheet.drop), so Review never offers the job again.
+const DROP_REASONS = [["closed", "It has closed"], ["duplicate", "A duplicate"], ["location", "Bad location"], ["other", "Other reason"]];
+function dropRow(t, tab) {  // tab "other": a row of the sheet's Other jobs tab
+  modal((box, close) => box.append(
+    el("h2", { text: "Not applying?" }),
+    el("p", { class: "muted", text: `${t.company} · ${t.title || ""} (${tab === "other" ? "Other jobs " : ""}row ${t.row}) leaves the queue. The sheet keeps it as Failed, with the reason in its Notes.` }),
+    el("div", { class: "foot" }, el("button", { class: "btn", text: "Cancel", onclick: close }),
+      el("div", { class: "row" }, ...DROP_REASONS.map(([why, label]) => el("button", { class: "btn danger", text: label, testid: `drop-${why}`,
+        onclick: async () => {
+          close();
+          try { await api.post("/api/mark", { action: "drop", why, row: t.row, url: t.url, tab }); toast("Dropped."); pollState(); if (S.screen && S.screen.reload) S.screen.reload(); }
+          catch (e) { fail(e); }
+        } }))))));
+}
+
 // ---- Review (approve, or rate only). Two sources when internships are on (state.internships, intern.py): NUworks co-ops,
 // and the term's internships (Simplify's and vanshb03's lists), whose Approve adds a row to the sheet's Other jobs tab.
 screens.review = async (view) => {
@@ -1117,7 +1133,8 @@ function companyCards(d) {
         el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title, jobFacts(r), el("div", { class: "small muted", text: r.host })),
         el("div", { class: "row" }, dueChip(r), assistantStart(d, r, "jobs", `assist-${r.row}`, { body: { row: r.row } }),
           linkOut(r.target, "Open site"),
-          el("button", { class: "btn small", text: "I applied myself", onclick: () => markRow("applied", r) })))))) : null,
+          el("button", { class: "btn small", text: "I applied myself", onclick: () => markRow("applied", r) }),
+          el("button", { class: "btn small", text: "Drop", testid: `company-drop-${r.row}`, onclick: () => dropRow(r) })))))) : null,
     d.site.length ? el("div", { class: "card" }, el("h2", { text: "Submitted on NUworks; the company site still wants you" }),
       el("ul", { class: "list" }, ...d.site.map((r) => el("li", { testid: `site-${r.row}` }, el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title,
         jobFacts(r), el("div", { class: "small muted", text: r.notes.slice(0, 160) })), el("div", { class: "row" }, dueChip(r), linkOut(r.url, "Open job"),
@@ -1157,7 +1174,8 @@ function otherCard(d) {
       el("div", { class: "row" },
         assistantStart(d, r, "other", `other-assist-${r.row}`, { disabled: !r.target, body: { row: r.row, tab: "other" } }),
         r.target ? linkOut(r.target, "Open site") : null,
-        el("button", { class: "btn small", text: "I applied myself", testid: `other-mark-${r.row}`, onclick: () => markRow("applied", r, "other") }))))) :
+        el("button", { class: "btn small", text: "I applied myself", testid: `other-mark-${r.row}`, onclick: () => markRow("applied", r, "other") }),
+        el("button", { class: "btn small", text: "Drop", testid: `other-drop-${r.row}`, onclick: () => dropRow(r, "other") }))))) :
       el("p", { class: "empty", text: d.exists ? `Nothing Approved in the ${d.tab} tab.` : "No jobs yet. Add one with Add a job." }));
 }
 

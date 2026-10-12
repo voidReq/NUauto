@@ -963,13 +963,21 @@ def company():
 
 def mark(body):
     action, row, url = body.get("action"), body.get("row"), str(body.get("url", ""))
-    other = body.get("tab") == "other"  # a row of the Other jobs tab (only "applied" there)
-    if action not in ("applied", "site") or not str(row).isdigit() or (other and action != "applied"):
+    other = body.get("tab") == "other"  # a row of the Other jobs tab (only "applied" and "drop" there)
+    if action not in ("applied", "site", "drop") or not str(row).isdigit() or (other and action == "site"):
         raise Refused("Unknown action.")
+    if action == "drop":
+        if body.get("why") not in sheet.DROP_REASONS:
+            raise Refused("Unknown reason.")
+        tab = "other" if other else "jobs"
+        if any(s.get("tab") == tab and s.get("row") == int(row) for s in assist_sessions()):
+            raise Refused("An assistant is working on this row: end its session first.")
     ws = worksheet(other)
     try:
         if action == "site":
             sheet.mark_site_done(ws, int(row), url)
+        elif action == "drop":
+            sheet.drop(ws, int(row), url, body["why"])
         else:
             sheet.mark_applied_by_hand(ws, int(row), url, how="by hand (marked in NUauto)")
     except sheet.SheetError as e:
@@ -979,6 +987,12 @@ def mark(body):
     else:
         APP.refresh_rows(force=True)
     return {}
+
+
+def assist_sessions():
+    """Every assistant session running now: this computer's and (remote_assist) the homelab's."""
+    from nuauto import assist
+    return assist.sessions() + list(homelab_assistants())
 
 
 # ---------------------------------------------------------------- other jobs (the sheet's Other jobs tab)

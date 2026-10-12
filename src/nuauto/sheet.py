@@ -333,6 +333,26 @@ def mark_applied_by_hand(ws, row_number, url, how="by hand"):
               value_input_option="RAW")
 
 
+DROP_MARK = "Dropped"   # Notes prefix of a row you chose not to apply to (drop)
+DROP_REASONS = {"closed": "the posting has closed", "duplicate": "a duplicate of another row",
+                "location": "the location doesn't work", "other": "not applying"}
+
+
+def drop(ws, row_number, url, why="other"):
+    """You won't apply to this one (closed, a duplicate, a bad location...): Failed, Notes "Dropped <date>: <reason>."
+    in front. It leaves every queue (they take Approved and Needs Human rows only) and stays as your record, so Review
+    never offers the job again. Only an Approved or Needs Human row still holding this job, never one whose Submit
+    click is unresolved. why: a DROP_REASONS key."""
+    current = _row_for(ws, row_number, url)
+    if current.status not in ("Approved", "Needs Human"):
+        raise SheetError(f"Row {row_number} is {current.status or 'empty'}: only Approved or Needs Human rows are dropped.")
+    if current.notes.startswith(SUBMIT_MARK):
+        raise SheetError(f"Row {row_number}'s Submit click is still unresolved: check the site first.")
+    text = f"{DROP_MARK} {date.today():%Y-%m-%d}: {DROP_REASONS.get(why, DROP_REASONS['other'])}. {current.notes}"
+    ws.update(range_name=f"D{row_number}:F{row_number}", values=[["Failed", text.strip(), current.date]],
+              value_input_option="RAW")
+
+
 def approve_proposed(ws, row_number, url):
     """Approve a Proposed row (the approve viewer, the GUI's Review). Only while it is still Proposed and still holds
     this job. The only way a Proposed row becomes Approved; nothing else in the row changes."""

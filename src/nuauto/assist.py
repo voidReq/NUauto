@@ -108,6 +108,31 @@ def host(url):
         return ""
 
 
+# Job boards many companies share, with the company in the path and no applicant account on that host
+# (job-boards.greenhouse.io/<company>/jobs/..., jobs.lever.co/<company>/..., jobs.ashbyhq.com/<company>/...,
+# apply.workable.com/<company>/...): each company there is its own job site for the one-session-per-site rule.
+BOARDS = ("greenhouse.io", "lever.co", "ashbyhq.com", "workable.com")
+
+
+def site_key(url):
+    """The job site a session holds (take_site, the claims, the queue): the host; host/<company> on a host companies
+    share by path (accounts.site: Workday's myworkdaysite.com; BOARDS). Greenhouse's embedded form names the company
+    in ?for=."""
+    from urllib.parse import parse_qs
+    key = accounts.site(url)
+    h = host(url)
+    if "/" in key or not any(h == d or h.endswith("." + d) for d in BOARDS):
+        return key
+    try:
+        u = urlparse(url)
+    except ValueError:
+        return key
+    seg = [x for x in u.path.split("/") if x]
+    company = (parse_qs(u.query).get("for") or [""])[0] if seg[:1] == ["embed"] else (seg[0] if seg else "")
+    company = re.sub(r"[^a-z0-9_-]", "", company.lower())
+    return f"{h}/{company}" if company else h
+
+
 def label_key(label):
     """Answer-bank key: label without a trailing required "*", lowercased (answers.norm)."""
     return answers.norm(label.rstrip().rstrip("*"))
@@ -804,7 +829,7 @@ def take_slot(info):
 
 def take_site(url):
     """One session per job site at a time (two could make the same account at once). The lock, or None if busy."""
-    return _lock(os.path.join(config.LOCAL_DIR, "assist_sites", re.sub(r"[^a-z0-9.-]", "_", host(url) or "none") + ".lock"))
+    return _lock(os.path.join(config.LOCAL_DIR, "assist_sites", re.sub(r"[^a-z0-9.-]", "_", site_key(url) or "none") + ".lock"))
 
 
 def sessions():
@@ -1611,25 +1636,25 @@ def run(number, url_override, other=False):
     row_lock = _lock(os.path.join(config.LOCAL_DIR, "assist_rows", f"{tab}-{number}.lock"))
     if row_lock is None:
         sys.exit(f"An assistant is already working on {where}: finish it in its own window first.")
-    slot, slot_lock = take_slot({"row": number, "tab": tab, "company": row.company, "host": host(url),
+    slot, slot_lock = take_slot({"row": number, "tab": tab, "company": row.company, "host": site_key(url),
                                  "since": __import__("datetime").datetime.now().isoformat(timespec="minutes")})
     if slot_lock is None:
         sys.exit(f"{slots()} assistants are running already (the most at once). Finish one (/exit in its window), "
                  "then start this one.")
     site_lock = take_site(url)
     if site_lock is None:
-        sys.exit(f"Another assistant is working on {host(url)} right now (two could make the same account there at "
+        sys.exit(f"Another assistant is working on {site_key(url)} right now (two could make the same account there at "
                  "once). Start this one when it is done.")
     # the other machine (remote.py): the homelab never starts a row or site the laptop holds; the laptop asks first
     claim_held = False
     if config.IS_SERVER:
         from nuauto import remote
-        why = remote.claimed(tab, number, host(url))
+        why = remote.claimed(tab, number, site_key(url))
         if why:
             sys.exit(f"Not started: {why}. Finish it there first.")
     elif config.REMOTE_ASSIST:
         from nuauto import remote
-        ok, note = remote.claim_on_homelab(tab, number, host(url))
+        ok, note = remote.claim_on_homelab(tab, number, site_key(url))
         if not ok:
             sys.exit(f"Not started: {note}. Finish it there first (the review page, or its tmux session).")
         claim_held = True
@@ -1649,7 +1674,7 @@ def run_locked(number, other, row, url, where, tab, slot, slot_lock):
     from nuauto import sheet
     log_ = browser.RunLog(f"assist_{'other_' if other else ''}row{number}")
     d = log_.dir
-    _relabel(slot_lock, {"row": number, "tab": tab, "company": row.company, "host": host(url), "slot": slot,
+    _relabel(slot_lock, {"row": number, "tab": tab, "company": row.company, "host": site_key(url), "slot": slot,
                          "pid": os.getpid(), "run": d, "since": __import__("datetime").datetime.now().isoformat(timespec="minutes")})
     answer_cmd = answer_prefix()
     # The resume: yours on the laptop; on the homelab the copy the laptop pushes (local/resume.pdf).

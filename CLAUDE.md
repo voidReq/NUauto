@@ -111,6 +111,9 @@ Status values: Proposed, Approved, Applied, Failed, Needs Human
 - Approved: I approved it. The script only ever acts on these rows.
 - Applied: submitted. Fill in Date.
 - Failed / Needs Human: script stopped. Put the reason in Notes.
+- Notes starting "Dropped <date>: <reason>" (sheet.drop, added 2026-10-12, my request): a Failed row I chose not to apply
+  to (closed, a duplicate, a bad location): the Drop button in the GUI's Company sites / Other jobs card and on the
+  homelab review page's queue. Only Approved / Needs Human rows; the row stays as a record, so Review never re-offers it.
 - Notes starting "ALSO APPLY ON COMPANY SITE" (SITE_MARK): submitted on NUworks, but the
   company also wants its own site; I do that part.
 - The first tab is NUworks only (sheet.open_worksheet refuses if "Other jobs" is first). A second tab,
@@ -266,7 +269,8 @@ COMPANY-SITE AGENT (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`;
   Log per run: logs/<stamp>_assist_row<N>/ (actions.log = every guard decision).
 - Side by side (added 2026-10-10, my call): up to 3 sessions at once (assist.slots). Each takes a slot (lock
   local/assist_slot<N>.lock with what runs there; slot 1 = assist_profile/, the others assist_profile_<N>/), a row lock
-  and a job-site lock (one session per site: two could make the same account at once); all held until its run ends.
+  and a job-site lock (one session per site: two could make the same account at once; the site is assist.site_key:
+  each company on a shared board, Greenhouse / Lever / Ashby / Workable / myworkdaysite.com, is its own site, 2026-10-12); all held until its run ends.
   Answer-bank commands and the Answers screen's save hold local/answers.lock (no answer lost between sessions). The
   GUI's Company sites shows which rows have one running (assist.sessions).
 - Needs you (added 2026-10-11, my request): when a session waits for me (its turn ended: a question, the end list) or
