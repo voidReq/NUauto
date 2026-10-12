@@ -64,7 +64,7 @@ INTERACT = {"browser_click", "browser_type", "browser_fill_form", "browser_selec
 SUBMIT_RE = re.compile(r"^\s*(submit|submit (my |your |the )?application|send( my)? application|apply|apply now|"
                        r"finish|complete( my)? application|confirm( and submit)?)\s*$", re.I)
 ENTER_KEYS = {"enter", "numpadenter", "return"}
-BASH_COMMANDS = {"answer", "guess", "guesses", "save", "once", "confirm", "alias", "blank", "email", "wait"}
+BASH_COMMANDS = {"answer", "guess", "guesses", "save", "once", "confirm", "alias", "blank", "email", "wait", "link-login"}
 MAX_ANSWER = 300  # one line; enough for a "30 word limit" answer, not an essay (an essay is typed into its field)
 MAX_WHY = 200     # a guess's reason: a few words
 REF_LINE = re.compile(r'^(?P<indent>\s*)-\s+(?P<role>[a-z]+)(?:\s+"(?P<name>(?:[^"\\]|\\.)*)")?(?P<attrs>[^\n]*?)\[ref=(?P<ref>[^\]\s]+)\](?P<tail>[^\n]*)$')
@@ -521,7 +521,18 @@ def decide(state, tool, inp):
     (browser_type) or a fields index (browser_fill_form)."""
     if tool == "Bash":
         why = check_bash(state, inp.get("command", ""))
-        return deny(why) if why else ALLOW
+        if why:
+            return deny(why)
+        argv = shlex.split(inp.get("command", ""))
+        if argv[2] == "link-login":  # your own login on another address: only with your OK (terminal / review page)
+            if len(argv) != 4:
+                return deny("link-login takes one thing: the site of the user's own login (as the guard named it).")
+            page = state.get("current_url") or ""
+            if argv[3] not in [c["site"] for c in accounts.candidates_for(page)]:
+                return deny(f"{argv[3]} is not one of the user's own logins for this page ({accounts.site(page)}).")
+            return ask(f"use the user's own login for {argv[3]} on this sign-in page too ({accounts.site(page)}; its "
+                       f"address: {page}). Approve only if this page is really that company's sign-in.")
+        return ALLOW
     if tool in ("Read", "Glob", "Grep"):
         why = check_read(state, tool, inp)
         return deny(why) if why else ALLOW
@@ -834,6 +845,8 @@ def bank(argv):
         return _bank(argv)
     if argv[:1] == ["email"]:  # may wait a minute for the mail: never while holding the bank's lock
         return email_cmd(argv[1:])
+    if argv[:1] == ["link-login"]:  # the guard asked you first (decide): your own login, linked to this page's site
+        return link_login_cmd(argv[1:])
     os.makedirs(config.LOCAL_DIR, mode=0o700, exist_ok=True)
     with open(os.path.join(config.LOCAL_DIR, "answers.lock"), "a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -920,6 +933,23 @@ def _bank(argv):
                 out = {"status": "leave_blank", "saved": True}
     log(d, f"bank {a.cmd} {a.label!r} -> {out.get('status') or out.get('error')}")
     print(json.dumps(out))
+
+
+def link_login_cmd(argv):
+    """`link-login <site>`: the user's own login for <site> works on the current page's site from now on (they approved
+    it: the guard asks before this runs). Only one of theirs that shares a company word with the page."""
+    d = run_dir()
+    with open(os.path.join(d, "state.json")) as f:
+        page = json.load(f).get("current_url") or ""
+    if len(argv) != 1 or argv[0] not in [c["site"] for c in accounts.candidates_for(page)]:
+        return print(json.dumps({"error": "not one of the user's own logins for this page"}))
+    key = accounts.link(argv[0], page)
+    log(d, f"LINKED the user's own login {argv[0]} to {key} (they approved)")
+    if config.REMOTE_ASSIST and not config.IS_SERVER:
+        from nuauto import sync
+        sync.share()
+    print(json.dumps({"status": "linked", "login": argv[0], "site": key,
+                      "next": f"type {accounts.SIGN_IN} into the password box again"}))
 
 
 def record_guess(state, entries, a):
@@ -1162,6 +1192,10 @@ def approval_target(state, tool, inp):
     """What you approve, as the guard sees it: the button (or key, and the box it goes to), the page it is on, and
     what is typed in the page at that moment (typed_print)."""
     name = tool.split("__")[-1]
+    if tool == "Bash":  # link-login (decide): your own login on this sign-in page
+        login = (shlex.split(inp.get("command", "")) + ["?"])[3]
+        return {"what": f"use your login for {login} on this sign-in page", "url": state.get("current_url") or "",
+                "fp": typed_print(state)}
     if name == "browser_click":
         what = f"click {(state['refs'].get(ref_of(inp) or '') or {}).get('name', '?')!r}"
     elif name == "browser_press_key":
@@ -1634,7 +1668,7 @@ def run_locked(number, other, row, url, where, tab, slot, slot_lock):
     state = {"current_url": url, "refs": {}, "issued": {}, "issued_values": [], "answer_cmd": answer_cmd,
              "read_roots": read_roots, "protected": protected_dirs(read_roots),
              "resume_src": os.path.realpath(resume_src), "resume": resume, "tab": "other" if other else "jobs",
-             "company": row.company, "job_title": row.title, "job_url": url, "password_sites": [],
+             "company": row.company, "job_title": row.title, "job_url": url, "row_url": row.url, "password_sites": [],
              "guesses": {}, "typed": {}, "account_email": accounts.account_email() or "", "where": where,
              "slot": slot, "view_url": view.url if view else None, "tmux": tmux_session() if view else None,
              # the pane this runs in: the review page types only there (never another window of that tmux session)
@@ -1662,15 +1696,19 @@ def run_locked(number, other, row, url, where, tab, slot, slot_lock):
         after_session(d, started, log_)
         if view:
             view.stop()
-    if view:  # the review page asks too: its Yes / No types your answer here (review.py)
+    laptop = view and os.path.exists(os.path.join(d, LAPTOP_FILE))
+    if laptop:  # you chose "do it on the laptop" on the review page: nothing went out here, the row is marked
+        log_.write(f"{where.capitalize()}: left for the laptop (marked in the sheet); not submitted here.")
+    if view and not laptop:  # the review page asks too: its Yes / No types your answer here (review.py)
         import time as t_
         write_private(os.path.join(d, ATTENTION), {"kind": "finish", "since": t_.time(), "time": t_.time(), "said": ""})
         from nuauto import daily
         from nuauto import review
         daily.discord(f"**NUauto: {row.company}**\nSession ended ({where}). Did it go through? Answer on the review page: "
                       f"{review.page_url(slot)}")
+    reply = "laptop" if laptop else None
     try:
-        while True:
+        while not laptop:
             reply = ask_line(f"\nDid you press Submit for {where} ({row.company}) and see the confirmation? "
                              "[y = yes / n = no]: ", FINISH_WAIT if view else None)
             if reply is None:
@@ -1699,6 +1737,11 @@ def run_locked(number, other, row, url, where, tab, slot, slot_lock):
         return
     nuworks_side(ws, row.number)
 
+
+# At the end of a row's Notes when the homelab's browser can't do it (a site that refuses an automated browser shows it
+# a sign-in page with no way in): the homelab never starts it again; you do it on the laptop (sheet.mark_on_laptop).
+LAPTOP_MARK = "DO ON THE LAPTOP: the homelab's browser was refused"
+LAPTOP_FILE = "laptop.json"  # in a homelab run folder: you chose "do it on the laptop" (no "Did it go through?" then)
 
 BROWSER_DIR = "browser"  # in the run folder: the browser tool's own output (downloads, snapshots) and the resume copy
 

@@ -455,8 +455,9 @@ def week_info(rows):
 
 
 def row_view(r, **extra):
+    from nuauto import assist
     return {"row": r.number, "company": r.company, "title": r.title, "url": r.url, "status": r.status,
-            "notes": r.notes, "date": r.date, **extra}
+            "notes": r.notes, "date": r.date, "on_laptop": assist.LAPTOP_MARK in (r.notes or ""), **extra}
 
 
 def closing(r):

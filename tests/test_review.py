@@ -16,7 +16,7 @@ import tempfile
 import threading
 import time
 from http.server import ThreadingHTTPServer
-from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.parse import parse_qs, unquote, urlencode, urlparse
 
 import tempfile as _tempfile  # noqa: E402
 os.environ["NUAUTO_STATE_DIR"] = _tempfile.mkdtemp(prefix="nuauto-test-")  # never the real local/ (logins, sheet)
@@ -186,16 +186,18 @@ try:
     def cand(row, host):
         return {"tab": "other", "row": row, "url": "https://x.example/a", "host": host, "company": "Q Co", "title": "T",
                 "closes": None, "match": 50}
-    real_queue = remote.queue_now
-    remote.queue_now = lambda manual=False: ([], [(cand(7, "acme.example"), "a session is on it"),
-                                                  (cand(9, "b.example"), "a session is on it"), (cand(11, "c.example"), None)])
+    real_queue = remote.queue_inputs
+    remote.queue_inputs = lambda: ([cand(7, "acme.example"), cand(9, "b.example"), cand(11, "c.example")],
+                                   [{"tab": "other", "row": 7, "host": "acme.example"}],           # slot 1's session (row 7)
+                                   [{"tab": "other", "row": 9, "host": "b.example"}], {}, 2, None)  # the laptop's claim on row 9
     try:
         page_q = text(req("GET", "/", cookie=KEY))
         assert "<a class=ok href='/s/1'>A session is working on it" in page_q    # row 7 is slot 1's session
         assert "The laptop's assistant is working on it" in page_q              # row 9: a laptop claim, no session here
-        assert page_q.count("Start now") == 1                                   # only row 11 can start
+        assert page_q.count("Start now") == 1 and "name=row value='11'" in page_q   # only row 11 can start
+        assert "1 slot free" not in page_q and "2 slots free" in page_q
     finally:
-        remote.queue_now = real_queue
+        remote.queue_inputs = real_queue
 
     # the session page: what it will do, the message (escaped)
     r = req("GET", "/s/1", cookie=KEY)
@@ -335,6 +337,170 @@ try:
             assert review.terminal(sess) == ""                                  # a gone session: nothing, no error
         finally:
             subprocess.run(["tmux", "kill-session", "-t", f"={TMUX_NAME}"], capture_output=True)
+
+    # "do it on the laptop": the page's End and No buttons write laptop.json, mark the sheet row (the real
+    # sheet.mark_on_laptop on an in-memory worksheet), then type /exit or n; a failure to mark is a message, never an error
+    from nuauto import sheet  # noqa: E402
+
+    class CellWS:
+        """An in-memory worksheet: update() writes the one cell it is given (E7 = column E, row 7)."""
+        def __init__(self, rows):
+            self.values = [list(sheet.HEADERS)] + [list(r) for r in rows]
+            self.calls = []
+
+        def get_all_values(self):
+            return [list(r) for r in self.values]
+
+        def update(self, range_name, values, value_input_option=None):
+            self.calls.append(range_name)
+            self.values[int(range_name[1:]) - 1][ord(range_name[0]) - ord("A")] = values[0][0]
+
+    ROW_URL = "https://jobs.example.org/the-row"
+
+    def fresh_sheet(status="Approved", url=ROW_URL, company="Acme <b>Robotics</b>", notes="match 90%"):
+        filler = [[f"https://x/{i}", "Co", "Job", "Approved", "", ""] for i in range(1, 6)]  # rows 2-6
+        return CellWS(filler + [[url, company, "Firmware Intern", status, notes, ""]])               # row 7
+
+    real_sheet = (sheet.open_other, sheet.open_worksheet)
+    real_type_into = review.type_into
+    typed_laptop, opened = [], []
+    laptop_file = os.path.join(run, assist.LAPTOP_FILE)
+    ws_now = [fresh_sheet()]
+
+    def fake_open(tab):
+        def f(*a, **k):
+            opened.append((tab, k.get("interactive")))
+            if isinstance(ws_now[0], Exception):
+                raise ws_now[0]
+            return ws_now[0]
+        return f
+
+    def fake_type(sess, text_):  # the file is there before the terminal is touched
+        typed_laptop.append((sess["slot"], text_, os.path.exists(laptop_file)))
+
+    def reset(attention, approval_on=False, **state_over):
+        for name in (assist.LAPTOP_FILE,):
+            if os.path.exists(os.path.join(run, name)):
+                os.remove(os.path.join(run, name))
+        assist.write_private(os.path.join(run, "state.json"), {**state, "tab": "other", "row_url": ROW_URL, **state_over})
+        assist.write_private(os.path.join(run, assist.ATTENTION), {"kind": attention, "since": 1, "time": 1, "said": ""})
+        if approval_on:
+            assist.write_private(os.path.join(run, assist.APPROVAL), approval)
+        elif os.path.exists(os.path.join(run, assist.APPROVAL)):
+            os.remove(os.path.join(run, assist.APPROVAL))
+        typed_laptop.clear(), opened.clear()
+        ws_now[0] = fresh_sheet()
+
+    MARK = assist.LAPTOP_MARK
+    sheet.open_other, sheet.open_worksheet = fake_open("other"), fake_open("jobs")
+    review.type_into = fake_type
+    try:
+        # the buttons: the reply card (End session next to End: do it on the laptop), the finish card, none while a prompt waits
+        reset("waiting")
+        page = text(req("GET", "/s/1", cookie=KEY))
+        assert "End: do it on the laptop" in page and "name=k value=laptop" in page and ">End session<" in page
+        assert "the homelab never starts it again" in page
+        reset("finish")
+        page = text(req("GET", "/s/1", cookie=KEY))
+        assert "No: do it on the laptop" in page and "name=a value=laptop" in page and "Yes, it went through" in page
+        assert "value=laptop data-busy=Saving" in page and "End: do it on the laptop" not in page      # (no reply card then)
+        reset("approve")                                                     # Claude Code's own permission question
+        page = text(req("GET", "/s/1", cookie=KEY))
+        assert "value=laptop" not in page and "do it on the laptop" not in page
+
+        # End: do it on the laptop (the session's working or waiting for you): marked, then /exit typed
+        reset("waiting")
+        r = req("POST", "/s/1/key", form={"t": token, "k": "laptop"}, cookie=KEY)
+        assert r[0] == 303 and "Left for the laptop: marked in your sheet" in unquote(r[1]["location"]), r[1]["location"]
+        assert typed_laptop == [(1, "/exit", True)], typed_laptop
+        assert oct(os.stat(laptop_file).st_mode & 0o777) == "0o600" and assist.read_json(laptop_file)["by"] == "Phone"
+        assert ws_now[0].values[6][4] == f"match 90% | {MARK} (the site showed it a sign-in page with no way in)", ws_now[0].values[6]
+        assert ws_now[0].values[6][3] == "Approved" and ws_now[0].calls == ["E7"] and opened == [("other", False)]
+        assert "do it on the laptop (by Phone)" in open(os.path.join(run, "actions.log")).read()
+        r = req("POST", "/s/1/key", form={"t": token, "k": "laptop"}, cookie=KEY)    # again: still marked once, /exit again is harmless
+        assert ws_now[0].calls == ["E7"] and ws_now[0].values[6][4].count(MARK) == 1
+        # a Submit waiting for approval is not a permission prompt: it still works
+        reset("approve", approval_on=True)
+        assert "Left for the laptop" in unquote(req("POST", "/s/1/key", form={"t": token, "k": "laptop"}, cookie=KEY)[1]["location"])
+        assert typed_laptop == [(1, "/exit", True)]
+        # not while Claude Code asks its own question (Enter would pick its first option): nothing written, nothing typed
+        reset("approve")
+        r = req("POST", "/s/1/key", form={"t": token, "k": "laptop"}, cookie=KEY)
+        assert "Nothing" in r[1]["location"] and typed_laptop == [] and not os.path.exists(laptop_file)
+        assert ws_now[0].calls == [] and opened == []
+        # the NUworks tab's session marks the NUworks tab (state tab "jobs")
+        reset("waiting", tab="jobs")
+        req("POST", "/s/1/key", form={"t": token, "k": "laptop"}, cookie=KEY)
+        assert opened == [("jobs", False)] and ws_now[0].calls == ["E7"]
+        # a missing / forged token or an unpaired device: nothing
+        reset("waiting")
+        assert req("POST", "/s/1/key", form={"t": "0" * 32, "k": "laptop"}, cookie=KEY)[0] == 403
+        assert req("POST", "/s/1/key", form={"t": token, "k": "laptop"})[0] == 403
+        assert req("POST", "/s/1/key", form={"t": token, "k": "laptop"}, cookie=KEY, headers={"Origin": "http://evil.example"})[0] == 403
+        assert typed_laptop == [] and not os.path.exists(laptop_file) and ws_now[0].calls == []
+
+        # No: do it on the laptop (the finish question): marked, then n typed (so the run records "laptop", never Applied)
+        reset("finish")
+        r = req("POST", "/s/1/finish", form={"t": token, "a": "laptop"}, cookie=KEY)
+        assert r[0] == 303 and "Left for the laptop: marked in your sheet" in unquote(r[1]["location"])
+        assert typed_laptop == [(1, "n", True)] and assist.read_json(laptop_file)["by"] == "Phone"
+        assert ws_now[0].values[6][4].count(MARK) == 1 and ws_now[0].values[6][3] == "Approved"
+        for kind in ("waiting", "approve"):                                   # only at the finish question
+            reset(kind)
+            r = req("POST", "/s/1/finish", form={"t": token, "a": "laptop"}, cookie=KEY)
+            assert "Nothing" in r[1]["location"] and typed_laptop == [] and not os.path.exists(laptop_file) and ws_now[0].calls == [], kind
+
+        # mark_laptop on its own: what it tells you, and that it never raises
+        def mark(**over):
+            reset("waiting", **over)
+            return review.mark_laptop(review.session(1), "Phone")
+        LEFT = "Left for the laptop: marked in your sheet, and the homelab won't start it again."
+        assert mark() == LEFT and ws_now[0].values[6][4].startswith("match 90% | " + MARK)
+        ws_now[0] = fresh_sheet(status="Needs Human", notes="External application: acme.example -> https://acme.example/j")
+        assert review.mark_laptop(review.session(1), "Phone") == LEFT
+        assert ws_now[0].values[6][4].startswith("External application: acme.example") and MARK in ws_now[0].values[6][4]
+        # the row now holds another job (url differs): not touched, you are told, the file is still written
+        reset("waiting")
+        ws_now[0] = fresh_sheet(url="https://jobs.example.org/another")
+        msg = review.mark_laptop(review.session(1), "Phone")
+        assert msg == "Left for the laptop, but its sheet row has changed: mark it yourself." and ws_now[0].calls == []
+        assert os.path.exists(laptop_file)
+        # no row_url in the state (an older session): the company must match
+        reset("waiting", row_url="")
+        ws_now[0] = fresh_sheet(company="Someone Else")
+        assert "sheet row has changed" in review.mark_laptop(review.session(1), "Phone") and ws_now[0].calls == []
+        reset("waiting", row_url="")
+        assert review.mark_laptop(review.session(1), "Phone") == LEFT and ws_now[0].calls == ["E7"]
+        # a row that is gone (cleared / shifted), or no row number for the session
+        reset("waiting")
+        ws_now[0] = CellWS([])
+        assert "sheet row has changed" in review.mark_laptop(review.session(1), "Phone")
+        reset("waiting")
+        sess = review.session(1)
+        sess["info"] = {**sess["info"], "row": None}
+        assert "sheet row has changed" in review.mark_laptop(sess, "Phone")
+        # a row that is not Approved / Needs Human (Applied, say), or a sheet that can't be read: a message, not an exception
+        reset("waiting")
+        ws_now[0] = fresh_sheet(status="Applied")
+        msg = review.mark_laptop(review.session(1), "Phone")
+        assert msg == "Left for the laptop; the sheet could not be marked (SheetError)." and ws_now[0].calls == []
+        reset("waiting")
+        ws_now[0] = RuntimeError("Google is down")
+        msg = review.mark_laptop(review.session(1), "Phone")
+        assert msg == "Left for the laptop; the sheet could not be marked (RuntimeError)." and os.path.exists(laptop_file)
+        assert "Google" not in msg
+        # and through the page the same failure is a normal answer: the session is still ended
+        reset("waiting")
+        ws_now[0] = RuntimeError("Google is down")
+        r = req("POST", "/s/1/key", form={"t": token, "k": "laptop"}, cookie=KEY)
+        assert r[0] == 303 and "could not be marked" in unquote(r[1]["location"]) and typed_laptop == [(1, "/exit", True)]
+    finally:
+        sheet.open_other, sheet.open_worksheet = real_sheet
+        review.type_into = real_type_into
+        for name in (laptop_file,):
+            if os.path.exists(name):
+                os.remove(name)
+        assist.write_private(os.path.join(run, "state.json"), state)
 
     # the body of a POST is read only for a paired device (no waiting on a body from anyone else)
     def raw_post(path, headers, cookie=None, body=b""):

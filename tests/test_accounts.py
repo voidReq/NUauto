@@ -181,4 +181,45 @@ try:
 finally:
     os.environ["PATH"] = real_path
 
+# your own login whose sign-in lives on another address (Amazon jobs'): the guard names it, you confirm the link
+from nuauto import assist  # noqa: E402
+page = "https://passport.amazon.com/ap/signin?return_to=amazon.jobs"
+assert A.brand_words(page) == {"amazon"} and A.brand_words("https://wd1.myworkdaysite.com/recruiting/wf/x") == set()
+assert [c["site"] for c in A.candidates_for(page)] == ["account.amazon.jobs"]
+assert A.candidates_for("https://login.example.com/") == [] and A.candidates_for("https://www.amazon.jobs/x") == []  # (domain)
+for ph in (A.SIGN_IN, A.NEW):  # neither a sign-in nor a new account until you link it
+    try:
+        A.password_for(page, ph)
+        raise AssertionError(f"{ph} went through")
+    except A.NoAccount as e:
+        assert "link-login" in str(e) and "account.amazon.jobs" in str(e) and "pw-amz" not in str(e)
+st = {"current_url": page, "answer_cmd": ["py", "a.py"], "refs": {}}
+verdict, why = assist.decide(st, "Bash", {"command": "py a.py link-login account.amazon.jobs"})
+assert verdict == "ask" and "passport.amazon.com" in why                                  # you are asked first
+assert assist.decide(st, "Bash", {"command": "py a.py link-login acme.wd5.myworkdayjobs.com"})[0] == "deny"
+assert assist.decide(st, "Bash", {"command": "py a.py link-login"})[0] == "deny"
+assert assist.decide({**st, "current_url": "https://evil.example/login"}, "Bash",
+                     {"command": "py a.py link-login account.amazon.jobs"})[0] == "deny"     # no company word in common
+assert assist.approval_target(st, "Bash", {"command": "py a.py link-login account.amazon.jobs"})["what"] == \
+    "use your login for account.amazon.jobs on this sign-in page"
+try:
+    A.link("wd1.myworkdaysite.com/other", page)                                            # not one of yours
+    raise AssertionError("linked a login NUauto made")
+except A.NoAccount:
+    pass
+# the command itself (after your OK): links the page's site, never another one the agent names
+run = os.path.join(config.STATE_DIR, "logs", "run1")
+os.makedirs(run)
+json.dump({"current_url": page}, open(os.path.join(run, "state.json"), "w"))
+os.environ[assist.STATE_ENV] = run
+out = io.StringIO()
+real_stdout, sys.stdout = sys.stdout, out
+try:
+    assist.link_login_cmd(["account.amazon.jobs"])
+finally:
+    sys.stdout = real_stdout
+assert json.loads(out.getvalue())["status"] == "linked" and "LINKED" in open(os.path.join(run, "actions.log")).read()
+assert A.password_for(page, A.SIGN_IN) == "pw-amz" and A.candidates_for(page) == []
+assert json.load(open(A.PATH))["account.amazon.jobs"]["also"] == ["passport.amazon.com"]
+
 print("All accounts checks passed.")

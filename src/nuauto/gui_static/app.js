@@ -1047,6 +1047,14 @@ screens.apply = async (view) => {
 // Assistant sessions run side by side (up to d.slots, each in its own terminal window and browser): a row with one
 // running says so instead of offering another; with every slot in use, Start waits.
 function assistantStart(d, r, tab, testid, args) {
+  if (r.on_laptop && !(d.homelab || []).find((s) => s.tab === tab && s.row === r.row)) {  // the homelab's browser was refused there
+    return el("span", { class: "row" }, el("span", { class: "chip warn", testid: `${testid}-laptop`, title: "The site showed the homelab's browser a sign-in page with no way in. The homelab won't start it again.",
+      text: "do it on the laptop" }), assistantStartButton(d, r, tab, testid, args));
+  }
+  return assistantStartButton(d, r, tab, testid, args);
+}
+
+function assistantStartButton(d, r, tab, testid, args) {
   const remote = (d.homelab || []).find((s) => s.tab === tab && s.row === r.row);
   if (remote) {  // the homelab's assistant has this row (you answer it on its review page; docs/REMOTE.md)
     const wait = remote.attention && remote.attention.kind;

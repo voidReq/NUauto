@@ -90,6 +90,10 @@ COMPANY-SITE AGENT (assist.py, prompts/ASSIST_PROMPT.md)
   each row once by itself (a session that ended without Applied waits for the user: no repeat, so no second submit);
   never a row or site the laptop claimed; the laptop's sessions ask the homelab first | remote.plan, candidates, auto,
   claim, claimed, claim_on_homelab; assist.run | test_remote
+- Your own login on another address (a company's sign-in elsewhere) only after you confirm the link for that page's
+  site; only one of your own logins that shares a company word with it; before that neither a sign-in nor a new account
+  there | accounts.candidates_for, link, find, password_for; assist.decide (link-login -> ask), link_login_cmd |
+  test_accounts
 - The answer banks and job-site logins shared with the homelab: merged under each file's lock, a login never dropped,
   sent as JSON over ssh and never printed; the writeups copy holds only files the agent may read | sync.share,
   merge_bank, merge_accounts, notes_files | test_share

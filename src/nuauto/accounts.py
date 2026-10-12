@@ -78,14 +78,53 @@ def domain(host):
 
 def find(data, where):
     """The login for this page (or site): the one saved for exactly this site, else one saved for its whole host (a
-    login from before sites knew companies' paths, or yours saved without one), else your own login for its domain."""
+    login from before sites knew companies' paths, or yours saved without one), else your own login for its domain,
+    else your own login you linked to this site (link: its sign-in lives elsewhere, e.g. Amazon jobs')."""
     key = site(where)
     if key in data:
         return data[key]
     if host_of(key) in data:
         return data[host_of(key)]
     return next((a for a in data.values() if a.get("own") and a.get("match") == "domain" and domain(a["site"]) == domain(key)),
-                None)
+                None) or next((a for a in data.values() if a.get("own") and key in (a.get("also") or [])), None)
+
+
+# Words in a site's address that say nothing about whose it is: a sign-in page shares its company's other words.
+GENERIC = {"www", "com", "org", "net", "io", "co", "us", "uk", "eu", "jobs", "job", "careers", "career", "account",
+           "accounts", "login", "signin", "sign", "auth", "sso", "id", "idp", "my", "hire", "hiring", "apply", "portal",
+           "app", "apps", "secure", "en", "myworkdayjobs", "myworkdaysite", "icims", "taleo", "oraclecloud", "passport"}
+
+
+def brand_words(where):
+    """The words of a site's host that name its company (account.amazon.jobs -> {"amazon"})."""
+    return {w for w in host_of(site(where)).split(".") if len(w) > 2 and w not in GENERIC and not re.fullmatch(r"wd\d+", w)}
+
+
+def candidates_for(where):
+    """Your own logins that may be for this sign-in page (they share a company word with it), not usable here yet:
+    [{"site", "company", "email"}] (never a password)."""
+    try:
+        with open(PATH) as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return []
+    words = brand_words(where)
+    if not words or find(data, where):
+        return []
+    return [{k: a.get(k) for k in ("site", "company", "email")} for a in data.values()
+            if a.get("own") and brand_words(a["site"]) & words]
+
+
+def link(own_site, where):
+    """Use your own login for own_site on this site too (you approved it: the guard asks first). Returns the site."""
+    key = site(where)
+    with locked() as data:
+        a = data.get(own_site)
+        if not a or not a.get("own"):
+            raise NoAccount(f"{own_site} is not one of the user's own logins")
+        if key not in (a.get("also") or []):
+            a["also"] = [*(a.get("also") or []), key]
+    return key
 
 
 def make_password(length=LENGTH):
@@ -176,6 +215,13 @@ def password_for(host, placeholder, company="", job=None):
         raise NoAccount(why)
     if placeholder not in PLACEHOLDERS:
         raise ValueError(placeholder)
+    if find(json.load(open(PATH)) if os.path.exists(PATH) else {}, h) is None:
+        maybe = candidates_for(h)
+        if maybe:  # one of yours may be for this page (its sign-in lives on another address): you link it first
+            names = ", ".join(f"{c['site']} ({c.get('company') or c['site']}, as {c.get('email')})" for c in maybe)
+            raise NoAccount(f"NUauto has no saved login for {h}, but the user has their own that may be for it: {names}. "
+                            f"If this sign-in is that company's, run the answer-bank command `link-login <that site>` (the "
+                            f"user confirms it), then type {SIGN_IN} again; never make a new account here without asking")
     with locked() as data:
         a = find(data, h)
         if a is not None and a.get("own") and placeholder == NEW:

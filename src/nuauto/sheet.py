@@ -298,6 +298,20 @@ def append_note(ws, row_number, url, text):
     ws.update(range_name=f"E{row_number}", values=[[f"{current.notes} {text}".strip()]], value_input_option="RAW")
 
 
+def mark_on_laptop(ws, row_number, url, why=""):
+    """An Approved / Needs Human row the homelab's assistant can't do (the site refused its browser): a mark at the end
+    of its Notes (assist.LAPTOP_MARK), so the homelab never starts it again and you see it is yours, on the laptop.
+    Nothing else changes; once there, the mark is kept."""
+    from nuauto import assist
+    current = _row_for(ws, row_number, url)
+    if current.status not in ("Approved", "Needs Human"):
+        raise SheetError(f"Row {row_number} is {current.status or 'empty'}: nothing to mark.")
+    if assist.LAPTOP_MARK in current.notes:
+        return
+    text = f"{current.notes} | {assist.LAPTOP_MARK}" + (f" ({why})" if why else "")
+    ws.update(range_name=f"E{row_number}", values=[[text.strip(" |")]], value_input_option="RAW")
+
+
 def mark_site_done(ws, row_number, url):
     """Applied row whose company-site application is now done: replace the SITE_MARK note."""
     current = _row_for(ws, row_number, url)
