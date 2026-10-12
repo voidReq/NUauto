@@ -96,7 +96,8 @@ cands = remote.candidates(main_rows, other_rows, lambda r: closes.get(r.number),
 order = [(c["tab"], c["row"]) for c in cands]
 assert order == [("jobs", 3), ("jobs", 2), ("jobs", 11), ("other", 2), ("jobs", 4), ("jobs", 9), ("other", 3),
                  ("jobs", 10), ("other", 8)], order
-c3 = cands[0]
+c3 = dict(cands[0])
+assert c3.pop("row_url") == next(r.url for r in main_rows if r.number == 3)  # the sheet row's own link (Drop checks it)
 assert c3 == {"tab": "jobs", "row": 3, "url": "https://beta.icims.com/job/1", "host": "beta.icims.com", "company": "Co3",
               "title": "Intern", "closes": TODAY + timedelta(days=2), "match": 50, "laptop": False}
 # the laptop mark in a row's Notes (assist.LAPTOP_MARK) shows as "laptop" on that candidate, on either tab
@@ -1283,5 +1284,25 @@ try:
     assert remote.TZ == "America/New_York"
 finally:
     config.LOCAL = real_local
+
+# the job site a session holds (assist.site_key): the host, but each company on a board companies share by path is its
+# own site (Greenhouse, Lever, Ashby, Workable; Workday's myworkdaysite.com), so two Greenhouse jobs can run at once
+from nuauto import assist  # noqa: E402
+for url, key in (("https://job-boards.greenhouse.io/Zinc/jobs/123", "job-boards.greenhouse.io/zinc"),
+                 ("https://boards.greenhouse.io/embed/job_app?for=acme&token=9", "boards.greenhouse.io/acme"),
+                 ("https://boards.greenhouse.io/embed/job_app?token=9", "boards.greenhouse.io"),
+                 ("https://jobs.lever.co/acme/1f2e/apply", "jobs.lever.co/acme"),
+                 ("https://jobs.ashbyhq.com/acme/uuid", "jobs.ashbyhq.com/acme"),
+                 ("https://apply.workable.com/acme/j/ABC/", "apply.workable.com/acme"),
+                 ("https://wd1.myworkdaysite.com/en-US/recruiting/acme/Careers/job/x", "wd1.myworkdaysite.com/acme"),
+                 ("https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/x", "acme.wd5.myworkdayjobs.com"),
+                 ("https://careers.acme.com/jobs/1", "careers.acme.com"),
+                 ("https://greenhouse.io/", "greenhouse.io")):
+    assert assist.site_key(url) == key, (url, assist.site_key(url))
+g1, g2 = ("https://job-boards.greenhouse.io/zinc/jobs/1", "https://job-boards.greenhouse.io/acme/jobs/2")
+gh = [dict(a, row=n, url=u, host=assist.site_key(u)) for n, u in ((30, g1), (31, g2))]
+go, rest = remote.plan(gh, [{"tab": "other", "row": 9, "host": assist.site_key("https://job-boards.greenhouse.io/zeta/jobs/3")}],
+                       [], {}, 2)
+assert [x["row"] for x, _ in go] == [30, 31] and rest == []
 
 print("All remote checks passed.")

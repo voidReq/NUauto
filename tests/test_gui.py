@@ -313,6 +313,14 @@ try:
     post("/api/mark", {"action": "applied", "tab": "other", "row": 4, "url": "https://wrong.example/1"}, expect=409)
     post("/api/mark", {"action": "applied", "tab": "other", "row": 4, "url": "https://jobs.example.net/1"})
     assert json.load(open(other_file))["rows"][3][3] == "Applied"
+    # Drop (not applying): Failed with the reason in Notes, so it leaves the list; an Applied row is never dropped
+    added = post("/api/other/add", {"url": "https://jobs.example.net/2", "company": "Shale Co", "title": "Dup Intern"})
+    post("/api/mark", {"action": "drop", "why": "bored", "tab": "other", "row": added["row"], "url": "https://jobs.example.net/2"}, expect=409)
+    post("/api/mark", {"action": "drop", "why": "closed", "tab": "other", "row": 4, "url": "https://jobs.example.net/1"}, expect=409)
+    post("/api/mark", {"action": "drop", "why": "duplicate", "tab": "other", "row": added["row"], "url": "https://jobs.example.net/2"})
+    row = json.load(open(other_file))["rows"][added["row"] - 1]
+    assert row[3] == "Failed" and row[4].startswith("Dropped ") and "duplicate" in row[4], row
+    assert [x["company"] for x in get("/api/other")["ready"]] == ["Granite Robotics"]
     assert get("/api/state")["week"] == week_before  # the Other jobs tab has no weekly / total cap
     r = post("/api/action", {"kind": "assist", "args": {"row": 2, "tab": "other"}})
     assert r["demo"] and r["command"].endswith("assist other 2"), r

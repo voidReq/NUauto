@@ -58,6 +58,12 @@ THE QUEUE (remote.py; nuauto-assist.timer every 10 minutes runs `nuauto assist a
 - A row that has had a session (started by the queue or by you) never starts again by itself (local/assist_auto.json):
   if it ended without "Applied", it waits for you: Start now on the review page (it lists the queue and why each row
   waits), or `nuauto assist start other 12`.
+- Not applying (closed, a duplicate, a bad location): Drop on the review page's queue (pick the reason). The row becomes
+  Failed with "Dropped <date>: <reason>" in Notes (sheet.drop), so it leaves the queue; never while a session or a laptop
+  claim is on it.
+- One session per job site (assist.site_key): the host, but each company on a board companies share by path is its own
+  site (job-boards.greenhouse.io/<company>, jobs.lever.co/<company>, jobs.ashbyhq.com/<company>,
+  apply.workable.com/<company>, wd1.myworkdaysite.com/<company>), so two companies' Greenhouse jobs run side by side.
 - Some sites refuse an automated browser (they show it a sign-in page with no way to register). End such a session
   with "End: do it on the laptop" (or "No: do it on the laptop" at "Did it go through?"): no question after, and the
   row's Notes get "DO ON THE LAPTOP..." (assist.LAPTOP_MARK, at the end): the homelab never starts it again, and the

@@ -76,7 +76,8 @@ def match_of(notes):
 
 
 def candidates(main_rows, other_rows, closes=None, today=None):
-    """The rows the queue may start, best first: [{"tab", "row", "url", "host", "company", "title", "closes", "match"}].
+    """The rows the queue may start, best first: [{"tab", "row", "url", "row_url", "host", "company", "title", "closes",
+    "match"}] (host: its job site, assist.site_key; row_url: the sheet row's own link).
     closes(row) -> its closing date or None (NUworks rows; apply.row_closes). Pure apart from closes."""
     from nuauto import assist
     from nuauto import jobs
@@ -90,12 +91,12 @@ def candidates(main_rows, other_rows, closes=None, today=None):
             day = closes(r) if closes else None
             if day and day < today:
                 continue  # past its deadline
-            out.append({"tab": "jobs", "row": r.number, "url": url, "host": assist.host(url), "company": r.company,
+            out.append({"tab": "jobs", "row": r.number, "url": url, "row_url": r.url, "host": assist.site_key(url), "company": r.company,
                         "title": r.title, "closes": day, "match": match_of(r.notes), "laptop": assist.LAPTOP_MARK in r.notes})
     for r in other_rows or []:
         url, _ = assist.other_target(r)
         if url:
-            out.append({"tab": "other", "row": r.number, "url": url, "host": assist.host(url), "company": r.company,
+            out.append({"tab": "other", "row": r.number, "url": url, "row_url": r.url, "host": assist.site_key(url), "company": r.company,
                         "title": r.title, "closes": None, "match": match_of(r.notes), "laptop": assist.LAPTOP_MARK in r.notes})
     urgent = lambda c: c["closes"] is not None and (c["closes"] - today).days <= jobs.URGENT_DAYS  # noqa: E731
     return sorted(out, key=lambda c: (not urgent(c), c["closes"] if urgent(c) else date.max, -c["match"],

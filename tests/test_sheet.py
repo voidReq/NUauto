@@ -107,6 +107,20 @@ expect(SheetError, lambda: sheet.resolve_submit(fresh("Needs Human"), 2, "Applie
 # mark_submit_started refuses on a row that is not Approved
 expect(SheetError, lambda: sheet.mark_submit_started(fresh("Proposed"), 2))
 
+# drop (not applying: closed, a duplicate, a bad location): Failed, the reason in front of Notes, the date kept; only on
+# Approved / Needs Human rows still holding the job, never on an unresolved Submit click
+ws = FakeWS([HEADERS, ["https://x/1", "Co", "Job", "Needs Human", "External application: x", ""]])
+sheet.drop(ws, 2, "https://x/1", "duplicate")
+assert ws.values[1][3:6] == ["Failed", f"Dropped {date.today():%Y-%m-%d}: a duplicate of another row. External application: x", ""]
+assert sheet.approved(sheet.read_rows(ws)) == []
+sheet.drop(fresh(), 2, "https://x/1", "nonsense")  # an unknown reason is "not applying"
+expect(SheetError, lambda: sheet.drop(fresh("Applied"), 2, "https://x/1"))
+expect(SheetError, lambda: sheet.drop(fresh("Proposed"), 2, "https://x/1"))
+expect(SheetError, lambda: sheet.drop(fresh(), 2, "https://x/other"))
+ws = fresh()
+sheet.mark_submit_started(ws, 2)
+expect(SheetError, lambda: sheet.drop(ws, 2, "https://x/1"))
+
 # mark_on_laptop: the mark goes at the END of Notes (NUworks "External application" notes must keep starting the cell),
 # only on Approved / Needs Human rows, once, and only on the row that still holds the job
 from nuauto import assist  # noqa: E402

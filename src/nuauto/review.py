@@ -362,7 +362,7 @@ border:2px solid currentColor;border-right-color:transparent;border-radius:50%;v
 border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .8s linear infinite}
 .approve,.prompt{background:#fde2e1}.waiting{background:#fff1c2}.finish{background:#dff3e3}
 button{font:inherit;padding:.6rem 1.1rem;border:0;border-radius:.5rem;background:#0b5cad;color:#fff;margin:.2rem .3rem .2rem 0}
-button.no{background:#777}button.go{background:#1a7f37}textarea,input[type=text]{font:inherit;width:100%;box-sizing:border-box;padding:.5rem}
+button.no{background:#777}button.go{background:#1a7f37}select{font:inherit;padding:.5rem}textarea,input[type=text]{font:inherit;width:100%;box-sizing:border-box;padding:.5rem}
 pre{white-space:pre-wrap;word-break:break-word;background:#f3f3f3;padding:.6rem;border-radius:.4rem;font-size:.85rem}
 img{max-width:100%;border:1px solid #ccc;border-radius:.3rem}.dim{color:#777;font-size:.9rem}.ok{color:#1a7f37;font-weight:600}
 @media (prefers-color-scheme:dark){body{background:#151515;color:#eee}.card{background:#1f1f1f;border-color:#333}
@@ -410,6 +410,10 @@ def form(action, token, inner, **hidden):
     return f"<form method=post action='{esc(action)}'>{fields}{inner}</form>"
 
 
+DROP_CHOICES = (("closed", "It has closed"), ("duplicate", "A duplicate"), ("location", "Bad location"),
+                ("other", "Other reason"))
+
+
 def queue_part(token):
     """The queue (remote.py), best first: what starts next by itself, and Start now on every row you can start right now
     (each judged on its own: a free slot and its job site free); "waiting for a free slot" only when none is free."""
@@ -444,6 +448,10 @@ def queue_part(token):
             line = f"<span class=dim>{esc(text)}</span>"
         else:
             line = f"<span class=dim>{esc(why_hand)}</span>"
+        if c.get("row_url") and not here.get(key) and why_hand != "a session is on it":  # not applying: out of the queue (sheet.drop)
+            reasons = "".join(f"<option value={esc(k)}>{esc(v)}</option>" for k, v in DROP_CHOICES)
+            button += form("/drop", token, f"<select name=why>{reasons}</select> <button class=no "
+                           "data-busy=Dropping>Drop</button>", tab=c["tab"], row=c["row"], url=c["row_url"])
         lines.append(f"<div class=card><b>{esc(c['company'])}</b> <span class=dim>{esc(c['title'])} | "
                      f"{'Other jobs' if c['tab'] == 'other' else 'NUworks'} row {c['row']} | {esc(c['host'])}</span>"
                      f"<div>{line}</div>{button}</div>")
@@ -690,6 +698,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, "Not allowed.", "text/plain")
         if u.path == "/start":
             return self._redirect("/?m=" + quote(start_now(f, dev["name"])))
+        if u.path == "/drop":
+            return self._redirect("/?m=" + quote(drop_now(f, dev["name"])))
         slot, sub = self._session(u.path)
         s = session(slot) if slot else None
         if not s:
@@ -751,6 +761,29 @@ def start_now(f, by):
     remote.record_started(c, auto=False)
     _log(f"{by} started {c['tab']} row {c['row']} ({c['company']})")
     return f"Started {c['company']}."
+
+
+def drop_now(f, by):
+    """Drop (the index's queue): you won't apply to this row (closed, a duplicate, a bad location): sheet.drop makes it
+    Failed with the reason in its Notes, so it leaves the queue. Never a row a session (here or the laptop's) is on."""
+    from nuauto import remote
+    from nuauto import sheet
+    tab, row, url, why = f.get("tab"), f.get("row", ""), f.get("url", ""), f.get("why", "")
+    if tab not in ("jobs", "other") or not row.isdigit() or why not in sheet.DROP_REASONS:
+        return "Nothing to do."
+    inputs = remote.queue_inputs()
+    c = next((x for x in inputs[0] if x["tab"] == tab and x["row"] == int(row) and x.get("row_url") == url), None)
+    if not c:
+        return "Not dropped: it is not in the queue any more (or its row holds another job now)."
+    if (tab, int(row)) in {(s.get("tab"), s.get("row")) for s in inputs[1] + inputs[2]}:
+        return "Not dropped: an assistant is working on it. End its session first."
+    try:
+        ws = sheet.open_other(interactive=False) if tab == "other" else sheet.open_worksheet(interactive=False)
+        sheet.drop(ws, int(row), url, why)
+    except sheet.SheetError as e:
+        return f"Not dropped: {e}"
+    _log(f"{by} dropped {tab} row {row} ({c['company']}): {why}")
+    return f"Dropped {c['company']}: it is Failed in your sheet, with the reason in its Notes."
 
 
 def serve():

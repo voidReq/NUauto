@@ -95,10 +95,12 @@ SCREENS
                  each waits for, Open its page (the homelab's review page in your browser), Open the review page, Pair this
                  computer (a one-time pairing link from the homelab over ssh, opened in your browser; POST /api/action
                  review_pair -> {"url"}). Then: Needs Human rows for the assistant (opens
-                 `nuauto assist <row>` in a terminal window, or shows the command), "I applied myself", company sites still
+                 `nuauto assist <row>` in a terminal window, or shows the command), "I applied myself", Drop (not applying: closed, a
+                 duplicate, a bad location; sheet.drop: Failed, "Dropped <date>: <reason>" in Notes; never while an
+                 assistant is on the row), company sites still
                  owed (Mark done), the NUworks side to retry, then the Other jobs card: the sheet's Other jobs tab's
                  Approved rows (read fresh; counted in the tab, not the menu), Start assistant (opens `nuauto assist other
-                 <row>`), Open site, I applied myself, Add a job (opens Sheet on the Other jobs tab). No caps there; their
+                 <row>`), Open site, I applied myself, Drop, Add a job (opens Sheet on the Other jobs tab). No caps there; their
                  Applied and other rows are on the Sheet screen. (A screen of its own until 2026-10-09.) By hand on NUworks tab: rows only you can finish there.
                  The lists follow the sheet by themselves: /api/state carries rows_at (when the sheet was last read), the
                  server reads it again after every finished row and run and when it is 30 s old, and the open screen
@@ -258,8 +260,8 @@ API (JSON; all need the cookie; POSTs need X-NUauto: 1)
   POST /api/answer           {"task", "id", "reply"}; POST /api/stop {"task", "force"}
   GET  /api/company          agent / other / site / retry rows, sessions (the assistants running now: slot, row, tab,
                              company, host, since, attention: {kind waiting|approve, since, said} while it waits for you)
-                             and slots (how many may); POST /api/mark {"action": applied|site, "row", "url",
-                             "tab": "other" (Other jobs tab, applied only)}
+                             and slots (how many may); POST /api/mark {"action": applied|site|drop, "row", "url",
+                             "why" (drop: closed|duplicate|location|other), "tab": "other" (Other jobs tab: applied, drop)}
   GET  /api/other            the Other jobs tab: exists, ready (Approved; an internship with its match, score, pay, posted),
                              applied, rest, sessions, slots
   POST /api/other/add        {"url", "company", "title"} -> {"row"}: an Approved row there (the tab made if missing)
