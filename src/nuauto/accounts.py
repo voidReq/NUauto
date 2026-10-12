@@ -299,7 +299,8 @@ def _bw(*args, stdin=None):
     if not exe:
         raise BitwardenError("Bitwarden's command line is not installed: npm install -g @bitwarden/cli, then bw login")
     try:
-        r = subprocess.run([exe, *args, "--nointeraction"], input=stdin, capture_output=True, text=True, timeout=120)
+        r = subprocess.run([exe, *args, "--nointeraction"], input=stdin, capture_output=True, text=True, timeout=120,
+                           env={**os.environ, "PATH": config.tools_path()})  # bw is a node script: node on PATH
     except subprocess.TimeoutExpired:
         raise BitwardenError(f"bw {args[0]} did not answer in 2 minutes") from None
     if r.returncode:

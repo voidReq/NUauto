@@ -296,7 +296,8 @@ def bitwarden():
         return [check("bitwarden", "Bitwarden", WARN, "Bitwarden's command line (bw) is not installed: NUauto adds its "
                       "logins to your vault with it.", ("bitwarden_install", "Install it"))]
     try:
-        r = subprocess.run([exe, "status", "--nointeraction"], capture_output=True, text=True, timeout=60)
+        r = subprocess.run([exe, "status", "--nointeraction"], capture_output=True, text=True, timeout=60,
+                           env={**os.environ, "PATH": config.tools_path()})  # bw is a node script: node on PATH
         status = json.loads(r.stdout or "{}").get("status")
     except (OSError, ValueError, subprocess.TimeoutExpired):
         status = None
