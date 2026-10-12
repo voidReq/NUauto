@@ -77,6 +77,19 @@ def lock_remote_local():
     return remote(f"chmod -R go-rwx {shlex.quote(config.SERVER_DIR + '/local')}", "lock down homelab local/")
 
 
+def stage_private(src, name):
+    """A copy of src in local/ only you can read (mode 600), so rsync -a carries that mode to the homelab (macOS's
+    rsync can't set modes). The file itself when it is that copy already."""
+    dest = os.path.join(config.LOCAL_DIR, name)
+    if os.path.realpath(src) != os.path.realpath(dest):
+        shutil.copyfile(src, dest + ".tmp")
+        os.chmod(dest + ".tmp", 0o600)
+        os.replace(dest + ".tmp", dest)
+    else:
+        os.chmod(dest, 0o600)
+    return dest
+
+
 def push(code=None):
     """code: send the laptop's code too (default: yes, unless the homelab deploys main from GitHub)."""
     if code is None:
@@ -91,6 +104,9 @@ def push(code=None):
     ok &= _run(RSYNC + ["data/ratings.json", f"{REMOTE}/data/ratings.json"], "push ratings")
     if os.path.exists(config.LAPTOP_RESUME):
         ok &= _run(RSYNC + ["-c", config.LAPTOP_RESUME, f"{REMOTE}/local/resume.pdf"], "push resume")
+    if config.REMOTE_ASSIST and config.LAPTOP_TRANSCRIPT and os.path.exists(config.LAPTOP_TRANSCRIPT):
+        ok &= _run(RSYNC + ["-c", stage_private(config.LAPTOP_TRANSCRIPT, "transcript.pdf"),
+                            f"{REMOTE}/local/transcript.pdf"], "push transcript")  # only the assistant there uses it
     if os.path.exists(config.TOKEN_PATH):
         ok &= _run(RSYNC + ["-u", "local/token.json", f"{REMOTE}/local/token.json"], "push Google token")
     if os.path.exists(config.GOOGLE_LOGIN_PATH):

@@ -88,7 +88,9 @@ emails; never for Google / Microsoft / Apple / LinkedIn / GitHub / Northeastern 
 
 ALSO YOURS (with care)
 - Following the application to other sites it needs (e.g. a careers site handing off to its ATS).
-- Uploading the resume: only the resume file listed under THIS RUN, when a page asks for a resume.
+- Uploading the resume: only the resume file listed under THIS RUN, when a page asks for a resume. The transcript
+  file listed there (if any): only where a page asks for a transcript (or "other documents" a transcript fits); say so
+  in the end message. No transcript listed and a page requires one: ask the user.
 - Checkboxes: tick consent / acknowledgement boxes the application requires, and list them in the end
   message (what each says).
 - Longer answers (essays, "why this company", cover letters, "describe a project"): draft one, type it into
@@ -125,6 +127,6 @@ the job on NUworks; an Other jobs row is not on NUworks).
 
 Enforced by code (a blocked action comes back as an error; don't look for a way around it, tell the user):
 asking before Submit-type clicks and Enter (with every unanswered guess shown to the user); no touching captchas; password boxes take
-only the two placeholders; no page scripts; uploads only of the resume; the only shell command is the answer bank
-(ANSWER); files: only the resume, notes and writeups, never secret files in them (keys, tokens, .env, NUauto's
+only the two placeholders; no page scripts; uploads only of the resume and the transcript; the only shell command is the answer bank
+(ANSWER); files: only the resume, transcript, notes and writeups, never secret files in them (keys, tokens, .env, NUauto's
 local/ folder).

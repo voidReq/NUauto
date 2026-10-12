@@ -1533,6 +1533,8 @@ screens.settings = async (view) => {
     effort.value = d.efforts.includes(s.assist_effort) ? s.assist_effort : d.efforts[0];
     const folders = el("textarea", { rows: "3", "aria-label": "Folders the assistant may read", testid: "set-read-paths" });
     folders.value = (s.assist_read_paths || []).join("\n");
+    const transcript = el("input", { type: "text", value: s.transcript_path || "", placeholder: "~/Documents/unofficial_transcript.pdf",
+      "aria-label": "Transcript", testid: "set-transcript" });
     const L = d.logins;
     const exportBtn = el("button", { class: "btn small", testid: "btn-export-logins", disabled: !L.new,
       text: L.new ? `Export ${plural(L.new, "new login")} for Bitwarden` : "No new logins to export", onclick: async () => {
@@ -1550,12 +1552,13 @@ screens.settings = async (view) => {
     return el("div", { class: "card stack", testid: "assistant-settings" }, el("h2", { text: "Company-site assistant" }),
       el("label", { class: "field" }, "Account email", el("span", { class: "muted small", text: "For the accounts it makes on job sites (Workday and others). Each site gets its own random password; the assistant never sees it." }), email),
       el("label", { class: "field" }, "Effort", el("span", { class: "muted small", text: "How hard it thinks (Claude Code's effort). Nothing is submitted without your review either way." }), effort),
+      el("label", { class: "field" }, "Transcript (optional)", el("span", { class: "muted small", text: "A PDF of your unofficial transcript. The assistant uploads it only where an application asks for a transcript (and copies it to your homelab if its assistant is on). Empty = none." }), transcript),
       el("label", { class: "field" }, "Folders it may read", el("span", { class: "muted small", text: "Your projects and writeups, one per line: for longer answers. Keys, tokens, .env files and NUauto's own logins are never read." }), folders),
       el("div", { class: "row between" }, el("span", { class: "small muted", testid: "logins-count",
         text: L.sites ? `Logins it made: ${plural(L.sites, "site")}${L.new ? `, ${L.new} not exported yet` : ", all exported"}` : "No logins made yet." }), exportBtn),
       el("div", {}, el("button", { class: "btn primary", text: "Save", testid: "assistant-save", onclick: async () => {
         try {
-          d = await api.post("/api/settings", { accounts_email: email.value, assist_effort: effort.value,
+          d = await api.post("/api/settings", { accounts_email: email.value, assist_effort: effort.value, transcript_path: transcript.value,
             assist_read_paths: folders.value.split("\n").map((x) => x.trim()).filter(Boolean) });
           toast("Saved."); draw();
         } catch (e) { fail(e); }

@@ -245,6 +245,17 @@ c = {**s, "resume": copy}
 ok(c, B + "browser_file_upload", {"paths": [copy]})
 blocked(c, B + "browser_file_upload", {"paths": [RESUME]}, "only the resume")
 assert assist.upload_copy(RESUME, run_dir) == copy   # a second run into the same folder is fine
+# the transcript (optional, local_config transcript_path): its copy may be uploaded too, and its source read; nothing else
+tsrc = os.path.join(tempfile.mkdtemp(), "unofficial_transcript.pdf")
+open(tsrc, "w").write("t")
+tcopy = assist.upload_copy(tsrc, run_dir)
+t = {**c, "transcript": tcopy, "transcript_src": os.path.realpath(tsrc)}
+ok(t, B + "browser_file_upload", {"paths": [tcopy]})
+ok(t, B + "browser_file_upload", {"paths": [copy, tcopy]})
+blocked(t, B + "browser_file_upload", {"paths": [tsrc]}, "or the transcript")
+blocked(c, B + "browser_file_upload", {"paths": [tcopy]}, "only the resume")   # no transcript saved: never
+assert assist.check_read(t, "Read", {"file_path": tsrc}) is None
+assert assist.check_read(c, "Read", {"file_path": tsrc}) is not None
 
 # Bash: only the answer-bank command, no shell tricks
 ok(s, "Bash", {"command": '/venv/python /proj/assist.py answer "City*" --option "A (+1)"'})
@@ -808,6 +819,11 @@ ctx = assist.context_text("row 3", type("R", (), {"company": "Acme", "title": "I
                           [tmp], ANSWER_CMD, ["/home/u/projects/site/data/projects"])
 assert "writeups (look here first for essays" in ctx and "/home/u/projects/site/data/projects" in ctx
 assert "<answer|guess|guesses|save|once|confirm|alias|blank>" in ctx
+assert "Transcript: none saved" in ctx
+ctx_t = assist.context_text("row 3", type("R", (), {"company": "Acme", "title": "Intern"})(), "https://x/1", False, RESUME,
+                            [tmp], ANSWER_CMD, transcript="/run/upload/transcript.pdf")
+assert "Transcript file (the user's unofficial transcript: upload it only where a page asks for a transcript" in ctx_t
+assert "/run/upload/transcript.pdf" in ctx_t
 assert "writeups" not in assist.context_text("row 3", type("R", (), {"company": "A", "title": "I"})(), "https://x/1",
                                              False, RESUME, [tmp], ANSWER_CMD).split("Resume and notes")[1].split("\n")[1]
 rules = assist.rules_text(ANSWER_CMD)

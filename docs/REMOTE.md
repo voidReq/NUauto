@@ -134,6 +134,7 @@ WHAT LIVES WHERE (with remote_assist)
   accounts.json (job-site logins)    both machines, merged the same way: a login is never dropped. If each machine made
        an account on the same site before they merged, the earlier stays the login and the other is kept with it
        ("other_passwords"); the merge names the site. Sent as JSON over ssh, never printed or logged.
+  transcript (transcript_path)       pushed by push() to local/transcript.pdf (mode 600); the agent there uploads it.
   gmail_token.json                   pushed by push() when the laptop's is newer (`nuauto login google` / `login gmail`).
   your writeups (assist_writeups)    copied by push() to ~/nuauto-notes/<folder name> on the homelab: only the files the
        agent may read anyway (sync.notes_files = assist.secret_path: no keys, tokens, .env, .git, NUauto's local/),
