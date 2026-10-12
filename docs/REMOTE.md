@@ -48,7 +48,9 @@ PAIR YOUR PHONE (once per device)
 
 THE QUEUE (remote.py; nuauto-assist.timer every 10 minutes runs `nuauto assist auto`)
 - On with "remote_auto": true (and remote_assist). Hours: "remote_hours": [9, 22] (the default: 09:00-22:00 New York
-  time), so no pings at night.
+  time, whatever clock the homelab runs on), so no pings at night: the only hours it starts sessions by itself (one
+  already running goes on; you can start one yourself any time). It takes effect at the timer's next run (every 10
+  minutes).
 - What it starts: Approved rows of the Other jobs tab and Needs Human rows stopped at a company site, best first:
   closing within a week, then match % (the "match NN%" in Notes), then sheet order. Into free slots (assist_slots),
   one session per job site, never a row or site the laptop holds (claims). NUworks rows only while the weekly cap and
@@ -101,7 +103,8 @@ THE REVIEW PAGE (review.py; http://<web_listen_host>:8766/, inside nuauto-web, o
                     into its terminal (tmux send-keys; a newline = Ctrl+J, so several lines go as one message: checked
                     with a real Claude Code session, as is /exit), as if you typed it there. Only into the pane the
                     session started in, and never when that pane shows a shell (the assistant ended).
-  The browser       the browser view's link and password, and the screen now. A captcha: solve it there, reply "done".
+  The browser       the browser view's link and password, and the screen now (it and the terminal refresh in place every
+                    4 s while it works). A captcha: solve it there, reply "done".
   Its terminal      the last lines (this run's site passwords taken out); Interrupt (Esc), End session (/exit).
   Ended             Did it go through? Yes / No (typed into the launcher's question).
 - Paired devices only: a cookie with a random key (HttpOnly, SameSite=Strict; the homelab keeps its hash in

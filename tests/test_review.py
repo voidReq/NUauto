@@ -202,6 +202,9 @@ try:
     # the session page: what it will do, the message (escaped)
     r = req("GET", "/s/1", cookie=KEY)
     page = text(r)
+    # while it works or waits on a Submit, the screen and terminal refresh in place (/s/1/term: paired devices only)
+    assert "data-live='/s/1'" in page and "id=live-term" in page    # (live-shot only with a browser view)
+    assert req("GET", "/s/1/term", cookie=KEY)[0] == 200 and req("GET", "/s/1/term")[0] == 403
     # like a chat, newest at the bottom: the terminal, the latest message, the Submit question right under it, then
     # the reply box with End session; opens at the Submit question
     assert page.index("Its terminal") < page.index("Its latest message") < page.index("Ready to submit") < page.index("id=reply")
@@ -394,6 +397,8 @@ try:
     MARK = assist.LAPTOP_MARK
     sheet.open_other, sheet.open_worksheet = fake_open("other"), fake_open("jobs")
     review.type_into = fake_type
+    real_end = review.end_session
+    review.end_session = lambda sess: fake_type(sess, "/exit")  # (End session types /exit itself, with its pause and retry)
     try:
         # the buttons: the reply card (End session next to End: do it on the laptop), the finish card, none while a prompt waits
         reset("waiting")
@@ -497,6 +502,7 @@ try:
     finally:
         sheet.open_other, sheet.open_worksheet = real_sheet
         review.type_into = real_type_into
+        review.end_session = real_end
         for name in (laptop_file,):
             if os.path.exists(name):
                 os.remove(name)
@@ -570,7 +576,10 @@ try:
             page.wait_for_selector("text=Approved.")
             dec = assist.read_json(decision_path)
             assert dec["decision"] == "approve" and dec["by"] == "Test Browser" and dec["id"] == "ap1", dec
-            os.remove(decision_path)
+            # until the guard picks your answer up, the page says so: no second Approve to tap
+            assert "Approved: it is submitting now" in page.inner_text("body") and page.locator("text=Approve: submit").count() == 0
+            os.remove(decision_path)                                    # (the guard took it)
+            page.goto(f"{ORIGIN}/s/1")
             # Decline with a note, the same way
             page.fill("input[name=note]", "not this one")
             page.click("button:has-text('Decline')")

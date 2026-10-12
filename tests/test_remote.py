@@ -1271,4 +1271,17 @@ finally:
     sheet.open_other, sheet.open_worksheet = patched["open_other"], patched["open_worksheet"]
     config.IS_SERVER = REAL_FLAGS[0]
 
+# its hours are New York time whatever clock the process runs on (a shell over ssh is often UTC)
+from datetime import timezone  # noqa: E402
+from zoneinfo import ZoneInfo  # noqa: E402
+real_local = config.LOCAL
+try:
+    config.LOCAL = {**config.LOCAL, "remote_hours": [9, 22]}
+    utc_0100 = datetime(2026, 10, 12, 1, 0, tzinfo=timezone.utc)                  # 21:00 in New York (EDT)
+    assert remote.in_hours(utc_0100.astimezone(ZoneInfo("America/New_York")))
+    assert not remote.in_hours(datetime(2026, 10, 12, 3, 0, tzinfo=timezone.utc).astimezone(ZoneInfo("America/New_York")))
+    assert remote.TZ == "America/New_York"
+finally:
+    config.LOCAL = real_local
+
 print("All remote checks passed.")

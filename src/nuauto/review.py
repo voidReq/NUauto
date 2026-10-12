@@ -221,6 +221,28 @@ def type_into(s, text):
     _tmux("send-keys", "-t", t, "Enter")
 
 
+ENDED = ("Did you press Submit", "left for the laptop", "Not submitted")  # what its terminal shows once Claude Code ended
+
+
+def end_session(s, wait=4.0):
+    """/exit in its terminal: Claude Code's command menu can take the first Enter (it picks the command), so a pause
+    before Enter, and one more Enter if the session has not ended a few seconds later."""
+    t = target(s)
+    r = _tmux("display-message", "-p", "-t", t, "#{pane_dead} #{pane_current_command}")
+    dead, _, cmd = (r.stdout.strip() if r.returncode == 0 else "1 ").partition(" ")
+    if dead == "1" or not cmd or cmd in SHELLS:
+        raise ValueError(f"its terminal shows {cmd or 'nothing'} now, not the assistant: nothing was typed")
+    _tmux("send-keys", "-t", t, "-l", "--", "/exit")
+    time.sleep(0.7)
+    _tmux("send-keys", "-t", t, "Enter")
+    deadline = time.time() + wait
+    while time.time() < deadline:
+        time.sleep(0.5)
+        if any(m in terminal(s) for m in ENDED):
+            return
+    _tmux("send-keys", "-t", t, "Enter")  # (harmless if it ended meanwhile: "Did you press Submit?" just asks again)
+
+
 def terminal(s):
     """The terminal's last lines, with this run's site passwords taken out."""
     from nuauto import accounts
@@ -335,6 +357,13 @@ document.addEventListener("submit", (e) => {
   if (b) { b.textContent = b.dataset.busy || "Working"; b.classList.add("busy"); }
   setTimeout(() => f.querySelectorAll("button").forEach((x) => { x.disabled = true; }), 0);
 });
+// While it works: the screen and the terminal refresh in place every few seconds (no reload, your typing kept).
+const live = document.body.dataset.live;
+if (live) setInterval(async () => {
+  const shot = document.getElementById("live-shot"), term = document.getElementById("live-term");
+  if (shot) { const next = new Image(); next.onload = () => { shot.src = next.src; }; next.src = live + "/shot.png?live=" + Date.now(); }
+  if (term) { try { const r = await fetch(live + "/term", {cache: "no-store"}); if (r.ok) term.textContent = await r.text(); } catch (e) {} }
+}, 4000);
 const v = document.body.dataset.v, u = document.body.dataset.poll, at = document.body.dataset.scroll;
 if (at && document.getElementById(at)) document.getElementById(at).scrollIntoView({block: at === "approve" ? "start" : "end"});
 if (u) setInterval(async () => {
@@ -347,10 +376,10 @@ def esc(x):
     return html.escape(str(x or ""))
 
 
-def layout(title, body, v="", poll="", scroll=""):
+def layout(title, body, v="", poll="", scroll="", live=""):
     return (f"<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
             f"<meta name=robots content=noindex><title>{esc(title)}</title><style>{CSS}</style>"
-            f"<body data-v='{esc(v)}' data-poll='{esc(poll)}' data-scroll='{esc(scroll)}'>{body}"
+            f"<body data-v='{esc(v)}' data-poll='{esc(poll)}' data-scroll='{esc(scroll)}' data-live='{esc(live)}'>{body}"
             "<script src='/poll.js'></script></body>")
 
 
@@ -421,6 +450,12 @@ def index_version():
     return hashlib.sha256(json.dumps(parts).encode()).hexdigest()[:16]
 
 
+def read_answer(s):
+    """Your answer to its open Submit question, before the guard has picked it up (decision.json), or None."""
+    from nuauto import assist
+    return assist.read_json(os.path.join(s["run"], assist.DECISION))
+
+
 def session_page(s, token, flash=""):
     """Read like a chat, newest at the bottom: the browser and the terminal, then its latest message, then what it wants
     from you right under it (a Submit to approve, or the session's end), then the reply box with End session. The page
@@ -436,8 +471,8 @@ def session_page(s, token, flash=""):
         parts.append(f"<div class=card><b>The browser</b> <span class=dim>(captchas: you solve them here, then reply "
                      f"\"done\")</span><p><a href='{esc(view['url'])}' target=_blank rel=noopener>Open it</a> &middot; "
                      f"password <code>{esc(view.get('password'))}</code></p>"
-                     f"<img src='/s/{slot}/shot.png?live={int(time.time())}' alt='the screen now'></div>")
-    parts.append(f"<div class=card><b>Its terminal</b><pre>{esc(terminal(s)) or '(not readable)'}</pre>"
+                     f"<img id=live-shot src='/s/{slot}/shot.png?live={int(time.time())}' alt='the screen now'></div>")
+    parts.append(f"<div class=card><b>Its terminal</b><pre id=live-term>{esc(terminal(s)) or '(not readable)'}</pre>"
                  + form(f"/s/{slot}/key", token, "<button class=no name=k value=interrupt data-busy=Interrupting>Interrupt (Esc)</button>")
                  + "</div>")
     if s["message"] and word != "finish":
@@ -449,7 +484,12 @@ def session_page(s, token, flash=""):
                      "question, not a Submit of the guard's). The reply box is off until it is answered, because Enter "
                      "would pick its first option. Answer it in the terminal: "
                      f"<code>ssh -t homelab tmux attach -t {esc(st.get('tmux') or '?')}</code></div>")
-    if a:
+    answered = a and a.get("waiting") and (read_answer(s) or {}).get("id") == a.get("id")
+    if answered:
+        dec = read_answer(s)
+        parts.append(f"<div class='card finish' id=approve><b>{'Approved: it is submitting now' if dec.get('decision') == 'approve' else 'Declined: it will not submit'}</b>"
+                     f"<p class=dim>Your answer ({esc(dec.get('by'))}) is with the assistant; this page updates by itself.</p></div>")
+    elif a:
         late = "" if a.get("waiting") else ("<p class=dim>The assistant stopped waiting for this; Approve tells it to "
                                             "do it now (good for 10 minutes, this action on this page only).</p>")
         parts.append(f"<div class='card approve' id=approve><b>Ready to submit</b><p>It wants to <b>{esc(a.get('what'))}</b>"
@@ -480,7 +520,8 @@ def session_page(s, token, flash=""):
                        "way in). The row is marked in your sheet; the homelab never starts it again.</p>"
                      + "</div>")
     return layout(f"NUauto: {st.get('company') or 'assistant'}", "".join(parts), version(s), f"/s/{slot}/v",
-                  scroll="approve" if a else "finish" if word == "finish" else "reply" if chat else "")
+                  scroll="approve" if a else "finish" if word == "finish" else "reply" if chat else "",
+                  live=f"/s/{slot}" if word in ("working", "approve") else "")
 
 
 NOT_PAIRED = ("<h2>Not paired</h2><p>This browser is not paired with NUauto. Make a pairing link (<code>nuauto review "
@@ -588,6 +629,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, session_page(s, form_token(key), q.get("m", "")))
         if sub == "/v":
             return self._send(200, version(s), "text/plain")
+        if sub == "/term":
+            return self._send(200, terminal(s) or "(not readable)", "text/plain; charset=utf-8")
         if sub == "/shot.png":
             from nuauto import assist
             from nuauto import screen
@@ -652,11 +695,11 @@ class Handler(BaseHTTPRequestHandler):
                 msg = "Interrupted."
             elif sub == "/key" and f.get("k") == "laptop" and status(s)[0] != "prompt":
                 msg = mark_laptop(s, by)
-                type_into(s, "/exit")
+                end_session(s)
             elif sub == "/key" and f.get("k") == "exit" and status(s)[0] == "prompt":
                 msg = "Not sent: Claude Code is asking something in its terminal (answer it there)."
             elif sub == "/key" and f.get("k") == "exit":
-                type_into(s, "/exit")
+                end_session(s)
                 assist.log(s["run"], f"REVIEW PAGE ended the session (by {by})")
                 msg = "Ending the session."
             else:

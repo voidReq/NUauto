@@ -61,9 +61,13 @@ def hours():
     return HOURS
 
 
+TZ = "America/New_York"  # remote_hours are New York time, whatever clock the process runs on (a shell over ssh: UTC)
+
+
 def in_hours(now=None):
+    from zoneinfo import ZoneInfo
     a, b = hours()
-    return a <= (now or datetime.now()).hour < b
+    return a <= (now or datetime.now(ZoneInfo(TZ))).hour < b
 
 
 def match_of(notes):
