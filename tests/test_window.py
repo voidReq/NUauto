@@ -73,4 +73,31 @@ if py:
 # ---- Playwright's own command line through the driver in the package (what a packaged app uses to install Firefox)
 assert cli.playwright_cli(["--version"]) == 0
 
+# terminal windows and bw get the tools' folders on PATH (config.tools_path): nvm's bin is found even when PATH lacks it
+# (a bash window doesn't load nvm), and bw, a node script, finds node there
+import shlex  # noqa: E402
+import subprocess  # noqa: E402
+import tempfile  # noqa: E402
+home = tempfile.mkdtemp()
+nvm = os.path.join(home, ".nvm", "versions", "node", "v24.0.0", "bin")
+os.makedirs(nvm)
+for name, body in (("node", "#!/bin/sh\necho node-ran\n"), ("bw", "#!/usr/bin/env node\n")):
+    with open(os.path.join(nvm, name), "w") as f:
+        f.write(body)
+    os.chmod(os.path.join(nvm, name), 0o755)
+real_env, real_tools = dict(os.environ), config.LOCAL.get("tools")
+try:
+    os.environ.update(HOME=home, PATH="/usr/bin:/bin")
+    config.LOCAL["tools"] = {}
+    path = config.tools_path()
+    assert path.split(os.pathsep)[0] == nvm and path.endswith("/usr/bin" + os.pathsep + "/bin"), path
+    assert path.count(nvm) == 1  # once, though node and bw both live there
+    r = subprocess.run(["bash", "-c", f"export PATH={shlex.quote(path)}; command -v bw && bw"], capture_output=True,
+                       text=True, env={"HOME": home, "PATH": "/usr/bin:/bin"})
+    assert r.stdout.split() == [os.path.join(nvm, "bw"), "node-ran"], (r.stdout, r.stderr)
+finally:
+    os.environ.clear()
+    os.environ.update(real_env)
+    config.LOCAL["tools"] = real_tools
+
 print("All window and packaging checks passed.")

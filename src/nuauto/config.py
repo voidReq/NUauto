@@ -169,3 +169,16 @@ def tool_path(name):
     dirs += [os.path.expanduser(d) for d in TOOL_DIRS[1:]]
     dirs += sorted(glob.glob(os.path.expanduser("~/.nvm/versions/node/*/bin")), reverse=True)
     return shutil.which(name, path=os.pathsep.join(d for d in dirs if d))
+
+
+def tools_path():
+    """PATH with the folders of the tools NUauto finds (tool_path: nvm's node and npm, bw, claude) in front of this
+    process's own. For terminal windows and child processes: bash doesn't load nvm (zsh or an interactive shell set it
+    up), and bw is a node script, so it needs node on PATH too."""
+    have = [p for p in os.environ.get("PATH", "").split(os.pathsep) if p]
+    dirs = []
+    for name in ("bw", "npm", "node", "claude"):  # bw's own folder first: under nvm its node is there too
+        found = tool_path(name)
+        if found and os.path.dirname(found) not in dirs + have:
+            dirs.append(os.path.dirname(found))
+    return os.pathsep.join(dirs + have)

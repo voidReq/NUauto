@@ -1158,7 +1158,8 @@ TERMINALS = [  # (command, how it takes a command to run)
 def open_terminal(command, intro):
     """Run a shell command in a new terminal window (you type there: the assistant's questions, Claude's login).
     Returns {"opened": bool, "command": what to paste if no terminal app was found}."""
-    script = (f"cd {shlex.quote(config.STATE_DIR)}; echo {shlex.quote(intro)}; echo; {command}; "
+    script = (f"export PATH={shlex.quote(config.tools_path())}; cd {shlex.quote(config.STATE_DIR)}; "
+              f"echo {shlex.quote(intro)}; echo; {command}; "
               "echo; read -rp 'Done. Press Enter to close this window. ' _")
     if config.DEMO:
         return {"opened": False, "command": command, "demo": True}
