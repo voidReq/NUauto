@@ -326,11 +326,18 @@ try:
             r = req("POST", "/s/1/finish", form={"t": token, "a": "y"}, cookie=KEY)              # not at the finish question
             assert "Nothing" in r[1]["location"]
             assist.write_private(os.path.join(run, assist.ATTENTION), {"kind": "finish", "since": 1, "time": 1, "said": ""})
-            r = req("POST", "/s/1/finish", form={"t": token, "a": "y"}, cookie=KEY)
-            assert "Thanks" in r[1]["location"]
             page = text(req("GET", "/s/1", cookie=KEY))
             assert "The session ended" in page and "Yes, it went through" in page and "Reply" not in page   # no reply box then
             assert "did it go through?" in text(req("GET", "/", cookie=KEY))
+            r = req("POST", "/s/1/finish", form={"t": token, "a": "y"}, cookie=KEY)
+            assert r[1]["location"].startswith("/?m=") and "Thanks" in r[1]["location"]   # back to the list at once
+            # one tap is enough: the page says your answer (not the question again) while the run closes
+            assert assist.read_json(os.path.join(run, assist.ATTENTION))["kind"] == "answered"
+            page = text(req("GET", "/s/1", cookie=KEY))
+            assert "marking it Applied" in page and "Yes, it went through" not in page and "Reply" not in page
+            assert "You said it went through" in text(req("GET", "/", cookie=KEY))
+            r = req("POST", "/s/1/finish", form={"t": token, "a": "y"}, cookie=KEY)
+            assert "Already answered" in unquote(r[1]["location"])
             r = req("POST", "/s/1/key", form={"t": token, "k": "exit"}, cookie=KEY)
             assert "Ending" in r[1]["location"]
             time.sleep(0.5)
