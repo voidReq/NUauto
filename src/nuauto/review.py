@@ -218,7 +218,29 @@ def type_into(s, text):
                 raise ValueError(f"tmux: {r.stderr.strip()[:200]}")
         if i < len(lines) - 1:
             _tmux("send-keys", "-t", t, "C-j")
-    _tmux("send-keys", "-t", t, "Enter")
+    # A long reply arrives as fast as a paste, and Claude Code then takes an Enter right after it as part of the paste
+    # (a new line, not "send"): let it land first, and press Enter again while the text still sits in its input box.
+    time.sleep(min(1.5, 0.3 + len(text) / 1500))
+    snippet = next((x.strip() for x in lines if x.strip()), "")[:30]
+    for _ in range(3):
+        _tmux("send-keys", "-t", t, "Enter")
+        time.sleep(0.8)
+        if not snippet or not still_typed(s, snippet):
+            return
+
+
+def still_typed(s, snippet):
+    """True if Claude Code's input box (from its last ❯ line down to the rule under it) still holds this text."""
+    rows = terminal(s).splitlines()[-25:]
+    at = max((i for i, x in enumerate(rows) if x.lstrip().startswith("❯")), default=None)
+    if at is None:
+        return False  # not Claude Code's prompt (e.g. the launcher's "Did you press Submit?"): an Enter there answers it
+    box = []
+    for x in rows[at:]:
+        if box and x.strip().startswith("─"):
+            break
+        box.append(x)
+    return snippet in " ".join(" ".join(box).split())
 
 
 ENDED = ("Did you press Submit", "left for the laptop", "Not submitted")  # what its terminal shows once Claude Code ended

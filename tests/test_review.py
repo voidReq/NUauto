@@ -731,4 +731,19 @@ finally:
     srv.shutdown()
     subprocess.run(["tmux", "kill-session", "-t", f"={TMUX_NAME}"], capture_output=True) if HAVE_TMUX else None
 
+# a long reply still sitting in Claude Code's input box (its Enter taken as part of a paste) is seen, so it is sent again
+real_terminal = review.terminal
+try:
+    box = ("● Earlier answer\n─────────\n❯ type: I have basic experience with C through a couple\n  projects in cybersecurity\n"
+           "─────────\n  ⏸ manual mode on")
+    review.terminal = lambda s_: box
+    assert review.still_typed({}, "type: I have basic experience")
+    assert not review.still_typed({}, "Earlier answer")                   # above the box: already sent
+    review.terminal = lambda s_: "● Done\n─────────\n❯ \n─────────\n  ⏸ manual mode on"
+    assert not review.still_typed({}, "type: I have basic experience")   # the box is empty: it went
+    review.terminal = lambda s_: "Did you press Submit for row 1? [y = yes / n = no]: "
+    assert not review.still_typed({}, "y")                                 # no Claude Code prompt: nothing to resend
+finally:
+    review.terminal = real_terminal
+
 print("All review checks passed.")
