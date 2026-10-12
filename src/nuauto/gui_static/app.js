@@ -1585,6 +1585,8 @@ function passwordManagerPanel(pm, done) {
     ] : null);
 }
 
+function hour(h) { return `${String(h).padStart(2, "0")}:00`; }
+
 function homelabAssistantPanel(ha, done) {
   if (!ha.available) return null;
   const from = el("input", { type: "number", min: "0", max: "23", step: "1", value: String(ha.hours[0]), "aria-label": "From (hour)", testid: "ha-from" });
@@ -1598,11 +1600,14 @@ function homelabAssistantPanel(ha, done) {
       el("button", { class: "btn small" + (ha.on ? "" : " primary"), testid: "ha-toggle", text: ha.on ? "Turn off" : "Turn on",
         onclick: () => saveSettings({ remote_assist: !ha.on }, ha.on ? "Off: the homelab runs no assistant." : "On: the homelab can run the assistant.", done) })),
     ha.on ? [
-      el("div", { class: "row between" }, el("span", { class: "small", text: ha.auto ? "It starts sessions by itself from your approved rows." : "You start each session yourself (the review page's queue, or Company sites here)." }),
+      el("div", { class: "row between" }, el("span", { class: "small", testid: "ha-auto-text", text: ha.auto ?
+          `It starts sessions by itself from your approved rows, only between ${hour(ha.hours[0])} and ${hour(ha.hours[1])} New York time (up to "Assistants at once" at a time).` :
+          "You start each session yourself (the review page's queue, or Company sites here)." }),
         el("button", { class: "btn small", testid: "ha-auto", text: ha.auto ? "Stop starting by itself" : "Start sessions by itself",
-          onclick: () => saveSettings({ remote_auto: !ha.auto }, ha.auto ? "It no longer starts sessions by itself." : "It starts sessions by itself now, in its hours.", done) })),
-      el("label", { class: "field" }, "Its hours", el("span", { class: "muted small", text: "When it may start sessions by itself, New York time (so no pings at night)." }),
-        el("div", { class: "row" }, "from", from, "to", to)),
+          onclick: () => saveSettings({ remote_auto: !ha.auto }, ha.auto ? "It no longer starts sessions by itself." :
+            `It starts sessions by itself now, between ${hour(ha.hours[0])} and ${hour(ha.hours[1])} New York time.`, done) })),
+      el("label", { class: "field" }, "Its hours", el("span", { class: "muted small", text: "The only hours it starts sessions by itself (New York time, 24-hour clock), so no pings at night. A session already running goes on; you can start one yourself any time." }),
+        el("div", { class: "row" }, "between", from, ":00 and", to, ":00")),
       el("label", { class: "field" }, "Assistants at once", el("span", { class: "muted small", text: "On each machine, 1 to 3." }), slots),
       el("div", { class: "row" }, el("button", { class: "btn small primary", text: "Save", testid: "ha-save", onclick: () =>
         saveSettings({ remote_hours: [Number(from.value), Number(to.value)], assist_slots: Number(slots.value) }, "Saved.", done) })),
