@@ -94,6 +94,8 @@ SECRETS AND STATE (never print or log any of these; all mode 600)
                                          own ones imported from Bitwarden (`nuauto accounts import`); with
                                          remote_assist merged both ways by sync.share (docs/REMOTE.md), else never
                                          synced; `nuauto accounts export` (or Settings) writes Bitwarden's import file
+  transcript.pdf        (yes)   (yes)    your unofficial transcript (transcript_path, any place on the laptop), for the assistant to
+                                         upload; with remote_assist sync.push copies it there (via a 600 copy in local/)
   gmail_token.json      yes     (yes)    the read-only Gmail login for the assistant's email codes (`nuauto login gmail`;
                                          renewed by `nuauto login google`); with remote_assist sync.push (if newer)
   gui.lock              yes     no       the running GUI (pid, port, a secret that only opens a window); not synced

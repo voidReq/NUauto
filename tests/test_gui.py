@@ -193,6 +193,13 @@ try:
     s1 = post("/api/settings", {"accounts_email": " demo.student@example.com ", "assist_effort": "medium",
                                 "assist_read_paths": ["/tmp/notes", " "]})["settings"]
     assert (s1["accounts_email"], s1["assist_effort"], s1["assist_read_paths"]) == ("demo.student@example.com", "medium", ["/tmp/notes"]), s1
+    # the transcript the assistant may upload: a PDF that exists, or empty
+    post("/api/settings", {"transcript_path": "/nowhere/transcript.pdf"}, expect=409)
+    tpdf = os.path.join(STATE, "transcript.pdf")
+    open(tpdf, "w").write("%PDF-1.4")
+    post("/api/settings", {"transcript_path": tpdf.replace(".pdf", ".txt")}, expect=409)
+    assert post("/api/settings", {"transcript_path": f" {tpdf} "})["settings"]["transcript_path"] == tpdf
+    assert post("/api/settings", {"transcript_path": ""})["settings"]["transcript_path"] == ""
     post("/api/logins/export", {}, expect=409)  # nothing to export yet
     FAKE_PW = "Xy9!demo-not-real"
     with open(os.path.join(STATE, "local", "accounts.json"), "w") as f:

@@ -65,6 +65,8 @@ SAFETY RULES (most important)
    DECISION: NUworks has no upload; its Apply popup picks from resumes already in my
    profile. The script selects only the exact "resume_label" saved in profile.json and
    never uploads anything.
+   (Added 2026-10-12, my request.) The company-site agent may also upload my unofficial transcript (local_config.json
+   "transcript_path", GUI Settings; the homelab gets a copy as local/transcript.pdf), only where a page asks for one.
 7. (Changed 2026-10-03; GUI added 2026-10-05.) `nuauto apply` submits every Approved row, one at a
    time, with no per-job prompt: Approved in the sheet IS my approval. It runs only with me there:
    in a real terminal, or from the GUI (`nuauto gui`: I click Start, the browser is visible, Stop =
@@ -201,8 +203,8 @@ COMPANY-SITE AGENT (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`;
   "Apply"), Enter and type(submit) make the terminal ask me first ("ask"); element names come from the
   latest full snapshot only (refs cleared by anything that changes the page), never from the agent's
   description. Never: page scripts (could submit behind the review), uploads other than
-  the resume (the launcher copies it into the run's log folder, logs/<run>/upload/, because the browser tool
-  only uploads from there; only that copy is allowed), non-web links; Bash only the answer-bank command (answer|guess|guesses|save|once|confirm|alias|blank|wait);
+  the resume and the transcript (the launcher copies them into the run's log folder, logs/<run>/browser/upload/, because
+  the browser tool only uploads from there; only those copies are allowed), non-web links; Bash only the answer-bank command (answer|guess|guesses|save|once|confirm|alias|blank|wait);
   Read/Glob/Grep only inside my resume, local_config.json "assist_read_paths" (my projects and writeups: mine is
   ~/projects, 2026-10-10) and "assist_writeups" (the first place it looks for essay material: mine is my site's
   project and security writeups, 2026-10-11), and never NUauto's local/ folders or logs, keys, tokens, .env or .git files in them

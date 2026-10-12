@@ -67,6 +67,11 @@ ALLOWED_HOSTS = {"northeastern-csm.symplicity.com"}
 # Laptop: the resume at local_config resume_path. Homelab: a copy the laptop pushes to local/resume.pdf.
 LAPTOP_RESUME = os.path.expanduser(LOCAL["resume_path"])
 RESUME_PATH = LAPTOP_RESUME if os.path.exists(LAPTOP_RESUME) else os.path.join(LOCAL_DIR, "resume.pdf")
+# The unofficial transcript (optional), for the company-site assistant to upload where an application asks for one.
+# Laptop: local_config "transcript_path". Homelab (remote_assist): a copy the laptop pushes to local/transcript.pdf.
+LAPTOP_TRANSCRIPT = os.path.expanduser(LOCAL.get("transcript_path") or "")
+TRANSCRIPT_PATH = (LAPTOP_TRANSCRIPT if LAPTOP_TRANSCRIPT and os.path.exists(LAPTOP_TRANSCRIPT)
+                   else os.path.join(LOCAL_DIR, "transcript.pdf"))
 DATA_DIR = os.path.join(STATE_DIR, "data")   # list, triage, details, scores, ratings, pool
 WORK_DIR = os.path.join(STATE_DIR, "work")   # batch files exchanged with the Claude subagents
 ANSWERS_PATH = os.path.join(LOCAL_DIR, "answers.json")

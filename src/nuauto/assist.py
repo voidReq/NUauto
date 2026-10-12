@@ -10,7 +10,8 @@
   nuauto assist other add <url> <company> <title>
                                       add a job to the Other jobs tab as Approved (the tab is made if missing)
 
-The agent may browse any site the application needs, fill fields, tick boxes, upload the resume, look things up on
+The agent may browse any site the application needs, fill fields, tick boxes, upload the resume (and the transcript, if
+saved: local_config "transcript_path"), look things up on
 the web (WebSearch / WebFetch: the company, the role) and read your notes (local_config.json "assist_read_paths"). It
 makes the accounts sites ask for, with your account email and a password NUauto makes (accounts.py): it types a
 placeholder and the guard types the real password, for that site only; the agent never sees it. It NEVER submits
@@ -30,7 +31,7 @@ Code checks every call (Claude Code hooks -> `assist.py hook pre|post`, logic in
 - passwords: only {{NEW_PASSWORD}} / {{PASSWORD}}, alone, into a field the latest snapshot names a password, never
   on an identity provider or Northeastern (accounts.never); the guard swaps in the site's password (updatedInput) and
   takes it out of what the browser tool replies (updatedToolOutput) and of the run's logs.
-- never: page scripts (they could submit behind the review), uploads other than the resume, non-web links; Bash
+- never: page scripts (they could submit behind the review), uploads other than the resume / transcript, non-web links; Bash
   other than the answer-bank command; files outside the resume and notes, or secret ones inside them (secret_path).
 - If the guard itself fails or times out, the action is blocked (the hooks' onFailure "block").
 """
@@ -326,7 +327,7 @@ def check_read(state, tool, inp):
     protected = state.get("protected", [])
     if tool == "Read":
         p = inp.get("file_path", "")
-        if state.get("resume_src") and os.path.realpath(os.path.expanduser(p)) == state["resume_src"]:
+        if os.path.realpath(os.path.expanduser(p)) in {f for f in (state.get("resume_src"), state.get("transcript_src")) if f}:
             return None
         if not under(p, roots):
             return f"Reading {p!r} is blocked: only the resume and notes ({roots})."
@@ -583,10 +584,11 @@ def decide(state, tool, inp):
         return deny(OWN_NETWORK) if config.IS_SERVER and own_network(inp["url"]) else ALLOW
     if name == "browser_file_upload":
         paths = inp.get("paths") or []
-        resume = state.get("resume")
-        if all(resume and os.path.realpath(os.path.expanduser(p)) == resume for p in paths):
+        resume, transcript = state.get("resume"), state.get("transcript")
+        allowed = {f for f in (resume, transcript) if f}
+        if all(os.path.realpath(os.path.expanduser(p)) in allowed for p in paths):
             return ALLOW
-        return deny(f"Only the resume can be uploaded: {resume}")
+        return deny(f"Only the resume can be uploaded: {resume}" + (f" (or the transcript: {transcript})" if transcript else ""))
     if name == "browser_press_key":
         if inp.get("key", "").lower() in ENTER_KEYS:
             if sign_in_page(state["refs"]):
@@ -1550,7 +1552,7 @@ def rules_text(answer_cmd):
         return f.read().replace("ANSWER ", " ".join(shlex.quote(a) for a in answer_cmd) + " ")
 
 
-def context_text(where, row, url, other, resume, read_roots, answer_cmd, writeups=(), view_url=None):
+def context_text(where, row, url, other, resume, read_roots, answer_cmd, writeups=(), view_url=None, transcript=None):
     email = accounts.account_email()
     own = accounts.own_login(url)  # one of your own logins (imported from Bitwarden) for this site
     return (f"\n\nTHIS RUN\n{where.capitalize()}: {row.company} | {row.title}\nPosting: {url}\n"
@@ -1561,7 +1563,10 @@ def context_text(where, row, url, other, resume, read_roots, answer_cmd, writeup
                "not approved yet, end your turn with one line saying it is ready for review; when a message says they "
                "approved, take a new snapshot and do exactly that action again.\n"
                if view_url else "") +
-            f"Resume file (the only file you may upload): {resume or 'not found'}\n"
+            f"Resume file (upload it where a page asks for a resume): {resume or 'not found'}\n"
+            + (f"Transcript file (the user's unofficial transcript: upload it only where a page asks for a transcript; "
+               f"you may also Read it for GPA or course questions): {transcript}\n" if transcript else
+               "Transcript: none saved (a page that needs one: ask the user).\n") +
             f"Account email (for any account a site needs): {email or 'not set: ask the user'}\n"
             + (f"The user has their own account on this job site ({own['site']}): sign in as {own['email']} with "
                f"{accounts.SIGN_IN}; never make a new account here.\n" if own else "") +
@@ -1683,6 +1688,9 @@ def run_locked(number, other, row, url, where, tab, slot, slot_lock):
                   if os.path.exists(r)]
     writeups = [os.path.realpath(r) for r in config.ASSIST_WRITEUPS if os.path.exists(r)]
     resume = upload_copy(resume_src, os.path.join(d, BROWSER_DIR)) if os.path.exists(resume_src) else None
+    # The transcript (optional): yours at local_config transcript_path; on the homelab the copy the laptop pushes.
+    transcript_src = config.TRANSCRIPT_PATH
+    transcript = upload_copy(transcript_src, os.path.join(d, BROWSER_DIR)) if os.path.exists(transcript_src) else None
     view = None
     if config.IS_SERVER:  # no monitor: the browser draws on a virtual screen you can open on your phone (screen.py)
         from nuauto import screen
@@ -1693,6 +1701,7 @@ def run_locked(number, other, row, url, where, tab, slot, slot_lock):
     state = {"current_url": url, "refs": {}, "issued": {}, "issued_values": [], "answer_cmd": answer_cmd,
              "read_roots": read_roots, "protected": protected_dirs(read_roots),
              "resume_src": os.path.realpath(resume_src), "resume": resume, "tab": "other" if other else "jobs",
+             "transcript_src": os.path.realpath(transcript_src) if transcript else None, "transcript": transcript,
              "company": row.company, "job_title": row.title, "job_url": url, "row_url": row.url, "password_sites": [],
              "guesses": {}, "typed": {}, "account_email": accounts.account_email() or "", "where": where,
              "slot": slot, "view_url": view.url if view else None, "tmux": tmux_session() if view else None,
@@ -1703,7 +1712,7 @@ def run_locked(number, other, row, url, where, tab, slot, slot_lock):
     profile = slot_profile(slot)
     os.makedirs(profile, mode=0o700, exist_ok=True)
     cmd = session(d, answer_cmd, read_roots, profile, rules_text(answer_cmd) + context_text(
-        where, row, url, other, resume, read_roots, answer_cmd, writeups, view.url if view else None), where,
+        where, row, url, other, resume, read_roots, answer_cmd, writeups, view.url if view else None, transcript), where,
         view.display if view else None)
     log_.write(f"{where.capitalize()}: {row.company} | {row.title} -> {host(url)} (assistant slot {slot} of {slots()})")
     if view:  # the password only here, on your screen: never in a log or a Discord message

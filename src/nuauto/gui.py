@@ -1274,7 +1274,8 @@ def log_file(path):
 # ---------------------------------------------------------------- settings
 
 PUBLIC_SETTINGS = ["sheet_id", "resume_path", "week_start", "max_per_week", "assist_read_paths", "server_hostname", "server_ssh",
-                   "server_dir", "web_base_url", "web_listen_host", "tos_ack", "accounts_email", "assist_effort"]
+                   "server_dir", "web_base_url", "web_listen_host", "tos_ack", "accounts_email", "assist_effort",
+                   "transcript_path"]
 EFFORTS = ("low", "medium", "high")  # the assistant's effort choices on the Settings screen (assist.effort)
 
 
@@ -1386,6 +1387,12 @@ def settings_put(body):
         if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
             raise Refused("Expected a list of folders.")
         updates["assist_read_paths"] = [p.strip() for p in paths if p.strip()]
+    if "transcript_path" in body:  # the assistant uploads it where an application asks for a transcript
+        path = str(body["transcript_path"] or "").strip()
+        full = os.path.expanduser(path)
+        if path and not (path.lower().endswith(".pdf") and os.path.isfile(full)):
+            raise Refused(f"No PDF at {path}.")
+        updates["transcript_path"] = path
     if "accounts_email" in body:
         email = str(body["accounts_email"] or "").strip()
         if email and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
