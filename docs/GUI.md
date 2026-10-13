@@ -128,7 +128,7 @@ SCREENS
                  (words their addresses contain, "bitwarden_import") + Import my logins (a terminal: unlock, then `bw list items
                  --search <word> | nuauto accounts import - --only <word>` per word), Check now; Assistant on your homelab
                  (homelab mode only, docs/REMOTE.md): on / off (remote_assist: pushed to the homelab, its review page restarted),
-                 Start sessions by itself (remote_auto), its hours (remote_hours), assistants at once (assist_slots), Pair this
+                 Start sessions by itself, one switch for NUworks rows and one for Other jobs rows (remote_auto {"nuworks", "other"}), its hours (remote_hours), assistants at once (assist_slots), Pair this
                  computer, Open the review page; setup, logs, quit
   Setup          the wizard (below); opens by itself until setup is done
   Past runs      logs/ folders: actions.log and the screenshots before and after Submit
@@ -275,8 +275,10 @@ API (JSON; all need the cookie; POSTs need X-NUauto: 1)
   GET  /api/settings         settings (no secrets; logins: {sites, new}, never a password); POST /api/settings {"resume_label",
                              "week_start", "max_per_week", "accounts_email", "assist_effort", "assist_read_paths",
                              "password_manager" ("" | "bitwarden"), "bitwarden_import" [words], and with a homelab "remote_assist",
-                             "remote_auto", "remote_hours" [from, to], "assist_slots"}; GET adds password_manager {on, check,
-                             waiting, own, only, bw} and homelab_assistant {available, on, auto, hours, slots, review_url}
+                             "remote_auto" (true / false, or {"nuworks": bool, "other": bool}: a tab left out stays as it
+                             was), "remote_hours" [from, to], "assist_slots"}; GET adds password_manager {on, check,
+                             waiting, own, only, bw} and homelab_assistant {available, on, auto (any tab), auto_tabs
+                             {nuworks, other}, hours, slots, review_url}
   POST /api/logins/export    Bitwarden's import file of the logins not exported yet ({"every": true}: all) -> {"path", "count"}
   GET  /api/setup            wizard steps; POST /api/setup {"action": ack|client_upload|client_downloads|
                              sheet_create|sheet_link|resume_pick|resume_set|labels_read|label_set|terms_read|

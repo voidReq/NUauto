@@ -229,6 +229,13 @@ assert rest == [(a, "had a session already: yours to start now")]
 go, rest = remote.plan([a], [{"tab": "other", "row": 9, "host": "a.com"}], [], {}, 0, jobs_left=0)
 assert rest == [(a, USED)]
 # a skipped row does not take a slot or its host
+# each tab on its own ("remote_auto": {"nuworks": .., "other": ..}): a tab that is off starts nothing by itself
+assert remote.auto_tabs({"remote_auto": True}) == {"jobs", "other"} and remote.auto_tabs({}) == set()
+assert remote.auto_tabs({"remote_auto": {"nuworks": True, "other": False}}) == {"jobs"}
+assert remote.auto_tabs({"remote_auto": {"other": True}}) == {"other"} and remote.auto_tabs({"remote_auto": "yes"}) == set()
+go, rest = remote.plan([a, b], [], [], {}, 5, tabs={"other"})
+assert [x["row"] for x, _ in go] == [2] and rest == [(a, remote.AUTO_OFF["jobs"])]
+assert [x["row"] for x, _ in remote.plan([a, b], [], [], {}, 5, manual=True, tabs=set())[0]] == [1, 2]   # by hand: any tab
 go, rest = remote.plan([a, d, b], [], [], once, 1)
 assert [x for x, _ in go] == [d] and [w for _, w in rest] == ["had a session already: yours to start now", "waiting for a free slot"]
 
@@ -549,7 +556,7 @@ try:
     qa, qb, qc = cand("other", 5, "e.com"), cand("jobs", 1, "a.com"), {**cand("other", 6, "f.com"), "laptop": True}
     remote.queue_inputs = lambda: ([qa, qb, qc], [], [], {}, 1, None)
     code, out = run_main(["queue"])
-    assert code is None and "Starts by itself: off" in out and "9:00-22:00" in out and "1 slot free" in out, out
+    assert code is None and "Starts by itself: NUworks off, Other jobs off" in out and "9:00-22:00" in out and "1 slot free" in out, out
     lines = {int(re.search(r"row (\d+)", ln).group(1)): ln for ln in out.splitlines() if " row " in ln}
     assert sorted(lines) == [1, 5, 6] and all("ready (start it yourself)" in lines[n] for n in (1, 5)), lines   # both startable by hand
     assert "marked: do it on the laptop" in lines[6]
@@ -557,6 +564,10 @@ try:
     code, out = run_main(["queue"])
     lines = {int(re.search(r"row (\d+)", ln).group(1)): ln for ln in out.splitlines() if " row " in ln}
     assert "next by itself" in lines[5] and "ready (start it yourself)" in lines[1], lines   # one free slot: the timer takes the first
+    config.LOCAL = {**config.LOCAL, "remote_auto": {"nuworks": True, "other": False}}               # each tab on its own
+    code, out = run_main(["queue"])
+    lines = {int(re.search(r"row (\d+)", ln).group(1)): ln for ln in out.splitlines() if " row " in ln}
+    assert "NUworks on, Other jobs off" in out and "next by itself" in lines[1] and "ready (start it yourself)" in lines[5], lines
     config.LOCAL = {k: v for k, v in config.LOCAL.items() if k != "remote_auto"}
     remote.queue_inputs = lambda: ([qa, qb], [], [], {}, 0, None)
     code, out = run_main(["queue"])
@@ -699,7 +710,7 @@ review.page_url = lambda slot=None: "http://100.64.0.1:8766/"
 remote.AUTO_PATH = os.path.join(config.LOCAL_DIR, "assist_auto_test.json")
 remote.STARTUP_CHECK = 0
 ca, cb, cc = cand("other", 21, "a.example"), cand("other", 22, "b.example"), cand("jobs", 23, "c.example")
-remote.queue_now = lambda manual=False: ([(ca, None), (cb, None), (cc, None)], [])
+remote.queue_now = lambda manual=False, tabs=None: ([(ca, None), (cb, None), (cc, None)], [])
 remote.in_hours = lambda now=None: True
 remote.ended = lambda name: name == remote.tmux_name("jobs", 23)
 
@@ -742,16 +753,16 @@ try:
     started_now.clear()
     sent.clear()
     remote.start = fake_start
-    remote.queue_now = lambda manual=False: (_ for _ in ()).throw(remote.RecordError("assist_auto.json can't be read"))
+    remote.queue_now = lambda manual=False, tabs=None: (_ for _ in ()).throw(remote.RecordError("assist_auto.json can't be read"))
     printed = run_auto()
     assert "can't be read" in printed and started_now == [] and sent == []
-    remote.queue_now = lambda manual=False: ([(ca, None), (cb, None), (cc, None)], [])
+    remote.queue_now = lambda manual=False, tabs=None: ([(ca, None), (cb, None), (cc, None)], [])
     # nothing started: no message
     sent.clear()
     remote.start = lambda tab, rown: "no"
     run_auto()
     assert sent == []
-    remote.queue_now = lambda manual=False: ([], [])
+    remote.queue_now = lambda manual=False, tabs=None: ([], [])
     assert run_auto() == "" and sent == []
     # the written record makes plan() leave those rows to you
     go, rest = remote.plan([ca, cb], [], [], remote._read_auto(), 5)
@@ -965,6 +976,11 @@ def cards(page):
         r"<div class=card><b>.*?(?:NUworks|Other jobs) row (\d+).*?(?=<div class=card><b>|\Z)", page, re.S)}
 
 
+def both():
+    """The queue's two tabs as one page (NUworks, then Other jobs)."""
+    return req("GET", "/?tab=jobs", cookie=KEY)[2] + req("GET", "/?tab=other", cookie=KEY)[2]
+
+
 def start_rows(page):
     return sorted(int(x) for x in re.findall(r"name=row value='(\d+)'", page))
 
@@ -975,7 +991,7 @@ def set_inputs(cands, running=(), claims=(), records=None, free=2, left=None):
 
 try:
     # two free slots, a session on b.example, no NUworks applications left: each row is judged on its own
-    page = req("GET", "/", cookie=KEY)[2]
+    page = both()
     assert "<h3>Queue</h3>" in page and "Starts by itself: off" in page and "9:00-22:00" in page and "2 slots free" in page
     assert "Acme &lt;i&gt;Co&lt;/i&gt;" in page and "<i>Co</i>" not in page
     assert start_rows(page) == [12, 14, 15] and page.count("Start now") == 3        # c1, c3 (had a session) and c4: all startable
@@ -989,51 +1005,72 @@ try:
     assert "used up" in cs[16] and "nobody said whether it went through" in cs[17] and W_LAPTOP.split(" (")[0] in cs[18]
     assert all("Start now" not in cs[n] for n in (13, 16, 17, 18))
     config.LOCAL = {**config.LOCAL, "remote_auto": True, "remote_hours": [8, 20]}
-    page = req("GET", "/", cookie=KEY)[2]
+    page = both()
     cs = cards(page)
     assert "Starts by itself: on" in page and "8:00-20:00" in page
     assert "starts next by itself" in cs[12] and "starts next by itself" in cs[15] and W_ONCE in cs[14]   # (the timer's own plan)
     config.LOCAL = {k: v for k, v in config.LOCAL.items() if k not in ("remote_auto", "remote_hours")}
 
+    # tabs: NUworks first by default; each tab's rows grouped (next, ready, waiting, check first, the laptop folded)
+    config.LOCAL = {**config.LOCAL, "remote_auto": {"nuworks": False, "other": True}}
+    page = req("GET", "/", cookie=KEY)[2]
+    assert "<nav class=tabs><a href='/?tab=jobs' class='on'>NUworks <span class=chip>1</span></a>" in page, page
+    assert "<a href='/?tab=other' class=''>Other jobs <span class=chip>6</span></a>" in page
+    assert sorted(cards(page)) == [16] and "Starts by itself: off" in page and "NUworks applications left now: 0" in page
+    page = req("GET", "/?tab=other", cookie=KEY)[2]
+    assert sorted(cards(page)) == [12, 13, 14, 15, 17, 18] and "Starts by itself: on" in page and "applications left" not in page
+    heads = re.findall(r"(Working on it now|Starts next by itself|Ready: start it yourself|Waiting|Check first|Do it on the laptop) "
+                       r"<span class=chip>(\d+)", page)
+    assert heads == [("Starts next by itself", "2"), ("Ready: start it yourself", "1"), ("Waiting", "1"), ("Check first", "1"),
+                     ("Do it on the laptop", "1")], heads
+    at = {n: page.index(f"Other jobs row {n} ") for n in (12, 13, 14, 15, 17, 18)}
+    assert at[12] < at[15] < at[14] < at[13] < at[17] < at[18]
+    assert page.index("<details class=group>") < at[18] and "<details class=group open" not in page
+    assert req("GET", "/?tab=bogus", cookie=KEY)[2].count("class='on'>NUworks") == 1
+    set_inputs([cand("other", 12, "a.example")])                                  # nothing on NUworks: Other jobs opens
+    assert "class='on'>Other jobs" in req("GET", "/", cookie=KEY)[2]
+    INPUTS[0] = (([c1, c2, c3, c4, c5, c6, c7], RUNNING_B, [], RECORDS, 2, 0))
+    config.LOCAL = {k: v for k, v in config.LOCAL.items() if k != "remote_auto"}
+
     # 2 free slots, 4 eligible rows on different hosts: all four get Start now (it used to be only the top two)
     four = [cand("other", n, f"h{n}.example") for n in (21, 22, 23, 24)]
     set_inputs(four, free=2)
-    page = req("GET", "/", cookie=KEY)[2]
+    page = both()
     assert start_rows(page) == [21, 22, 23, 24] and "2 slots free" in page and "waiting for a free slot" not in page
     # none free: no button anywhere, each says waiting for a free slot
     set_inputs(four, free=0)
-    page = req("GET", "/", cookie=KEY)[2]
+    page = both()
     assert start_rows(page) == [] and "Start now" not in page and "every slot is in use" in page
     assert page.count("waiting for a free slot") == 4
     set_inputs(four, free=1)
-    page = req("GET", "/", cookie=KEY)[2]
+    page = both()
     assert start_rows(page) == [21, 22, 23, 24] and "1 slot free" in page and "1 slots" not in page
     # two rows on one site with nothing running: both can be started individually (starting one blocks the other after)
     same = [cand("other", 31, "same.example"), cand("other", 32, "same.example")]
     set_inputs(same, free=2)
-    page = req("GET", "/", cookie=KEY)[2]
+    page = both()
     assert start_rows(page) == [31, 32]
     # a running session's site blocks only that site's rows
     mixed = [cand("other", 41, "h1.example"), cand("other", 42, "h2.example"), cand("jobs", 43, "h1.example")]
     set_inputs(mixed, running=[{"tab": "other", "row": 99, "host": "h1.example"}], free=2)
-    page = req("GET", "/", cookie=KEY)[2]
+    page = both()
     cs = cards(page)
     assert start_rows(page) == [42] and page.count("another session is on h1.example") == 2
     assert "Start now" in cs[42] and "another session is on h1.example" in cs[41] and "another session is on h1.example" in cs[43]
     set_inputs(mixed, claims=[{"tab": "other", "row": 77, "host": "h2.example"}], free=2)   # the laptop's claim: the same
-    assert start_rows(req("GET", "/", cookie=KEY)[2]) == [41, 43]
+    assert start_rows(both()) == [41, 43]
     # a NUworks row with the applications used up cannot start; an Other jobs row can
     set_inputs([cand("jobs", 51, "j.example"), cand("other", 52, "k.example")], free=2, left=0)
-    assert start_rows(req("GET", "/", cookie=KEY)[2]) == [52]
-    # the first twelve only
-    set_inputs([cand("other", n, f"h{n}.example") for n in range(20, 40)], free=5)
-    assert req("GET", "/", cookie=KEY)[2].count("Start now") == 12
+    assert start_rows(both()) == [52]
+    # the first GROUP_MAX of a group only
+    set_inputs([cand("other", n, f"h{n}.example") for n in range(60, 60 + review.GROUP_MAX + 5)], free=5)
+    assert both().count("Start now") == review.GROUP_MAX and "and 5 more" in both()
     set_inputs([])
-    assert "Nothing approved is waiting" in req("GET", "/", cookie=KEY)[2]
+    assert "Nothing approved is waiting" in both()
     INPUTS[0] = RuntimeError("sheet")
-    assert "Queue not readable now (RuntimeError)" in req("GET", "/", cookie=KEY)[2]
+    assert "Queue not readable now (RuntimeError)" in both()
     INPUTS[0] = remote.RecordError("assist_auto.json can't be read")
-    assert "Queue not readable now (RecordError)" in req("GET", "/", cookie=KEY)[2]
+    assert "Queue not readable now (RecordError)" in both()
     INPUTS[0] = (([c1, c2, c3, c4, c5, c6, c7], RUNNING_B, [], RECORDS, 2, 0))
 
     def post_start(form, token=TOKEN, **kw):
@@ -1048,7 +1085,7 @@ try:
     assert started_now == []
     # a row you can start: recorded as started by hand (auto False)
     code, where = post_start({"tab": "other", "row": "12"})
-    assert code == 303 and where == "/?m=Started Acme <i>Co</i>." and started_now == [("other", 12)] and recorded == [(c1, False)]
+    assert code == 303 and where == "/?tab=other&m=Started Acme <i>Co</i>." and started_now == [("other", 12)] and recorded == [(c1, False)]
     # one with an earlier session (the queue leaves it to you): you may
     started_now.clear(); recorded.clear()
     assert "Started" in post_start({"tab": "other", "row": "14"})[1] and started_now == [("other", 14)] and recorded == [(c3, False)]
@@ -1059,19 +1096,21 @@ try:
     # the others say why, and nothing starts
     for form, why in (({"tab": "other", "row": "13"}, W_BUSY), ({"tab": "jobs", "row": "16"}, W_USED),
                       ({"tab": "other", "row": "17"}, remote.OUTCOME_UNKNOWN), ({"tab": "other", "row": "18"}, W_LAPTOP)):
-        assert post_start(form)[1] == f"/?m=Not started: {why}.", form
+        assert post_start(form)[1] == f"/?tab={form['tab']}&m=Not started: {why}.", form
     set_inputs([c1, c4], free=0)                                                     # no free slot: the row's own reason
-    assert post_start({"tab": "other", "row": "15"})[1] == f"/?m=Not started: {W_SLOT}."
+    assert post_start({"tab": "other", "row": "15"})[1] == f"/?tab=other&m=Not started: {W_SLOT}."
     INPUTS[0] = (([c1, c2, c3, c4, c5, c6, c7], RUNNING_B, [], RECORDS, 2, 0))
-    gone = "/?m=Not started: it is not in the queue (not Approved, or not a company-site application)."
+    gone = "m=Not started: it is not in the queue (not Approved, or not a company-site application)."
     for form in ({"tab": "other", "row": "999"}, {"tab": "jobs", "row": "12"}):
-        assert post_start(form)[1] == gone, form
-    for form in ({"tab": "bogus", "row": "12"}, {"tab": "other", "row": "x"}, {"tab": "other"}, {"row": "12"}, {}):
+        assert post_start(form)[1] == f"/?tab={form['tab']}&{gone}", form
+    for form in ({"tab": "bogus", "row": "12"}, {"row": "12"}, {}):
         assert post_start(form)[1] == "/?m=Nothing to do.", form
+    for form in ({"tab": "other", "row": "x"}, {"tab": "other"}):
+        assert post_start(form)[1] == "/?tab=other&m=Nothing to do.", form
     assert started_now == [] and recorded == []
     # tmux refuses: said, not recorded
     remote.start = lambda tab, rown: "tmux session nuauto-other-12 exists already"
-    assert post_start({"tab": "other", "row": "12"})[1] == "/?m=Not started: tmux session nuauto-other-12 exists already"
+    assert post_start({"tab": "other", "row": "12"})[1] == "/?tab=other&m=Not started: tmux session nuauto-other-12 exists already"
     assert recorded == []
     # the start is logged with the device's name
     remote.start = lambda tab, rown: None

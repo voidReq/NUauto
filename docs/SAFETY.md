@@ -86,7 +86,7 @@ COMPANY-SITE AGENT (assist.py, prompts/ASSIST_PROMPT.md)
   the agent's browser and WebFetch never open the user's own network there | review.Handler, pair, device, form_token,
   session, terminal; assist.own_network | test_review, test_assist
 - The homelab's queue starts only approved rows (Other jobs Approved, Needs Human stopped at a company site), only with
-  remote_assist and remote_auto, in remote_hours, into free slots, one per job site, NUworks rows under the weekly cap,
+  remote_assist and remote_auto (per tab: remote.auto_tabs), in remote_hours, into free slots, one per job site, NUworks rows under the weekly cap,
   each row once by itself (a session that ended without Applied waits for the user: no repeat, so no second submit);
   never a row or site the laptop claimed; the laptop's sessions ask the homelab first | remote.plan, candidates, auto,
   claim, claimed, claim_on_homelab; assist.run | test_remote

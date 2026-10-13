@@ -377,10 +377,13 @@ border:2px solid currentColor;border-right-color:transparent;border-radius:50%;a
 .approve,.prompt{background:#fde2e1}.waiting{background:#fff1c2}.finish{background:#dff3e3}
 button{font:inherit;padding:.6rem 1.1rem;border:0;border-radius:.5rem;background:#0b5cad;color:#fff;margin:.2rem .3rem .2rem 0}
 button.no{background:#777}button.go{background:#1a7f37}select{font:inherit;padding:.5rem}textarea,input[type=text]{font:inherit;width:100%;box-sizing:border-box;padding:.5rem}
+nav.tabs{display:flex;gap:.4rem;margin:.4rem 0}nav.tabs a{padding:.45rem .9rem;border-radius:.5rem;background:#eee;
+text-decoration:none;color:inherit}nav.tabs a.on{background:#0b5cad;color:#fff}nav.tabs a.on .chip{background:#fff;color:#0b5cad}h4{margin:1.1rem 0 .2rem}
+details.group summary{cursor:pointer;margin:1.1rem 0 .2rem}
 pre{white-space:pre-wrap;word-break:break-word;background:#f3f3f3;padding:.6rem;border-radius:.4rem;font-size:.85rem}
 img{max-width:100%;border:1px solid #ccc;border-radius:.3rem}.dim{color:#777;font-size:.9rem}.ok{color:#1a7f37;font-weight:600}
 @media (prefers-color-scheme:dark){body{background:#151515;color:#eee}.card{background:#1f1f1f;border-color:#333}
-pre{background:#262626}.chip{background:#333}.ok{color:#4ac26b}.approve{background:#5a1f1d}.waiting{background:#4d3f0d}.finish{background:#1e4227}a{color:#7ab4ff}}"""
+pre{background:#262626}.chip{background:#333}.ok{color:#4ac26b}nav.tabs a{background:#333}nav.tabs a.on{background:#0b5cad}.approve{background:#5a1f1d}.waiting{background:#4d3f0d}.finish{background:#1e4227}a{color:#7ab4ff}}"""
 
 POLL_JS = """// Back to a page the browser kept in memory (its buttons greyed by a tap): load it fresh instead, so they work.
 window.addEventListener("pageshow", (e) => { if (e.persisted) location.reload(); });
@@ -428,9 +431,57 @@ DROP_CHOICES = (("closed", "It has closed"), ("duplicate", "A duplicate"), ("loc
                 ("other", "Other reason"))
 
 
-def queue_part(token):
-    """The queue (remote.py), best first: what starts next by itself, and Start now on every row you can start right now
-    (each judged on its own: a free slot and its job site free); "waiting for a free slot" only when none is free."""
+QUEUE_TABS = (("jobs", "NUworks"), ("other", "Other jobs"))
+# the groups inside a tab, in this order (a row's group: queue_row)
+GROUPS = (("running", "Working on it now", ""), ("next", "Starts next by itself", ""),
+          ("ready", "Ready: start it yourself", ""), ("wait", "Waiting", "a slot, its job site or the weekly cap"),
+          ("check", "Check first", "a Submit was approved and nobody said whether it went through"),
+          ("laptop", "Do it on the laptop", "the homelab's browser was refused there"))
+GROUP_MAX = 25  # cards per group (the rest: "and N more")
+
+
+def queue_row(c, inputs, by_itself, here, tabs, token):
+    """(group, card html) for one queue row."""
+    from nuauto import remote
+    key = (c["tab"], c["row"])
+    why_hand = remote.can_start(c, inputs)
+    button = ""
+    if here.get(key):  # its session: one tap away
+        group, line = "running", f"<a class=ok href='/s/{int(here[key])}'>A session is working on it: open it &rarr;</a>"
+    elif why_hand == "a session is on it":
+        group, line = "running", "<span class=ok>The laptop's assistant is working on it</span>"
+    elif why_hand is None:
+        button = form("/start", token, "<button data-busy=Starting>Start now</button>", tab=c["tab"], row=c["row"])
+        first = by_itself.get(key)
+        nxt = c["tab"] in tabs and first is None
+        group = "next" if nxt else "ready"
+        text = ("starts next by itself" if nxt else
+                "had a session already: start it yourself" if first and first.startswith("had a session") else
+                "ready to start")
+        line = f"<span class=dim>{esc(text)}</span>"
+    else:
+        group = ("laptop" if why_hand == remote.LAPTOP_WHY else "check" if why_hand == remote.OUTCOME_UNKNOWN else "wait")
+        line = f"<span class=dim>{esc(why_hand)}</span>"
+    if c.get("row_url") and group != "running":  # not applying: out of the queue (sheet.drop)
+        reasons = "".join(f"<option value={esc(k)}>{esc(v)}</option>" for k, v in DROP_CHOICES)
+        button += form("/drop", token, f"<select name=why>{reasons}</select> <button class=no "
+                       "data-busy=Dropping>Drop</button>", tab=c["tab"], row=c["row"], url=c["row_url"])
+    return group, (f"<div class=card><b>{esc(c['company'])}</b> <span class=dim>{esc(c['title'])} | "
+                   f"{'Other jobs' if c['tab'] == 'other' else 'NUworks'} row {c['row']} | {esc(c['host'])}</span>"
+                   f"<div>{line}</div>{button}</div>")
+
+
+def queue_tab(cands, tab):
+    """The tab to show: the one asked for, else the first with rows in it (NUworks first)."""
+    if tab in dict(QUEUE_TABS):
+        return tab
+    return next((t for t, _ in QUEUE_TABS if any(c["tab"] == t for c in cands)), QUEUE_TABS[0][0])
+
+
+def queue_part(token, tab=None):
+    """The queue (remote.py) in two tabs, NUworks and Other jobs, each grouped: working on it now, next by itself, ready
+    for you to start (Start now on every row you can start right now, each judged on its own: a free slot and its job
+    site free), waiting, check first, do it on the laptop (folded). Inside a group, queue order (best first)."""
     from nuauto import assist
     from nuauto import remote
     try:
@@ -439,42 +490,37 @@ def queue_part(token):
         return f"<p class=dim>Queue not readable now ({esc(type(e).__name__)}).</p>"
     cands, free = inputs[0], inputs[4]
     a, b = remote.hours()
-    auto_on = bool(config.LOCAL.get("remote_auto"))
-    auto = "on" if auto_on else "off (\"remote_auto\" in local_config.json)"
-    go_auto, rest_auto = remote.plan(*inputs)  # what the timer would start (it hands the free slots out in order)
+    tabs = remote.auto_tabs()
+    go_auto, rest_auto = remote.plan(*inputs, tabs=tabs)  # what the timer would start (it hands the free slots out in order)
     by_itself = {(c["tab"], c["row"]): why for c, why in go_auto + rest_auto}
     here = {(x.get("tab"), x.get("row")): x.get("slot") for x in assist.sessions()}  # sessions on the homelab now
-    lines = []
-    for c in cands[:12]:
-        key = (c["tab"], c["row"])
-        why_hand = remote.can_start(c, inputs)
-        button = ""
-        if here.get(key):  # its session: one tap away
-            line = f"<a class=ok href='/s/{int(here[key])}'>A session is working on it: open it &rarr;</a>"
-        elif why_hand == "a session is on it":
-            line = "<span class=ok>The laptop's assistant is working on it</span>"
-        elif why_hand is None:
-            button = form("/start", token, "<button data-busy=Starting>Start now</button>", tab=c["tab"], row=c["row"])
-            first = by_itself.get(key)
-            text = ("starts next by itself" if auto_on and first is None else
-                    "had a session already: start it yourself" if first and first.startswith("had a session") else
-                    "ready to start")
-            line = f"<span class=dim>{esc(text)}</span>"
-        else:
-            line = f"<span class=dim>{esc(why_hand)}</span>"
-        if c.get("row_url") and not here.get(key) and why_hand != "a session is on it":  # not applying: out of the queue (sheet.drop)
-            reasons = "".join(f"<option value={esc(k)}>{esc(v)}</option>" for k, v in DROP_CHOICES)
-            button += form("/drop", token, f"<select name=why>{reasons}</select> <button class=no "
-                           "data-busy=Dropping>Drop</button>", tab=c["tab"], row=c["row"], url=c["row_url"])
-        lines.append(f"<div class=card><b>{esc(c['company'])}</b> <span class=dim>{esc(c['title'])} | "
-                     f"{'Other jobs' if c['tab'] == 'other' else 'NUworks'} row {c['row']} | {esc(c['host'])}</span>"
-                     f"<div>{line}</div>{button}</div>")
+    tab = queue_tab(cands, tab)
+    nav = "".join(f"<a href='/?tab={t}' class='{'on' if t == tab else ''}'>{esc(name)} "
+                  f"<span class=chip>{sum(1 for c in cands if c['tab'] == t)}</span></a>" for t, name in QUEUE_TABS)
+    groups = {g: [] for g, _, _ in GROUPS}
+    for c in cands:
+        if c["tab"] == tab:
+            g, card = queue_row(c, inputs, by_itself, here, tabs, token)
+            groups[g].append(card)
+    parts = []
+    for g, title, what in GROUPS:
+        cards = groups[g]
+        if not cards:
+            continue
+        more = (f"<p class=dim>and {len(cards) - GROUP_MAX} more</p>" if len(cards) > GROUP_MAX else "")
+        head = f"{esc(title)} <span class=chip>{len(cards)}</span>" + (f" <span class=dim>({esc(what)})</span>" if what else "")
+        inner = "".join(cards[:GROUP_MAX]) + more
+        parts.append(f"<details class=group><summary><b>{head}</b></summary>{inner}</details>" if g == "laptop" else
+                     f"<h4>{head}</h4>{inner}")
     slots_text = f"{free} slot{'s' if free != 1 else ''} free" if free else "every slot is in use"
-    return (f"<h3>Queue</h3><p class=dim>Starts by itself: {esc(auto)}, {a}:00-{b}:00 New York time. {slots_text}.</p>"
-            + ("".join(lines) or "<p class=dim>Nothing approved is waiting.</p>"))
+    auto = "on" if tab in tabs else "off (Settings > Assistant on your homelab, in the laptop's NUauto)"
+    left = inputs[5]
+    cap = f" NUworks applications left now: {max(0, left)}." if tab == "jobs" and left is not None else ""
+    return (f"<h3>Queue</h3><nav class=tabs>{nav}</nav><p class=dim>Starts by itself: {esc(auto)}, {a}:00-{b}:00 New York "
+            f"time. {slots_text}.{cap}</p>" + ("".join(parts) or "<p class=dim>Nothing approved is waiting.</p>"))
 
 
-def index_page(token):
+def index_page(token, tab=None):
     items = []
     for s in sessions():
         word, text = status(s)
@@ -484,7 +530,7 @@ def index_page(token):
                      f"{esc(st.get('where'))} | slot {s['slot']}</div></div>")
     body = "<h2>NUauto assistants</h2>" + ("".join(items) or "<p class=dim>No assistant is running on the homelab.</p>")
     # it reloads by itself when a session starts, ends or wants something (a started one shows up without a reload)
-    return layout("NUauto assistants", body + queue_part(token), index_version(), "/v")
+    return layout("NUauto assistants", body + queue_part(token, tab), index_version(), "/v")
 
 
 def index_version():
@@ -666,7 +712,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, index_version(), "text/plain")
         if u.path == "/":
             flash = f"<div class=card><b>{esc(q['m'])}</b></div>" if q.get("m") else ""
-            return self._send(200, index_page(form_token(key)).replace("<h2>NUauto assistants</h2>",
+            return self._send(200, index_page(form_token(key), q.get("tab")).replace("<h2>NUauto assistants</h2>",
                                                                        "<h2>NUauto assistants</h2>" + flash, 1))
         slot, sub = self._session(u.path)
         s = session(slot) if slot else None
@@ -713,10 +759,11 @@ class Handler(BaseHTTPRequestHandler):
                 ("Set-Cookie", f"{COOKIE}={key}; HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000")])
         if not dev or not hmac.compare_digest(f.get("t", ""), form_token(key)):
             return self._send(403, "Not allowed.", "text/plain")
+        back = f"/?tab={f['tab']}&m=" if f.get("tab") in ("jobs", "other") else "/?m="  # the queue's tab it came from
         if u.path == "/start":
-            return self._redirect("/?m=" + quote(start_now(f, dev["name"])))
+            return self._redirect(back + quote(start_now(f, dev["name"])))
         if u.path == "/drop":
-            return self._redirect("/?m=" + quote(drop_now(f, dev["name"])))
+            return self._redirect(back + quote(drop_now(f, dev["name"])))
         slot, sub = self._session(u.path)
         s = session(slot) if slot else None
         if not s:
@@ -844,6 +891,30 @@ DEMO_SESSIONS = [
 ]
 
 
+
+def _demo_row(tab, row, company, title, host, match, laptop=False):
+    url = f"https://{host}/jobs/{row}"
+    return {"tab": tab, "row": row, "url": url, "row_url": url, "host": host, "company": company, "title": title,
+            "closes": None, "match": match, "laptop": laptop}
+
+
+DEMO_QUEUE = [  # best first, both tabs (the demo sessions are on Other jobs rows 11-13)
+    _demo_row("jobs", 21, "Delta Devices", "Firmware Co-op", "delta.wd5.myworkdayjobs.com", 88),
+    _demo_row("jobs", 22, "Ember Health", "Security Analyst Co-op", "careers.ember.example", 74),
+    _demo_row("jobs", 23, "Fjord Motors", "Controls Co-op", "fjord.icims.com", 70, laptop=True),
+    _demo_row("other", 11, "Acme Robotics", "Embedded Software Intern", "acme.wd1.myworkdayjobs.com", 90),
+    _demo_row("other", 30, "Garnet Aerospace", "Avionics Intern", "job-boards.greenhouse.io/garnet", 84),
+    _demo_row("other", 31, "Helix Semiconductor", "Hardware Intern", "jobs.lever.co/helix", 79),
+    _demo_row("other", 32, "Iris Security", "Red Team Intern", "jobs.ashbyhq.com/iris", 77),
+    _demo_row("other", 33, "Juniper Labs", "Systems Intern", "acme.wd1.myworkdayjobs.com", 72),
+    _demo_row("other", 34, "Kestrel Defense", "Embedded Intern", "kestrel.icims.com", 71, laptop=True),
+    _demo_row("other", 35, "Lumen Optics", "Test Engineering Intern", "careers.lumen.example", 68, laptop=True),
+    _demo_row("other", 36, "Maple Grid", "Power Systems Intern", "maple.example", 66),
+]
+DEMO_RECORDS = {"other-32": {"url": "https://jobs.ashbyhq.com/iris/jobs/32", "auto": True},                 # had a session
+                "other-36": {"url": "https://maple.example/jobs/36", "auto": True, "approved": True, "answer": None}}
+
+
 def demo(port=0):
     """`nuauto review demo`: the review page on 127.0.0.1 with DEMO_SESSIONS, in a temp folder; prints a link that
     pairs the browser that opens it. Nothing real is read or sent (no tmux: Reply etc. say they could not)."""
@@ -852,7 +923,8 @@ def demo(port=0):
         state = tempfile.mkdtemp(prefix="nuauto-review-demo-")
         os.makedirs(os.path.join(state, "local"), mode=0o700)
         with open(os.path.join(state, "local", "local_config.json"), "w") as f:
-            json.dump({**config.LOCAL, "web_listen_host": "127.0.0.1", "server_hostname": "", "remote_assist": False}, f)
+            json.dump({**config.LOCAL, "web_listen_host": "127.0.0.1", "server_hostname": "", "remote_assist": False,
+                       "remote_auto": {"nuworks": False, "other": True}}, f)
         env = {**os.environ, "NUAUTO_STATE_DIR": state, "NUAUTO_REVIEW_DEMO": "1"}
         os.execve(sys.executable, [sys.executable, "-m", "nuauto.review", "demo", str(port)], env)
     import fcntl
@@ -884,7 +956,14 @@ def demo(port=0):
         f.flush()
         locks.append(f)
     import nuauto.remote as remote
-    remote.queue_inputs = lambda: ([], [], [], {}, 0, None)  # no sheet here
+    from nuauto import sheet
+    # a made-up queue (no sheet here); Start now and Drop change nothing
+    remote.queue_inputs = lambda: (DEMO_QUEUE, assist.sessions(), [], DEMO_RECORDS, 1, 2)
+    remote.start = lambda tab, row: "this is the demo: nothing starts"
+
+    def no_sheet(*a, **k):
+        raise sheet.SheetError("this is the demo: your sheet is not touched")
+    sheet.open_worksheet = sheet.open_other = no_sheet
     link = make_pairing("demo")
     print(json.dumps({"url": link, "port": port, "state_dir": config.STATE_DIR}), flush=True)
     serve()

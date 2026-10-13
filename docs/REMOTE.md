@@ -47,7 +47,9 @@ PAIR YOUR PHONE (once per device)
   nuauto review devices / nuauto review unpair <name>|--all
 
 THE QUEUE (remote.py; nuauto-assist.timer every 10 minutes runs `nuauto assist auto`)
-- On with "remote_auto": true (and remote_assist). Hours: "remote_hours": [9, 22] (the default: 09:00-22:00 New York
+- On with "remote_auto" (and remote_assist), per sheet tab: true = both; {"nuworks": true, "other": false} = each on
+  its own (2026-10-13, my request; Settings > Assistant on your homelab has a switch for each). A tab that is off starts
+  nothing by itself; its rows still show on the review page with Start now. Hours: "remote_hours": [9, 22] (the default: 09:00-22:00 New York
   time, whatever clock the homelab runs on), so no pings at night: the only hours it starts sessions by itself (one
   already running goes on; you can start one yourself any time). It takes effect at the timer's next run (every 10
   minutes).
@@ -96,6 +98,11 @@ RUN ONE BY HAND
   (check it yourself) and the slot is free again.
 
 THE REVIEW PAGE (review.py; http://<web_listen_host>:8766/, inside nuauto-web, only with remote_assist)
+- The index: the running sessions, then the queue in two tabs, NUworks and Other jobs (/?tab=jobs|other; it opens on
+  the first with rows, NUworks first; Start now and Drop come back to the same tab), each with its row count and
+  whether it starts by itself. Inside a tab the rows are grouped, queue order inside each group: Working on it now,
+  Starts next by itself, Ready: start it yourself, Waiting (a slot, its job site, the weekly cap), Check first (a Submit
+  approved, outcome not given), and Do it on the laptop (folded). Up to 25 rows a group (review.GROUP_MAX).
 - One page per running session (/s/<slot>):
   Ready to submit   what it will click, on which page; the guesses you haven't confirmed, what you changed, anything
                     typed with no answer behind it (the same list as the laptop's Submit question); the screen when it
@@ -146,7 +153,7 @@ WHAT LIVES WHERE (with remote_assist)
 
 PORTS (homelab; slot n = 1..3)
   review page http://<web_listen_host>:8766 (in nuauto-web; the Mark-done tunnel forwards 8765 only); its index lists
-  the running sessions and the queue (Start now; a row a session works on links to it), and reloads by itself when a
+  the running sessions and the queue (NUworks / Other jobs tabs, grouped; Start now; a row a session works on links to it), and reloads by itself when a
   session starts, ends or wants something (/v)
   virtual screen :40+n (Xvfb, -nolisten tcp)   VNC 127.0.0.1:5940+n (x11vnc -localhost: never on the network)
   browser view http://<web_listen_host>:6080+n/vnc.html (websockify + noVNC; Tailscale only; a password per run)

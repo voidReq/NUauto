@@ -3,7 +3,8 @@
 THE QUEUE (homelab; `nuauto assist auto`, run by nuauto-assist.timer every 10 minutes)
 Sessions start by themselves from your approved rows: the Other jobs tab's Approved rows and the Needs Human rows
 stopped at a company site (assist.assist_target), in order: closing within a week first, then match %, then sheet
-order. Only with "remote_assist" and "remote_auto" true in local_config.json, only during "remote_hours" (default
+order. Only with "remote_assist" and "remote_auto" in local_config.json (true = both tabs; {"nuworks": true, "other":
+false} = each tab on its own), only during "remote_hours" (default
 [9, 22]: 09:00 to 22:00 New York time, so no pings at night), only into free slots (assist.slots()), one session per
 job site, NUworks rows only under the weekly cap, never a row the laptop has claimed. Each row starts by itself once
 (local/assist_auto.json): if that session ends without "Applied", the row waits for you (start it from the review
@@ -43,6 +44,15 @@ CLAIM_HOURS = 12
 HOURS = (9, 22)
 STARTUP_CHECK = 8  # seconds after starting: still running?
 TABS = {"nuworks": "jobs", "other": "other"}                        # the command's word -> assist's tab name
+
+
+def auto_tabs(cfg=None):
+    """The tabs whose rows start by itself: "remote_auto" true = both ("jobs", "other"); {"nuworks": bool, "other": bool}
+    = each on its own; anything else = none."""
+    v = (config.LOCAL if cfg is None else cfg).get("remote_auto")
+    if isinstance(v, dict):
+        return {TABS[k] for k in TABS if v.get(k) is True}
+    return set(TABS.values()) if v is True else set()
 
 
 def tab_word(tab):
@@ -107,12 +117,18 @@ OUTCOME_UNKNOWN = ("a Submit was approved in its last session and nobody said wh
                    "then mark the row (Applied), or start it again by hand: nuauto assist start <nuworks|other> <row> --again")
 
 
-def plan(cands, running, claims, records, free, jobs_left=None, manual=False):
+LAPTOP_WHY = "marked: do it on the laptop (the homelab's browser was refused there)"
+AUTO_OFF = {"jobs": "NUworks rows don't start by itself (off in Settings): yours to start",
+            "other": "Other jobs rows don't start by itself (off in Settings): yours to start"}
+
+
+def plan(cands, running, claims, records, free, jobs_left=None, manual=False, tabs=None):
     """Which of cands to start now: [(candidate, None)] to start and [(candidate, why not)] for the rest. running: the
     homelab's sessions (assist.sessions); claims: the laptop's live claims; records: what the queue knows of earlier
     sessions ({"<tab>-<row>": {"url", "auto", "approved", "answer"}}); free: free slots; jobs_left: NUworks-tab
     applications still allowed (week and total; None = no limit to check). manual: you start it (Start now): the
-    start-once rule doesn't apply, the others do. Pure (tests/test_remote.py)."""
+    start-once rule doesn't apply, the others do. tabs: the tabs that start by itself (auto_tabs; None = every tab; ignored
+when manual). Pure (tests/test_remote.py)."""
     busy_rows = {(s.get("tab"), s.get("row")) for s in running} | {(c.get("tab"), c.get("row")) for c in claims}
     busy_hosts = {s.get("host") for s in running} | {c.get("host") for c in claims}
     go, rest = [], []
@@ -122,11 +138,13 @@ def plan(cands, running, claims, records, free, jobs_left=None, manual=False):
         if (c["tab"], c["row"]) in busy_rows:
             why = "a session is on it"
         elif c.get("laptop") or (same and rec.get("answer") == "laptop"):
-            why = "marked: do it on the laptop (the homelab's browser was refused there)"
+            why = LAPTOP_WHY
         elif same and rec.get("approved") and rec.get("answer") not in ("y", "n", "laptop"):
             why = OUTCOME_UNKNOWN
         elif same and not manual:  # any earlier session (yours or the queue's): never again by itself
             why = "had a session already: yours to start now"
+        elif not manual and tabs is not None and c["tab"] not in tabs:
+            why = AUTO_OFF[c["tab"]]
         elif c["tab"] == "jobs" and jobs_left is not None and jobs_left <= 0:
             why = "this week's (or the total) NUworks applications are used up"
         elif c["host"] in busy_hosts:
@@ -354,9 +372,10 @@ def queue_inputs():
             jobs_left(main_rows, running, claims))
 
 
-def queue_now(manual=False):
-    """(go, rest): what the queue would start now and why the others wait (homelab). manual: you start them."""
-    return plan(*queue_inputs(), manual)
+def queue_now(manual=False, tabs=None):
+    """(go, rest): what the queue would start now and why the others wait (homelab). manual: you start them; tabs: the
+    tabs that start by itself (auto_tabs)."""
+    return plan(*queue_inputs(), manual, tabs)
 
 
 def can_start(c, inputs):
@@ -386,12 +405,13 @@ def record_started(c, auto=True):
 
 def auto():
     """The timer's run: start what the queue allows now. Quiet when there is nothing to do."""
-    if not (config.IS_SERVER and config.REMOTE_ASSIST and config.LOCAL.get("remote_auto")):
+    tabs = auto_tabs()
+    if not (config.IS_SERVER and config.REMOTE_ASSIST and tabs):
         return
     if not in_hours():
         return
     try:
-        go, _ = queue_now()
+        go, _ = queue_now(tabs=tabs)
     except RecordError as e:
         return print(e)
     started = []
@@ -441,15 +461,17 @@ def main(argv):
         sys.exit("Turn on \"remote_assist\" in local_config.json first (docs/REMOTE.md).")
     if argv == ["queue"]:
         inputs = queue_inputs()
-        go, rest = plan(*inputs)
+        tabs = auto_tabs()
+        go, rest = plan(*inputs, tabs=tabs)
         by_itself = {(c["tab"], c["row"]): why for c, why in go + rest}
         a, b = hours()
         free = inputs[4]
-        print(f"Starts by itself: {'on' if config.LOCAL.get('remote_auto') else 'off (remote_auto)'}, {a}:00-{b}:00"
+        on = lambda t: "on" if t in tabs else "off"  # noqa: E731
+        print(f"Starts by itself: NUworks {on('jobs')}, Other jobs {on('other')} (remote_auto), {a}:00-{b}:00"
               f"{'' if in_hours() else ' (outside those hours now)'}; {free} slot{'s' if free != 1 else ''} free")
         for c in inputs[0]:
             hand, auto_ = can_start(c, inputs), by_itself.get((c["tab"], c["row"]))
-            text = ("next by itself" if auto_ is None and config.LOCAL.get("remote_auto") else "ready (start it yourself)") \
+            text = ("next by itself" if auto_ is None and c["tab"] in tabs else "ready (start it yourself)") \
                 if hand is None else hand
             print(f"  {c['company'][:28]:28} {c['tab']:5} row {c['row']:<4} {c['host'][:34]:34} {text}")
         return

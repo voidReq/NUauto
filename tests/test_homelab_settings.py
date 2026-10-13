@@ -115,12 +115,24 @@ assert restarted == ["systemctl --user restart nuauto-web"]
 # the other keys push, but the web page restarts only when remote_assist itself flipped
 r = gui.settings_put({"remote_auto": True})
 assert saved()["remote_auto"] is True and r["homelab_assistant"]["auto"] is True
+assert r["homelab_assistant"]["auto_tabs"] == {"nuworks": True, "other": True}
 settle(2, 1)
+r = gui.settings_put({"remote_auto": {"nuworks": False}})                       # one tab: the other stays as it was
+assert saved()["remote_auto"] == {"nuworks": False, "other": True}
+assert r["homelab_assistant"]["auto"] is True and r["homelab_assistant"]["auto_tabs"] == {"nuworks": False, "other": True}
+settle(3, 1)
+r = gui.settings_put({"remote_auto": {"other": False}})
+assert saved()["remote_auto"] == {"nuworks": False, "other": False} and r["homelab_assistant"]["auto"] is False
+for bad in ({}, {"nuworks": 1}, {"elsewhere": True}):
+    refused({"remote_auto": bad}, "on or off")
+settle(4, 1)
+r = gui.settings_put({"remote_auto": True})
+settle(5, 1)
 r = gui.settings_put({"remote_assist": True, "remote_hours": [8, 20], "assist_slots": 2})  # on -> on
 assert saved()["remote_hours"] == [8, 20] and saved()["assist_slots"] == 2
 assert (r["homelab_assistant"]["hours"], r["homelab_assistant"]["slots"]) == ([8, 20], 2), r["homelab_assistant"]
-settle(3, 1)
-pushes = 3
+settle(6, 1)
+pushes = 6
 for good in (1, 3):
     assert gui.settings_put({"assist_slots": good})["homelab_assistant"]["slots"] == good
     pushes += 1
