@@ -1621,12 +1621,16 @@ function homelabAssistantPanel(ha, done) {
       el("button", { class: "btn small" + (ha.on ? "" : " primary"), testid: "ha-toggle", text: ha.on ? "Turn off" : "Turn on",
         onclick: () => saveSettings({ remote_assist: !ha.on }, ha.on ? "Off: the homelab runs no assistant." : "On: the homelab can run the assistant.", done) })),
     ha.on ? [
-      el("div", { class: "row between" }, el("span", { class: "small", testid: "ha-auto-text", text: ha.auto ?
-          `It starts sessions by itself from your approved rows, only between ${hour(ha.hours[0])} and ${hour(ha.hours[1])} New York time (up to "Assistants at once" at a time).` :
-          "You start each session yourself (the review page's queue, or Company sites here)." }),
-        el("button", { class: "btn small", testid: "ha-auto", text: ha.auto ? "Stop starting by itself" : "Start sessions by itself",
-          onclick: () => saveSettings({ remote_auto: !ha.auto }, ha.auto ? "It no longer starts sessions by itself." :
-            `It starts sessions by itself now, between ${hour(ha.hours[0])} and ${hour(ha.hours[1])} New York time.`, done) })),
+      ...[["nuworks", "NUworks rows", "company sites of NUworks jobs; only under the weekly cap"],
+          ["other", "Other jobs rows", "the Other jobs tab: Summer internships and jobs you added"]].map(([tab, name, what]) => {
+        const on = (ha.auto_tabs || {})[tab];
+        return el("div", { class: "row between" }, el("span", { class: "small", testid: `ha-auto-text-${tab}`, text: on ?
+            `${name} (${what}): it starts sessions by itself, only between ${hour(ha.hours[0])} and ${hour(ha.hours[1])} New York time (up to "Assistants at once" at a time).` :
+            `${name} (${what}): you start each session yourself (the review page's queue, or Company sites here).` }),
+          el("button", { class: "btn small", testid: `ha-auto-${tab}`, text: on ? "Stop starting by itself" : "Start by itself",
+            onclick: () => saveSettings({ remote_auto: { [tab]: !on } }, on ? `${name} no longer start by themselves.` :
+              `${name} start by themselves now, between ${hour(ha.hours[0])} and ${hour(ha.hours[1])} New York time.`, done) }));
+      }),
       el("label", { class: "field" }, "Its hours", el("span", { class: "muted small", text: "The only hours it starts sessions by itself (New York time, 24-hour clock), so no pings at night. A session already running goes on; you can start one yourself any time." }),
         el("div", { class: "row" }, "between", from, ":00 and", to, ":00")),
       el("label", { class: "field" }, "Assistants at once", el("span", { class: "muted small", text: "On each machine, 1 to 3." }), slots),

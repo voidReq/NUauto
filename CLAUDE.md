@@ -184,7 +184,8 @@ COMPANY-SITE AGENT (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`;
 - Laptop, real terminal, me watching; or (Phase 3, my call 2026-10-11) the homelab, in a tmux session I attach to, with
   "remote_assist" on: its browser on a virtual screen I open over Tailscale (screen.py), Discord links me to the review
   page (review.py, Tailscale only, paired devices only): I answer it, approve or decline each Submit (the guard waits
-  for my tap; a late Approve = a 10-minute pass for that one action) and get captchas there. With "remote_auto" the
+  for my tap; a late Approve = a 10-minute pass for that one action) and get captchas there. With "remote_auto" (each tab
+  its own switch since 2026-10-13: {"nuworks": .., "other": ..}; the review page's queue is in those two tabs, grouped) the
   homelab starts sessions by itself from my approved rows (remote.py: 09:00-22:00, free slots, never a row that had a
   session before, never a row or site the laptop holds: claims over ssh). A site that refuses the homelab's browser
   (a fake sign-in page): "End: do it on the laptop" marks the row's Notes (assist.LAPTOP_MARK); the homelab skips it

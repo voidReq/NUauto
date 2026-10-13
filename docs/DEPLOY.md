@@ -41,7 +41,7 @@ WHAT RUNS ON THE HOMELAB
 Unit files live in this repo (deploy/systemd/) and are installed in ~/.config/systemd/user/.
 - With "remote_assist": company-site assistant sessions in tmux, each with a virtual screen and a browser view on the
   Tailscale IP; nuauto-assist.timer (every 10 min, `nuauto assist auto`) starts them from the queue when "remote_auto"
-  is on (else it does nothing). Setup, ports, the queue and what is shared: docs/REMOTE.md.
+  is on for that row's tab (NUworks, Other jobs: each its own switch; else it does nothing). Setup, ports, the queue and what is shared: docs/REMOTE.md.
 - nuauto-daily.timer -> nuauto-daily.service: `nuauto daily` at 08:00 and 18:00 New York time
   (+0-15 min random, Persistent=true so a missed run happens at boot). Steps: list -> Claude
   triage -> details -> Claude score -> Claude category -> pool -> notifications (see

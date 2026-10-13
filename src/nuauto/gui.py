@@ -1416,11 +1416,20 @@ def settings_put(body):
     remote_keys = {"remote_assist", "remote_auto", "remote_hours", "assist_slots"} & set(body)
     if remote_keys and not onboard.homelab_assistant()["available"]:
         raise Refused("The assistant on a homelab needs a homelab (server_hostname in local_config.json; docs/DEPLOY.md).")
-    for k in ("remote_assist", "remote_auto"):
-        if k in body:
-            if not isinstance(body[k], bool):
-                raise Refused(f"{k} is on or off.")
-            updates[k] = body[k]
+    if "remote_assist" in body:
+        if not isinstance(body["remote_assist"], bool):
+            raise Refused("remote_assist is on or off.")
+        updates["remote_assist"] = body["remote_assist"]
+    if "remote_auto" in body:  # true / false = both tabs; {"nuworks": bool, "other": bool} = each (a key left out: as it was)
+        v = body["remote_auto"]
+        if isinstance(v, dict) and v and set(v) <= {"nuworks", "other"} and all(isinstance(x, bool) for x in v.values()):
+            from nuauto import remote
+            was = remote.auto_tabs(read_local())
+            updates["remote_auto"] = {k: v.get(k, remote.TABS[k] in was) for k in ("nuworks", "other")}
+        elif isinstance(v, bool):
+            updates["remote_auto"] = v
+        else:
+            raise Refused("remote_auto is on or off (or {\"nuworks\": on/off, \"other\": on/off}).")
     if "remote_hours" in body:
         h = body["remote_hours"]
         if not (isinstance(h, list) and len(h) == 2 and all(isinstance(x, int) and not isinstance(x, bool) for x in h)

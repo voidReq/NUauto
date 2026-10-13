@@ -712,7 +712,9 @@ def homelab_assistant():
     on = bool(cfg.get("remote_assist"))
     url = review.page_url() if on else ""
     return {"available": bool(config.HAS_SERVER and not config.IS_SERVER and not config.FROZEN),
-            "on": on, "auto": bool(cfg.get("remote_auto")), "hours": list(remote.hours()),
+            "on": on, "auto": bool(remote.auto_tabs(cfg)),
+            "auto_tabs": {"nuworks": "jobs" in remote.auto_tabs(cfg), "other": "other" in remote.auto_tabs(cfg)},
+            "hours": list(remote.hours()),
             "slots": slots if isinstance(slots, int) and not isinstance(slots, bool) and 1 <= slots <= 3 else 3,
             "review_url": url.rstrip("/") if url.startswith("http") else None}
 
