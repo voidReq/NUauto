@@ -191,7 +191,7 @@ if onboard.scheduler_kind():
 config.SHEET_ID = ""
 steps = {s["id"]: s for s in onboard.steps({})}
 assert list(steps) == ["welcome", "tools", "google_client", "google_login", "sheet", "resume", "nuworks", "preferences", "extras",
-                      "password_manager", "homelab"]
+                      "internships", "password_manager", "homelab"]
 assert steps["welcome"]["status"] == "todo" and steps["extras"]["status"] == "optional" and not onboard.complete(list(steps.values()))
 os.remove(config.TOKEN_PATH)
 

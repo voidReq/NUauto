@@ -136,9 +136,15 @@ SCREENS
   Answers        the answer bank as a table (exact-match rules unchanged); locked while a run uses it. NUworks /
                  Other jobs switch: the Other jobs bank (answers_other.json) is its own table; the NUworks one has a
                  "NUworks only" column (never used for Other jobs; default on for start/end date and co-op term)
-  Settings       every health check (run them now), logins, resume label, applications per week (the weekly cap), week start;
-                 the company-site assistant: account email, effort (low / medium / high), the folders it may read, its job-site
-                 logins (how many; Export for Bitwarden: the import file in ~/Downloads, mode 600, and how to import it);
+  Settings       every health check (run them now), logins (Google, NUworks, Claude Code, and Gmail: the read-only login
+                 for the assistant's email codes, with a link to turn the Gmail API on), resume label, applications per
+                 week (the weekly cap), week start;
+                 the company-site assistant: account email, effort (low / medium / high), assistants at once (1-3, on each
+                 machine; no homelab needed), the folders it may read, your writeups (assist_writeups: the first place it
+                 looks for essays), its job-site logins (how many; Export for Bitwarden: the import file in ~/Downloads,
+                 mode 600, and how to import it); Summer internships (optional; local_config "internships",
+                 docs/PIPELINE.md): on / off, the term as the lists name it (a new year's term moves the lists' addresses
+                 with it), the match % to enter the pool (empty: the co-ops' bar), each list's address (empty: not read);
                  Password manager (optional, for anyone; local_config "password_manager": "bitwarden"): Use Bitwarden / Stop
                  using it, Install it (npm @bitwarden/cli, then bw login, in a terminal window), Add N to Bitwarden (a terminal
                  window: bw unlock asks your master password itself, then `nuauto accounts export --bitwarden`), Your own logins
@@ -149,7 +155,10 @@ SCREENS
                  assistant's tools there), Use this homelab (local_config's server fields; NUauto then needs a restart: the
                  card offers Quit), Set it up (a terminal window: `nuauto onboard homelab-setup`, docs/DEPLOY.md's steps,
                  each asked first; sudo asks for the homelab's password there), Log in to Claude there (ssh -t ... claude),
-                 Stop using it (local mode again); in the same card, NUauto on your homelab (homelab mode only, docs/REMOTE.md): its page on /
+                 Stop using it (local mode again); with one in use, its code (From GitHub's main / From this computer
+                 instead: deploy_from_git, a run of `nuauto onboard homelab-deploy on|off`: the code pushed once, the
+                 deploy timer turned on or off; your fork's address, deploy_repo) and the Mark-done links' public address
+                 (web_base_url; the homelab's web page restarts with it); in the same card, NUauto on your homelab (homelab mode only, docs/REMOTE.md): its page on /
                  off (remote_app), its assistant on / off (remote_assist, which needs the page: both pushed to the homelab,
                  nuauto-web restarted), Start sessions by itself, one switch for NUworks rows and one for Other jobs rows
                  (remote_auto {"nuworks", "other"}), its hours (remote_hours), assistants at once (assist_slots), Pair this
@@ -187,6 +196,7 @@ SETUP WIZARD (onboard.py + gui_static/setup.js; each step checks itself)
                field picked and Save asks for one. Saving rebuilds the pool (homelab mode: pushes). The resume-label
                read (nuworks step) tries up to 4 jobs (onboard.a_job_urls: pool, then jobs with details, then any
                listed job), so it works before the pool has anything for you.
+  internships  optional: the same Summer internships part as Settings (done when on)
   extras       Discord webhook (checked with a GET, posts nothing until you press Test), automatic updates
                (local mode: systemd user timer / launchd agent at 08:00 and 18:00), app icon
   password_manager   optional: the same Password manager part as Settings (done when Bitwarden is on and its check is OK)
@@ -339,7 +349,8 @@ API (JSON; all need the cookie; POSTs need X-NUauto: 1)
                              "version"}. answers.json entries carry nuworks_only; leave_blank is kept while empty
   GET  /api/settings         settings (no secrets; logins: {sites, new}, never a password); POST /api/settings {"resume_label",
                              "week_start", "max_per_week", "accounts_email", "assist_effort", "assist_read_paths",
-                             "password_manager" ("" | "bitwarden"), "bitwarden_import" [words], and with a homelab "remote_app",
+                             "assist_writeups", "assist_slots" (1-3), "internships" ({"on", "term", "threshold", "lists"}),
+                             "web_base_url", "password_manager" ("" | "bitwarden"), "bitwarden_import" [words], and with a homelab "remote_app",
                              "remote_assist", "remote_auto" (true / false, or {"nuworks": bool, "other": bool}: a tab left
                              out stays as it was), "remote_hours" [from, to], "assist_slots"}; GET adds password_manager
                              {on, check, waiting, own, only, bw}, homelab_assistant {available, on, app, auto (any tab),

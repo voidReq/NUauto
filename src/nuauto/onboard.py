@@ -11,6 +11,7 @@ The first two are read-only (hidden browser, domain lock on, nothing filled or s
 local/onboard.json for the wizard.
   python -m nuauto.onboard homelab-check <ssh name> [<folder>]   what that homelab has (read-only, over ssh)
   python -m nuauto.onboard homelab-setup   set the homelab up, step by step, each asked first (Settings > Homelab)
+  python -m nuauto.onboard homelab-deploy on|off [<fork address>]   the homelab deploys GitHub's main by itself, or not
 
 Never imports daily.py: it sets AUTO_HEADLESS for its whole process, and the GUI's runs must keep a visible browser.
 """
@@ -681,6 +682,10 @@ def steps(checks):
     add("extras", "Notifications, automatic updates, app icon", False, "Optional.", optional=True,
         discord=os.path.exists(config.DISCORD_WEBHOOK_PATH), scheduler=kind, scheduled=scheduler_enabled() if kind else False,
         homelab=config.HAS_SERVER, launcher=launcher_exists(), mac=sys.platform == "darwin", mac_app=bool(mac_app()))
+    ii = internships_info()
+    add("internships", "Summer internships (optional)", ii["on"], "Optional. Internships from public lists (not on "
+        "NUworks), read from the companies' own sites and scored like your co-ops; approved ones go in the sheet's "
+        "Other jobs tab, with no weekly limit.", optional=True, **ii)
     pm = password_manager(checks)
     add("password_manager", "Password manager (Bitwarden)", pm["on"] and (pm["check"] or {}).get("status") == health.OK,
         "Optional. Your own job-site logins for the assistant, and the ones it makes put into your vault.",
@@ -735,7 +740,8 @@ def homelab_link():
     return {"available": not config.FROZEN, "on": config.HAS_SERVER, "saved": bool(cfg.get("server_hostname")),
             "ssh": cfg.get("server_ssh") or "", "hostname": cfg.get("server_hostname") or "",
             "dir": cfg.get("server_dir") or "", "listen": cfg.get("web_listen_host") or "",
-            "deploy_from_git": bool(cfg.get("deploy_from_git")), "default_dir": HOMELAB_DIR}
+            "deploy_from_git": bool(cfg.get("deploy_from_git")), "deploy_repo": cfg.get("deploy_repo") or "",
+            "web_base_url": cfg.get("web_base_url") or "", "default_dir": HOMELAB_DIR}
 
 
 HOMELAB_DIR = "projects/auto"  # under the homelab user's home: the units in deploy/systemd/ run from %h/projects/auto
@@ -810,6 +816,47 @@ def _ask(what):
             if a == "q":
                 sys.exit("Stopped. Run it again any time: what is done stays done.")
             return a == "y"
+
+
+REPO_URL = re.compile(r"^https://[A-Za-z0-9.-]+/[A-Za-z0-9._/-]+$")
+
+
+def homelab_deploy(on, repo=None):
+    """`python -m nuauto.onboard homelab-deploy on|off [<repo>]` (Settings > Homelab > Deploys, run as a GUI task): the
+    homelab deploys GitHub's main by itself (deploy_from_git; docs/DEPLOY.md, TURN ON DEPLOY FROM GITHUB), or the laptop
+    pushes its code again. repo: another fork's address ("" = this project's)."""
+    from nuauto import sync
+    if config.FROZEN or not config.HAS_SERVER or config.IS_SERVER:
+        sys.exit("Deploys are set on your laptop (a source install) with a homelab in use.")
+    if repo is not None and repo and not REPO_URL.match(repo):
+        sys.exit("The fork's address is an https:// git address, like https://github.com/you/NUauto.git.")
+    if on:
+        print("Copying this computer's code there once (it carries the deploy tool and its timer)...")
+        sync.push(code=True)
+        units = [os.path.join(config.PROJECT_DIR, "deploy", "systemd", f) for f in ("nuauto-deploy.service", "nuauto-deploy.timer")]
+        ok = sync.remote("mkdir -p .config/systemd/user", "make the units folder") and \
+            sync._run(["rsync", "-a", "-e", " ".join(sync.SSH)] + units + [f"{config.SERVER}:.config/systemd/user/"], "copy the deploy timer") and \
+            sync.remote("systemctl --user daemon-reload && systemctl --user enable --now nuauto-deploy.timer", "turn the deploy timer on")
+        if not ok:
+            sys.exit("The homelab's deploy timer could not be turned on (is the homelab reachable?): nothing changed.")
+    else:
+        sync.remote("systemctl --user disable --now nuauto-deploy.timer", "turn the deploy timer off")
+    save_config({"deploy_from_git": bool(on), **({"deploy_repo": repo} if repo is not None else {})})
+    config.DEPLOY_FROM_GIT = bool(on) and config.HAS_SERVER
+    sync.push(code=not on)  # the setting itself (and, off, this computer's code again)
+    print("The homelab deploys GitHub's main by itself now (every 5 minutes)." if on else
+          "The homelab gets its code from this computer again (each push).")
+
+
+def internships_info():
+    """Settings' and setup's Summer internships part (optional; local_config "internships"; docs/PIPELINE.md)."""
+    from nuauto import intern
+    raw = local_config().get("internships")
+    cfg = raw if isinstance(raw, dict) else {}
+    lists = {**intern.DEFAULTS["lists"], **(cfg["lists"] if isinstance(cfg.get("lists"), dict) else {})}
+    return {"on": isinstance(raw, dict) or raw is True, "term": cfg.get("term") or intern.DEFAULTS["term"],
+            "threshold": cfg.get("threshold"), "lists": lists, "names": dict(intern.NAMES),
+            "default_lists": dict(intern.DEFAULTS["lists"]), "co_op_bar": jobs.PREFS["threshold"]}
 
 
 def homelab_setup():
@@ -1017,6 +1064,8 @@ def main(argv):
         print(f"App launcher: {launcher_create()}")
     elif argv == ["homelab-setup"]:  # Settings > Homelab > Set it up (a terminal window)
         homelab_setup()
+    elif argv[:1] == ["homelab-deploy"] and argv[1:2] in (["on"], ["off"]) and len(argv) <= 3:
+        homelab_deploy(argv[1] == "on", argv[2] if len(argv) == 3 else None)
     elif argv[:1] == ["homelab-check"] and len(argv) in (2, 3):
         print(json.dumps(homelab_probe(*argv[1:]), indent=1))
     elif argv == ["resume-labels"]:

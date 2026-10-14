@@ -933,6 +933,11 @@ def act(body):
     elif kind == "login_google":
         task = APP.start("login_google", "Google login", config.self_cmd("login", "google"), browser=False,
                          on_done=lambda t: APP.run_now(["quick", "sheet"]))
+    elif kind == "login_gmail":  # read-only Gmail, for the assistant's email codes and links (mail.py)
+        if config.DEMO:
+            raise Refused("Demo mode: there is no Gmail to log in to.")
+        task = APP.start("login_gmail", "Gmail login", config.self_cmd("login", "gmail"), browser=False,
+                         on_done=lambda t: APP.run_now(["quick"]))
     elif kind == "check_nuworks":
         APP.run_now(["nuworks"])
         return {}
@@ -1403,7 +1408,8 @@ def log_file(path):
 
 PUBLIC_SETTINGS = ["sheet_id", "resume_path", "week_start", "max_per_week", "assist_read_paths", "server_hostname", "server_ssh",
                    "server_dir", "web_base_url", "web_listen_host", "tos_ack", "accounts_email", "assist_effort",
-                   "transcript_path"]
+                   "transcript_path", "assist_writeups", "deploy_from_git", "deploy_repo"]
+LIST_SETTINGS = ("assist_read_paths", "assist_writeups")  # (empty: [] rather than "")
 EFFORTS = ("low", "medium", "high")  # the assistant's effort choices on the Settings screen (assist.effort)
 
 
@@ -1431,8 +1437,12 @@ def logins_export(body):
 
 def settings_get():
     from nuauto import onboard
+    from nuauto import assist
+    from nuauto import mail
     cfg = read_local()
-    return {"settings": {k: cfg.get(k, "" if k != "assist_read_paths" else []) for k in PUBLIC_SETTINGS},
+    return {"settings": {k: cfg.get(k, [] if k in LIST_SETTINGS else "") for k in PUBLIC_SETTINGS},
+            "assist_slots": assist.slots(), "internships": onboard.internships_info(),
+            "gmail": {"ready": mail.ready(), "days_left": mail.days_left() if mail.ready() else None},
             "max_per_week": sheet.max_per_week(), "max_per_week_ceiling": sheet.MAX_PER_WEEK_CEILING,
             "resume_label": health.resume_label(), "discord": os.path.exists(config.DISCORD_WEBHOOK_PATH),
             "client_json": health.client_json_found(), "google_login": os.path.exists(config.TOKEN_PATH),
@@ -1482,16 +1492,17 @@ def app_on(cfg):
     return bool(cfg.get("remote_assist") or cfg.get("remote_app"))
 
 
-def remote_changed(old):
-    """After the homelab's NUauto settings changed: the homelab gets them (sync.push), and its NUauto page starts or
-    stops with them (nuauto-web reads them at its start). In the background: Settings answers at once. old: app_on before."""
+def remote_changed(old, restart=False):
+    """After settings the homelab acts on changed: the homelab gets them (sync.push), and nuauto-web restarts when its
+    NUauto page starts or stops with them, or the Mark-done address changed (restart: it reads both at its start). In
+    the background: Settings answers at once. old: app_on before."""
     if not config.HAS_SERVER or config.IS_SERVER or config.DEMO:
         return
     from nuauto import sync
 
     def push():
         sync.push()
-        if app_on(read_local()) != bool(old):
+        if restart or app_on(read_local()) != bool(old):
             sync.remote("systemctl --user restart nuauto-web", "restart the homelab's web page")
         APP.run_now(["homelab"])
     threading.Thread(target=push, daemon=True).start()
@@ -1524,11 +1535,19 @@ def settings_put(body):
         if not label:
             raise Refused("The resume label can't be empty.")
         set_resume_label(label)
-    if "assist_read_paths" in body:
-        paths = body["assist_read_paths"]
-        if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
-            raise Refused("Expected a list of folders.")
-        updates["assist_read_paths"] = [p.strip() for p in paths if p.strip()]
+    for key in LIST_SETTINGS:  # the folders the assistant may read; your writeups (the first place it looks for essays)
+        if key in body:
+            paths = body[key]
+            if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
+                raise Refused("Expected a list of folders.")
+            updates[key] = [p.strip() for p in paths if p.strip()]
+    if "internships" in body:
+        updates["internships"] = internships_setting(body["internships"])
+    if "web_base_url" in body:  # the Mark-done page's public address (your tunnel to the homelab; docs/DEPLOY.md)
+        url = str(body["web_base_url"] or "").strip().rstrip("/")
+        if url and not re.fullmatch(r"https://[A-Za-z0-9.-]+(:\d{1,5})?(/[A-Za-z0-9._~/-]*)?", url):
+            raise Refused("The Mark-done page's address is https://..., the public address your tunnel gives it.")
+        updates["web_base_url"] = url
     if "transcript_path" in body:  # the assistant uploads it where an application asks for a transcript
         path = str(body["transcript_path"] or "").strip()
         full = os.path.expanduser(path)
@@ -1554,7 +1573,7 @@ def settings_put(body):
                 not all(IMPORT_TEXT.match(t.strip()) for t in texts if t.strip()):
             raise Refused("Each site text is one word like myworkday or amazon.jobs (letters, digits, dots, dashes).")
         updates["bitwarden_import"] = [t.strip() for t in texts if t.strip()]
-    remote_keys = {"remote_assist", "remote_app", "remote_auto", "remote_hours", "assist_slots"} & set(body)
+    remote_keys = {"remote_assist", "remote_app", "remote_auto", "remote_hours"} & set(body)
     if remote_keys and REMOTE and not config.REMOTE_ASSIST:
         raise Refused("The assistant on this homelab is off (the laptop's Settings > NUauto on your homelab).")
     if remote_keys and not REMOTE and not onboard.homelab_assistant()["available"]:
@@ -1584,19 +1603,61 @@ def settings_put(body):
                 and 0 <= h[0] < h[1] <= 24):
             raise Refused("Hours are from and to, 0-24, from before to.")
         updates["remote_hours"] = h
-    if "assist_slots" in body:
+    if "assist_slots" in body:  # on each machine, with or without a homelab
         n = body["assist_slots"]
         if not isinstance(n, int) or isinstance(n, bool) or not 1 <= n <= 3:
             raise Refused("Assistants at once: 1, 2 or 3.")
         updates["assist_slots"] = n
-    old_remote = app_on(read_local())
+    old = read_local()
+    old_remote = app_on(old)
     if updates:
         write_local(updates)
         apply_config(read_local())
-    if remote_keys:
-        remote_changed(old_remote)
+    if "internships" in updates:  # this process (Review, Today) takes them at once
+        import importlib
+        from nuauto import intern
+        importlib.reload(intern)
+    # what the homelab runs by itself (its page, its assistant, the internship updates, the Mark-done page): sent now
+    homelab_keys = remote_keys | ({"internships", "web_base_url", "assist_slots"} & set(updates))
+    if homelab_keys:
+        remote_changed(old_remote, restart="web_base_url" in updates and updates["web_base_url"] != old.get("web_base_url", ""))
     APP.run_now(["quick", "bitwarden"] if {"password_manager"} & set(updates) else ["quick"])
     return settings_get()
+
+
+def internships_setting(v):
+    """local_config "internships" from Settings / setup ({"on", "term", "threshold", "lists"}; docs/PIPELINE.md): off =
+    false; on = what was saved, with these changes (the per-run limits stay as they were)."""
+    from nuauto import intern
+    if not isinstance(v, dict) or not isinstance(v.get("on"), bool):
+        raise Refused("Summer internships: on or off, then the term, the bar and the lists.")
+    if not v["on"]:
+        return False
+    old = read_local().get("internships")
+    new = dict(old) if isinstance(old, dict) else {}
+    if "term" in v:
+        term = " ".join(str(v["term"] or "").split())
+        if not term or len(term) > 40:
+            raise Refused("The term is how the lists name it, like Summer 2028.")
+        new["term"] = term
+    if "threshold" in v:
+        t = v["threshold"]
+        if t in (None, ""):
+            new.pop("threshold", None)
+        elif str(t).isdigit() and 1 <= int(t) <= 100:
+            new["threshold"] = int(t)
+        else:
+            raise Refused("The bar is a match % from 1 to 100, or empty for your co-ops' bar.")
+    if "lists" in v:
+        lists = v["lists"]
+        if not isinstance(lists, dict) or not set(lists) <= set(intern.NAMES):
+            raise Refused("Unknown list.")
+        for k, url in lists.items():
+            url = str(url or "").strip()
+            if url and not re.fullmatch(r"https://[A-Za-z0-9.-]+/[A-Za-z0-9._~/%-]+", url):
+                raise Refused(f"{intern.NAMES[k]}: an https:// address of its listings.json, or empty (not read).")
+            new.setdefault("lists", {})[k] = url
+    return new
 
 
 def read_json(path):
@@ -1740,6 +1801,8 @@ _TERMINAL = "It runs in a terminal window on your laptop (you type there, never 
 LAPTOP_ONLY = {  # action -> why it is the laptop's (the homelab's page shows this instead of doing it)
     "login_google": "Google's login opens a browser on the computer that asks for it: log in from NUauto on your laptop. "
                     "It copies the login here.",
+    "login_gmail": "The Gmail login opens a browser on the computer that asks for it: log in from NUauto on your laptop. "
+                   "It copies the login here.",
     "login_nuworks": "The NUworks login opens Firefox on the computer that asks for it: log in from NUauto on your laptop. "
                      "It copies the session here.",
     "login_claude": "Claude Code logs in in a terminal. For the homelab's: in NUauto on your laptop, Settings > Homelab > "
@@ -1752,8 +1815,8 @@ LAPTOP_ONLY = {  # action -> why it is the laptop's (the homelab's page shows th
 REMOTE_SETUP = {"ack", "labels_read", "label_set", "terms_read", "prefs_save", "discord_save", "discord_test",
                 "discord_remove"}
 # settings that name things on the laptop (its files and folders, its password manager) or switch this page itself off
-REMOTE_SETTINGS_OFF = {"resume_path", "transcript_path", "assist_read_paths", "password_manager", "bitwarden_import",
-                       "remote_assist", "remote_app"}
+REMOTE_SETTINGS_OFF = {"resume_path", "transcript_path", "assist_read_paths", "assist_writeups", "password_manager",
+                       "bitwarden_import", "remote_assist", "remote_app", "web_base_url"}
 
 
 def group_on(group):
@@ -1858,6 +1921,16 @@ def homelab_post(body):
         return open_terminal(f"{shlex.quote(config.self_exe())} onboard homelab-setup",
                              "NUauto sets up your homelab here, one step at a time (each asked first). sudo asks for "
                              "the homelab's password in this window; NUauto never sees it.")
+    if a == "deploy":  # the homelab deploys GitHub's main by itself, or gets this computer's code again (a run: its log)
+        on, repo = body.get("on"), str(body.get("repo") or "").strip()
+        if not isinstance(on, bool) or (repo and not onboard.REPO_URL.match(repo)):
+            raise Refused("Deploys: on or off, and a fork's https:// address or nothing.")
+        if config.DEMO:
+            raise Refused("Demo mode: there is no homelab to deploy to.")
+        task = APP.start("homelab_deploy", "Deploys from GitHub" if on else "Deploys from this computer",
+                         config.self_cmd("onboard", "homelab-deploy", "on" if on else "off", repo), browser=False,
+                         on_done=lambda t: APP.run_now(["homelab"]))
+        return {"task": task.view()}
     if a == "claude":
         there = f"cd {shlex.quote(config.SERVER_DIR)} && export PATH=$HOME/.local/bin:$PATH && claude"
         return open_terminal(f"ssh -t {shlex.quote(config.SERVER)} {shlex.quote(there)}",

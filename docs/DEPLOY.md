@@ -22,8 +22,9 @@ MODES
                      is also where NUauto's page for your phone and the assistant's browser views listen.
     remote_app       true = NUauto's page on the homelab too (the same app, for your phone; docs/REMOTE.md);
                      remote_assist (its assistant) turns it on as well.
-  The GUI sets all of these up (a source install): Settings > Homelab (Check, Use this homelab, Set it up), or setup's
-  optional Homelab step; the same card's NUauto on your homelab part for remote_app / remote_assist.
+  The GUI sets all of these up (a source install): Settings > Homelab (Check, Use this homelab, Set it up; its code:
+  deploy_from_git and your fork's deploy_repo; the Mark-done links' web_base_url), or setup's optional Homelab step;
+  the same card's NUauto on your homelab part for remote_app / remote_assist.
   Below, `ssh homelab` means ssh to server_ssh.
 
 MACHINES (homelab mode)

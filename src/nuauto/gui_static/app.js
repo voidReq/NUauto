@@ -215,6 +215,11 @@ function taskFinished(t) {
   pollHealth();
 }
 
+// A run the server just started (its reply's task): the page follows it (the taskbar, its log, its questions)
+function adoptTask(r) {
+  if (r && r.task) { S.task = r.task; S.taskLog = []; S.taskAfter = 0; S.lastTaskState[r.task.id] = "running"; pollTask(); }
+}
+
 async function action(kind, args) {
   const why = S.state && S.state.laptop_only && S.state.laptop_only[kind];
   if (why) { laptopOnlyBox(why); return null; }
@@ -222,7 +227,7 @@ async function action(kind, args) {
     const r = await api.post("/api/action", { kind, args: args || {} });
     if (r.opened !== undefined) terminalResult(r);
     if (r.message) toast(r.message);
-    if (r.task) { S.task = r.task; S.taskLog = []; S.taskAfter = 0; S.lastTaskState[r.task.id] = "running"; pollTask(); }
+    adoptTask(r);
     pollState();
     return r;
   } catch (e) { fail(e); return null; }
@@ -1675,7 +1680,13 @@ screens.settings = async (view) => {
             el("button", { class: "btn small", text: "Check now", onclick: () => { action("check_nuworks"); toast("Checking NUworks in the background…"); } }),
             el("button", { class: "btn small", text: "Log in", onclick: () => action("login_nuworks") }))),
           el("div", { class: "row between" }, el("span", { text: "Claude Code" }), el("button", { class: "btn small", text: "Log in", onclick: () => action("login_claude") })),
-          el("p", { class: "small muted", text: "Google logins last 7 days (Testing-mode apps); NUauto warns you a day before." })),
+          el("div", { class: "row between", testid: "gmail-login" }, el("div", {}, el("span", { text: "Gmail (optional)" }),
+            el("div", { class: "small muted", text: d.gmail.ready ? (d.gmail.days_left != null ? `read-only; ${Math.max(0, d.gmail.days_left)} days left` : "read-only") :
+              "read-only, for the assistant's email codes and links" })),
+            el("button", { class: "btn small", text: d.gmail.ready ? "Log in again" : "Log in", testid: "btn-login-gmail", onclick: () => action("login_gmail") })),
+          d.gmail.ready ? null : el("p", { class: "small muted" }, "Gmail first needs its API turned on in your Google Cloud project: ",
+            linkOut("https://console.cloud.google.com/apis/library/gmail.googleapis.com", "Gmail API"), ". Use the account email's inbox (below)."),
+          el("p", { class: "small muted", text: "Google logins last 7 days (Testing-mode apps); NUauto warns you a day before. Log in to Google again renews Gmail's too." })),
         el("div", { class: "card stack" }, el("h2", { text: "Applying" }),
           el("label", { class: "field" }, "NUworks resume label", el("span", { class: "muted small", text: "Exactly as in the Apply popup's Resume dropdown." }), label),
           el("label", { class: "field" }, "Applications per week", el("span", { class: "muted small", text: `The most NUauto will submit in one week (1 to ${d.max_per_week_ceiling}). It stops at this number; Approved jobs wait for the next week.` }), cap),
@@ -1683,6 +1694,8 @@ screens.settings = async (view) => {
           el("div", {}, el("button", { class: "btn primary", text: "Save", testid: "settings-save", onclick: async () => {
             try { d = await api.post("/api/settings", { resume_label: label.value, week_start: week.value, max_per_week: cap.value }); toast("Saved."); pollState(); draw(); } catch (e) { fail(e); } } })))),
       assistantCard(),
+      el("div", { class: "card stack", testid: "intern-settings" }, el("h2", { text: "Summer internships" }),
+        internshipsPanel(d.internships, (r) => { if (r) { d = r; draw(); } else reload(); })),
       // Bitwarden unlocks in a terminal window on the laptop: its card is the laptop's only
       onHomelab() ? null : el("div", { class: "card stack", testid: "pm-settings" }, el("h2", { text: "Password manager" }),
         passwordManagerPanel(d.password_manager, (r) => { if (r) { d = r; draw(); } else reload(); })),
@@ -1752,6 +1765,11 @@ screens.settings = async (view) => {
     effort.value = d.efforts.includes(s.assist_effort) ? s.assist_effort : d.efforts[0];
     const folders = el("textarea", { rows: "3", "aria-label": "Folders the assistant may read", testid: "set-read-paths" });
     folders.value = (s.assist_read_paths || []).join("\n");
+    const writeups = el("textarea", { rows: "2", "aria-label": "Your writeups", testid: "set-writeups" });
+    writeups.value = (s.assist_writeups || []).join("\n");
+    const slots = el("select", { "aria-label": "Assistants at once", testid: "set-assist-slots" }, ...[1, 2, 3].map((n) => el("option", { value: String(n), text: String(n) })));
+    slots.value = String(d.assist_slots);
+    const lines = (t) => t.value.split("\n").map((x) => x.trim()).filter(Boolean);
     const transcript = el("input", { type: "text", value: s.transcript_path || "", placeholder: "~/Documents/unofficial_transcript.pdf",
       "aria-label": "Transcript", testid: "set-transcript" });
     const L = d.logins;
@@ -1774,14 +1792,16 @@ screens.settings = async (view) => {
       el("label", { class: "field" }, "Effort", el("span", { class: "muted small", text: "How hard it thinks (Claude Code's effort). Nothing is submitted without your review either way." }), effort),
       here ? el("p", { class: "small muted", text: "Your transcript and the folders it may read are files on your laptop: set them in NUauto there (the homelab gets copies)." }) : [
         el("label", { class: "field" }, "Transcript (optional)", el("span", { class: "muted small", text: "A PDF of your unofficial transcript. The assistant uploads it only where an application asks for a transcript (and copies it to your homelab if its assistant is on). Empty = none." }), transcript),
-        el("label", { class: "field" }, "Folders it may read", el("span", { class: "muted small", text: "Your projects and writeups, one per line: for longer answers. Keys, tokens, .env files and NUauto's own logins are never read." }), folders)],
+        el("label", { class: "field" }, "Folders it may read", el("span", { class: "muted small", text: "Your projects and writeups, one per line: for longer answers. Keys, tokens, .env files and NUauto's own logins are never read." }), folders),
+        el("label", { class: "field" }, "Your writeups (optional)", el("span", { class: "muted small", text: "Folders of your own project or security writeups, one per line: the first place it looks for essay material (and, with its assistant on the homelab, copied there)." }), writeups)],
+      el("label", { class: "field" }, "Assistants at once", el("span", { class: "muted small", text: "How many company-site applications may run side by side, each with its own browser: on each machine, 1 to 3." }), slots),
       el("div", { class: "row between" }, el("span", { class: "small muted", testid: "logins-count",
         text: L.sites ? `Logins it made: ${plural(L.sites, "site")}${L.new ? `, ${L.new} not exported yet` : ", all exported"}` : "No logins made yet." }), here ? null : exportBtn),
       el("div", {}, el("button", { class: "btn primary", text: "Save", testid: "assistant-save", onclick: async () => {
         try {
-          d = await api.post("/api/settings", here ? { accounts_email: email.value, assist_effort: effort.value } :
-            { accounts_email: email.value, assist_effort: effort.value, transcript_path: transcript.value,
-              assist_read_paths: folders.value.split("\n").map((x) => x.trim()).filter(Boolean) });
+          const both = { accounts_email: email.value, assist_effort: effort.value, assist_slots: Number(slots.value) };
+          d = await api.post("/api/settings", here ? both :
+            { ...both, transcript_path: transcript.value, assist_read_paths: lines(folders), assist_writeups: lines(writeups) });
           toast("Saved."); draw();
         } catch (e) { fail(e); }
       } })));
@@ -1838,8 +1858,6 @@ function homelabAssistantPanel(ha, done) {
   const here = onHomelab();
   const from = el("input", { type: "number", min: "0", max: "23", step: "1", value: String(ha.hours[0]), "aria-label": "From (hour)", testid: "ha-from" });
   const to = el("input", { type: "number", min: "1", max: "24", step: "1", value: String(ha.hours[1]), "aria-label": "To (hour)", testid: "ha-to" });
-  const slots = el("select", { "aria-label": "Assistants at once", testid: "ha-slots" }, ...[1, 2, 3].map((n) => el("option", { value: String(n), text: String(n) })));
-  slots.value = String(ha.slots);
   const queue = ha.on ? [
     ...[["nuworks", "NUworks rows", "company sites of NUworks jobs; only under the weekly cap"],
         ["other", "Other jobs rows", "the Other jobs tab: Summer internships and jobs you added"]].map(([tab, name, what]) => {
@@ -1853,9 +1871,8 @@ function homelabAssistantPanel(ha, done) {
     }),
     el("label", { class: "field" }, "Its hours", el("span", { class: "muted small", text: "The only hours it starts sessions by itself (New York time, 24-hour clock), so no pings at night. A session already running goes on; you can start one yourself any time." }),
       el("div", { class: "row" }, "between", from, ":00 and", to, ":00")),
-    el("label", { class: "field" }, "Assistants at once", el("span", { class: "muted small", text: "On each machine, 1 to 3." }), slots),
     el("div", { class: "row" }, el("button", { class: "btn small primary", text: "Save", testid: "ha-save", onclick: () =>
-      saveSettings({ remote_hours: [Number(from.value), Number(to.value)], assist_slots: Number(slots.value) }, "Saved.", done) })),
+      saveSettings({ remote_hours: [Number(from.value), Number(to.value)] }, "Saved.", done) })),
   ] : null;
   if (here) {
     return el("div", { class: "stack", testid: "ha-panel" }, ha.on ?
@@ -1927,10 +1944,63 @@ function homelabLinkPanel(h, done) {
           "Everything runs on this computer again (after a restart of NUauto): its updates, Discord messages and NUauto's page there stop being used from here. Nothing on the homelab is deleted.",
           "Stop using it", async () => { const r = await post({ action: "off" }); if (r) fill(out, restartNote()); }, { danger: true }) }))) :
       h.saved ? restartNote() : null,
+      h.on ? deploysPanel(h, post) : null,
     el("div", { class: "row" }, el("label", { class: "field grow" }, "Its ssh name", el("span", { class: "muted small", text: "What you type after ssh (a key, no password)." }), ssh),
       el("label", { class: "field grow" }, "NUauto's folder there", el("span", { class: "muted small", text: "Under its home folder." }), folder)),
     el("div", {}, el("button", { class: "btn", text: "Check", testid: "hl-check", onclick: check })),
     out);
+}
+
+// The homelab in use: where its code comes from (GitHub's main by itself, or this computer at each push:
+// deploy_from_git, a run with its log), and the Mark-done links' public address (web_base_url: your tunnel to it).
+function deploysPanel(h, post) {
+  const fork = el("input", { type: "text", value: h.deploy_repo, placeholder: "this project's GitHub repo",
+    "aria-label": "Your fork's address", testid: "hl-fork" });
+  const mark = el("input", { type: "text", value: h.web_base_url, placeholder: "https://nuauto.example.com",
+    "aria-label": "The Mark-done page's address", testid: "hl-mark-url" });
+  const on = h.deploy_from_git;
+  return el("div", { class: "stack", testid: "hl-deploys" },
+    el("div", { class: "row between" }, el("div", {}, el("b", { text: "Its code" }), el("div", { class: "small muted", text: on ?
+        "From GitHub's main, by itself (every 5 minutes): merging to main deploys it." : "From this computer, each time it pushes (what is checked out here)." })),
+      el("button", { class: "btn small", testid: "hl-deploy", text: on ? "From this computer instead" : "From GitHub's main",
+        onclick: () => confirmBox(on ? "Code from this computer?" : "Code from GitHub's main?", on ?
+          "The homelab's deploy timer is turned off; from now on it gets the code checked out here, at each push." :
+          "This computer's code is copied there once more (with the deploy tool), then the homelab's deploy timer is turned on: from then on it runs GitHub's main (or your fork's), and branches here never reach it.",
+          "Switch", async () => adoptTask(await post({ action: "deploy", on: !on, repo: fork.value }))) })),
+    el("label", { class: "field" }, "Your fork (optional)", el("span", { class: "muted small", text: "The GitHub address to deploy from, if you run your own copy of NUauto: https://github.com/you/NUauto.git. Empty: this project's." }), fork),
+    el("label", { class: "field" }, "Mark-done links (optional)", el("span", { class: "muted small", text: "The public address of the homelab's Mark-done page, so Discord's links work from your phone: a tunnel or reverse proxy you set up to its port 8765 (docs/DEPLOY.md). Empty: no Mark links." }), mark),
+    el("div", {}, el("button", { class: "btn small primary", text: "Save", testid: "hl-mark-save", onclick: () =>
+      saveSettings({ web_base_url: mark.value }, "Saved: the homelab's web page restarts with it.", () => {}) })));
+}
+
+// Summer internships (optional; local_config "internships", intern.py): on / off, the term as the lists name it, the
+// bar to enter your pool (empty: your co-ops'), and the lists' addresses. Settings and setup's step are the same.
+function internshipsPanel(ii, done) {
+  const term = el("input", { type: "text", value: ii.term, maxlength: "40", "aria-label": "Term", testid: "in-term" });
+  const bar = el("input", { type: "number", min: "1", max: "100", value: ii.threshold == null ? "" : String(ii.threshold),
+    placeholder: `${ii.co_op_bar} (your co-ops')`, "aria-label": "Match % to enter your pool", testid: "in-bar" });
+  const lists = Object.entries(ii.names).map(([k, name]) => [k, name, el("input", { type: "text", value: ii.lists[k] || "",
+    "aria-label": `${name}'s address`, testid: `in-list-${k}` })]);
+  // a new term (Summer 2028): the lists' addresses follow it (each year's lists are their own repos)
+  term.addEventListener("change", () => {
+    const y = (term.value.match(/(\d{4})/) || [])[1];
+    if (y) lists.forEach(([, , inp]) => { inp.value = inp.value.replace(/Summer\d{4}/, `Summer${y}`); });
+  });
+  return el("div", { class: "stack", testid: "in-panel" },
+    el("p", { class: "small muted", text: "Optional. Summer internships from public lists (not on NUworks): each posting is read from the company's own site and scored like your co-ops. Review gets a second list; approved ones go in your sheet's Other jobs tab, with no weekly limit, for the company-site assistant. Checked with each update (and every 2 hours on a homelab)." }),
+    el("div", { class: "row between" }, el("div", { class: "row" }, el("b", { text: "Summer internships" }),
+      el("span", { class: `chip ${ii.on ? "ok" : "off"}`, text: ii.on ? "on" : "off", testid: "in-status" })),
+      el("button", { class: "btn small" + (ii.on ? "" : " primary"), testid: "in-toggle", text: ii.on ? "Turn off" : "Turn on",
+        onclick: () => saveSettings({ internships: { on: !ii.on } }, ii.on ? "Internships: off." : "Internships: on (the next update reads the lists).", done) })),
+    ii.on ? [
+      el("label", { class: "field" }, "Term", el("span", { class: "muted small", text: "As the lists name it, like Summer 2027." }), term),
+      el("label", { class: "field" }, "Match % to enter your pool", el("span", { class: "muted small", text: "Empty: the same bar as your co-ops (a kind of work's lower bar still counts)." }), bar),
+      ...lists.map(([k, name, inp]) => el("label", { class: "field" }, `${name}'s address`,
+        el("span", { class: "muted small", text: "Its listings.json (empty: not read)." }), inp)),
+      el("div", {}, el("button", { class: "btn small primary", text: "Save", testid: "in-save", onclick: () => saveSettings({ internships: {
+        on: true, term: term.value, threshold: bar.value, lists: Object.fromEntries(lists.map(([k, , inp]) => [k, inp.value.trim()])) } },
+      "Saved: the next update reads them.", done) })),
+    ] : null);
 }
 
 // ---- Setup (filled in by the wizard code in setup.js)

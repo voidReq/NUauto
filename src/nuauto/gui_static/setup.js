@@ -278,6 +278,10 @@
       return [box];
     },
 
+    internships(s, redraw) {
+      return [internshipsPanel(s.data, () => redraw())];
+    },
+
     password_manager(s, redraw) {
       return [passwordManagerPanel(s.data, () => redraw())];
     },

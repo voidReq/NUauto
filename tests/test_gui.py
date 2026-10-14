@@ -226,11 +226,11 @@ try:
     for bad in ("myworkday", ["a"], ["x" * 61], ["two words"], ["a/b"], ["a;rm -rf"], ["$(id)"], ["ok.site", "bad site"], None):
         post("/api/settings", {"bitwarden_import": bad}, expect=409)
     assert "bitwarden_import" not in json.load(open(local_config))
-    for body in ({"remote_assist": True}, {"remote_auto": True}, {"remote_hours": [9, 22]}, {"assist_slots": 2},
+    for body in ({"remote_assist": True}, {"remote_auto": True}, {"remote_hours": [9, 22]},
                  {"remote_assist": "yes"}, {"remote_hours": [22, 9]}):
         post("/api/settings", body, expect=409)  # no homelab (server_hostname): refused before anything is saved
     cfg_now = json.load(open(local_config))
-    assert not any(k in cfg_now for k in ("remote_assist", "remote_auto", "remote_hours", "assist_slots")), cfg_now
+    assert not any(k in cfg_now for k in ("remote_assist", "remote_auto", "remote_hours")), cfg_now
     s3 = post("/api/settings", {"password_manager": "bitwarden", "bitwarden_import": [" myworkday ", "", "amazon.jobs"]})
     assert s3["password_manager"]["on"] and s3["password_manager"]["only"] == ["myworkday", "amazon.jobs"], s3["password_manager"]
     assert json.load(open(local_config))["password_manager"] == "bitwarden"
@@ -303,7 +303,36 @@ try:
     post("/api/homelab", {"action": "save", "ssh": "homelab", "hostname": "lab", "folder": "projects/auto", "listen": "0.0.0.0"},
          expect=409)
     post("/api/homelab", {"action": "setup"}, expect=409)                       # no homelab used yet
+    post("/api/homelab", {"action": "deploy", "on": True}, expect=409)
     post("/api/homelab", {"action": "nope"}, expect=409)
+    # what a user sets for themselves, all in Settings (or setup): the writeups, assistants at once (no homelab needed),
+    # the Mark-done page's address, the Gmail login, Summer internships (on / off, term, bar, lists)
+    s = post("/api/settings", {"assist_writeups": [" ~/notes/writeups ", ""], "assist_slots": 2})
+    assert s["settings"]["assist_writeups"] == ["~/notes/writeups"] and s["assist_slots"] == 2
+    assert json.load(open(local_config))["assist_slots"] == 2
+    post("/api/settings", {"assist_slots": 3})
+    for bad in ("http://x.example", "nope", "https://x example"):
+        post("/api/settings", {"web_base_url": bad}, expect=409)
+    assert post("/api/settings", {"web_base_url": "https://mark.example.com/"})["settings"]["web_base_url"] == "https://mark.example.com"
+    post("/api/settings", {"web_base_url": ""})
+    assert "Demo" in post("/api/action", {"kind": "login_gmail"}, expect=409)["error"]
+    assert get("/api/settings")["gmail"] == {"ready": False, "days_left": None}
+    was_interns = json.load(open(local_config)).get("internships")
+    for bad in ({"on": "yes"}, {"on": True, "term": ""}, {"on": True, "threshold": 0}, {"on": True, "threshold": "x"},
+                {"on": True, "lists": {"nope": ""}}, {"on": True, "lists": {"simplify": "http://plain.example/x"}}):
+        post("/api/settings", {"internships": bad}, expect=409)
+    ii = post("/api/settings", {"internships": {"on": True, "term": " Summer  2028 ", "threshold": "62",
+                                                "lists": {"simplify": "https://raw.example.com/S2028/listings.json", "vansh": ""}}})["internships"]
+    assert ii["on"] and ii["term"] == "Summer 2028" and ii["threshold"] == 62 and ii["lists"]["vansh"] == ""
+    assert get("/api/state")["internships"]["term"] == "Summer 2028"                  # this process took it at once
+    assert post("/api/settings", {"internships": {"on": True, "threshold": ""}})["internships"]["threshold"] is None
+    assert post("/api/settings", {"internships": {"on": False}})["internships"]["on"] is False
+    assert json.load(open(local_config))["internships"] is False
+    post("/api/settings", {"internships": {"on": True}})
+    cfg = json.load(open(local_config))
+    cfg["internships"] = was_interns
+    json.dump(cfg, open(local_config, "w"))
+    get("/api/settings")
     for bad in (0, 31, "lots", 2.5, True, None):
         post("/api/settings", {"max_per_week": bad}, expect=409)
     assert post("/api/settings", {"max_per_week": "7"})["max_per_week"] == 7
