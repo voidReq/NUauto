@@ -94,7 +94,11 @@ try:
     st = get("/api/state")
     assert st["where"] == "homelab" and st["demo"] and not st["setup_needed"]                  # setup is the laptop's
     assert {"login_google", "login_nuworks", "login_claude", "bitwarden_add", "review_pair"} <= set(st["laptop_only"])
-    assert [w["status"] for w in st["waiting"]] == ["approve", "waiting", "finish"]
+    waiting = [t for t in st["todo"] if t["kind"] == "assistant"]                    # Today's list, first
+    assert [t["status"] for t in waiting] == ["approve", "waiting", "finish"] and st["todo"][:3] == waiting
+    assert waiting[0]["screen"] == "#/assistant/1"
+    # each once: the NUworks row the third session is on is its assistant's item, not also a company-site item
+    assert not [t for t in st["todo"] if t["kind"] == "company" and t["row"] == waiting[2]["row"]]
     assert st["assistants"].startswith("other-") and ":approve" in st["assistants"]
 
     # ---- what needs the laptop: refused here, with the reason the page shows
@@ -164,9 +168,9 @@ try:
         page.click("button:has-text('Pair')")
         page.wait_for_selector("text=Paired")
         page.click("text=Open NUauto")
-        page.wait_for_selector("[data-testid=waiting-1]")
-        assert "on your homelab" in page.inner_text("#side-foot") if page.is_visible("#side-foot") else True
-        page.click("[data-testid=waiting-1] a")
+        page.wait_for_selector("[data-testid=todo] [data-testid^=todo-assistant-]")
+        assert page.locator("[data-testid^=todo-assistant-]").count() == 3
+        page.click("[data-testid^=todo-assistant-] >> nth=0 >> a")
         page.wait_for_selector("[data-testid=as-approval]")
         assert "click 'Submit Application'" in page.inner_text("[data-testid=as-approval]")
         page.click("[data-testid=as-approve]")
@@ -181,11 +185,15 @@ try:
         page.wait_for_selector("[data-testid=laptop-only]:has-text('on your laptop')")
         page.keyboard.press("Escape")
         assert page.locator("[data-testid=btn-quit]").count() == 0 and page.locator("[data-testid=hl-panel]").count() == 0
-        # Company sites: the sessions here, each a tap from its screen; rows with the queue's reason
+        # one card for the homelab (its paired devices and its assistant), no Bitwarden card (the laptop's)
+        assert page.locator("[data-testid=homelab-settings]").count() == 1 and page.locator("[data-testid=pm-settings]").count() == 0
+        assert page.locator("[data-testid=homelab-settings] [data-testid=devices]").count() == 1
+        # Company sites: one line for the assistants and the queue; each session opened from its own row
         page.goto(f"{ORIGIN}/#/company")
-        page.wait_for_selector("[data-testid=here-assistants]")
-        assert page.locator("[data-testid^=here-open-]").count() == 3
-        page.wait_for_selector("[data-testid=queue-line]")
+        page.wait_for_selector("[data-testid=assistants-bar]")
+        assert page.locator("[data-testid=assistants-bar]").count() == 1 and page.locator("[data-testid=queue-line]").count() == 1
+        assert "3 of 3 running" in page.inner_text("[data-testid=assistants-running]")
+        assert page.locator("a[data-testid$=-running][href^='#/assistant/']").count() == 3
         b.close()
     assert not errors, errors
 finally:

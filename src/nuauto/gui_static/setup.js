@@ -282,12 +282,9 @@
       return [passwordManagerPanel(s.data, () => redraw())];
     },
 
-    homelab(s, redraw) {
-      return [homelabLinkPanel(s.data, () => redraw())];
-    },
-
-    homelab_assistant(s, redraw) {
-      return [homelabAssistantPanel(s.data, () => redraw())];
+    homelab(s, redraw) {  // which homelab; then, once NUauto runs with one, its page and its assistant (as in Settings)
+      return [homelabLinkPanel(s.data, () => redraw()), s.data.assistant ? [el("hr", { class: "sep" }),
+        el("h3", { text: "NUauto on your homelab" }), homelabAssistantPanel(s.data.assistant, () => redraw())] : null];
     },
 
     extras(s, redraw) {

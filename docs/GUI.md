@@ -20,9 +20,14 @@ WHAT IT IS
   page and this API there too (gui.serve_remote, REMOTE mode), on the homelab's Tailscale address :8766, to paired
   devices (your phone). Every screen is the same; the page knows where it runs (state.where) and shows what only the
   laptop can do (state.laptop_only: logins, terminal windows, the laptop's files, Bitwarden, setup's file steps, Quit) as
-  "On your laptop" with the reason; the server refuses those there. What it adds there: each assistant session's screen
-  (#/assistant/<slot>), the queue in Company sites, Today's "Assistants waiting for you", Settings > Paired devices.
-  Without a homelab none of it exists, and the laptop's app is unchanged.
+  "On your laptop" with the reason; the server refuses those there (the Bitwarden card is left out). What it adds there:
+  each assistant session's screen (#/assistant/<slot>), the queue in Company sites, Settings > This homelab (paired
+  devices). Without a homelab none of it exists, and the laptop's app is unchanged.
+- Each thing in one place (2026-10-14), with or without a homelab: Today has one list of what only you can do (the
+  assistants waiting for you first, each item opening where you do it: no second Mark done or Open job there); Company
+  sites has one assistants line (here, on the homelab, waiting for you; the homelab's queue), each session reached from
+  its own row; Settings has one Homelab card (and setup one Homelab step); Pair this computer and Open NUauto on the
+  homelab are there only.
 
 PACKAGED APP (packaging/; .github/workflows/release.yml builds and smoke-tests it on every pull request (all but the
 Intel Mac app, the slowest build), and builds all four and publishes them as a GitHub release on every v* tag)
@@ -50,8 +55,10 @@ Intel Mac app, the slowest build), and builds all four and publishes them as a G
 
 SCREENS
   Today          health problems with fix buttons, this week's count, next steps (with "Review N internships" when
-                 internships are on and some wait: it opens Review on that list), what only you can do (each item with
-                 its due date, soonest first; same in Apply's Company sites part)
+                 internships are on and some wait: it opens Review on that list), what only you can do: the assistants
+                 that wait for you first (approve, answer, did it go through: its screen, or "in its terminal window"),
+                 then each item with its due date, soonest first; each item opens where you do it (Company sites,
+                 Review), nothing done twice in two places
   Review         one pool job at a time. Approve mode: Approve (y) adds it to the sheet as Approved at once
                  (or, for one of your Proposed rows, which Review shows first, turns that row Approved);
                  Each card shows its Score (match + each bonus) and Order (why it sits there: closing soon,
@@ -96,16 +103,15 @@ SCREENS
                  assistant's rows + retries). Company sites tab (assistants side by side, up to 3: a row with one
                  running shows "assistant running (slot N)" instead of Start, or "assistant waiting for you" / "approve in its window"
                  while it waits for you (assist.sessions attention; a desktop notification says so too); one the homelab runs
-                 (remote_assist) shows "assistant running on the homelab" / "waiting for you (its page)", from `nuauto
-                 assist sessions` over ssh every minute (never in view or demo mode); "N of 3 assistants running"; it follows
-                 /api/state assistants). With remote_assist a Homelab assistants card first: the homelab's sessions and what
-                 each waits for, Open its screen (#/assistant/<slot> of NUauto on the homelab, in your browser), Open NUauto
-                 on the homelab, Pair this computer (a one-time pairing link from the homelab over ssh, opened in your
-                 browser; POST /api/action review_pair -> {"url"}). On the homelab's own page instead: Assistants on this
-                 homelab (each session's status and Open), the queue's line (what starts by itself, its hours, free slots,
-                 NUworks applications left), each row's place in the queue as a chip (review.queue_view: starts next by
-                 itself / ready / what it waits for), Start now (remote start in tmux; refused with the reason) and "Sort the
-                 list by: the queue's order". Then: Needs Human rows for the assistant (opens
+                 (remote_assist) shows "assistant running on the homelab: open" / "...: waiting for you: open" (its screen
+                 in NUauto on the homelab, in your browser), from `nuauto assist sessions` over ssh every minute (never in
+                 view or demo mode); it follows /api/state assistants). First one line for the whole tab
+                 (assistants-bar): "Assistants: N of 3 running here · M on the homelab · K wait for you (Today lists
+                 them)". On the homelab's own page the same line (no "here") plus the queue's (what starts by itself, its
+                 hours, free slots, NUworks applications left); each row's place in the queue as a chip
+                 (review.queue_view: starts next by itself / ready / what it waits for), Start now (remote start in tmux;
+                 refused with the reason), a running session's Open (its screen) and "Sort the list by: the queue's
+                 order". Then: Needs Human rows for the assistant (opens
                  `nuauto assist <row>` in a terminal window, or shows the command), "I applied myself", Drop (not applying: closed, a
                  duplicate, a bad location; sheet.drop: Failed, "Dropped <date>: <reason>" in Notes; never while an
                  assistant is on the row), company sites still
@@ -143,13 +149,14 @@ SCREENS
                  assistant's tools there), Use this homelab (local_config's server fields; NUauto then needs a restart: the
                  card offers Quit), Set it up (a terminal window: `nuauto onboard homelab-setup`, docs/DEPLOY.md's steps,
                  each asked first; sudo asks for the homelab's password there), Log in to Claude there (ssh -t ... claude),
-                 Stop using it (local mode again); NUauto on your homelab (homelab mode only, docs/REMOTE.md): its page on /
+                 Stop using it (local mode again); in the same card, NUauto on your homelab (homelab mode only, docs/REMOTE.md): its page on /
                  off (remote_app), its assistant on / off (remote_assist, which needs the page: both pushed to the homelab,
                  nuauto-web restarted), Start sessions by itself, one switch for NUworks rows and one for Other jobs rows
                  (remote_auto {"nuworks", "other"}), its hours (remote_hours), assistants at once (assist_slots), Pair this
-                 computer, Open it; setup, logs, quit. On the homelab's page: Paired devices (each one, "this one", Unpair,
-                 Make a pairing link for another device), its queue's settings (no on / off: the laptop's), the email and
-                 effort only (the transcript, folders, export, Bitwarden: on your laptop), no Quit
+                 computer, Open it; setup, logs, quit. On the homelab's page one This homelab card: Paired devices (each
+                 one, "this one", Unpair, Make a pairing link for another device) and its assistant's queue settings (no
+                 on / off: the laptop's); the email and effort only (the transcript, folders, export: on your laptop); no
+                 Password manager card (Bitwarden unlocks on the laptop), no Quit
   Setup          the wizard (below); opens by itself until setup is done (never on the homelab's page: setup is the
                  laptop's; there it says so, and the steps it can do are preferences, Discord and the resume label)
   Past runs      logs/ folders: actions.log and the screenshots before and after Submit
@@ -183,9 +190,8 @@ SETUP WIZARD (onboard.py + gui_static/setup.js; each step checks itself)
   extras       Discord webhook (checked with a GET, posts nothing until you press Test), automatic updates
                (local mode: systemd user timer / launchd agent at 08:00 and 18:00), app icon
   password_manager   optional: the same Password manager part as Settings (done when Bitwarden is on and its check is OK)
-  homelab            optional, a source install only: the same Homelab part as Settings (done when NUauto runs with one)
-  homelab_assistant  optional, only in homelab mode: the same NUauto on your homelab part as Settings (done when its page
-                     is on)
+  homelab            optional, a source install only: the same Homelab card as Settings (done when NUauto runs with one;
+                     then its NUauto on your homelab part shows there too: one step for all of it)
 
 HEALTH (health.py; the same checks `nuauto doctor` prints, `nuauto doctor --json`)
   check     how                                                               GUI runs it
@@ -287,8 +293,9 @@ VIEW MODE (`nuauto gui --view`; gui.VIEW; added 2026-10-09 so an agent can look 
 API (JSON; all need the cookie; POSTs need X-NUauto: 1)
   GET  /api/state            counts, week, to-do, last scan, setup_needed, the current task; internships {on, term,
                              review: how many wait for Review}; where (laptop | homelab), laptop_only {action: why} (the
-                             homelab's page), waiting (the homelab's sessions that wait for you), remote_app (the laptop:
-                             the homelab's page address, when it has one)
+                             homelab's page), remote_app (the laptop: the homelab's page address, when it has one); todo:
+                             the assistants that wait for you first ({"kind": "assistant", "status", "text", "screen": its
+                             screen, or null for a laptop session in its terminal window}), then site / company / urgent
   GET  /api/health           the checks; POST /api/health/run {"groups": [...]}
   GET  /api/review?mode=&q=&category=&source=   the review queue (q / category narrow it; total, categories = the whole
                              queue; source=intern: the internships, else the co-ops; the reply says "source"; an internship

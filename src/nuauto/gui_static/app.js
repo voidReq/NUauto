@@ -475,11 +475,6 @@ screens.home = (view) => {
     const problems = S.checks.filter((c) => c.status === "fail" || c.status === "warn");
     const lu = st.last_update;
     fill(view,
-      (st.waiting || []).length ? el("div", { class: "card", testid: "waiting" }, el("h2", { text: "Assistants waiting for you" }),
-        el("ul", { class: "list" }, ...st.waiting.map((s) => el("li", { testid: `waiting-${s.slot}` },
-          el("div", { class: "what" }, el("b", { text: s.company || "assistant" }), " · ", s.title,
-            el("div", { class: "small muted", text: s.text })),
-          el("a", { class: "btn small primary", href: `#/assistant/${s.slot}`, text: s.status === "approve" ? "Review and approve" : "Open" }))))) : null,
       st.setup_needed ? el("div", { class: "card", testid: "setup-needed" }, el("h2", { text: "Finish setting up" }),
         el("p", { class: "muted", text: "A few steps (Google, your sheet, NUworks, your resume), each checked as you go." }),
         el("a", { href: "#/setup", class: "btn primary", text: "Open setup" })) : null,
@@ -521,13 +516,21 @@ function dueChip(t) {
     text: `${t.past ? "closed" : "closes"} ${t.closes_text}` });
 }
 
+// Today's one list of what only you can do; each item opens the place you do it (nothing is done twice in two places).
+// An assistant that waits for you comes first: its screen (the homelab's page), or its terminal window (the laptop).
 function todoList(items) {
   if (!items.length) return el("p", { class: "empty", text: "Nothing waiting on you." });
   return el("ul", { class: "list" }, ...items.map((t) => {
+    if (t.kind === "assistant") return el("li", { testid: `todo-assistant-${t.tab}-${t.row}` },
+      el("div", { class: "what" }, el("b", { text: t.company || "assistant" }), " · the assistant: ", t.text,
+        t.title ? el("div", { class: "small muted", text: t.title }) : null),
+      el("div", { class: "row" }, !t.screen ? el("span", { class: "chip warn", text: "in its terminal window" }) :
+        t.screen.startsWith("#") ? el("a", { class: "btn small primary", href: t.screen, text: t.status === "approve" ? "Review and approve" : "Open" }) :
+          el("button", { class: "btn small primary", text: "Open its screen", title: "In NUauto on your homelab, in your browser",
+            onclick: () => openExternal(t.screen) })));
     if (t.kind === "site") return el("li", { testid: `todo-site-${t.row}` },
       el("div", { class: "what" }, el("b", { text: t.company }), " · apply on their own site too ", el("span", { class: "muted", text: `(row ${t.row})` })),
-      el("div", { class: "row" }, dueChip(t), linkOut(t.url, "Open job"), el("button", { class: "btn small", text: "Mark done",
-        onclick: () => markRow("site", t) })));
+      el("div", { class: "row" }, dueChip(t), el("a", { class: "btn small", href: "#/company", text: "Open" })));
     if (t.kind === "company") return el("li", { testid: `todo-company-${t.row}` },
       el("div", { class: "what" }, el("b", { text: t.company }), " · company-site application ", linkOut(t.target, t.host)),
       el("div", { class: "row" }, dueChip(t), el("a", { class: "btn small", href: "#/company", text: "Open" })));
@@ -1112,10 +1115,13 @@ function assistantStart(d, r, tab, testid, args) {
 
 function assistantStartButton(d, r, tab, testid, args) {
   const remote = (d.homelab || []).find((s) => s.tab === tab && s.row === r.row);
-  if (remote) {  // the homelab's assistant has this row (you answer it on its review page; docs/REMOTE.md)
+  if (remote) {  // the homelab's assistant has this row: its screen is in NUauto on the homelab (in your browser)
     const wait = remote.attention && remote.attention.kind;
-    return el("span", { class: wait ? "chip warn" : "chip ok", testid: `${testid}-homelab`,
-      text: wait ? "assistant on the homelab: waiting for you (its review page)" : "assistant running on the homelab" });
+    const text = wait ? "assistant on the homelab: waiting for you" : "assistant running on the homelab";
+    return d.homelab_review ? el("button", { class: "btn small" + (wait ? " primary" : ""), testid: `${testid}-homelab`,
+      text: `${text}: open`, title: "Its screen in NUauto on your homelab, in your browser",
+      onclick: () => openExternal(`${d.homelab_review}/#/assistant/${remote.slot}`) }) :
+      el("span", { class: wait ? "chip warn" : "chip ok", testid: `${testid}-homelab`, text });
   }
   const running = (d.sessions || []).find((s) => s.tab === tab && s.row === r.row);
   if (running && onHomelab()) {  // here: its screen, a tap away
@@ -1156,31 +1162,24 @@ function assistantStartButton(d, r, tab, testid, args) {
     } });
 }
 
-function assistantsLine(d) {
-  const n = (d.sessions || []).length;
-  return n ? el("p", { class: "small", testid: "assistants-running", text: `${n} of ${d.slots} assistants running` +
-    (n >= d.slots ? (onHomelab() ? ": end one (on its screen) to start another." : ": finish one (type /exit in its window) to start another.")
-      : "; you can start another.") }) : null;
-}
-
-// The homelab's assistants (remote_assist), seen from the laptop: you answer them in NUauto on your homelab, in your
-// browser (that page can't live inside this window: it refuses frames, and its pairing cookie belongs to the browser
-// that paired).
-function homelabCard(d) {
-  if (!d.homelab_review) return null;
-  const word = (s) => { const k = s.attention && s.attention.kind;
-    return k === "approve" ? "ready to submit: approve it" : k === "waiting" ? "waiting for you" : k === "finish" ? "ended: did it go through?" : "working"; };
-  return el("div", { class: "card", testid: "homelab-assistants" }, el("h2", { text: "Homelab assistants" }),
-    el("p", { class: "small muted", text: "Sessions running on the homelab. You answer them, approve their Submit and solve captchas in NUauto on your homelab, in your browser (Tailscale on). A browser is paired once: Pair this computer opens a one-time link, then press Pair." }),
-    (d.homelab || []).length ? el("ul", { class: "list" }, ...d.homelab.map((s) => el("li", { testid: `homelab-${s.tab}-${s.row}` },
-      el("div", { class: "what" }, el("b", { text: s.company || "assistant" }), " · ", s.tab === "other" ? `Other jobs row ${s.row}` : `row ${s.row}`,
-        el("div", { class: "small muted", text: `${s.host || ""} · slot ${s.slot}` })),
-      el("div", { class: "row" }, el("span", { class: s.attention ? "chip warn" : "chip ok", text: word(s) }),
-        el("button", { class: "btn small primary", text: "Open its screen", onclick: () => openExternal(`${d.homelab_review}/#/assistant/${s.slot}`) })))))
-      : el("p", { class: "empty", text: "No assistant is running on the homelab now." }),
-    el("div", { class: "row" },
-      el("button", { class: "btn small", text: "Open NUauto on the homelab", testid: "homelab-open", onclick: () => openExternal(`${d.homelab_review}/`) }),
-      el("button", { class: "btn small", text: "Pair this computer", testid: "homelab-pair", onclick: pairThisComputer })));
+// One line at the top of Company sites, the same on both machines: how many assistants run (here, and on the homelab),
+// how many wait for you (Today lists them), and on the homelab's page what its queue starts by itself. Each session is
+// reached from its own row (its screen, or its terminal window); pairing and opening the homelab's page are in Settings.
+function assistantsBar(d) {
+  const here = (d.sessions || []).length, there = (d.homelab || []).length;
+  if (!here && !there && !onHomelab()) return null;
+  const waits = [...(d.sessions || []), ...(d.homelab || [])].filter((s) => s.attention && s.attention.kind).length;
+  const parts = [`Assistants: ${here} of ${d.slots} running${onHomelab() ? "" : " here"}`];
+  if (there) parts.push(`${there} on the homelab`);
+  if (waits) parts.push(`${waits} ${waits === 1 ? "waits" : "wait"} for you (Today lists ${waits === 1 ? "it" : "them"})`);
+  if (here >= d.slots) parts.push(onHomelab() ? "end one (on its screen) to start another" : "finish one (type /exit in its window) to start another");
+  const q = d.queue || {};
+  const tabs = (q.auto || []).map((t) => (t === "jobs" ? "NUworks rows" : "Other jobs rows"));
+  const queue = q.error || (q.hours ? (tabs.length ? `Starts by itself: ${tabs.join(" and ")}, ${hour(q.hours[0])}–${hour(q.hours[1])} New York time.` :
+    "Nothing starts by itself (Settings).") + ` ${q.free ? plural(q.free, "slot") + " free" : "Every slot is in use"}.` +
+    (q.left != null ? ` NUworks applications left now: ${Math.max(0, q.left)}.` : "") : null);
+  return el("div", { class: "note", testid: "assistants-bar" }, el("span", { testid: "assistants-running", text: parts.join(" · ") + "." }),
+    queue ? el("div", { class: "small muted", testid: "queue-line", text: queue }) : null);
 }
 
 async function pairThisComputer() {
@@ -1188,33 +1187,13 @@ async function pairThisComputer() {
   if (r && r.url) { openExternal(r.url); toast("Opened a pairing link in your browser: press Pair there."); }
 }
 
-// On the homelab's page: the assistant sessions running here (each one's screen is a tap away), and the queue's settings
-function hereCard(d) {
-  const q = d.queue || {};
-  const tabs = (q.auto || []).map((t) => (t === "jobs" ? "NUworks rows" : "Other jobs rows"));
-  return el("div", { class: "card", testid: "here-assistants" }, el("h2", { text: "Assistants on this homelab" }),
-    (d.sessions || []).length ? el("ul", { class: "list" }, ...d.sessions.map((s) => {
-      const k = s.attention && s.attention.kind;
-      return el("li", { testid: `here-${s.tab}-${s.row}` },
-        el("div", { class: "what" }, el("b", { text: s.company || "assistant" }), " · ", s.tab === "other" ? `Other jobs row ${s.row}` : `row ${s.row}`,
-          el("div", { class: "small muted", text: `${s.host || ""} · slot ${s.slot}` })),
-        el("div", { class: "row" }, el("span", { class: k ? "chip warn" : "chip ok",
-          text: k === "approve" ? "ready to submit: approve it" : k === "waiting" ? "waiting for you" : k === "finish" ? "ended: did it go through?" : "working" }),
-          el("a", { class: "btn small primary", href: `#/assistant/${s.slot}`, testid: `here-open-${s.slot}`, text: "Open" })));
-    })) : el("p", { class: "empty", text: "No assistant is running here now." }),
-    q.error ? el("p", { class: "small muted", text: q.error }) : q.hours ? el("p", { class: "small muted", testid: "queue-line",
-      text: (tabs.length ? `Starts by itself: ${tabs.join(" and ")}, ${hour(q.hours[0])}–${hour(q.hours[1])} New York time.` : "Nothing starts by itself (Settings).") +
-        ` ${q.free ? plural(q.free, "slot") + " free" : "Every slot is in use"}.` + (q.left != null ? ` NUworks applications left now: ${Math.max(0, q.left)}.` : "") }) : null);
-}
-
 function companyCards(d) {
   return [
-    onHomelab() ? hereCard(d) : homelabCard(d),
+    assistantsBar(d),
     d.agent.length ? el("div", { class: "card", testid: "company-agent" }, el("h2", { text: "Company sites: ready for the assistant" }),
       el("p", { class: "small muted", text: onHomelab() ?
         "Jobs that send you to the company's own site. The assistant (Claude) fills the application in a browser here on the homelab, which you watch and use from its screen; it asks you there before anything is submitted. You solve captchas, open email codes and approve Submit. Several can run at once." :
         "Jobs that send you to the company's own site. The assistant (Claude, in a terminal window) fills the application in a visible browser; it asks you before anything is submitted. You solve captchas, open email codes and approve Submit. Several can run at once, each in its own window." }),
-      assistantsLine(d),
       el("ul", { class: "list" }, ...d.agent.map((r) => el("li", { testid: `company-${r.row}` },
         el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title, jobFacts(r), el("div", { class: "small muted", text: r.host })),
         el("div", { class: "row" }, dueChip(r), assistantStart(d, r, "jobs", `assist-${r.row}`, { body: { row: r.row } }),
@@ -1251,7 +1230,6 @@ function otherCard(d) {
   if (d.error) return el("div", { class: "card", testid: "other-jobs" }, head, el("div", { class: "note fail", text: d.error }));
   return el("div", { class: "card", testid: "other-jobs" }, head,
     el("p", { class: "small muted", text: `Approved rows of your sheet's "${d.tab}" tab; no weekly or total limit. The assistant answers from your Other jobs answers first, then your NUworks ones (not the NUworks-only ones: co-op dates and term). When you tell it the application went through, the row becomes Applied; nothing is sent to NUworks. Applied and other rows: the Sheet screen.` }),
-    assistantsLine(d),
     d.ready.length ? el("ul", { class: "list" }, ...d.ready.map((r) => el("li", { testid: `other-${r.row}` },
       el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title,
         r.match != null ? jobFacts(r) : null,  // an internship from Simplify's list: its match % and pay
@@ -1705,16 +1683,10 @@ screens.settings = async (view) => {
           el("div", {}, el("button", { class: "btn primary", text: "Save", testid: "settings-save", onclick: async () => {
             try { d = await api.post("/api/settings", { resume_label: label.value, week_start: week.value, max_per_week: cap.value }); toast("Saved."); pollState(); draw(); } catch (e) { fail(e); } } })))),
       assistantCard(),
-      onHomelab() ? devicesCard() : null,
-      onHomelab() ? el("div", { class: "card stack", testid: "pm-settings" }, el("h2", { text: "Password manager" }),
-        el("p", { class: "small muted", text: "Bitwarden is set up and unlocked on your laptop (Settings there): it asks for your master password in a terminal window, never in a page." })) :
-        el("div", { class: "card stack", testid: "pm-settings" }, el("h2", { text: "Password manager" }),
-          passwordManagerPanel(d.password_manager, (r) => { if (r) { d = r; draw(); } else reload(); })),
-      !onHomelab() && d.homelab && d.homelab.available ? el("div", { class: "card stack", testid: "homelab-settings" }, el("h2", { text: "Homelab" }),
-        homelabLinkPanel(d.homelab, () => reload())) : null,
-      d.homelab_assistant.available ? el("div", { class: "card stack", testid: "ha-settings" },
-        el("h2", { text: onHomelab() ? "This homelab's assistant" : "NUauto on your homelab" }),
-        homelabAssistantPanel(d.homelab_assistant, (r) => { if (r) { d = r; draw(); } else reload(); })) : null,
+      // Bitwarden unlocks in a terminal window on the laptop: its card is the laptop's only
+      onHomelab() ? null : el("div", { class: "card stack", testid: "pm-settings" }, el("h2", { text: "Password manager" }),
+        passwordManagerPanel(d.password_manager, (r) => { if (r) { d = r; draw(); } else reload(); })),
+      homelabCard(),
       el("div", { class: "card stack" }, el("h2", { text: "Setup" }),
         el("p", { class: "small muted", text: onHomelab() ? "Setup is done in NUauto on your laptop (the homelab gets its settings from there). Your preferences can be changed here too." :
           "Google client, sheet, resume, NUworks, preferences, notifications: each step checked." }),
@@ -1730,9 +1702,24 @@ screens.settings = async (view) => {
             "Closes this window's server. A running job is stopped first (like Ctrl+C).", "Quit", async () => { await api.post("/api/quit", {}).catch(() => {}); gone("NUauto has quit. Start it again from your apps menu, or run nuauto gui."); }, { danger: true }) }))));
   }
   // (the homelab's page) the devices paired with it: each one's cookie is its key (the homelab keeps only its hash)
-  function devicesCard() {
+  // Everything about the homelab in one card. The laptop: which homelab (connection, setup), then NUauto there (its
+  // page, its assistant). The homelab's own page: the devices paired with it, and its assistant's queue.
+  function homelabCard() {
+    const ha = d.homelab_assistant;
+    const done = (r) => { if (r) { d = r; draw(); } else reload(); };
+    if (onHomelab()) {
+      return el("div", { class: "card stack", testid: "homelab-settings" }, el("h2", { text: "This homelab" }),
+        devicesPanel(), el("hr", { class: "sep" }), el("h3", { text: "Its assistant" }), homelabAssistantPanel(ha, done));
+    }
+    if (!(d.homelab && d.homelab.available)) return null;  // the packaged app: always on its own
+    return el("div", { class: "card stack", testid: "homelab-settings" }, el("h2", { text: "Homelab" }),
+      homelabLinkPanel(d.homelab, () => reload()),
+      ha.available ? [el("hr", { class: "sep" }), el("h3", { text: "NUauto on your homelab" }),
+        el("div", { testid: "ha-settings" }, homelabAssistantPanel(ha, done))] : null);
+  }
+  function devicesPanel() {
     const name = el("input", { type: "text", placeholder: "e.g. phone", maxlength: "40", "aria-label": "Name of the device", testid: "pair-name" });
-    return el("div", { class: "card stack", testid: "devices" }, el("h2", { text: "Paired devices" }),
+    return el("div", { class: "stack", testid: "devices" }, el("h3", { text: "Paired devices" }),
       el("p", { class: "small muted", text: "The browsers that can use NUauto on your homelab (over Tailscale only). A browser is paired once; unpair one you no longer use, or lost." }),
       el("ul", { class: "list" }, ...(d.devices || []).map((x) => el("li", { testid: `device-${x.id}` },
         el("div", { class: "what" }, el("b", { text: x.name || "device" }), x.id === d.this ? el("span", { class: "chip accent", text: "this one" }) : null,

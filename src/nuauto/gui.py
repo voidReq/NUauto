@@ -618,23 +618,53 @@ def state():
                                for s in assistants()["sessions"])
         + "|" + ",".join(f"{s.get('tab')}-{s.get('row')}:{(s.get('attention') or {}).get('kind', '')}"
                          for s in homelab_assistants()),
-        # (homelab) the sessions that wait for you, for Today and the menu
-        "waiting": waiting_sessions() if REMOTE else [],
         "mode": "homelab" if config.HAS_SERVER else "local", "setup_needed": setup_needed(),
         "rows_loaded": rows is not None, "rows_at": APP.rows_at, "rows_error": APP.rows_error, "week": week_info(rows),
         "counts": {"review": len(todo), "approved": len(approved), "company": len(agent) + len(retry), "site": len(site),
                    "apply": len(approved) + len(agent) + len(retry),  # the Apply menu item: its rows + Company sites
                    "needs_human": len(agent) + len(other)},
-        "todo": sorted(([{"kind": "site", **x} for x in site] + [{"kind": "company", **x} for x in agent]
-                        + [{"kind": "urgent", "id": r["id"], "title": r["title"], "company": r["company"],
-                            "closes": r["closes"], "match": r["match"], "url": jobs.job_url(r["id"]),
-                            "closes_text": jobs.closes_text(date.fromisoformat(r["closes"])), "past": False, "soon": True}
-                           for r in soon]),
-                       key=lambda t: t["closes"] or "9999"),  # soonest deadline first; no deadline last
+        "todo": todo_list(site, agent, soon),
         "last_update": scans[-1] if scans else None,
         "sheet_url": f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit" if sheet_id and not config.DEMO else None,
         "task": task.view(task.total()) if task else None,
     }
+
+
+ASSISTANT_WAITS = {"approve": "ready to submit: approve it", "waiting": "waiting for your answer",
+                   "finish": "ended: did it go through?", "prompt": "Claude Code asks something in its terminal"}
+
+
+def assistant_todo():
+    """The assistant sessions that wait for you, as Today's to-do items: on the homelab its own (their screen there); on
+    the laptop its own (their terminal windows) and the homelab's (their screen in NUauto on the homelab)."""
+    if REMOTE:
+        return [{"kind": "assistant", "tab": s["tab"], "row": s["row"], "company": s["company"], "title": s["title"],
+                 "status": s["status"], "text": s["text"][:1].lower() + s["text"][1:], "screen": f"#/assistant/{s['slot']}"}
+                for s in waiting_sessions()]
+    out, base = [], homelab_review()
+    for where, sessions in (("window", assistants()["sessions"]), ("homelab", homelab_assistants() if base else [])):
+        for s in sessions:
+            kind = (s.get("attention") or {}).get("kind")
+            if kind in ASSISTANT_WAITS:
+                out.append({"kind": "assistant", "tab": s.get("tab"), "row": s.get("row"), "company": s.get("company") or "",
+                            "title": "", "status": kind, "text": ASSISTANT_WAITS[kind],
+                            "screen": f"{base}/#/assistant/{s.get('slot')}" if where == "homelab" else None})
+    return out
+
+
+def todo_list(site, agent, soon):
+    """Today's "Only you can do these": the assistants waiting for you first, then everything else soonest deadline
+    first (no deadline last). Each item once: a company-site row whose assistant waits for you is that assistant's item."""
+    waiting = assistant_todo()
+    busy = {(t["tab"], t["row"]) for t in waiting}
+    rest = sorted([{"kind": "site", **x} for x in site]
+                  + [{"kind": "company", **x} for x in agent if ("jobs", x["row"]) not in busy]
+                  + [{"kind": "urgent", "id": r["id"], "title": r["title"], "company": r["company"],
+                      "closes": r["closes"], "match": r["match"], "url": jobs.job_url(r["id"]),
+                      "closes_text": jobs.closes_text(date.fromisoformat(r["closes"])), "past": False, "soon": True}
+                     for r in soon],
+                  key=lambda t: t["closes"] or "9999")
+    return waiting + rest
 
 
 OTHER_ROWS_FOR = 30  # seconds the internship Review reuses the Other jobs tab's rows (it asks on every search)

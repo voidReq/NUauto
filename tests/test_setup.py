@@ -255,7 +255,7 @@ try:
     assert step("password_manager", chk("ok"))["status"] == "optional"  # off, even when the check says ok
     onboard.save_config({"password_manager": "bitwarden", "bitwarden_import": []})
     assert onboard.password_manager({})["only"] == ["myworkday"]        # empty: the default
-    # the homelab step
+    # the homelab step: one step, which homelab, then (with one) NUauto there: its page and its assistant
     real_flags = (config.HAS_SERVER, config.IS_SERVER, config.FROZEN)
     try:
         config.HAS_SERVER, config.IS_SERVER, config.FROZEN = True, False, False
@@ -263,35 +263,34 @@ try:
         assert ha["available"] and ha["on"] is False and ha["auto"] is False and ha["review_url"] is None, ha
         assert ha["slots"] == 3 and ha["hours"] == list(__import__("nuauto.remote", fromlist=["x"]).hours()), ha
         ids = [s["id"] for s in onboard.steps({})]
-        assert ids[-3:] == ["password_manager", "homelab", "homelab_assistant"], ids
-        assert step("homelab")["status"] == "done" and step("homelab_assistant")["status"] == "optional"
+        assert ids[-2:] == ["password_manager", "homelab"] and "homelab_assistant" not in ids, ids
+        assert step("homelab")["status"] == "done" and step("homelab")["data"]["assistant"] == ha
         assert ha["app"] is False                                          # NUauto's page there: off too
-        onboard.save_config({"remote_app": True})                          # its page alone (no assistant): the step is done
+        onboard.save_config({"remote_app": True})                          # its page alone (no assistant)
         assert onboard.homelab_assistant()["app"] and not onboard.homelab_assistant()["on"]
-        assert step("homelab_assistant")["status"] == "done"
+        assert step("homelab")["data"]["assistant"]["app"] is True
         onboard.save_config({"remote_app": False})
         onboard.save_config({"remote_assist": True, "remote_auto": True, "assist_slots": 2, "remote_hours": [8, 20]})
         ha = onboard.homelab_assistant()
         assert ha["on"] and ha["app"] and ha["auto"] and ha["slots"] == 2 and ha["hours"] == [8, 20], ha   # (the assistant needs the page)
         assert onboard.homelab_assistant(here=True)["available"]          # the homelab's own page: its queue's settings
         assert ha["review_url"] is None or (ha["review_url"].startswith("http") and not ha["review_url"].endswith("/")), ha
-        assert step("homelab_assistant")["status"] == "done"
         for bad in (0, 4, "2", None):  # (True also passes isinstance int: onboard.py homelab_assistant, minor)
             onboard.save_config({"assist_slots": bad})
             assert onboard.homelab_assistant()["slots"] == 3, bad        # out of range: the default
-        config.IS_SERVER = True                                          # the homelab itself: no step
+        config.IS_SERVER = True                                          # the homelab itself: nothing of it to set there
         assert not onboard.homelab_assistant()["available"]
-        assert "homelab_assistant" not in [s["id"] for s in onboard.steps({})]
-        config.IS_SERVER, config.FROZEN = False, True                    # the packaged app: always local mode
+        assert step("homelab")["data"]["assistant"] is None
+        config.IS_SERVER, config.FROZEN = False, True                    # the packaged app: always local mode, no step
         assert not onboard.homelab_assistant()["available"]
-        assert "homelab_assistant" not in [s["id"] for s in onboard.steps({})]
+        assert "homelab" not in [s["id"] for s in onboard.steps({})]
         config.FROZEN, config.HAS_SERVER = False, False
-        assert not onboard.homelab_assistant()["available"]
+        assert not onboard.homelab_assistant()["available"] and step("homelab")["data"]["assistant"] is None
     finally:
         config.HAS_SERVER, config.IS_SERVER, config.FROZEN = real_flags
     # optional steps (todo ones done) never block complete(); a todo one still does
     every = [{"id": "x", "status": "done"}, {"id": "password_manager", "status": "optional"},
-             {"id": "homelab_assistant", "status": "optional"}]
+             {"id": "homelab", "status": "optional"}]
     assert onboard.complete(every) and not onboard.complete(every + [{"id": "y", "status": "todo"}])
 finally:
     onboard.save_config({k: v for k, v in old_pm.items() if v is not None})

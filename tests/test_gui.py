@@ -278,7 +278,17 @@ try:
     assert get("/api/other")["sessions"] == [] and get("/api/state")["assistants"] == "|"  # it ended: the slot is free
     # the laptop's page: nothing is the laptop's only (it is the laptop); the homelab's own parts are not here
     st = get("/api/state")
-    assert st["where"] == "laptop" and st["laptop_only"] == {} and st["waiting"] == [] and st["remote_app"] is None
+    assert st["where"] == "laptop" and st["laptop_only"] == {} and st["remote_app"] is None
+    assert not [t for t in st["todo"] if t["kind"] == "assistant"]               # no assistant waits for you here
+    with hold_slot(1, {"row": 7, "tab": "other", "company": "Basalt Bio", "host": "jobs.example.net", "run": STATE}):
+        # one waiting for you (its attention file, as Claude Code's hooks write it): Today's first to-do, in its window
+        att = os.path.join(STATE, "attention.json")
+        json.dump({"kind": "approve", "since": time.time(), "said": "Ready"}, open(att, "w"))
+        try:
+            first = get("/api/state")["todo"][0]
+            assert first["kind"] == "assistant" and first["status"] == "approve" and first["screen"] is None, first
+        finally:
+            os.remove(att)
     assert get("/api/company")["queue"] is None
     assert request("GET", "/api/assistant/1")[0] == 404 and request("GET", "/api/assistant/1/shot.png")[0] == 404
     post("/api/assistant", {"slot": 1, "do": "approve", "id": "x"}, expect=409)
@@ -928,7 +938,8 @@ fetch("{target}", {{method: "POST", credentials: "include", body: {json.dumps(bo
         with hold_slot(2, {"row": harbor_row, "tab": "other", "company": "Harbor Embedded", "host": "jobs.example-ats.com"}):
             page.wait_for_selector(f"[data-testid=other-assist-{harbor_row}-running]", timeout=20000)
             assert page.inner_text(f"[data-testid=other-assist-{harbor_row}-running]") == "assistant running (slot 2)"
-            assert "1 of 3 assistants running" in page.inner_text("[data-testid=assistants-running]")
+            assert "Assistants: 1 of 3 running here" in page.inner_text("[data-testid=assistants-running]")
+            assert page.locator("[data-testid=assistants-bar]").count() == 1      # one line for the whole tab
         page.wait_for_selector(f"[data-testid=other-assist-{harbor_row}]", timeout=20000)
         # Start: greyed out for a few seconds (a second click would start the same job twice), then back
         start = page.locator(f"[data-testid=other-assist-{harbor_row}]")

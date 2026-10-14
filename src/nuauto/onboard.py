@@ -686,13 +686,11 @@ def steps(checks):
         "Optional. Your own job-site logins for the assistant, and the ones it makes put into your vault.",
         optional=True, **pm)
     hl = homelab_link()
-    if hl["available"]:
+    if hl["available"]:  # one step: which homelab, then (once NUauto runs with it) its page and its assistant
+        ha = homelab_assistant()
         add("homelab", "A homelab (optional)", hl["on"], "Optional. An always-on computer checks for new jobs and sends "
-            "your Discord messages, so this one can be off. Without one, everything runs here.", optional=True, **hl)
-    ha = homelab_assistant()
-    if ha["available"]:
-        add("homelab_assistant", "NUauto on your homelab", ha["app"], "Optional. NUauto's page on the homelab, for your "
-            "phone; and its assistant, so company-site applications go on with this computer off.", optional=True, **ha)
+            "your Discord messages, so this one can be off; NUauto's page and its assistant can run there too, for your "
+            "phone. Without one, everything runs here.", optional=True, **hl, assistant=ha if ha["available"] else None)
     return out
 
 

@@ -8,12 +8,12 @@ WHAT IT IS
   Tailscale address, port 8766, for your paired phone or other computers. Review, Apply, Sheet, Insights, Answers,
   Settings work there as on the laptop, on the homelab's data, with the laptop closed. It replaced the old review page
   (the same address; its /s/<slot> links now open #/assistant/<slot>).
-- "remote_app": true in local_config.json turns the page on (Settings > NUauto on your homelab > Its page, on the
+- "remote_app": true in local_config.json turns the page on (Settings > Homelab > NUauto on your homelab > Its page, on the
   laptop). "remote_assist" (its assistant) turns it on too: you answer the assistant there.
 - `nuauto assist [other] <row>` runs on the homelab too, inside a tmux session, so an application can go on with the
   laptop closed. Its browser draws on a virtual screen there; you see and use that browser in a web page (noVNC) on
-  your phone or laptop, over Tailscale only. Its screen in the app (Apply > Company sites > Open, or Today's "Assistants
-  waiting for you"): approve or decline its Submit, reply, watch its browser and terminal, end it.
+  your phone or laptop, over Tailscale only. Its screen in the app (its row in Apply > Company sites, or its item in Today's "Only you can do
+  these"): approve or decline its Submit, reply, watch its browser and terminal, end it.
 - Sessions start by themselves from your approved rows (the queue), and a claim keeps the laptop and the homelab off
   each other's rows and job sites.
 
@@ -62,7 +62,7 @@ TURN IT ON (once; new setups: the laptop's Settings > Homelab > Set it up does s
    And once, so Claude Code trusts the folder the sessions start in (the page can't answer that question):
      ssh -t homelab 'cd ~/projects/auto && claude'     -> "Yes, I trust this folder", then /exit
      (or the laptop's Settings > Homelab > Log in to Claude there)
-3. Turn it on: the laptop's Settings > NUauto on your homelab (Its page; Its assistant), or setup's optional step, or
+3. Turn it on: the laptop's Settings > Homelab > NUauto on your homelab (Its page; Its assistant), or setup's Homelab step, or
    "remote_app" / "remote_assist": true in local_config.json (laptop). The GUI pushes it to the homelab and restarts
    nuauto-web; the Homelab chip then checks what the homelab still needs (the tools above, its Firefox, Claude's folder
    trust, the page). web_listen_host must be the homelab's Tailscale IP (Settings > Homelab > Check finds it): the page
@@ -78,12 +78,12 @@ PAIR YOUR PHONE (once per device)
   Open the link on the phone, Tailscale on, and press Pair (within 10 minutes; the link works once). Pair the browser
   you will use: a link tapped in Discord opens in Discord's own browser, which keeps its own cookies (copy it into
   Safari / Chrome instead). Each browser is paired once; then bookmark http://<web_listen_host>:8766/ there (or Add to
-  Home Screen). The laptop's browser: Settings > NUauto on your homelab > Pair this computer.
+  Home Screen). The laptop's browser: Settings > Homelab > Pair this computer.
   nuauto review devices / nuauto review unpair <name>|--all     (or Settings > Paired devices > Unpair)
 
 THE QUEUE (remote.py; nuauto-assist.timer every 10 minutes runs `nuauto assist auto`)
 - On with "remote_auto" (and remote_assist), per sheet tab: true = both; {"nuworks": true, "other": false} = each on
-  its own (2026-10-13, my request; Settings > NUauto on your homelab has a switch for each). A tab that is off starts
+  its own (2026-10-13, my request; Settings > Homelab has a switch for each). A tab that is off starts
   nothing by itself; its rows still show in Company sites with Start now. Hours: "remote_hours": [9, 22] (the default:
   09:00-22:00 New York time, whatever clock the homelab runs on), so no pings at night: the only hours it starts
   sessions by itself (one already running goes on; you can start one yourself any time). It takes effect at the timer's
@@ -211,14 +211,19 @@ PORTS (homelab; slot n = 1..3)
   files (downloads, snapshots, the resume copy) are in the run folder's browser/, apart from the guard's (a page can't
   plant a Submit answer there).
 
-FROM THE LAPTOP'S GUI
-- Settings > Homelab (a source install): which homelab, Check (over ssh, read-only), Use this homelab, Set it up (a
-  terminal window: docs/DEPLOY.md's steps, each asked first), Log in to Claude there, Stop using it. Settings > NUauto
-  on your homelab: its page and its assistant, on / off; Pair this computer; Open it; its queue's settings.
-- Apply > Company sites (with remote_assist): a Homelab assistants card: the homelab's sessions and what each waits
-  for, Open its screen, Open NUauto on the homelab, Pair this computer (asks the homelab for a one-time link over ssh
-  and opens it in your browser: press Pair). The page itself can't live inside NUauto's window (it refuses frames, and
-  its cookie belongs to the browser that paired), so it opens in your browser.
+FROM THE LAPTOP'S GUI (each thing in one place, 2026-10-14)
+- Settings > Homelab (a source install), one card: which homelab, Check (over ssh, read-only), Use this homelab, Set it
+  up (a terminal window: docs/DEPLOY.md's steps, each asked first), Log in to Claude there, Stop using it; then NUauto on
+  your homelab: its page and its assistant, on / off; Pair this computer (asks the homelab for a one-time link over ssh
+  and opens it in your browser: press Pair); Open it; its queue's settings. Setup's one optional Homelab step is the
+  same.
+- Today's "Only you can do these": a homelab session that waits for you is an item there (Open its screen).
+- Apply > Company sites: one line, how many assistants run here and on the homelab and how many wait for you; a row
+  the homelab works on has "assistant running on the homelab: open" (its screen). The page itself can't live inside
+  NUauto's window (it refuses frames, and its cookie belongs to the browser that paired), so it opens in your browser.
+- The homelab's own page has the same three places: Today (its sessions that wait for you), Company sites (the same
+  line, plus what its queue starts by itself; each row's queue chip, Start now, a running session's Open), Settings >
+  This homelab (its paired devices, its assistant's queue settings).
 
 FOR AGENTS
 - `nuauto gui --demo --remote --no-open` (or `nuauto review demo`): the homelab's app on 127.0.0.1, on demo data with
@@ -240,4 +245,4 @@ NOT YET PROVEN FOR REAL
   Apply from it (its virtual screen), the NUworks turn between the machines, the settings / ratings merge on real files,
   Settings > Homelab's Check and Set it up on a real homelab.
 - The queue starting sessions by itself (nuauto-assist.timer), a laptop claim over ssh, the merge on your real answer
-  banks and logins, a real application on the homelab, the GUI's Homelab assistants card.
+  banks and logins, a real application on the homelab, the laptop GUI's links to the homelab's sessions.

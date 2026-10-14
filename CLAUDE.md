@@ -203,9 +203,11 @@ COMPANY-SITE AGENT (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`;
   homelab starts sessions by itself from my approved rows (remote.py: 09:00-22:00, free slots, never a row that had a
   session before, never a row or site the laptop holds: claims over ssh). A site that refuses the homelab's browser
   (a fake sign-in page): "End: do it on the laptop" marks the row's Notes (assist.LAPTOP_MARK); the homelab skips it
-  and the GUI shows "do it on the laptop" (my request, 2026-10-11; no disguising the browser). The GUI's Company sites shows them (Homelab assistants: Open its
-  screen, Pair this computer). Everything optional and set in the GUI too (my request, for other users: setup's optional
-  steps and Settings: Homelab, NUauto on your homelab, Password manager (Bitwarden) with its status chip). Proven with a
+  and the GUI shows "do it on the laptop" (my request, 2026-10-11; no disguising the browser). The GUI's Company sites shows them (each row
+  opens its session's screen; one line counts them; Today lists the ones waiting for me). Everything optional and set in
+  the GUI too (my request, for other users: setup's optional steps and Settings: one Homelab card (which homelab, NUauto
+  on it, pairing), Password manager (Bitwarden) with its status chip). Each thing in one place, with or without a
+  homelab (my request, 2026-10-14: "not redundancy between any of the pages"). Proven with a
   practice run on 2026-10-11 (docs/REMOTE.md). Starts `claude --model sonnet --effort low --permission-mode default` (never my auto
   mode: its own check asked about every click; the guard decides; local_config.json "assist_effort":
   low / medium / high; Settings; low is my call, 2026-10-10) with the Playwright MCP browser (profile assist_profile/:
