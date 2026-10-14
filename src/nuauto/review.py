@@ -1,32 +1,28 @@
-"""The review page: the assistant on the homelab, from your phone (Phase 3b; docs/REMOTE.md).
+"""The homelab side of NUauto on your phone: pairing your devices, and the assistant sessions running there (docs/REMOTE.md).
 
-Runs inside `nuauto web` (a second listener, only with "remote_assist") on web_listen_host:8766, the homelab's
-Tailscale IP: only your own devices reach it, and never through the public Mark-done tunnel (that one forwards 8765).
-Each running assistant session (assist.sessions) has a page, /s/<slot>:
-  - a Submit waiting for you: what it will click and on which page, the guesses you haven't confirmed, what you
-    changed, anything typed with no answer behind it, the screen when it asked; Approve / Decline (with a note).
-    The guard waits up to assist.WAIT for you; a later Approve is a pass for that one action (assist.take_grant), and
-    the page tells the agent to do it now.
-  - waiting for you (a question, the end list, a captcha): its whole message and a reply box. Your reply is typed into
-    its terminal (tmux), as if you typed it there. The browser view's link and password are on the page: a captcha you
-    solve there yourself, then reply "done".
-  - the session ended: "Did it go through?" Yes (Applied) / No, typed into its terminal's question.
-  - always: the screen now, its terminal's last lines, Interrupt (Esc), End session (/exit).
-Only paired devices. `nuauto review pair` makes a one-time link (10 minutes); open it on your phone, press Pair: a long
-random key goes in a cookie there (HttpOnly, SameSite=Strict) and the homelab keeps only its hash
-(local/review_devices.json). Every request needs that cookie and this server's own Host; every POST also a form token
-made from the key, and a matching Origin when the browser sends one. Discord links only point here: no power by
-themselves. Every answer goes in the run's actions.log with the device's name.
+The page itself is the NUauto app (gui.serve_remote: the same screens as `nuauto gui`), served inside `nuauto web` on
+web_listen_host:8766, the homelab's Tailscale IP: only your own devices reach it, and never through the public
+Mark-done tunnel (that one forwards 8765). This module holds what the app's homelab parts are made of:
+  - pairing: `nuauto review pair` makes a one-time link (10 minutes); open it on your phone, press Pair: a long random
+    key goes in a cookie there (HttpOnly, SameSite=Strict) and the homelab keeps only its hash
+    (local/review_devices.json). Discord links only point to the page: no power by themselves.
+  - each running assistant session (assist.sessions), for the app's Assistants screen (#/assistant/<slot>):
+    a Submit waiting for you (what it will click and on which page, the guesses you haven't confirmed, what you changed,
+    anything typed with no answer behind it, the screen when it asked; Approve / Decline with a note: the guard waits up
+    to assist.WAIT for you, a later Approve is a pass for that one action, assist.take_grant); its whole last message and
+    a reply typed into its terminal (tmux), as if you typed it there; the browser view's link and password (captchas:
+    you solve them there, then reply "done"); "Did it go through?" when it ended; Interrupt (Esc), End session (/exit).
+    Every answer goes in the run's actions.log with the device's name.
+  - the queue (remote.py) for the app's Company sites: each row's group and what it waits for; Start now.
 
   nuauto review pair [<name>] [--discord]   a pairing link (printed; --discord also posts it)
   nuauto review devices                     the paired devices
   nuauto review unpair <name>|--all         forget a device (its cookie stops working)
-  nuauto review demo [<port>]               the page with made-up sessions, on this computer (prints a pairing link)
+  nuauto review demo [<port>]               the homelab's app with made-up sessions, on this computer (prints a pairing
+                                            link; the same as `nuauto gui --demo --remote --no-open`)
 On the laptop these run on the homelab over ssh (all but demo).
 """
 import hashlib
-import hmac
-import html
 import json
 import os
 import re
@@ -37,8 +33,6 @@ import sys
 import time
 from contextlib import contextmanager
 from datetime import datetime
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, quote, urlparse
 
 from nuauto import config
 
@@ -57,11 +51,12 @@ def listen_host():
 
 
 def page_url(slot=None):
+    """The homelab's NUauto page (gui.serve_remote), or one assistant session's screen in it."""
     try:
         base = f"http://{listen_host()}:{PORT}"
     except Exception:
-        return "(the review page: web_listen_host is not set)"
-    return base + (f"/s/{slot}" if slot else "/")
+        return "(the homelab's NUauto page: web_listen_host is not set)"
+    return base + (f"/#/assistant/{slot}" if slot else "/")
 
 
 def _log(msg):
@@ -121,18 +116,42 @@ def pair(code, name=""):
 
 
 def device(key):
-    """The paired device with this key ({"name", "paired"}), or None."""
+    """The paired device with this key ({"name", "paired", "id"}), or None."""
     if not key:
         return None
     try:
         with open(DEVICES) as f:
-            return json.load(f).get(_hash(key))
+            found = json.load(f).get(_hash(key))
     except (OSError, ValueError):
         return None
+    return {**found, "id": device_id(_hash(key))} if found else None
 
 
-def form_token(key):
-    return hmac.new(key.encode(), b"nuauto-review-form", hashlib.sha256).hexdigest()[:32]
+def device_id(key_hash):
+    """A short, stable name for one paired device in the app's list (part of its key's hash: never the key)."""
+    return key_hash[:12]
+
+
+def devices():
+    """The paired devices, oldest first: [{"id", "name", "paired"}]."""
+    try:
+        with open(DEVICES) as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        data = {}
+    return sorted(({"id": device_id(h), "name": d.get("name", ""), "paired": d.get("paired", "")}
+                   for h, d in data.items()), key=lambda d: d["paired"])
+
+
+def unpair(which):
+    """Forget devices: by id (devices()), by name, or "--all". Their cookies stop working. Returns how many."""
+    with _locked(DEVICES) as d:
+        gone = [h for h, v in d.items() if which == "--all" or which in (v.get("name"), device_id(h))]
+        for h in gone:
+            del d[h]
+    if gone:
+        _log(f"unpaired {len(gone)} device(s): {which}")
+    return len(gone)
 
 
 # ---------- sessions ----------
@@ -365,180 +384,7 @@ def answer_approval(s, approval_id, decision, by, note=""):
     return "Approved." if decision == "approve" else "Declined."
 
 
-# ---------- the pages ----------
-
-CSS = """body{font:16px/1.45 system-ui,sans-serif;max-width:46rem;margin:0 auto;padding:1rem;color:#1d1d1f;background:#fafafa}
-a{color:#0b5cad}.card{background:#fff;border:1px solid #ddd;border-radius:.6rem;padding:.8rem 1rem;margin:.8rem 0}
-.chip{display:inline-block;padding:.1rem .5rem;border-radius:1rem;font-size:.8rem;background:#eee}
-button:disabled{opacity:.6}button.busy::after{content:"";display:inline-block;width:.8em;height:.8em;margin-left:.5em;
-border:2px solid currentColor;border-right-color:transparent;border-radius:50%;vertical-align:-.1em;animation:spin .8s linear infinite}
-@keyframes spin{to{transform:rotate(360deg)}}.working::before{content:"";display:inline-block;width:.7em;height:.7em;margin-right:.4em;
-border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .8s linear infinite}
-.approve,.prompt{background:#fde2e1}.waiting{background:#fff1c2}.finish{background:#dff3e3}
-button{font:inherit;padding:.6rem 1.1rem;border:0;border-radius:.5rem;background:#0b5cad;color:#fff;margin:.2rem .3rem .2rem 0}
-button.no{background:#777}button.go{background:#1a7f37}select{font:inherit;padding:.5rem}textarea,input[type=text]{font:inherit;width:100%;box-sizing:border-box;padding:.5rem}
-nav.tabs{display:flex;gap:.4rem;margin:.4rem 0}nav.tabs a{padding:.45rem .9rem;border-radius:.5rem;background:#eee;
-text-decoration:none;color:inherit}nav.tabs a.on{background:#0b5cad;color:#fff}nav.tabs a.on .chip{background:#fff;color:#0b5cad}h4{margin:1.1rem 0 .2rem}
-details.group summary{cursor:pointer;margin:1.1rem 0 .2rem}
-pre{white-space:pre-wrap;word-break:break-word;background:#f3f3f3;padding:.6rem;border-radius:.4rem;font-size:.85rem}
-img{max-width:100%;border:1px solid #ccc;border-radius:.3rem}.dim{color:#777;font-size:.9rem}.ok{color:#1a7f37;font-weight:600}
-@media (prefers-color-scheme:dark){body{background:#151515;color:#eee}.card{background:#1f1f1f;border-color:#333}
-pre{background:#262626}.chip{background:#333}.ok{color:#4ac26b}nav.tabs a{background:#333}nav.tabs a.on{background:#0b5cad}.approve{background:#5a1f1d}.waiting{background:#4d3f0d}.finish{background:#1e4227}a{color:#7ab4ff}}"""
-
-POLL_JS = """// Back to a page the browser kept in memory (its buttons greyed by a tap): load it fresh instead, so they work.
-window.addEventListener("pageshow", (e) => { if (e.persisted) location.reload(); });
-// A tapped button shows it is working until the next page loads (its name/value still goes with the form).
-document.addEventListener("submit", (e) => {
-  const f = e.target, b = e.submitter;
-  if (f.dataset.sent) { e.preventDefault(); return; }  // a second tap while the first is on its way
-  f.dataset.sent = "1";
-  if (b && b.name) { const h = document.createElement("input"); h.type = "hidden"; h.name = b.name; h.value = b.value; f.append(h); }
-  if (b) { b.textContent = b.dataset.busy || "Working"; b.classList.add("busy"); }
-  setTimeout(() => f.querySelectorAll("button").forEach((x) => { x.disabled = true; }), 0);
-});
-// While it works: the screen and the terminal refresh in place every few seconds (no reload, your typing kept).
-const live = document.body.dataset.live;
-if (live) setInterval(async () => {
-  const shot = document.getElementById("live-shot"), term = document.getElementById("live-term");
-  if (shot) { const next = new Image(); next.onload = () => { shot.src = next.src; }; next.src = live + "/shot.png?live=" + Date.now(); }
-  if (term) { try { const r = await fetch(live + "/term", {cache: "no-store"}); if (r.ok) term.textContent = await r.text(); } catch (e) {} }
-}, 4000);
-const v = document.body.dataset.v, u = document.body.dataset.poll, at = document.body.dataset.scroll;
-if (at && document.getElementById(at)) document.getElementById(at).scrollIntoView({block: at === "approve" ? "start" : "end"});
-if (u) setInterval(async () => {
-  if ([...document.querySelectorAll("textarea,input[type=text]")].some(e => e.value)) return;
-  try { const r = await fetch(u, {cache: "no-store"}); if (r.ok && (await r.text()).trim() !== v) location.reload(); } catch (e) {}
-}, 5000);"""
-
-
-def esc(x):
-    return html.escape(str(x or ""))
-
-
-def layout(title, body, v="", poll="", scroll="", live=""):
-    return (f"<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
-            f"<meta name=robots content=noindex><title>{esc(title)}</title><style>{CSS}</style>"
-            f"<body data-v='{esc(v)}' data-poll='{esc(poll)}' data-scroll='{esc(scroll)}' data-live='{esc(live)}'>{body}"
-            "<script src='/poll.js'></script></body>")
-
-
-def form(action, token, inner, **hidden):
-    fields = "".join(f"<input type=hidden name={esc(k)} value='{esc(v)}'>" for k, v in {"t": token, **hidden}.items())
-    return f"<form method=post action='{esc(action)}'>{fields}{inner}</form>"
-
-
-DROP_CHOICES = (("closed", "It has closed"), ("duplicate", "A duplicate"), ("location", "Bad location"),
-                ("other", "Other reason"))
-
-
-QUEUE_TABS = (("jobs", "NUworks"), ("other", "Other jobs"))
-# the groups inside a tab, in this order (a row's group: queue_row)
-GROUPS = (("running", "Working on it now", ""), ("next", "Starts next by itself", ""),
-          ("ready", "Ready: start it yourself", ""), ("wait", "Waiting", "a slot, its job site or the weekly cap"),
-          ("check", "Check first", "a Submit was approved and nobody said whether it went through"),
-          ("laptop", "Do it on the laptop", "the homelab's browser was refused there"))
-GROUP_MAX = 25  # cards per group (the rest: "and N more")
-
-
-def queue_row(c, inputs, by_itself, here, tabs, token):
-    """(group, card html) for one queue row."""
-    from nuauto import remote
-    key = (c["tab"], c["row"])
-    why_hand = remote.can_start(c, inputs)
-    button = ""
-    if here.get(key):  # its session: one tap away
-        group, line = "running", f"<a class=ok href='/s/{int(here[key])}'>A session is working on it: open it &rarr;</a>"
-    elif why_hand == "a session is on it":
-        group, line = "running", "<span class=ok>The laptop's assistant is working on it</span>"
-    elif why_hand is None:
-        button = form("/start", token, "<button data-busy=Starting>Start now</button>", tab=c["tab"], row=c["row"])
-        first = by_itself.get(key)
-        nxt = c["tab"] in tabs and first is None
-        group = "next" if nxt else "ready"
-        text = ("starts next by itself" if nxt else
-                "had a session already: start it yourself" if first and first.startswith("had a session") else
-                "ready to start")
-        line = f"<span class=dim>{esc(text)}</span>"
-    else:
-        group = ("laptop" if why_hand == remote.LAPTOP_WHY else "check" if why_hand == remote.OUTCOME_UNKNOWN else "wait")
-        line = f"<span class=dim>{esc(why_hand)}</span>"
-    if c.get("row_url") and group != "running":  # not applying: out of the queue (sheet.drop)
-        reasons = "".join(f"<option value={esc(k)}>{esc(v)}</option>" for k, v in DROP_CHOICES)
-        button += form("/drop", token, f"<select name=why>{reasons}</select> <button class=no "
-                       "data-busy=Dropping>Drop</button>", tab=c["tab"], row=c["row"], url=c["row_url"])
-    return group, (f"<div class=card><b>{esc(c['company'])}</b> <span class=dim>{esc(c['title'])} | "
-                   f"{'Other jobs' if c['tab'] == 'other' else 'NUworks'} row {c['row']} | {esc(c['host'])}</span>"
-                   f"<div>{line}</div>{button}</div>")
-
-
-def queue_tab(cands, tab):
-    """The tab to show: the one asked for, else the first with rows in it (NUworks first)."""
-    if tab in dict(QUEUE_TABS):
-        return tab
-    return next((t for t, _ in QUEUE_TABS if any(c["tab"] == t for c in cands)), QUEUE_TABS[0][0])
-
-
-def queue_part(token, tab=None):
-    """The queue (remote.py) in two tabs, NUworks and Other jobs, each grouped: working on it now, next by itself, ready
-    for you to start (Start now on every row you can start right now, each judged on its own: a free slot and its job
-    site free), waiting, check first, do it on the laptop (folded). Inside a group, queue order (best first)."""
-    from nuauto import assist
-    from nuauto import remote
-    try:
-        inputs = remote.queue_inputs()
-    except Exception as e:
-        return f"<p class=dim>Queue not readable now ({esc(type(e).__name__)}).</p>"
-    cands, free = inputs[0], inputs[4]
-    a, b = remote.hours()
-    tabs = remote.auto_tabs()
-    go_auto, rest_auto = remote.plan(*inputs, tabs=tabs)  # what the timer would start (it hands the free slots out in order)
-    by_itself = {(c["tab"], c["row"]): why for c, why in go_auto + rest_auto}
-    here = {(x.get("tab"), x.get("row")): x.get("slot") for x in assist.sessions()}  # sessions on the homelab now
-    tab = queue_tab(cands, tab)
-    nav = "".join(f"<a href='/?tab={t}' class='{'on' if t == tab else ''}'>{esc(name)} "
-                  f"<span class=chip>{sum(1 for c in cands if c['tab'] == t)}</span></a>" for t, name in QUEUE_TABS)
-    groups = {g: [] for g, _, _ in GROUPS}
-    for c in cands:
-        if c["tab"] == tab:
-            g, card = queue_row(c, inputs, by_itself, here, tabs, token)
-            groups[g].append(card)
-    parts = []
-    for g, title, what in GROUPS:
-        cards = groups[g]
-        if not cards:
-            continue
-        more = (f"<p class=dim>and {len(cards) - GROUP_MAX} more</p>" if len(cards) > GROUP_MAX else "")
-        head = f"{esc(title)} <span class=chip>{len(cards)}</span>" + (f" <span class=dim>({esc(what)})</span>" if what else "")
-        inner = "".join(cards[:GROUP_MAX]) + more
-        parts.append(f"<details class=group><summary><b>{head}</b></summary>{inner}</details>" if g == "laptop" else
-                     f"<h4>{head}</h4>{inner}")
-    slots_text = f"{free} slot{'s' if free != 1 else ''} free" if free else "every slot is in use"
-    auto = "on" if tab in tabs else "off (Settings > Assistant on your homelab, in the laptop's NUauto)"
-    left = inputs[5]
-    cap = f" NUworks applications left now: {max(0, left)}." if tab == "jobs" and left is not None else ""
-    return (f"<h3>Queue</h3><nav class=tabs>{nav}</nav><p class=dim>Starts by itself: {esc(auto)}, {a}:00-{b}:00 New York "
-            f"time. {slots_text}.{cap}</p>" + ("".join(parts) or "<p class=dim>Nothing approved is waiting.</p>"))
-
-
-def index_page(token, tab=None):
-    items = []
-    for s in sessions():
-        word, text = status(s)
-        st = s["state"]
-        items.append(f"<div class=card><a href='/s/{s['slot']}'><b>{esc(st.get('company'))}</b></a> "
-                     f"<span class='chip {word}'>{esc(text)}</span><div class=dim>{esc(st.get('job_title'))} | "
-                     f"{esc(st.get('where'))} | slot {s['slot']}</div></div>")
-    body = "<h2>NUauto assistants</h2>" + ("".join(items) or "<p class=dim>No assistant is running on the homelab.</p>")
-    # it reloads by itself when a session starts, ends or wants something (a started one shows up without a reload)
-    return layout("NUauto assistants", body + queue_part(token, tab), index_version(), "/v")
-
-
-def index_version():
-    """Changes when a session starts or ends, or what one wants changes (cheap: no sheet read; the list polls it)."""
-    parts = [[x["slot"], x["info"].get("tab"), x["info"].get("row"), x["attention"].get("kind"),
-              (x["approval"] or {}).get("id"), (x["approval"] or {}).get("waiting")] for x in sessions()]
-    return hashlib.sha256(json.dumps(parts).encode()).hexdigest()[:16]
-
+# ---------- what the app shows (gui.py serves it: the Assistants screen, Company sites' queue) ----------
 
 def read_answer(s):
     """Your answer to its open Submit question, before the guard has picked it up (decision.json), or None."""
@@ -546,320 +392,168 @@ def read_answer(s):
     return assist.read_json(os.path.join(s["run"], assist.DECISION))
 
 
-def session_page(s, token, flash=""):
-    """Read like a chat, newest at the bottom: the browser and the terminal, then its latest message, then what it wants
-    from you right under it (a Submit to approve, or the session's end), then the reply box with End session. The page
-    opens at the bottom part (the Submit question when there is one)."""
-    st, a, word = s["state"], s["approval"], status(s)[0]
-    slot = s["slot"]
-    chat = word not in ("finish", "prompt", "answered")
-    note = f"<div class=card><b>{esc(flash)}</b></div>" if flash else ""
-    parts = [f"<p><a href='/'>&larr; all</a></p><h2>{esc(st.get('company'))}</h2>"
-             f"<div class=dim>{esc(st.get('job_title'))} | {esc(st.get('where'))} | slot {slot}</div>"]
-    view = s["view"]
-    if view.get("url"):
-        parts.append(f"<div class=card><b>The browser</b> <span class=dim>(captchas: you solve them here, then reply "
-                     f"\"done\")</span><p><a href='{esc(view['url'])}' target=_blank rel=noopener>Open it</a> &middot; "
-                     f"password <code>{esc(view.get('password'))}</code></p>"
-                     f"<img id=live-shot src='/s/{slot}/shot.png?live={int(time.time())}' alt='the screen now'></div>")
-    parts.append(f"<div class=card><b>Its terminal</b><pre id=live-term>{esc(terminal(s)) or '(not readable)'}</pre>"
-                 + form(f"/s/{slot}/key", token, "<button class=no name=k value=interrupt data-busy=Interrupting>Interrupt (Esc)</button>")
-                 + "</div>")
-    if s["message"] and word not in ("finish", "answered"):
-        parts.append(f"<div class='card {'waiting' if word == 'waiting' else ''}'><b>Its latest message</b>"
-                     f"<pre>{esc(s['message'])}</pre></div>")
-    parts.append(note)
-    if word == "answered":
-        parts.append(f"<div class='card finish'><p class=working>{esc(status(s)[1])}… this session closes in a moment.</p>"
-                     "<p><a href='/'>All sessions</a></p></div>")
-    if word == "prompt":
-        parts.append("<div class='card approve'><b>Claude Code is asking something in its terminal</b> (a permission "
-                     "question, not a Submit of the guard's). The reply box is off until it is answered, because Enter "
-                     "would pick its first option. Answer it in the terminal: "
-                     f"<code>ssh -t homelab tmux attach -t {esc(st.get('tmux') or '?')}</code></div>")
-    answered = a and a.get("waiting") and (read_answer(s) or {}).get("id") == a.get("id")
-    if answered:
-        dec = read_answer(s)
-        parts.append(f"<div class='card finish' id=approve><b>{'Approved: it is submitting now' if dec.get('decision') == 'approve' else 'Declined: it will not submit'}</b>"
-                     f"<p class=dim>Your answer ({esc(dec.get('by'))}) is with the assistant; this page updates by itself.</p></div>")
-    elif a:
-        late = "" if a.get("waiting") else ("<p class=dim>The assistant stopped waiting for this; Approve tells it to "
-                                            "do it now (good for 10 minutes, this action on this page only).</p>")
-        parts.append(f"<div class='card approve' id=approve><b>Ready to submit</b><p>It wants to <b>{esc(a.get('what'))}</b>"
-                     f"<br><span class=dim>on {esc(a.get('url'))}</span></p><pre>{esc(a.get('why'))}</pre>"
-                     + (f"<img src='/s/{slot}/shot.png?a={esc(a['id'])}' alt='the screen when it asked'>"
-                        if os.path.exists(os.path.join(s["run"], "approval.png")) else "")
-                     + late + form(f"/s/{slot}/approve", token,
-                                   "<button class=go name=d value=approve data-busy=Approving>Approve: submit</button>"
-                                   "<input type=text name=note placeholder='Note for the agent (when you decline)'>"
-                                   "<button class=no name=d value=decline data-busy=Declining>Decline</button>", id=a["id"]) + "</div>")
-    if word == "finish":
-        parts.append("<div class='card finish' id=finish><b>The session ended. Did you approve Submit and did the site "
-                     "confirm the application?</b><p class=dim>Yes marks the row Applied (dated today).</p>"
-                     + form(f"/s/{slot}/finish", token, "<button class=go name=a value=y data-busy=Saving>Yes, it went through</button>"
-                            "<button class=no name=a value=n data-busy=Saving>No</button>"
-                            "<button class=no name=a value=laptop data-busy=Saving>No: do it on the laptop</button>") + "</div>")
-    if chat:
-        now = ("<p class=working>Working on it… (this page updates by itself when it answers)</p>" if word == "working"
-               else "<p class=dim>Waiting for your answer.</p>" if word == "waiting" else "")
-        parts.append("<div class=card id=reply>" + now + "<b>Reply</b> <span class=dim>(typed into its terminal)</span>"
-                     + form(f"/s/{slot}/reply", token, "<textarea name=text rows=4 maxlength=4000></textarea>"
-                            "<button data-busy=Sending>Send</button>")
-                     + "<p class=dim>Done (it submitted, or you stop here)? End the session; then it asks whether it "
-                       "went through.</p>"
-                     + form(f"/s/{slot}/key", token, "<button class=no name=k value=exit data-busy=Ending>End session</button>"
-                            "<button class=no name=k value=laptop data-busy=Ending>End: do it on the laptop</button>")
-                     + "<p class=dim>On the laptop: a site that refuses the homelab's browser (a sign-in page with no "
-                       "way in). The row is marked in your sheet; the homelab never starts it again.</p>"
-                     + "</div>")
-    return layout(f"NUauto: {st.get('company') or 'assistant'}", "".join(parts), version(s), f"/s/{slot}/v",
-                  scroll="approve" if a else "finish" if word == "finish" else "reply" if chat else "",
-                  live=f"/s/{slot}" if word in ("working", "approve") else "")
+def summary(s):
+    """One running session, for the lists (Company sites, Today)."""
+    word, text = status(s)
+    st, info = s["state"], s["info"]
+    return {"slot": s["slot"], "tab": info.get("tab"), "row": info.get("row"),
+            "company": st.get("company") or info.get("company") or "", "title": st.get("job_title") or "",
+            "where": st.get("where") or "", "host": info.get("host") or "", "since": info.get("since"),
+            "status": word, "text": text}
 
 
-NOT_PAIRED = ("<h2>Not paired</h2><p>This browser is not paired with NUauto. Make a pairing link (<code>nuauto review "
-              "pair</code>, or <code>nuauto review pair --discord</code>) and open it in this browser.</p><p class=dim>"
-              "Paired a moment ago? A link opened from Discord (or another app) may have opened in that app's own "
-              "browser, which keeps its own cookies: copy the link into your phone's browser (Safari, Chrome) and pair "
-              "there; each browser is paired once.</p>")
+def view(s):
+    """Everything the Assistants screen shows for one session (it asks again every few seconds): what it wants from you
+    (a Submit to approve with the list of what you haven't confirmed, its last message, the end question), the browser
+    view's link and password, its terminal's last lines."""
+    from nuauto import assist
+    word, _ = status(s)
+    a = s["approval"]
+    out = {**summary(s), "message": s["message"] if word not in ("finish", "answered") else "",
+           "terminal": terminal(s), "tmux": s["state"].get("tmux") or "", "version": version(s), "approval": None,
+           "browser": ({"url": s["view"]["url"], "password": s["view"].get("password") or ""}
+                       if s["view"].get("url") else None)}
+    if a:
+        dec = read_answer(s) or {}
+        mine = a.get("waiting") and dec.get("id") == a.get("id")  # answered; the guard has not picked it up yet
+        out["approval"] = {"id": a.get("id") or "", "what": a.get("what") or "", "url": a.get("url") or "",
+                           "why": a.get("why") or "", "waiting": bool(a.get("waiting")),
+                           "shot": os.path.exists(os.path.join(s["run"], assist.SHOT)),
+                           "answered": dec.get("decision") if mine else None, "by": dec.get("by") if mine else None}
+    return out
 
 
-def pair_page(code, done=None):
-    if done is True:
-        home = page_url()
-        return layout("Paired", f"<h2>Paired</h2><p>This device can use the review page now. The pairing link was "
-                      f"for once; to come back, open <a href='/'>{esc(home)}</a> (bookmark it, or Add to Home Screen). "
-                      "Discord's messages link there too.</p><p><a href='/'>Open it</a></p>")
-    if done is False:
-        return layout("Not paired", "<h2>Not paired</h2><p>That link is used up or expired. Make a new one: "
-                      "<code>nuauto review pair</code></p>")
-    return layout("Pair this device", "<h2>Pair this device with NUauto?</h2><p class=dim>It can then answer the "
-                  "assistant and approve its Submit. Only pair your own phone or computer.</p>"
-                  f"<form method=post action='/pair'><input type=hidden name=c value='{esc(code)}'>"
-                  "<input type=text name=name placeholder='Name (e.g. phone)' maxlength=40><button>Pair</button></form>")
-
-
-class Handler(BaseHTTPRequestHandler):
-    server_version = "nuauto"
-
-    def log_message(self, *args):
-        pass
-
-    def _send(self, code, body, kind="text/html; charset=utf-8", headers=()):
-        data = body if isinstance(body, bytes) else body.encode()
-        self.send_response(code)
-        self.send_header("Content-Type", kind)
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Frame-Options", "DENY")
-        self.send_header("Referrer-Policy", "same-origin")  # no-referrer would make form posts say "Origin: null"
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; "
-                                                    "img-src 'self'; connect-src 'self'; form-action 'self'; "
-                                                    "frame-ancestors 'none'; base-uri 'none'")
-        for k, v in headers:
-            self.send_header(k, v)
-        self.end_headers()
-        self.wfile.write(data)
-
-    def _redirect(self, where):
-        self.send_response(303)
-        self.send_header("Location", where)
-        self.send_header("Content-Length", "0")
-        self.end_headers()
-
-    def _host_ok(self):
-        return self.headers.get("Host", "") == f"{listen_host()}:{PORT}"
-
-    def _key(self):
-        for part in (self.headers.get("Cookie") or "").split(";"):
-            k, _, v = part.strip().partition("=")
-            if k == COOKIE:
-                return v
-        return None
-
-    def _who(self):
-        """(key, device) for a paired device, else (None, None)."""
-        key = self._key()
-        dev = device(key)
-        return (key, dev) if dev else (None, None)
-
-    def _form(self):
+def shot(s, live=False):
+    """The screen when it asked (its Submit question), else the screen now (live: always now). PNG bytes or None."""
+    from nuauto import assist
+    from nuauto import screen
+    if not live:
         try:
-            n = int(self.headers.get("Content-Length") or 0)
-        except ValueError:
-            n = 0
-        n = max(0, min(n, 20000))
-        return {k: v[0] for k, v in parse_qs(self.rfile.read(n).decode("utf-8", "replace")).items()}
+            with open(os.path.join(s["run"], assist.SHOT), "rb") as f:
+                return f.read()
+        except OSError:
+            pass
+    return screen.screenshot(s["run"])
 
-    def _session(self, path):
-        m = re.fullmatch(r"/s/([1-9])(/[a-z.]+)?", path)
-        return (int(m.group(1)), m.group(2) or "") if m else (None, None)
 
-    def do_GET(self):
-        if not self._host_ok():
-            return self._send(400, "Wrong host.", "text/plain")
-        u = urlparse(self.path)
-        q = {k: v[0] for k, v in parse_qs(u.query).items()}
-        if u.path == "/poll.js":
-            return self._send(200, POLL_JS, "text/javascript")
-        key, dev = self._who()
-        if u.path == "/pair":  # already paired (an old pairing link opened again): straight to the page
-            return self._redirect("/") if dev else self._send(200, pair_page(q.get("c", "")))
-        if not dev:
-            return self._send(403, layout("Not paired", NOT_PAIRED))
-        if u.path == "/v":
-            return self._send(200, index_version(), "text/plain")
-        if u.path == "/":
-            flash = f"<div class=card><b>{esc(q['m'])}</b></div>" if q.get("m") else ""
-            return self._send(200, index_page(form_token(key), q.get("tab")).replace("<h2>NUauto assistants</h2>",
-                                                                       "<h2>NUauto assistants</h2>" + flash, 1))
-        slot, sub = self._session(u.path)
-        s = session(slot) if slot else None
-        if not s:
-            return self._send(404, layout("Gone", "<h2>No session there</h2><p><a href='/'>All sessions</a></p>"))
-        if sub == "":
-            return self._send(200, session_page(s, form_token(key), q.get("m", "")))
-        if sub == "/v":
-            return self._send(200, version(s), "text/plain")
-        if sub == "/term":
-            return self._send(200, terminal(s) or "(not readable)", "text/plain; charset=utf-8")
-        if sub == "/shot.png":
-            from nuauto import assist
-            from nuauto import screen
-            png = None
-            if not q.get("live"):
-                try:
-                    with open(os.path.join(s["run"], assist.SHOT), "rb") as f:
-                        png = f.read()
-                except OSError:
-                    png = None
-            png = png or screen.screenshot(s["run"])
-            return self._send(200, png, "image/png") if png else self._send(404, "No screen.", "text/plain")
-        return self._send(404, "Not found.", "text/plain")
+def act(s, body, by):
+    """One tap on the Assistants screen (by: the paired device's name, for the run's actions.log). Returns {"message"},
+    with "closing": True when the session is ending (the screen goes back to the list)."""
+    from nuauto import assist
+    do, word = body.get("do"), status(s)[0]
+    kind = s["attention"].get("kind")
+    busy = "Not sent: Claude Code is asking something in its terminal (answer it there)."
+    try:
+        if do in ("approve", "decline"):
+            return {"message": answer_approval(s, str(body.get("id") or ""), do, by, str(body.get("note") or ""))}
+        if do == "reply":
+            text = str(body.get("text") or "")
+            if word == "prompt":
+                return {"message": busy}
+            if not text.strip():
+                return {"message": "Nothing to send."}
+            type_into(s, text[:MAX_REPLY])
+            assist.log(s["run"], f"REVIEW PAGE reply by {by} ({len(text)} characters)")
+            return {"message": "Sent."}
+        if do == "interrupt":
+            _tmux("send-keys", "-t", target(s), "Escape")
+            return {"message": "Interrupted."}
+        if do == "exit":
+            if word == "prompt":
+                return {"message": busy}
+            end_session(s)
+            assist.log(s["run"], f"REVIEW PAGE ended the session (by {by})")
+            return {"message": "Ending the session."}
+        if do == "laptop" and word != "prompt" and kind != "finish":  # End: do it on the laptop
+            message = mark_laptop(s, by)
+            end_session(s)
+            return {"message": message}
+        if do == "finish" and kind == "answered":
+            return {"message": "Already answered: its session is closing.", "closing": True}
+        if do == "finish" and kind == "finish" and body.get("answer") == "laptop":
+            message = mark_laptop(s, by)
+            type_into(s, "n")
+            answered(s, "n")
+            return {"message": message, "closing": True}
+        if do == "finish" and kind == "finish" and body.get("answer") in ("y", "n"):
+            a = body["answer"]
+            type_into(s, a)
+            answered(s, a)
+            assist.log(s["run"], f"REVIEW PAGE did it go through: {a} (by {by})")
+            return {"message": (f"Thanks: {st_company(s)} is marked Applied." if a == "y" else
+                                f"{st_company(s)}: left as it was."), "closing": True}
+    except (ValueError, OSError, subprocess.TimeoutExpired) as e:
+        return {"message": f"Could not do that: {e}"}
+    return {"message": "Nothing to do."}
 
-    def do_POST(self):
-        if not self._host_ok():
-            return self._send(400, "Wrong host.", "text/plain")
-        origin = self.headers.get("Origin")
-        if origin and origin != f"http://{listen_host()}:{PORT}":
-            return self._send(403, "Wrong origin.", "text/plain")
-        u = urlparse(self.path)
-        key, dev = self._who()
-        if u.path != "/pair" and not dev:  # only a paired device's body is read at all
-            return self._send(403, "Not allowed.", "text/plain")
-        f = self._form()
-        if u.path == "/pair":
-            if dev:
-                return self._redirect("/")
-            key = pair(f.get("c", ""), f.get("name", ""))
-            if not key:
-                return self._send(403, pair_page("", False))
-            return self._send(200, pair_page("", True), headers=[
-                ("Set-Cookie", f"{COOKIE}={key}; HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000")])
-        if not dev or not hmac.compare_digest(f.get("t", ""), form_token(key)):
-            return self._send(403, "Not allowed.", "text/plain")
-        back = f"/?tab={f['tab']}&m=" if f.get("tab") in ("jobs", "other") else "/?m="  # the queue's tab it came from
-        if u.path == "/start":
-            return self._redirect(back + quote(start_now(f, dev["name"])))
-        if u.path == "/drop":
-            return self._redirect(back + quote(drop_now(f, dev["name"])))
-        slot, sub = self._session(u.path)
-        s = session(slot) if slot else None
-        if not s:
-            return self._redirect("/")
-        by = dev["name"]
-        from nuauto import assist
-        try:
-            if sub == "/approve" and f.get("d") in ("approve", "decline"):
-                msg = answer_approval(s, f.get("id", ""), f["d"], by, f.get("note", ""))
-            elif sub == "/reply" and status(s)[0] == "prompt":
-                msg = "Not sent: Claude Code is asking something in its terminal (answer it there)."
-            elif sub == "/reply" and f.get("text", "").strip():
-                type_into(s, f["text"][:MAX_REPLY])
-                assist.log(s["run"], f"REVIEW PAGE reply by {by} ({len(f['text'])} characters)")
-                msg = "Sent."
-            elif sub == "/finish" and f.get("a") == "laptop" and s["attention"].get("kind") == "finish":
-                msg = mark_laptop(s, by)
-                type_into(s, "n")
-                answered(s, "n")
-                return self._redirect("/?m=" + quote(msg))
-            elif sub == "/finish" and f.get("a") in ("y", "n") and s["attention"].get("kind") == "finish":
-                type_into(s, f["a"])
-                answered(s, f["a"])
-                assist.log(s["run"], f"REVIEW PAGE did it go through: {f['a']} (by {by})")
-                msg = (f"Thanks: {st_company(s)} is marked Applied." if f["a"] == "y" else
-                       f"{st_company(s)}: left as it was.")
-                return self._redirect("/?m=" + quote(msg))  # its session closes in a moment: back to the list
-            elif sub == "/finish" and s["attention"].get("kind") == "answered":
-                return self._redirect("/?m=" + quote("Already answered: its session is closing."))
-            elif sub == "/key" and f.get("k") == "interrupt":
-                _tmux("send-keys", "-t", target(s), "Escape")
-                msg = "Interrupted."
-            elif sub == "/key" and f.get("k") == "laptop" and status(s)[0] != "prompt":
-                msg = mark_laptop(s, by)
-                end_session(s)
-            elif sub == "/key" and f.get("k") == "exit" and status(s)[0] == "prompt":
-                msg = "Not sent: Claude Code is asking something in its terminal (answer it there)."
-            elif sub == "/key" and f.get("k") == "exit":
-                end_session(s)
-                assist.log(s["run"], f"REVIEW PAGE ended the session (by {by})")
-                msg = "Ending the session."
-            else:
-                msg = "Nothing to do."
-        except (ValueError, OSError, subprocess.TimeoutExpired) as e:
-            msg = f"Could not do that: {e}"
-        return self._redirect(f"/s/{slot}?m={quote(msg)}")
+
+# the queue's groups, in this order (a row's group: queue_state)
+GROUPS = (("running", "Working on it now", ""), ("next", "Starts next by itself", ""),
+          ("ready", "Ready: start it yourself", ""), ("wait", "Waiting", "a slot, its job site or the weekly cap"),
+          ("check", "Check first", "a Submit was approved and nobody said whether it went through"),
+          ("laptop", "Do it on the laptop", "the homelab's browser was refused there"))
+
+
+def queue_state(c, inputs, by_itself, here, tabs):
+    """(group, what to say, whether you can start it now) for one queue row: judged on its own (a free slot, its job site
+    free, the caps, its records, the laptop mark), not behind the rows ahead of it."""
+    from nuauto import remote
+    key = (c["tab"], c["row"])
+    why = remote.can_start(c, inputs)
+    if here.get(key):
+        return "running", "a session is working on it", False
+    if why == "a session is on it":
+        return "running", "the laptop's assistant is working on it", False
+    if why is None:
+        first = by_itself.get(key)
+        if c["tab"] in tabs and first is None:
+            return "next", "starts next by itself", True
+        return "ready", ("had a session already: start it yourself" if first and first.startswith("had a session")
+                         else "ready to start"), True
+    return ("laptop" if why == remote.LAPTOP_WHY else "check" if why == remote.OUTCOME_UNKNOWN else "wait"), why, False
+
+
+def queue_view():
+    """The homelab's queue (remote.py) for the app's Company sites: per row ("jobs-12", "other-3") its group, what it waits
+    for and whether you can start it now; which tabs start by themselves, the hours, free slots, NUworks applications
+    left. One read of the sheet."""
+    from nuauto import assist
+    from nuauto import remote
+    inputs = remote.queue_inputs()
+    tabs = remote.auto_tabs()
+    go_auto, rest_auto = remote.plan(*inputs, tabs=tabs)  # what the timer would start (it hands the free slots out in order)
+    by_itself = {(c["tab"], c["row"]): why for c, why in go_auto + rest_auto}
+    here = {(x.get("tab"), x.get("row")): x.get("slot") for x in assist.sessions()}
+    rows = {}
+    for n, c in enumerate(inputs[0]):
+        group, text, can = queue_state(c, inputs, by_itself, here, tabs)
+        rows[f"{c['tab']}-{c['row']}"] = {"group": group, "text": text, "start": can, "order": n,
+                                          "slot": here.get((c["tab"], c["row"]))}
+    a, b = remote.hours()
+    return {"rows": rows, "groups": [{"key": k, "title": t, "what": w} for k, t, w in GROUPS],
+            "auto": sorted(tabs), "hours": [a, b], "free": inputs[4], "left": inputs[5]}
 
 
 def start_now(f, by):
-    """Start now (the index's queue): one row you can start right now (remote.can_start: a free slot, its job site free,
-    the caps, its records, the laptop mark; the start-once rule doesn't apply to you)."""
+    """Start now: one row you can start right now (remote.can_start: a free slot, its job site free, the caps, its
+    records, the laptop mark; the start-once rule doesn't apply to you). Returns (started, what to tell you)."""
     from nuauto import remote
-    tab, row = f.get("tab"), f.get("row", "")
+    tab, row = f.get("tab"), str(f.get("row", ""))
     if tab not in ("jobs", "other") or not row.isdigit():
-        return "Nothing to do."
+        return False, "Nothing to do."
     inputs = remote.queue_inputs()
     c = next((x for x in inputs[0] if x["tab"] == tab and x["row"] == int(row)), None)
     if not c:
-        return "Not started: it is not in the queue (not Approved, or not a company-site application)."
+        return False, "Not started: it is not in the queue (not Approved, or not a company-site application)."
     why = remote.can_start(c, inputs)
     if why:
-        return f"Not started: {why}."
+        return False, f"Not started: {why}."
     why = remote.start(c["tab"], c["row"])
     if why:
-        return f"Not started: {why}"
+        return False, f"Not started: {why}"
     remote.record_started(c, auto=False)
     _log(f"{by} started {c['tab']} row {c['row']} ({c['company']})")
-    return f"Started {c['company']}."
-
-
-def drop_now(f, by):
-    """Drop (the index's queue): you won't apply to this row (closed, a duplicate, a bad location): sheet.drop makes it
-    Failed with the reason in its Notes, so it leaves the queue. Never a row a session (here or the laptop's) is on."""
-    from nuauto import remote
-    from nuauto import sheet
-    tab, row, url, why = f.get("tab"), f.get("row", ""), f.get("url", ""), f.get("why", "")
-    if tab not in ("jobs", "other") or not row.isdigit() or why not in sheet.DROP_REASONS:
-        return "Nothing to do."
-    inputs = remote.queue_inputs()
-    c = next((x for x in inputs[0] if x["tab"] == tab and x["row"] == int(row) and x.get("row_url") == url), None)
-    if not c:
-        return "Not dropped: it is not in the queue any more (or its row holds another job now)."
-    if (tab, int(row)) in {(s.get("tab"), s.get("row")) for s in inputs[1] + inputs[2]}:
-        return "Not dropped: an assistant is working on it. End its session first."
-    try:
-        ws = sheet.open_other(interactive=False) if tab == "other" else sheet.open_worksheet(interactive=False)
-        sheet.drop(ws, int(row), url, why)
-    except sheet.SheetError as e:
-        return f"Not dropped: {e}"
-    _log(f"{by} dropped {tab} row {row} ({c['company']}): {why}")
-    return f"Dropped {c['company']}: it is Failed in your sheet, with the reason in its Notes."
-
-
-def serve():
-    """The review page's server (web.py starts it in a thread). Never on every address."""
-    ThreadingHTTPServer((listen_host(), PORT), Handler).serve_forever()
+    return True, f"Started {c['company']}: it shows up here in a few seconds."
 
 
 def pair_link_from_homelab(name):
@@ -875,7 +569,7 @@ def pair_link_from_homelab(name):
     return links[-1] if r.returncode == 0 and links else None
 
 
-# ---------- demo: the page with made-up sessions, on this computer (for looking at it; nothing real) ----------
+# ---------- demo: made-up sessions on the demo sheet's rows (`nuauto gui --demo --remote`; nothing real) ----------
 
 DEMO_SESSIONS = [
     {"company": "Acme Robotics", "job_title": "Embedded Software Intern", "where": "Other jobs row 12",
@@ -887,61 +581,32 @@ DEMO_SESSIONS = [
     {"company": "Beacon Systems", "job_title": "Hardware Test Intern", "where": "Other jobs row 15",
      "message": "Please confirm these guesses (reply with changes, or OK):\n1. Graduation date = May 2029 (resume)\n"
                 "2. Willing to relocate = Yes (no info)\n3. Essay \"Why Beacon?\" (draft, 120 words):\n   I have built ..."},
-    {"company": "Cobalt Labs", "job_title": "Security Engineering Co-op", "where": "row 31", "finish": True},
+    {"company": "Cobalt Labs", "job_title": "Security Engineering Co-op", "where": "NUworks row", "finish": True},
 ]
+DEMO_RECORDS = {"Iris Security": {"auto": True},                                    # had a session: yours to start
+                "Maple Grid": {"auto": True, "approved": True, "answer": None}}     # a Submit approved, outcome not given
 
 
-
-def _demo_row(tab, row, company, title, host, match, laptop=False):
-    url = f"https://{host}/jobs/{row}"
-    return {"tab": tab, "row": row, "url": url, "row_url": url, "host": host, "company": company, "title": title,
-            "closes": None, "match": match, "laptop": laptop}
-
-
-DEMO_QUEUE = [  # best first, both tabs (the demo sessions are on Other jobs rows 11-13)
-    _demo_row("jobs", 21, "Delta Devices", "Firmware Co-op", "delta.wd5.myworkdayjobs.com", 88),
-    _demo_row("jobs", 22, "Ember Health", "Security Analyst Co-op", "careers.ember.example", 74),
-    _demo_row("jobs", 23, "Fjord Motors", "Controls Co-op", "fjord.icims.com", 70, laptop=True),
-    _demo_row("other", 11, "Acme Robotics", "Embedded Software Intern", "acme.wd1.myworkdayjobs.com", 90),
-    _demo_row("other", 30, "Garnet Aerospace", "Avionics Intern", "job-boards.greenhouse.io/garnet", 84),
-    _demo_row("other", 31, "Helix Semiconductor", "Hardware Intern", "jobs.lever.co/helix", 79),
-    _demo_row("other", 32, "Iris Security", "Red Team Intern", "jobs.ashbyhq.com/iris", 77),
-    _demo_row("other", 33, "Juniper Labs", "Systems Intern", "acme.wd1.myworkdayjobs.com", 72),
-    _demo_row("other", 34, "Kestrel Defense", "Embedded Intern", "kestrel.icims.com", 71, laptop=True),
-    _demo_row("other", 35, "Lumen Optics", "Test Engineering Intern", "careers.lumen.example", 68, laptop=True),
-    _demo_row("other", 36, "Maple Grid", "Power Systems Intern", "maple.example", 66),
-]
-DEMO_RECORDS = {"other-32": {"url": "https://jobs.ashbyhq.com/iris/jobs/32", "auto": True},                 # had a session
-                "other-36": {"url": "https://maple.example/jobs/36", "auto": True, "approved": True, "answer": None}}
-
-
-def demo(port=0):
-    """`nuauto review demo`: the review page on 127.0.0.1 with DEMO_SESSIONS, in a temp folder; prints a link that
-    pairs the browser that opens it. Nothing real is read or sent (no tmux: Reply etc. say they could not)."""
-    import tempfile
-    if not os.environ.get("NUAUTO_REVIEW_DEMO"):
-        state = tempfile.mkdtemp(prefix="nuauto-review-demo-")
-        os.makedirs(os.path.join(state, "local"), mode=0o700)
-        with open(os.path.join(state, "local", "local_config.json"), "w") as f:
-            json.dump({**config.LOCAL, "web_listen_host": "127.0.0.1", "server_hostname": "", "remote_assist": False,
-                       "remote_auto": {"nuworks": False, "other": True}}, f)
-        env = {**os.environ, "NUAUTO_STATE_DIR": state, "NUAUTO_REVIEW_DEMO": "1"}
-        os.execve(sys.executable, [sys.executable, "-m", "nuauto.review", "demo", str(port)], env)
+def demo_setup():
+    """(demo only: `nuauto gui --demo --remote`, with demo.py's homelab rows) DEMO_SESSIONS as running sessions on their
+    companies' rows (their slot locks held by this process: keep the returned files open; three sessions fill every
+    slot, so the queue's rows wait) and DEMO_RECORDS as the queue's records. The queue itself is the real one, on the
+    demo sheet. Starting a session changes nothing; there is no tmux, so Reply and End say they could not."""
     import fcntl
-    import socket
     from nuauto import assist
-    global PORT
-    if not port:
-        with socket.socket() as sock:
-            sock.bind(("127.0.0.1", 0))
-            port = sock.getsockname()[1]
-    PORT = port
+    from nuauto import remote
+    from nuauto import sheet
+    assert config.DEMO, "demo only"
+    rows = {r.company: ("jobs", r) for r in sheet.read_rows(sheet.open_worksheet(interactive=False))}
+    rows.update({r.company: ("other", r) for r in sheet.read_rows(sheet.open_other(interactive=False))})
     locks = []
     for n, x in enumerate(DEMO_SESSIONS, 1):
+        tab, r = rows[x["company"]]
         d = os.path.join(config.LOGS_DIR, f"demo_assist_{n}")
         os.makedirs(d, mode=0o700, exist_ok=True)
+        where = f"{'Other jobs row' if tab == 'other' else 'row'} {r.number}"
         assist.write_private(os.path.join(d, "state.json"), {"company": x["company"], "job_title": x["job_title"],
-                                                             "where": x["where"], "slot": n, "tmux": None})
+                                                             "where": where, "slot": n, "tmux": None, "tab": tab})
         if x.get("message"):
             assist.write_private(os.path.join(d, assist.MESSAGE), x["message"].encode())
         if x.get("approval"):
@@ -951,37 +616,37 @@ def demo(port=0):
         assist.write_private(os.path.join(d, assist.ATTENTION), {"kind": kind, "since": time.time(), "said": ""})
         f = open(os.path.join(config.LOCAL_DIR, f"assist_slot{n}.lock"), "a+")
         fcntl.flock(f, fcntl.LOCK_EX)
-        f.write(json.dumps({"slot": n, "row": 10 + n, "tab": "other", "company": x["company"], "host": "demo",
+        f.truncate(0)
+        host = assist.site_key(assist.assist_target(r.notes)[0] if tab == "jobs" else r.url)
+        f.write(json.dumps({"slot": n, "row": r.number, "tab": tab, "company": x["company"], "host": host,
                             "run": d, "since": "10:00"}))
         f.flush()
         locks.append(f)
-    import nuauto.remote as remote
-    from nuauto import sheet
-    # a made-up queue (no sheet here); Start now and Drop change nothing
-    remote.queue_inputs = lambda: (DEMO_QUEUE, assist.sessions(), [], DEMO_RECORDS, 1, 2)
+    records = {}
+    for company, rec in DEMO_RECORDS.items():
+        tab, r = rows[company]
+        records[f"{tab}-{r.number}"] = {**rec, "url": r.url, "company": company}
+    assist.write_private(remote.AUTO_PATH, records)
     remote.start = lambda tab, row: "this is the demo: nothing starts"
-
-    def no_sheet(*a, **k):
-        raise sheet.SheetError("this is the demo: your sheet is not touched")
-    sheet.open_worksheet = sheet.open_other = no_sheet
-    link = make_pairing("demo")
-    print(json.dumps({"url": link, "port": port, "state_dir": config.STATE_DIR}), flush=True)
-    serve()
+    return locks
 
 
 # ---------- command line ----------
 
 def main(argv):
-    if argv[:1] == ["demo"]:  # anywhere, nothing real: the page with made-up sessions
-        return demo(int(argv[1]) if len(argv) > 1 and argv[1].isdigit() else 0)
+    if argv[:1] == ["demo"]:  # anywhere, nothing real: the homelab's app with made-up sessions
+        from nuauto import gui
+        port = ["--port", argv[1]] if len(argv) > 1 and argv[1].isdigit() else []
+        return gui.main(["--demo", "--remote", "--no-open", *port])
     if not config.IS_SERVER:  # the laptop: the same command on the homelab (the devices live there)
         if not config.HAS_SERVER:
-            sys.exit("The review page runs on the homelab (docs/REMOTE.md).")
+            sys.exit("NUauto's page for your phone runs on a homelab (docs/REMOTE.md).")
         from nuauto import sync
         sys.exit(sync.ssh(f"cd {shlex.quote(config.SERVER_DIR)} && .venv/bin/nuauto review "
                           + " ".join(shlex.quote(a) for a in argv)))
-    if not config.REMOTE_ASSIST:
-        sys.exit("Turn on \"remote_assist\" in local_config.json first (docs/REMOTE.md).")
+    if not config.REMOTE_APP:
+        sys.exit("Turn on NUauto on your homelab first: the laptop's Settings > NUauto on your homelab (\"remote_app\" in "
+                 "local_config.json; docs/REMOTE.md).")
     if argv[:1] == ["pair"]:
         rest = [a for a in argv[1:] if a != "--discord"]
         link = make_pairing(rest[0] if rest else "phone")
@@ -993,22 +658,15 @@ def main(argv):
                           f"{PAIR_TTL // 60} minutes, then bookmark the page there: {link}")
         return
     if argv == ["devices"]:
-        try:
-            with open(DEVICES) as f:
-                devs = json.load(f)
-        except (OSError, ValueError):
-            devs = {}
+        devs = devices()
         if not devs:
             return print("No paired devices. `nuauto review pair` makes a link.")
-        for d in devs.values():
+        for d in devs:
             print(f"{d['name']:20} paired {d['paired']}")
         return
     if argv[:1] == ["unpair"] and len(argv) == 2:
-        with _locked(DEVICES) as d:
-            gone = [k for k, v in d.items() if argv[1] == "--all" or v["name"] == argv[1]]
-            for k in gone:
-                del d[k]
-        return print(f"Forgot {len(gone)} device{'s' if len(gone) != 1 else ''}.")
+        n = unpair(argv[1])
+        return print(f"Forgot {n} device{'s' if n != 1 else ''}.")
     sys.exit(__doc__)
 
 

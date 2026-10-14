@@ -191,7 +191,7 @@ if onboard.scheduler_kind():
 config.SHEET_ID = ""
 steps = {s["id"]: s for s in onboard.steps({})}
 assert list(steps) == ["welcome", "tools", "google_client", "google_login", "sheet", "resume", "nuworks", "preferences", "extras",
-                      "password_manager"]
+                      "password_manager", "homelab"]
 assert steps["welcome"]["status"] == "todo" and steps["extras"]["status"] == "optional" and not onboard.complete(list(steps.values()))
 os.remove(config.TOKEN_PATH)
 
@@ -200,8 +200,30 @@ os.remove(config.TOKEN_PATH)
 from nuauto import accounts  # noqa: E402
 from nuauto import health  # noqa: E402
 
-assert list(steps)[-1] == "password_manager" and steps["password_manager"]["status"] == "optional"
+assert list(steps)[-2] == "password_manager" and steps["password_manager"]["status"] == "optional"
 assert "homelab_assistant" not in steps and not onboard.homelab_assistant()["available"]  # demo: no homelab
+# a homelab: optional, there in a source install (never the packaged app: it is always local mode), not used yet
+assert list(steps)[-1] == "homelab" and steps["homelab"]["status"] == "optional"
+hl = steps["homelab"]["data"]
+assert hl["available"] and not hl["on"] and not hl["saved"] and hl["default_dir"] == "projects/auto"
+# what it checks and saves: names and folders only like the ones it can pass to ssh; its page never on every address
+assert not onboard.homelab_probe("bad name; rm -rf")["ok"] and not onboard.homelab_probe("-oProxyCommand=x")["ok"]
+assert not onboard.homelab_probe("homelab", "../etc")["ok"] and not onboard.homelab_probe("homelab", "/abs")["ok"]
+for bad in (("homelab", "lab", "projects/auto", "0.0.0.0"), ("homelab", "lab", "projects/auto", "127.0.0.1"),
+            ("homelab", "lab", "projects/auto", "not-an-ip"), ("x y", "lab", "projects/auto", "100.64.0.2"),
+            ("homelab", "lab", "../up", "100.64.0.2")):
+    try:
+        onboard.homelab_save(*bad)
+    except onboard.Refused:
+        pass
+    else:
+        raise AssertionError(f"saved {bad}")
+saved_cfg = dict(onboard.local_config())
+link = onboard.homelab_save("homelab", "lab-box", "projects/auto", "100.64.0.2")
+assert link["saved"] and link["ssh"] == "homelab" and link["hostname"] == "lab-box" and link["listen"] == "100.64.0.2"
+assert not link["on"]                                                       # (this process: after a restart of NUauto)
+assert not onboard.homelab_save("", "", "", "")["saved"]                     # stop using it: local mode again
+onboard.save_config({k: saved_cfg.get(k, "") for k in ("server_hostname", "server_ssh", "server_dir", "web_listen_host")})
 accounts.PATH = os.path.join(config.LOCAL_DIR, "accounts.json")
 with open(accounts.PATH, "w") as f:
     json.dump({"a.example.com": {"password": "pw-secret-a"}, "b.example.com": {"exported": True},
@@ -241,11 +263,17 @@ try:
         assert ha["available"] and ha["on"] is False and ha["auto"] is False and ha["review_url"] is None, ha
         assert ha["slots"] == 3 and ha["hours"] == list(__import__("nuauto.remote", fromlist=["x"]).hours()), ha
         ids = [s["id"] for s in onboard.steps({})]
-        assert ids[-2:] == ["password_manager", "homelab_assistant"], ids
-        assert step("homelab_assistant")["status"] == "optional"
+        assert ids[-3:] == ["password_manager", "homelab", "homelab_assistant"], ids
+        assert step("homelab")["status"] == "done" and step("homelab_assistant")["status"] == "optional"
+        assert ha["app"] is False                                          # NUauto's page there: off too
+        onboard.save_config({"remote_app": True})                          # its page alone (no assistant): the step is done
+        assert onboard.homelab_assistant()["app"] and not onboard.homelab_assistant()["on"]
+        assert step("homelab_assistant")["status"] == "done"
+        onboard.save_config({"remote_app": False})
         onboard.save_config({"remote_assist": True, "remote_auto": True, "assist_slots": 2, "remote_hours": [8, 20]})
         ha = onboard.homelab_assistant()
-        assert ha["on"] and ha["auto"] and ha["slots"] == 2 and ha["hours"] == [8, 20], ha
+        assert ha["on"] and ha["app"] and ha["auto"] and ha["slots"] == 2 and ha["hours"] == [8, 20], ha   # (the assistant needs the page)
+        assert onboard.homelab_assistant(here=True)["available"]          # the homelab's own page: its queue's settings
         assert ha["review_url"] is None or (ha["review_url"].startswith("http") and not ha["review_url"].endswith("/")), ha
         assert step("homelab_assistant")["status"] == "done"
         for bad in (0, 4, "2", None):  # (True also passes isinstance int: onboard.py homelab_assistant, minor)
@@ -310,10 +338,18 @@ try:
         page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
         page.goto(url)
         page.wait_for_selector("[data-testid=setup-steps]")  # a fresh start opens Setup
-        # the list ends with the optional Password manager step; no homelab, so no homelab-assistant step
-        assert page.locator("[data-testid=setup-steps] > li").last.get_attribute("data-testid") == "step-password_manager"
+        # the list ends with the optional Password manager and Homelab steps; no homelab, so no homelab-assistant step
+        assert page.locator("[data-testid=setup-steps] > li").last.get_attribute("data-testid") == "step-homelab"
         assert "optional" in page.locator("[data-testid=step-password_manager] .head").inner_text().lower()
         assert page.locator("[data-testid=step-homelab_assistant]").count() == 0
+        # the Homelab step: Check asks it over ssh (the demo answers with made-up facts) and offers to use it
+        page.click("[data-testid=step-homelab] .head")
+        page.fill("[data-testid=hl-ssh]", "homelab")
+        page.click("[data-testid=hl-check]")
+        page.wait_for_selector("[data-testid=hl-facts]")
+        assert "100.64.0.42" in page.inner_text("[data-testid=hl-facts]") and "demo-homelab" in page.inner_text("[data-testid=hl-facts]")
+        assert page.is_enabled("[data-testid=hl-use]")
+        page.click("[data-testid=step-homelab] .head")  # closed again (nothing saved: the wizard goes on from the top)
         page.click("[data-testid=setup-ack]")  # the box is not ticked: refused
         page.wait_for_selector("[data-testid=toast]")
         page.check("[data-testid=setup-tos]")

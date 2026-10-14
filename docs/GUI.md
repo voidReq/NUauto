@@ -15,7 +15,14 @@ WHAT IT IS
   company-site application, the wizard's read-only NUworks reads.
 - It quits after 30 minutes with no window open and nothing running, or with Settings > Quit.
 - Linux and macOS. Install: install.sh (uv brings Python 3.12; Playwright's Firefox; the `nuauto` command in
-  ~/.local/bin; an app icon). The homelab never runs it (it refuses there).
+  ~/.local/bin; an app icon). `nuauto gui` never runs on the homelab (it refuses there).
+- The same app on the homelab (2026-10-14; "remote_app" or "remote_assist"; docs/REMOTE.md): nuauto-web serves this
+  page and this API there too (gui.serve_remote, REMOTE mode), on the homelab's Tailscale address :8766, to paired
+  devices (your phone). Every screen is the same; the page knows where it runs (state.where) and shows what only the
+  laptop can do (state.laptop_only: logins, terminal windows, the laptop's files, Bitwarden, setup's file steps, Quit) as
+  "On your laptop" with the reason; the server refuses those there. What it adds there: each assistant session's screen
+  (#/assistant/<slot>), the queue in Company sites, Today's "Assistants waiting for you", Settings > Paired devices.
+  Without a homelab none of it exists, and the laptop's app is unchanged.
 
 PACKAGED APP (packaging/; .github/workflows/release.yml builds and smoke-tests it on every pull request (all but the
 Intel Mac app, the slowest build), and builds all four and publishes them as a GitHub release on every v* tag)
@@ -89,12 +96,16 @@ SCREENS
                  assistant's rows + retries). Company sites tab (assistants side by side, up to 3: a row with one
                  running shows "assistant running (slot N)" instead of Start, or "assistant waiting for you" / "approve in its window"
                  while it waits for you (assist.sessions attention; a desktop notification says so too); one the homelab runs
-                 (remote_assist) shows "assistant running on the homelab" / "waiting for you (its review page)", from `nuauto
+                 (remote_assist) shows "assistant running on the homelab" / "waiting for you (its page)", from `nuauto
                  assist sessions` over ssh every minute (never in view or demo mode); "N of 3 assistants running"; it follows
                  /api/state assistants). With remote_assist a Homelab assistants card first: the homelab's sessions and what
-                 each waits for, Open its page (the homelab's review page in your browser), Open the review page, Pair this
-                 computer (a one-time pairing link from the homelab over ssh, opened in your browser; POST /api/action
-                 review_pair -> {"url"}). Then: Needs Human rows for the assistant (opens
+                 each waits for, Open its screen (#/assistant/<slot> of NUauto on the homelab, in your browser), Open NUauto
+                 on the homelab, Pair this computer (a one-time pairing link from the homelab over ssh, opened in your
+                 browser; POST /api/action review_pair -> {"url"}). On the homelab's own page instead: Assistants on this
+                 homelab (each session's status and Open), the queue's line (what starts by itself, its hours, free slots,
+                 NUworks applications left), each row's place in the queue as a chip (review.queue_view: starts next by
+                 itself / ready / what it waits for), Start now (remote start in tmux; refused with the reason) and "Sort the
+                 list by: the queue's order". Then: Needs Human rows for the assistant (opens
                  `nuauto assist <row>` in a terminal window, or shows the command), "I applied myself", Drop (not applying: closed, a
                  duplicate, a bad location; sheet.drop: Failed, "Dropped <date>: <reason>" in Notes; never while an
                  assistant is on the row), company sites still
@@ -126,12 +137,27 @@ SCREENS
                  using it, Install it (npm @bitwarden/cli, then bw login, in a terminal window), Add N to Bitwarden (a terminal
                  window: bw unlock asks your master password itself, then `nuauto accounts export --bitwarden`), Your own logins
                  (words their addresses contain, "bitwarden_import") + Import my logins (a terminal: unlock, then `bw list items
-                 --search <word> | nuauto accounts import - --only <word>` per word), Check now; Assistant on your homelab
-                 (homelab mode only, docs/REMOTE.md): on / off (remote_assist: pushed to the homelab, its review page restarted),
-                 Start sessions by itself, one switch for NUworks rows and one for Other jobs rows (remote_auto {"nuworks", "other"}), its hours (remote_hours), assistants at once (assist_slots), Pair this
-                 computer, Open the review page; setup, logs, quit
-  Setup          the wizard (below); opens by itself until setup is done
+                 --search <word> | nuauto accounts import - --only <word>` per word), Check now; Homelab (a source install,
+                 never the packaged app; onboard.homelab_link): its ssh name and folder, Check (over ssh, read-only:
+                 onboard.homelab_probe: its hostname, Tailscale address, NUauto / Claude / timers / lingering / the
+                 assistant's tools there), Use this homelab (local_config's server fields; NUauto then needs a restart: the
+                 card offers Quit), Set it up (a terminal window: `nuauto onboard homelab-setup`, docs/DEPLOY.md's steps,
+                 each asked first; sudo asks for the homelab's password there), Log in to Claude there (ssh -t ... claude),
+                 Stop using it (local mode again); NUauto on your homelab (homelab mode only, docs/REMOTE.md): its page on /
+                 off (remote_app), its assistant on / off (remote_assist, which needs the page: both pushed to the homelab,
+                 nuauto-web restarted), Start sessions by itself, one switch for NUworks rows and one for Other jobs rows
+                 (remote_auto {"nuworks", "other"}), its hours (remote_hours), assistants at once (assist_slots), Pair this
+                 computer, Open it; setup, logs, quit. On the homelab's page: Paired devices (each one, "this one", Unpair,
+                 Make a pairing link for another device), its queue's settings (no on / off: the laptop's), the email and
+                 effort only (the transcript, folders, export, Bitwarden: on your laptop), no Quit
+  Setup          the wizard (below); opens by itself until setup is done (never on the homelab's page: setup is the
+                 laptop's; there it says so, and the steps it can do are preferences, Discord and the resume label)
   Past runs      logs/ folders: actions.log and the screenshots before and after Submit
+  Assistant      (the homelab's page; #/assistant/<slot>) one assistant session: its browser (the view's link and
+                 password, the screen now), its terminal (Interrupt), its latest message, Ready to submit (what, on which
+                 page, the list of what you haven't confirmed, the screen when it asked; Approve / Decline with a note), the
+                 end question (Yes / No / No: do it on the laptop), Reply, End session, End: do it on the laptop. It asks
+                 again every 4 s; what you type is kept (docs/REMOTE.md, AN ASSISTANT'S SCREEN)
 
 SETUP WIZARD (onboard.py + gui_static/setup.js; each step checks itself)
   welcome      NUworks terms of use read (local_config tos_ack) and the limits
@@ -157,7 +183,9 @@ SETUP WIZARD (onboard.py + gui_static/setup.js; each step checks itself)
   extras       Discord webhook (checked with a GET, posts nothing until you press Test), automatic updates
                (local mode: systemd user timer / launchd agent at 08:00 and 18:00), app icon
   password_manager   optional: the same Password manager part as Settings (done when Bitwarden is on and its check is OK)
-  homelab_assistant  optional, only in homelab mode: the same Assistant on your homelab part as Settings (done when on)
+  homelab            optional, a source install only: the same Homelab part as Settings (done when NUauto runs with one)
+  homelab_assistant  optional, only in homelab mode: the same NUauto on your homelab part as Settings (done when its page
+                     is on)
 
 HEALTH (health.py; the same checks `nuauto doctor` prints, `nuauto doctor --json`)
   check     how                                                               GUI runs it
@@ -203,7 +231,18 @@ SAFETY MODEL (details and tests: docs/SAFETY.md)
   child's stdin closes and it stops the same way.
 - One browser at a time: browser.lock_profile (flock on local/browser_profile.lock), held from launch to close.
 - Sync (homelab mode): pull at start and every 30 minutes; push after Review and the Google login; never on a
-  timer, so an open GUI on a work-in-progress branch does not deploy it.
+  timer, so an open GUI on a work-in-progress branch does not deploy it. With NUauto on the homelab the pull also
+  merges the settings, ratings and answers changed on its page (sync.share), and this process takes the settings again.
+- On the homelab (REMOTE: gui.serve_remote inside nuauto-web): web_listen_host:8766 only; a paired device's cookie
+  (review.py) instead of the start secret; that server's own Host; the same X-NUauto / JSON / Origin rules on every POST
+  (the pairing form: its Origin); Referrer-Policy same-origin. The page's own files are served without the cookie
+  (public code; a link tapped in Discord arrives without it), every /api needs it (else 403 {"pair": true}).
+  LAPTOP_ONLY actions, setup steps outside REMOTE_SETUP, the settings in REMOTE_SETTINGS_OFF, /api/quit and
+  /api/logins/export are refused there with the reason. Its runs are nuauto-web's children (gui.lock holds its pid, for
+  `--ui json`); a run you watch (Apply, the NUworks side) gets a virtual screen and its browser view (run_screen, slot 0;
+  Task.browser_view: the link and password, shown in the live run). No idle quit, no desktop notifications, no pull
+  (the homelab owns the data); it takes a changed local_config.json at once (reload_config). The update starts the
+  homelab's own nuauto-daily.service (never a second copy beside the timer's).
 
 DEMO MODE (demo.py) AND TESTING WITH AGENTS
 - `nuauto gui --demo` makes a temp folder (NUAUTO_STATE_DIR) and runs everything on fakes: the sheet is a JSON file
@@ -216,6 +255,11 @@ DEMO MODE (demo.py) AND TESTING WITH AGENTS
   carries the secret) in Playwright. Everything on screen has a JSON API (below); key controls have data-testid.
 - `nuauto gui --demo --screenshots DIR`: every screen, light/dark, wide/narrow, as PNGs (plus Review's internship list:
   review-intern, review-intern-unread, review-intern-list); then it quits.
+- `nuauto gui --demo --remote [--no-open] [--port N] [--screenshots DIR]` (also `nuauto review demo`): the app as the
+  homelab serves it (REMOTE), on 127.0.0.1, with demo state "homelab" (more company-site rows, the assistant on) and
+  three made-up assistant sessions (review.demo_setup: waiting to submit, waiting for an answer, ended). Prints
+  {"url": a pairing link, "port", "remote": true, ...}: open it, press Pair. --screenshots: homelab-<screen>-*.png
+  (Today, Apply, Company sites, the three assistants, Settings, Setup).
 - `nuauto selftest` (also Settings > Run a self-test): the whole demo flow in a hidden browser (Firefox installed if
   missing; approve, apply with a question, the fake sheet), in its own temp folder; exit 0 = this install works.
 - Demo runs nobody watches use a hidden browser: with NUAUTO_DEMO_HEADLESS=1 (tests and the self-test set it) or no
@@ -234,13 +278,17 @@ VIEW MODE (`nuauto gui --view`; gui.VIEW; added 2026-10-09 so an agent can look 
 - Test: tests/test_view.py.
 - Tests (in `nuauto test`): test_gui.py (security rules, API, single instance, the main flows in headless
   Firefox, Review's internship list: approve / undo / the unreadable one / internships off), test_setup.py (each wizard step's checks, then the wizard end to end), test_demo.py (the real apply.py
-  on the fake pages: Ctrl+C and GUI-gone stops, cap refusal, NUworks re-login states), test_health.py.
+  on the fake pages: Ctrl+C and GUI-gone stops, cap refusal, NUworks re-login states), test_health.py,
+  test_homelab_app.py (the homelab's app in demo mode: pairing, refusals, sessions, queue, devices, a phone-width
+  browser approving a Submit), test_review.py (its handler's rules and the sessions' backend).
 - CI: .github/workflows/tests.yml runs `nuauto test` on Ubuntu and macOS for every pull request and every push to main
   (a newer push to a pull request stops its older run).
 
 API (JSON; all need the cookie; POSTs need X-NUauto: 1)
   GET  /api/state            counts, week, to-do, last scan, setup_needed, the current task; internships {on, term,
-                             review: how many wait for Review}
+                             review: how many wait for Review}; where (laptop | homelab), laptop_only {action: why} (the
+                             homelab's page), waiting (the homelab's sessions that wait for you), remote_app (the laptop:
+                             the homelab's page address, when it has one)
   GET  /api/health           the checks; POST /api/health/run {"groups": [...]}
   GET  /api/review?mode=&q=&category=&source=   the review queue (q / category narrow it; total, categories = the whole
                              queue; source=intern: the internships, else the co-ops; the reply says "source"; an internship
@@ -255,12 +303,22 @@ API (JSON; all need the cookie; POSTs need X-NUauto: 1)
                              install_firefox|install_claude|nuworks_side|assist|fix_permissions|review_pair|bitwarden_add|
                              bitwarden_import ({"only": [words]})|bitwarden_login|bitwarden_install, "args"} (the bitwarden_ ones
                              open a terminal window: Bitwarden asks for your master password there, never this page)
-                             (assist: {"row", "tab": "other"} for the Other jobs tab)
-  GET  /api/task?after=N     the current task: state, new log lines, question, row, screenshot, countdown
+                             (assist: {"row", "tab": "other"} for the Other jobs tab; on the homelab it starts the row's
+                             session in tmux: {"started", "message"}); the homelab's own: pair_device ({"name"} ->
+                             {"link", "minutes"}), unpair ({"id"}: never this device -> {"gone", "devices"})
+  GET  /api/task?after=N     the current task: state, new log lines, question, row, screenshot, countdown; browser_view
+                             {url, password} (the homelab: its virtual screen's view, while it runs)
+  GET  /api/assistant/<slot>  (homelab) one session's screen: review.view (status, message, approval {id, what, url, why,
+                             waiting, shot, answered, by}, browser {url, password}, terminal, version); .../shot.png[?live=1]
+  POST /api/assistant        (homelab) {"slot", "do": approve|decline|reply|interrupt|exit|laptop|finish, "id", "note",
+                             "text", "answer": y|n|laptop} -> {"message", "closing"}
+  GET  /api/devices          (homelab) the paired devices {id, name, paired} and this one's id
+  POST /api/homelab          (laptop) Settings > Homelab: {"action": check ({"ssh", "folder"} -> what it has)|save ({"ssh",
+                             "hostname", "folder", "listen"})|off|setup (a terminal window)|claude (a terminal window)}
   POST /api/answer           {"task", "id", "reply"}; POST /api/stop {"task", "force"}
   GET  /api/company          agent / other / site / retry rows, sessions (the assistants running now: slot, row, tab,
                              company, host, since, attention: {kind waiting|approve, since, said} while it waits for you)
-                             and slots (how many may); POST /api/mark {"action": applied|site|drop, "row", "url",
+                             and slots (how many may); queue (the homelab: review.queue_view, or {"error"}); POST /api/mark {"action": applied|site|drop, "row", "url",
                              "why" (drop: closed|duplicate|location|other), "tab": "other" (Other jobs tab: applied, drop)}
   GET  /api/other            the Other jobs tab: exists, ready (Approved; an internship with its match, score, pay, posted),
                              applied, rest, sessions, slots
@@ -274,11 +332,12 @@ API (JSON; all need the cookie; POSTs need X-NUauto: 1)
                              "version"}. answers.json entries carry nuworks_only; leave_blank is kept while empty
   GET  /api/settings         settings (no secrets; logins: {sites, new}, never a password); POST /api/settings {"resume_label",
                              "week_start", "max_per_week", "accounts_email", "assist_effort", "assist_read_paths",
-                             "password_manager" ("" | "bitwarden"), "bitwarden_import" [words], and with a homelab "remote_assist",
-                             "remote_auto" (true / false, or {"nuworks": bool, "other": bool}: a tab left out stays as it
-                             was), "remote_hours" [from, to], "assist_slots"}; GET adds password_manager {on, check,
-                             waiting, own, only, bw} and homelab_assistant {available, on, auto (any tab), auto_tabs
-                             {nuworks, other}, hours, slots, review_url}
+                             "password_manager" ("" | "bitwarden"), "bitwarden_import" [words], and with a homelab "remote_app",
+                             "remote_assist", "remote_auto" (true / false, or {"nuworks": bool, "other": bool}: a tab left
+                             out stays as it was), "remote_hours" [from, to], "assist_slots"}; GET adds password_manager
+                             {on, check, waiting, own, only, bw}, homelab_assistant {available, on, app, auto (any tab),
+                             auto_tabs {nuworks, other}, hours, slots, review_url}, where, homelab (the laptop:
+                             onboard.homelab_link) and (the homelab) devices, this
   POST /api/logins/export    Bitwarden's import file of the logins not exported yet ({"every": true}: all) -> {"path", "count"}
   GET  /api/setup            wizard steps; POST /api/setup {"action": ack|client_upload|client_downloads|
                              sheet_create|sheet_link|resume_pick|resume_set|labels_read|label_set|terms_read|
@@ -288,7 +347,10 @@ API (JSON; all need the cookie; POSTs need X-NUauto: 1)
   POST /api/quit
 
 FILES IT WRITES (all under local/, mode 700, except as noted)
-  gui.lock          pid, port and a secret that only lets a second start ask for a window (removed on exit)
+  gui.lock          pid, port and a secret that only lets a second start ask for a window (removed on exit); on the
+                    homelab nuauto-web's (its runs check it)
+  settings.lock     local_config.json and profile.json are changed under it (Settings, setup, sync's merge)
+  review_devices.json, review_pair.json   (homelab) the paired devices' key hashes, the open pairing links' hashes
   browser_profile.lock   who uses the NUworks browser (pid, what, since)
   onboard.json      what the read-only NUworks reads found (resume labels, terms)
   local_config.json gains tos_ack, preferences, tools (saved tool paths) through the wizard (mode 644, as before)
@@ -298,6 +360,8 @@ FILES IT WRITES (all under local/, mode 700, except as noted)
 NOT YET PROVEN FOR REAL (only in demo mode so far)
 - A real GUI apply with you watching; the Google and NUworks logins through the GUI; the resume-label and term
   reads against the real NUworks; the systemd/launchd toggle.
+- The app on the real homelab (2026-10-14): served by nuauto-web, used from a paired phone, an Apply run there on its
+  virtual screen; Settings > Homelab's Check and Set it up against a real homelab.
 - The packaged app on a real desktop other than Fedora 44 (containers ran it on Ubuntu 22.04/24.04, Debian 12, Fedora
   and Arch; its own window was rendered on GTK 4 and on GTK 3 / Ubuntu 22.04 with a virtual X server). The macOS app
   on a real Mac: CI builds both (Apple Silicon on every pull request, Intel on v* tags) and runs their self-test, but nobody has opened one yet. No

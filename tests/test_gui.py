@@ -269,12 +269,31 @@ try:
     post("/api/settings", {"password_manager": "", "bitwarden_import": ["myworkday"]})  # off again (the page part below turns it on)
     assert get("/api/settings")["password_manager"]["on"] is False
     # assistants side by side: a running one (its slot's lock held, as by a live `nuauto assist`) shows on its row
-    # (the state string is "<this computer's>|<the homelab's>": empty on both sides without remote_assist)
+    # (the state string is "<this computer's>|<the homelab's>": empty on both sides without remote_assist; each
+    # session with what it waits for, so the open screen updates when that changes)
     assert get("/api/company")["sessions"] == [] and get("/api/company")["slots"] == 3 and get("/api/state")["assistants"] == "|"
     with hold_slot(1, {"row": 7, "tab": "other", "company": "Basalt Bio", "host": "jobs.example.net"}):
         assert [(s["slot"], s["row"], s["tab"]) for s in get("/api/other")["sessions"]] == [(1, 7, "other")]
-        assert get("/api/state")["assistants"] == "other-7:1|"
+        assert get("/api/state")["assistants"] == "other-7:1:|"
     assert get("/api/other")["sessions"] == [] and get("/api/state")["assistants"] == "|"  # it ended: the slot is free
+    # the laptop's page: nothing is the laptop's only (it is the laptop); the homelab's own parts are not here
+    st = get("/api/state")
+    assert st["where"] == "laptop" and st["laptop_only"] == {} and st["waiting"] == [] and st["remote_app"] is None
+    assert get("/api/company")["queue"] is None
+    assert request("GET", "/api/assistant/1")[0] == 404 and request("GET", "/api/assistant/1/shot.png")[0] == 404
+    post("/api/assistant", {"slot": 1, "do": "approve", "id": "x"}, expect=409)
+    post("/api/action", {"kind": "pair_device", "args": {"name": "x"}}, expect=409)
+    post("/api/action", {"kind": "unpair", "args": {"id": "0" * 12}}, expect=409)
+    post("/api/devices", {}, expect=404)
+    assert request("GET", "/pair?c=x")[0] == 404 and request("GET", "/s/1")[0] == 404            # (the homelab's only)
+    # Settings > Homelab: check one (the demo answers with made-up facts, no ssh), then what can be saved
+    assert get("/api/settings")["homelab"]["available"] and not get("/api/settings")["homelab"]["on"]
+    probe = post("/api/homelab", {"action": "check", "ssh": "homelab"})
+    assert probe["ok"] and probe["tailscale"] == "100.64.0.42"
+    post("/api/homelab", {"action": "save", "ssh": "homelab", "hostname": "lab", "folder": "projects/auto", "listen": "0.0.0.0"},
+         expect=409)
+    post("/api/homelab", {"action": "setup"}, expect=409)                       # no homelab used yet
+    post("/api/homelab", {"action": "nope"}, expect=409)
     for bad in (0, 31, "lots", 2.5, True, None):
         post("/api/settings", {"max_per_week": bad}, expect=409)
     assert post("/api/settings", {"max_per_week": "7"})["max_per_week"] == 7

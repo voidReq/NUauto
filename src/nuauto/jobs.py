@@ -17,6 +17,7 @@ Pipeline (run in order; each step only does new work):
 
 Rules live in RULES below. Nothing here clicks Apply or changes NUworks.
 """
+import contextlib
 import glob
 import html
 import json
@@ -214,6 +215,30 @@ def save(name, data):
     with open(tmp, "w") as f:
         json.dump(data, f, indent=1)
     os.replace(tmp, path(name))
+
+
+@contextlib.contextmanager
+def ratings_locked():
+    """data/ratings.json read and written under its lock (yields the dict; saved if changed): the GUI's Review on either
+    machine and sync's merge of both machines' ratings (sync.share) take it."""
+    import fcntl
+    os.makedirs(config.DATA_DIR, exist_ok=True)
+    with open(path("ratings.lock"), "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        ratings = load("ratings.json", {})
+        before = json.dumps(ratings, sort_keys=True)
+        yield ratings
+        if json.dumps(ratings, sort_keys=True) != before:
+            save("ratings.json", ratings)
+
+
+def set_rating(job_id, rating):
+    """One rating ({"label": 0|1, "date"}), or None to take it away; the others as they are on disk now."""
+    with ratings_locked() as ratings:
+        if rating is None:
+            ratings.pop(job_id, None)
+        else:
+            ratings[job_id] = rating
 
 
 def load_details():

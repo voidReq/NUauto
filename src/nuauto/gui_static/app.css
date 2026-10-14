@@ -121,6 +121,14 @@ code, .mono { font-family: var(--mono); font-size: 12.5px; }
 .demo-banner { margin: 8px 0 4px; border: 1px dashed var(--warn); background: var(--warn-soft); color: var(--text);
   border-radius: var(--radius-sm); padding: 8px 14px; font-size: 13px; }
 
+/* the homelab's page: an assistant's screen (it wants something from you: attn), and the pairing page */
+.card.attn { border-color: color-mix(in srgb, var(--warn) 60%, var(--border)); }
+.reply textarea { width: 100%; min-height: 96px; resize: vertical; font: inherit; }
+.log.term { max-height: 260px; }
+main.narrow { max-width: 34rem; margin: 3rem auto; padding: 0 16px; }
+main.narrow .brand { padding: 0; }
+main.narrow h1 { font-size: 20px; }
+
 /* buttons and inputs */
 .btn { font: inherit; font-weight: 600; font-size: 13.5px; border-radius: var(--radius-sm); padding: 8px 14px;
   border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer;

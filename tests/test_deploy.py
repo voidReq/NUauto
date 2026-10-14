@@ -194,7 +194,10 @@ finally:
     config.DEPLOY_FROM_GIT = False
 
 # one list of what makes web restart, in deploy.py and in doctor (which can't import deploy: it runs on older code)
-assert [os.path.basename(p) for p in deploy.WEB_CODE] == list(doctor.WEB_FILES)
+assert deploy.NOT_WEB == doctor.NOT_WEB
+assert deploy.web_code("src/nuauto/gui.py") and deploy.web_code("src/nuauto/review.py") and deploy.web_code("src/nuauto/web.py")
+assert not deploy.web_code("src/nuauto/deploy.py") and not deploy.web_code("src/nuauto/gui_static/app.js")   # read per request
+assert not deploy.web_code("docs/REMOTE.md") and not deploy.web_code("tests/test_gui.py")
 # the unit files this deploy installs exist in the repo and run the installed command
 for unit in ("nuauto-deploy.service", "nuauto-deploy.timer"):
     assert os.path.isfile(os.path.join(config.PROJECT_DIR, "deploy", "systemd", unit)), unit

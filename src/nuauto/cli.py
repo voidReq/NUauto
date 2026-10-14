@@ -141,7 +141,9 @@ def main():
         elif cmd == "assist":
             if config.IS_SERVER and not config.REMOTE_ASSIST and rest == ["auto"]:
                 return  # nuauto-assist.timer while the assistant on the homelab is off: nothing to do, no failure
-            if config.IS_SERVER and not config.REMOTE_ASSIST:
+            # NUauto's page on the homelab without its assistant: the NUworks turn and the NUworks side still work there
+            app_only = config.REMOTE_APP and rest[:1] in (["nuworks-turn"], ["nuworks-done"], ["nuworks"])
+            if config.IS_SERVER and not config.REMOTE_ASSIST and not app_only:
                 sys.exit("nuauto assist runs on the laptop (visible browser, you at the terminal). On the homelab only "
                          "with \"remote_assist\": true in local_config.json (docs/REMOTE.md).")
             from nuauto import assist

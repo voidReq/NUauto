@@ -16,7 +16,10 @@ WHERE AM I
 - Laptop (Fedora, ~/projects/auto): code is edited here. Interactive commands run here.
 - Homelab (`ssh homelab`; hostname and path in local_config.json) = PROD. Runs the
   scheduled update, Discord messages and the Mark-done page. config.IS_SERVER is True there. With "remote_assist"
-  (Phase 3, 2026-10-11) also company-site assistant sessions, in tmux (docs/REMOTE.md).
+  (Phase 3, 2026-10-11) also company-site assistant sessions, in tmux (docs/REMOTE.md). With "remote_app" (or
+  remote_assist; 2026-10-14, my request: "1:1 with the app") nuauto-web also serves NUauto's page for my phone: the
+  same app as `nuauto gui` (gui.serve_remote), Tailscale IP :8766, paired devices only; what needs the laptop shows as
+  "On your laptop" there (docs/REMOTE.md, docs/GUI.md).
   Code gets there by itself: with "deploy_from_git" (mine, once turned on) the homelab deploys GitHub's main every
   5 minutes (deploy.py, nuauto-deploy.timer); otherwise sync.py copies the laptop's checkout. Never edit it on the
   homelab. Details: docs/DEPLOY.md.
@@ -45,7 +48,8 @@ HARD LIMITS
   Both caps count the main (NUworks) tab only: the Other jobs tab has no cap (my call, 2026-10-07). Summer
   internships (Simplify's and vanshb03's lists, intern.py) go in the Other jobs tab: no weekly or total cap either; Approved ones
   can be applied to as much as I want (my call, 2026-10-10).
-- One application at a time on NUworks (apply.py: one browser, one row after another). Company sites: up to 3 assistant
+- One application at a time on NUworks (apply.py: one browser, one row after another; and one machine at a time,
+  since both can run Apply: remote.nuworks_turn, 2026-10-14). Company sites: up to 3 assistant
   sessions side by side (my call, 2026-10-10; local_config.json "assist_slots" 1-3), each in its own terminal window and
   browser profile, one per row and one per job site at a time (COMPANY-SITE AGENT).
 - I should check NUworks' terms of use before running against the real site.
@@ -70,9 +74,11 @@ SAFETY RULES (most important)
 7. (Changed 2026-10-03; GUI added 2026-10-05.) `nuauto apply` submits every Approved row, one at a
    time, with no per-job prompt: Approved in the sheet IS my approval. It runs only with me there:
    in a real terminal, or from the GUI (`nuauto gui`: I click Start, the browser is visible, Stop =
-   Ctrl+C). Never from an agent: code refuses real submits inside a Claude Code shell (CLAUDECODE),
-   and `--ui json` works only as a child of the running GUI. A dry run (fill, screenshot, stop)
-   exists only as the hidden --dry-run dev flag.
+   Ctrl+C). (Added 2026-10-14, my call: "Allow it on the homelab".) Or from NUauto's page on the homelab: I tap Start
+   on a paired device, the browser runs on a virtual screen I watch there (its link and password on the run's card),
+   Stop = Ctrl+C. Never from an agent: code refuses real submits inside a Claude Code shell (CLAUDECODE),
+   and `--ui json` works only as a child of the running GUI (on the homelab: nuauto-web). A dry run (fill, screenshot,
+   stop) exists only as the hidden --dry-run dev flag.
 8. (Changed 2026-10-03.) No y/n before submit. Every filled form is still screenshotted to
    logs/ before Submit, and after-submit confirmation is checked.
 9. Log every action and save every screenshot to a logs/ folder, per application.
@@ -115,7 +121,7 @@ Status values: Proposed, Approved, Applied, Failed, Needs Human
 - Failed / Needs Human: script stopped. Put the reason in Notes.
 - Notes starting "Dropped <date>: <reason>" (sheet.drop, added 2026-10-12, my request): a Failed row I chose not to apply
   to (closed, a duplicate, a bad location): the Drop button in the GUI's Company sites / Other jobs card and on the
-  homelab review page's queue. Only Approved / Needs Human rows; the row stays as a record, so Review never re-offers it.
+  homelab page's Company sites. Only Approved / Needs Human rows; the row stays as a record, so Review never re-offers it.
 - Notes starting "ALSO APPLY ON COMPANY SITE" (SITE_MARK): submitted on NUworks, but the
   company also wants its own site; I do that part.
 - The first tab is NUworks only (sheet.open_worksheet refuses if "Other jobs" is first). A second tab,
@@ -162,7 +168,14 @@ GUI (`nuauto gui`, gui.py + gui_static/ + onboard.py + health.py + demo.py; adde
   process can start, only the sheet and file checks run, no window, no lock file, no homelab sync; my saved
   answers and run logs / screenshots are hidden. Start it with --no-open --port 0 and open the printed URL in
   Playwright). Never start the real GUI (no --view) or click Start in one; it refuses to start inside a Claude Code
-  shell anyway. Screens for review: `nuauto gui --demo --screenshots DIR`.
+  shell anyway. Screens for review: `nuauto gui --demo --screenshots DIR`. The homelab's page: `nuauto gui --demo
+  --remote` (= `nuauto review demo`; prints a pairing link; --screenshots DIR too). Never use the real homelab page.
+- The same app on the homelab (2026-10-14; WHERE AM I): gui.REMOTE mode inside nuauto-web; paired-device cookie
+  instead of the start secret; laptop-only actions refused there (gui.LAPTOP_ONLY, REMOTE_SETUP, REMOTE_SETTINGS_OFF).
+  Settings, ratings, answers and the resume label changed on either page merge both ways (sync.share). Setting a
+  homelab up is in the GUI too, for other users: Settings > Homelab (Check over ssh, Use this homelab, Set it up: a
+  terminal window, `nuauto onboard homelab-setup`, each step asked first) and setup's optional Homelab step. Local mode
+  (and the packaged app) is unchanged without one.
 - Setup wizard (onboard.py): each step checks itself; preferences go in local_config.json "preferences"
   (jobs.DEFAULTS = my original settings). Health checks (health.py) never open a login page.
 - Its own window (window.py): macOS pywebview; Linux the system python3's GTK + WebKitGTK (window_gtk.py); else a
@@ -182,16 +195,17 @@ COMPANY-SITE AGENT (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`;
   Workday, Oracle, iCIMS, SuccessFactors...). Never NUworks itself (refused even with --url), never rows
   stopped for something on NUworks (cover letter, transcript...): those are mine (assist.assist_target).
 - Laptop, real terminal, me watching; or (Phase 3, my call 2026-10-11) the homelab, in a tmux session I attach to, with
-  "remote_assist" on: its browser on a virtual screen I open over Tailscale (screen.py), Discord links me to the review
-  page (review.py, Tailscale only, paired devices only): I answer it, approve or decline each Submit (the guard waits
+  "remote_assist" on: its browser on a virtual screen I open over Tailscale (screen.py), Discord links me to its screen
+  in NUauto's page on the homelab (#/assistant/<slot>; the old review page until 2026-10-14; Tailscale only, paired
+  devices only): I answer it, approve or decline each Submit (the guard waits
   for my tap; a late Approve = a 10-minute pass for that one action) and get captchas there. With "remote_auto" (each tab
-  its own switch since 2026-10-13: {"nuworks": .., "other": ..}; the review page's queue is in those two tabs, grouped) the
+  its own switch since 2026-10-13: {"nuworks": .., "other": ..}; the queue shows in that page's Company sites) the
   homelab starts sessions by itself from my approved rows (remote.py: 09:00-22:00, free slots, never a row that had a
   session before, never a row or site the laptop holds: claims over ssh). A site that refuses the homelab's browser
   (a fake sign-in page): "End: do it on the laptop" marks the row's Notes (assist.LAPTOP_MARK); the homelab skips it
   and the GUI shows "do it on the laptop" (my request, 2026-10-11; no disguising the browser). The GUI's Company sites shows them (Homelab assistants: Open its
-  page, Pair this computer). Everything optional and set in the GUI too (my request, for other users: setup's optional
-  steps and Settings: Assistant on your homelab, Password manager (Bitwarden) with its status chip). Proven with a
+  screen, Pair this computer). Everything optional and set in the GUI too (my request, for other users: setup's optional
+  steps and Settings: Homelab, NUauto on your homelab, Password manager (Bitwarden) with its status chip). Proven with a
   practice run on 2026-10-11 (docs/REMOTE.md). Starts `claude --model sonnet --effort low --permission-mode default` (never my auto
   mode: its own check asked about every click; the guard decides; local_config.json "assist_effort":
   low / medium / high; Settings; low is my call, 2026-10-10) with the Playwright MCP browser (profile assist_profile/:
@@ -242,7 +256,7 @@ COMPANY-SITE AGENT (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`;
   host/<company>; my own login on another domain counts for the whole domain (account.amazon.jobs = amazon.jobs). A
   sign-in page on yet another address (Amazon jobs' passport.amazon.com): the guard names my own login(s) sharing a
   company word with it and refuses both a sign-in and a new account; the agent runs `link-login <site>`, which the guard
-  asks me first (terminal / review page), then my login works there too ("also" in accounts.json). Never a login chosen
+  asks me first (terminal / its screen on the homelab page), then my login works there too ("also" in accounts.json). Never a login chosen
   by the agent alone (my call, 2026-10-11).
 - Sign-in pages (added 2026-10-10, my call): a sign-in / create-account page's own "Submit" doesn't ask (the latest
   snapshot has a password box and only account boxes: assist.sign_in_page); any question on the page, or "Apply" /
@@ -267,8 +281,9 @@ COMPANY-SITE AGENT (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`;
   click, typing, hover or key inside one (assist.CAPTCHA, captcha_target); no solving, no disguised browser. After I /exit, the launcher asks "did you submit?"; y =
   Applied (dated today, counts toward the weekly limit), then the same job is submitted on NUworks too by
   apply.submit_nuworks_side (the tested NUworks code; every popup check except the off-site-link stop;
-  outcome appended to Notes; retry: `nuauto assist nuworks <row>`). On the homelab never: the row's Notes say "NUworks
-  side NOT submitted yet" and the laptop's retry list has it. The agent never touches the sheet.
+  outcome appended to Notes; retry: `nuauto assist nuworks <row>`). On the homelab never by itself: the row's Notes say
+  "NUworks side NOT submitted yet" and Company sites (the laptop's page or the homelab's, since 2026-10-14) offers
+  Submit on NUworks too. The agent never touches the sheet.
   Log per run: logs/<stamp>_assist_row<N>/ (actions.log = every guard decision).
 - Side by side (added 2026-10-10, my call): up to 3 sessions at once (assist.slots). Each takes a slot (lock
   local/assist_slot<N>.lock with what runs there; slot 1 = assist_profile/, the others assist_profile_<N>/), a row lock
@@ -323,7 +338,7 @@ src/nuauto/: cli.py (the nuauto command)   config.py (all paths, hosts; reads lo
   daily.py (homelab update + Discord)   web.py (Mark-done page, homelab)   sync.py (laptop<->homelab)   deploy.py (homelab: deploys main)
   doctor.py (health check)   inspect_form.py (read-only form lister)   assist.py (company-site agent)   accounts.py (its job-site logins)
   mail.py (the agent's email codes and links: read-only Gmail)   screen.py (the homelab assistant's virtual screen + browser view)
-  review.py (the homelab assistant's review page, inside nuauto web)   remote.py (its queue, and claims between the machines)
+  review.py (pairing devices with the homelab's page; its assistant sessions' screens and queue, served by gui.py)   remote.py (its queue, and claims between the machines)
   setup_sheet.py (sheet setup / `format` restyle)   gui.py (the window's server)   gui_static/ (its page)
   health.py (the checks behind doctor and the GUI)   onboard.py (setup wizard)   demo.py (demo mode fakes)
   window.py (which window) + window_gtk.py (the Linux window, run by the system python3)
@@ -369,8 +384,10 @@ nuauto assist [<row>]  # company-site agent for a Needs Human row; asks me befor
 nuauto accounts [export [<file>] [--all]]   # the job-site logins the agent made (no passwords shown); Bitwarden's import file
 nuauto accounts import <file>|- --only <text>   # my own logins from Bitwarden for those sites (bw list items --search ...)
 nuauto accounts export --bitwarden              # NUauto's new logins straight into my vault (bw unlocked by me; no file)
-nuauto review pair [<name>] | devices | unpair <name>   # the homelab assistant's review page: pair my phone (docs/REMOTE.md)
-nuauto review demo                                      # that page with made-up sessions, locally (agents: look at it with this)
+nuauto review pair [<name>] | devices | unpair <name>   # NUauto's page on the homelab: pair my phone (docs/REMOTE.md)
+nuauto review demo                                      # that page with made-up sessions, locally (= nuauto gui --demo --remote; agents)
+nuauto onboard homelab-setup                            # set a homelab up step by step (Settings > Homelab > Set it up opens it)
+nuauto onboard homelab-check <ssh name> [<folder>]      # what that homelab has, read-only over ssh
 nuauto assist queue | start <nuworks|other> <row>      # (homelab) the assistant's queue / start one row's session in tmux
 nuauto assist other [<row>]                      # same agent for the sheet's Other jobs tab (no NUworks step after)
 nuauto assist other add <url> <company> <title>  # add a job there as Approved
@@ -394,7 +411,8 @@ company-site agent's guard. test_mail.py covers the email codes and links (Gmail
 agent's `email` command). test_insights.py covers the Insights numbers (pay parsing, folding, no guessing). test_intern.py covers the
 internship pool and postings.py (job-site links, parsing, the network guard on a local server, fetch tries, rules,
 Review queue, a whole update with Claude stood in for). test_deploy.py runs deploy.py on a throwaway git repo (copy, web restart only when needed, undo on failure). test_demo.py runs the real apply.py on demo mode's fake pages (stops, cap, re-login).
-test_gui.py covers the GUI server's security and flows; test_view.py the read-only `--view` mode; test_setup.py the wizard; test_health.py the checks;
+test_gui.py covers the GUI server's security and flows; test_homelab_app.py the same app as the homelab serves it (demo
+`--remote`: pairing, refusals, sessions, queue, devices, a phone-width browser); test_review.py its handler's rules and the sessions' backend; test_view.py the read-only `--view` mode; test_setup.py the wizard; test_health.py the checks;
 test_window.py the packaged-app plumbing (self_cmd, the assistant's command, the window choice, clean env).
 
 ENVIRONMENT / STYLE

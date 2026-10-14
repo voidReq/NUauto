@@ -18,11 +18,18 @@ runs, the claim (local/assist_claims/ on the homelab; ignored after CLAIM_HOURS)
 sessions off that row and site; the laptop lets go when its session ends. Homelab unreachable: the laptop goes ahead
 and says so.
 
+NUWORKS TURN (both machines, with NUauto on the homelab: both can run Apply)
+One machine submits on NUworks at a time (nuworks_turn): each counts the weekly cap from the sheet before each submit,
+so two at once could both see room for the last one. The homelab's runs take the turn in local/nuworks_turn.json there
+(it lasts while that process runs); the laptop's ask for it over ssh (it lasts until they let go, or NUWORKS_TURN_HOURS).
+Homelab unreachable: the laptop goes ahead and says so (nothing there can be applying without you starting it).
+
   nuauto assist auto | queue                 start what the queue allows now / show what it would start
   nuauto assist start <nuworks|other> <row> [--again]   (homelab) start one row's session now, in tmux (--again: also
                                              after an approved Submit whose outcome nobody gave)
   nuauto assist sessions                     (homelab) the running sessions, as JSON (the laptop's GUI reads it)
   nuauto assist claim|unclaim <nuworks|other> <row> <host>   (homelab) what the laptop's sessions run over ssh
+  nuauto assist nuworks-turn|nuworks-done    (homelab) the laptop's NUworks runs take / give back the turn, over ssh
 """
 import fcntl
 import json
@@ -41,6 +48,8 @@ from nuauto import config
 AUTO_PATH = os.path.join(config.LOCAL_DIR, "assist_auto.json")      # rows the queue started: never again by itself
 CLAIMS_DIR = os.path.join(config.LOCAL_DIR, "assist_claims")       # the laptop's running sessions (on the homelab)
 CLAIM_HOURS = 12
+NUWORKS_TURN = os.path.join(config.LOCAL_DIR, "nuworks_turn.json")  # (homelab) which machine submits on NUworks now
+NUWORKS_TURN_HOURS = 3  # a laptop's turn counts this long at most (one that never gave it back: crashed, no network)
 HOURS = (9, 22)
 STARTUP_CHECK = 8  # seconds after starting: still running?
 TABS = {"nuworks": "jobs", "other": "other"}                        # the command's word -> assist's tab name
@@ -232,6 +241,96 @@ def claimed(tab, row, host):
             if c.get("host") == host:
                 return f"the laptop's assistant is on {host} now"
     return None
+
+
+# ---------- the NUworks turn (both machines) ----------
+
+class NuworksBusy(Exception):
+    """The other machine is submitting on NUworks now (the message says which)."""
+
+
+def _pid_alive(pid):
+    try:
+        os.kill(int(pid), 0)
+    except (ProcessLookupError, ValueError, TypeError):
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def turn_holder(turn, now=None):
+    """Who holds this turn record now ("laptop" / "homelab"), or None when it no longer counts. Pure but for the pid."""
+    if not isinstance(turn, dict):
+        return None
+    if turn.get("by") == "homelab":
+        return "homelab" if _pid_alive(turn.get("pid")) else None
+    if turn.get("by") == "laptop":
+        return "laptop" if (now or time.time()) - float(turn.get("since") or 0) < NUWORKS_TURN_HOURS * 3600 else None
+    return None
+
+
+def take_turn(by, pid=None):
+    """(homelab) The NUworks turn for by ("homelab": a run here, pid its process; "laptop": over ssh). Returns None, or
+    why not (the other machine holds it). The same machine taking it again (a run that never let go) is fine: each
+    machine runs one NUworks browser at a time anyway (browser.lock_profile)."""
+    with _claims_lock():
+        try:
+            with open(NUWORKS_TURN) as f:
+                turn = json.load(f)
+        except (OSError, ValueError):
+            turn = None
+        held = turn_holder(turn)
+        if held and held != by:
+            return (f"the {held} is applying on NUworks now (one machine at a time: both count the weekly limit before "
+                    "each submit). Try again when it is done.")
+        with open(NUWORKS_TURN + ".tmp", "w") as f:
+            json.dump({"by": by, "pid": pid, "since": time.time()}, f)
+        os.replace(NUWORKS_TURN + ".tmp", NUWORKS_TURN)
+    return None
+
+
+def give_turn(by):
+    with _claims_lock():
+        try:
+            with open(NUWORKS_TURN) as f:
+                if json.load(f).get("by") != by:
+                    return
+        except (OSError, ValueError):
+            return
+        try:
+            os.remove(NUWORKS_TURN)
+        except OSError:
+            pass
+
+
+@contextmanager
+def nuworks_turn():
+    """Around a run that submits on NUworks (apply.main, the NUworks side): one machine at a time, when NUauto on the
+    homelab can apply too (REMOTE_APP). Raises NuworksBusy. The laptop goes ahead, and says so, if the homelab can't be
+    reached."""
+    if config.DEMO or not config.REMOTE_APP:
+        yield
+        return
+    if config.IS_SERVER:
+        why = take_turn("homelab", os.getpid())
+        if why:
+            raise NuworksBusy(why)
+        try:
+            yield
+        finally:
+            give_turn("homelab")
+        return
+    code, out = _homelab("nuworks-turn")
+    if code is None:
+        print("(The homelab could not be asked whether it is applying on NUworks now: going ahead.)")
+    elif code != 0:
+        raise NuworksBusy(out.strip().splitlines()[-1] if out.strip() else "the homelab is applying on NUworks now")
+    try:
+        yield
+    finally:
+        if code == 0:
+            _homelab("nuworks-done")
 
 
 # ---------- claims (from the laptop) ----------
@@ -451,6 +550,16 @@ def main(argv):
         ok, why = claim(tab, row, argv[3])
         print(json.dumps({"ok": ok, "why": why}))
         sys.exit(0 if ok else 3)
+    if argv in (["nuworks-turn"], ["nuworks-done"]):
+        if not config.IS_SERVER:
+            sys.exit("nuworks-turn / nuworks-done run on the homelab (the laptop's NUworks runs call them over ssh).")
+        if argv == ["nuworks-done"]:
+            return give_turn("laptop")
+        why = take_turn("laptop")
+        if why:
+            print(why)
+            sys.exit(3)
+        return
     if not config.IS_SERVER:
         sys.exit("The queue runs on the homelab (docs/REMOTE.md).")
     if argv == ["sessions"]:

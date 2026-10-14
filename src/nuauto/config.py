@@ -108,6 +108,9 @@ DEPLOY_FROM_GIT = bool(LOCAL.get("deploy_from_git")) and HAS_SERVER
 DEPLOY_REPO = LOCAL.get("deploy_repo") or f"https://github.com/{REPO}.git"
 # The company-site assistant on the homelab too (`nuauto assist` there, in tmux; docs/REMOTE.md). Off unless true.
 REMOTE_ASSIST = bool(LOCAL.get("remote_assist")) and HAS_SERVER
+# The NUauto app on the homelab too: the same screens as `nuauto gui`, from your phone (gui.serve_remote, inside nuauto-web,
+# on web_listen_host:8766, paired devices only; docs/REMOTE.md). The assistant there needs it (you answer it there).
+REMOTE_APP = HAS_SERVER and (REMOTE_ASSIST or bool(LOCAL.get("remote_app")))
 # The homelab's copy of your writeups: sync.push puts each assist_writeups folder in ~/nuauto-notes/<its name> there.
 # The agent on the homelab reads only those and the resume (never ~/projects there: that holds the live NUauto).
 NOTES_COPY_DIR = os.path.expanduser("~/nuauto-notes")
@@ -139,6 +142,21 @@ def find_client_json():
 def lock_token():
     if os.path.exists(TOKEN_PATH):
         os.chmod(TOKEN_PATH, 0o600)
+
+
+class settings_lock:
+    """local_config.json and profile.json are changed under this lock (Settings, setup, and sync's merge of both
+    machines' copies): `with config.settings_lock(): ...`."""
+
+    def __enter__(self):
+        import fcntl
+        os.makedirs(LOCAL_DIR, mode=0o700, exist_ok=True)
+        self.f = open(os.path.join(LOCAL_DIR, "settings.lock"), "a")
+        fcntl.flock(self.f, fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, *exc):
+        self.f.close()
 
 
 def self_cmd(*args):
