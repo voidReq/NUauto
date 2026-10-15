@@ -228,6 +228,8 @@ try:
     assert gui.link_state()["on"] is True
 
     # ---- unpaired on the homelab: forgotten here at the next call, and the app says how to link again
+    eventually(lambda: not gui._homelab["busy"], "the background read to end")  # (else it is that next call)
+    gui._homelab["at"] = time.time()                                             # and none starts meanwhile
     mine = next(d["id"] for d in json.loads(there("GET", "/api/devices", cookie=PHONE)[2])["devices"] if d["name"] == asked[0])
     assert there("POST", "/api/action", {"kind": "unpair", "args": {"id": mine}}, cookie=PHONE)[0] == 200
     try:
