@@ -1236,7 +1236,7 @@ def homelab_read():
             except link.NoLink as e:  # unreachable a moment, or unpaired: what ssh still says
                 _homelab.update(queue=None, task=None, error=str(e))
         from nuauto import remote
-        _homelab["sessions"] = remote.homelab_sessions() if config.REMOTE_ASSIST and not config.DEMO else []
+        _homelab["sessions"] = remote.homelab_sessions() if config.REMOTE_ASSIST and config.HAS_SERVER and not config.DEMO else []
     finally:
         _homelab["at"], _homelab["busy"] = time.time(), False
 

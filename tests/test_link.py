@@ -74,6 +74,10 @@ def eventually(check, what, seconds=60):
 
 # the laptop's app, in this process: laptop mode, with a homelab whose page is on
 config.REMOTE_APP, config.REMOTE_ASSIST, config.IS_SERVER = True, True, False
+from nuauto import remote  # noqa: E402
+
+ssh_reads = []
+remote.homelab_sessions = lambda: ssh_reads.append(1) or []  # the read without a link: never ssh in a test
 gui.REMOTE = False
 link.address = lambda: ("127.0.0.1", PORT)
 lsrv = ThreadingHTTPServer(("127.0.0.1", 0), gui.Handler)
@@ -175,10 +179,12 @@ try:
         pass
 
     # ---- the background read: its sessions, its queue, its running task, through the link
+    eventually(lambda: not gui._homelab["busy"], "an earlier read (started before the link) to end")
     gui._homelab.update({"at": 0.0, "busy": False})
     gui.homelab_assistants()
     eventually(lambda: not gui._homelab["busy"] and gui._homelab["at"] > 0, "the read")
-    assert len(gui.homelab_assistants()) == 3 and gui._homelab["error"] is None
+    assert len(gui.homelab_assistants()) == 3 and gui._homelab["error"] is None, (gui._homelab, ssh_reads)
+    assert ssh_reads == [], ssh_reads  # (no homelab set here: never ssh)
     assert gui._homelab["queue"] and gui._homelab["queue"]["free"] == 0
     todo = gui.assistant_todo()
     assert [t["screen"] for t in todo if t["status"] == "approve"] == ["#/assistant/h1"], todo   # opens in this app

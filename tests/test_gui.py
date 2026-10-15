@@ -405,7 +405,7 @@ try:
     assert get("/api/other")["ready"][0]["on_laptop"] is False
     # no tab yet: adding the first job makes it (headers, then the job as row 2)
     os.remove(other_file)
-    assert get("/api/other") == {"exists": False, "tab": "Other jobs", "ready": [], "applied": [], "rest": [], "sessions": [], "slots": 3, "homelab": [], "homelab_review": None}
+    assert get("/api/other") == {"exists": False, "tab": "Other jobs", "ready": [], "applied": [], "rest": [], "sessions": [], "slots": 3, "homelab": [], "homelab_review": None, "linked": False}
     assert post("/api/other/add", {"url": "https://jobs.example.net/2", "company": "Cinder", "title": "Intern"})["row"] == 2
     rows = json.load(open(other_file))["rows"]
     assert rows[0] == ["URL", "Company", "Title", "Status", "Notes", "Date"] and rows[1][3] == "Approved", rows

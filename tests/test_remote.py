@@ -1048,7 +1048,8 @@ from nuauto import gui  # noqa: E402
 
 reads, gate = [], threading.Event()
 remote.homelab_sessions = lambda: (reads.append(1), gate.wait(5), [{"slot": 1, "tab": "other", "row": 3}])[2]
-real_flags = (gui.VIEW, config.DEMO, config.REMOTE_ASSIST, config.IS_SERVER, config.REMOTE_APP)
+real_flags = (gui.VIEW, config.DEMO, config.REMOTE_ASSIST, config.IS_SERVER, config.REMOTE_APP, config.HAS_SERVER)
+config.HAS_SERVER = True  # a laptop with a homelab set (else no ssh read at all)
 
 
 def fresh_cache():
@@ -1095,7 +1096,7 @@ try:
     wait_idle()
     assert gui._homelab["busy"] is False and gui._homelab["at"] > 0
 finally:
-    gui.VIEW, config.DEMO, config.REMOTE_ASSIST, config.IS_SERVER, config.REMOTE_APP = real_flags
+    gui.VIEW, config.DEMO, config.REMOTE_ASSIST, config.IS_SERVER, config.REMOTE_APP, config.HAS_SERVER = real_flags
     threading.excepthook = threading.__excepthook__
 
 # ---- the GUI's Homelab assistants card: the review page's address, Pair this computer, the browser tool's screenshots
