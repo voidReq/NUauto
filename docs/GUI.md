@@ -276,6 +276,13 @@ DEMO MODE (demo.py) AND TESTING WITH AGENTS
   three made-up assistant sessions (review.demo_setup: waiting to submit, waiting for an answer, ended). Prints
   {"url": a pairing link, "port", "remote": true, ...}: open it, press Pair. --screenshots: homelab-<screen>-*.png
   (Today, Apply, Company sites, the three assistants, Settings, Setup).
+- `nuauto gui --demo --linked [--no-open]`: the laptop's demo app linked to a demo homelab page of its own (a child
+  `--demo --remote`; config.DEMO_LINK, gui.demo_link): Today's homelab items open their screens in the app, Company
+  sites' Start on the homelab with each row's place in the homelab's queue, Apply's Run on: the homelab, Settings >
+  Homelab > This app (Unlink / Link). Both on 127.0.0.1, made-up data, no ssh. Test: tests/test_link.py.
+- One page for both machines: tests/screens.py opens every screen on the laptop's demo (test_gui), the linked demo
+  (test_link) and the homelab's (test_homelab_app): the same menu, none empty, none showing an error. A change that
+  should differ between the two goes behind state.where / REMOTE (or linked) with a check on each side.
 - `nuauto selftest` (also Settings > Run a self-test): the whole demo flow in a hidden browser (Firefox installed if
   missing; approve, apply with a question, the fake sheet), in its own temp folder; exit 0 = this install works.
 - Demo runs nobody watches use a hidden browser: with NUAUTO_DEMO_HEADLESS=1 (tests and the self-test set it) or no
@@ -305,7 +312,10 @@ API (JSON; all need the cookie; POSTs need X-NUauto: 1)
                              review: how many wait for Review}; where (laptop | homelab), laptop_only {action: why} (the
                              homelab's page), remote_app (the laptop: the homelab's page address, when it has one); todo:
                              the assistants that wait for you first ({"kind": "assistant", "status", "text", "screen": its
-                             screen, or null for a laptop session in its terminal window}), then site / company / urgent
+                             screen, or null for a laptop session in its terminal window}), then site / company / urgent;
+                             commit (the code this machine runs, short; both pages show it in the side bar); homelab_link
+                             (the laptop, homelab page on: {on, error, commit: the homelab's, task: its running task
+                             {id, kind, label, state}}, else null)
   GET  /api/health           the checks; POST /api/health/run {"groups": [...]}
   GET  /api/review?mode=&q=&category=&source=   the review queue (q / category narrow it; total, categories = the whole
                              queue; source=intern: the internships, else the co-ops; the reply says "source"; an internship
@@ -333,6 +343,13 @@ API (JSON; all need the cookie; POSTs need X-NUauto: 1)
   POST /api/homelab          (laptop) Settings > Homelab: {"action": check ({"ssh", "folder"} -> what it has)|save ({"ssh",
                              "hostname", "folder", "listen"})|off|setup (a terminal window)|claude (a terminal window)}
   POST /api/answer           {"task", "id", "reply"}; POST /api/stop {"task", "force"}
+  GET  /api/homelab/assistant/<slot>[/shot.png], /api/homelab/task?after=N, /api/homelab/file?path=   (laptop, linked: the
+                             homelab's page's answers through the link: a session's screen, its run, their pictures;
+                             a task comes with "where": "homelab" and its screenshot through this route)
+  POST /api/homelab/assistant, /api/homelab/answer, /api/homelab/stop   (laptop, linked) a tap on a homelab session's
+                             screen, its run's question, its Stop; refusals carry the homelab page's own words. POST
+                             /api/action apply / nuworks_side / assist with "on": "homelab" runs it there (Start on the
+                             homelab, Run on: the homelab); homelab_link / homelab_unlink: Settings > Homelab > This app
   GET  /api/company          agent / other / site / retry rows, sessions (the assistants running now: slot, row, tab,
                              company, host, since, attention: {kind waiting|approve, since, said} while it waits for you)
                              and slots (how many may); queue (the homelab: review.queue_view, or {"error"}); POST /api/mark {"action": applied|site|drop, "row", "url",

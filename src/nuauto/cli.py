@@ -41,7 +41,7 @@ from nuauto import config
 TOOLS = {"jobs": "jobs", "answers": "answers", "sheet": "sheet", "setup-sheet": "setup_sheet",
          "inspect": "inspect_form", "daily": "daily", "web": "web", "health": "health", "demo": "demo",
          "onboard": "onboard", "selftest": "selftest", "insights": "insights", "intern": "intern", "accounts": "accounts",
-         "review": "review"}
+         "review": "review", "link": "link"}
 COMMANDS = ("approve", "rate", "apply", "status", "update", "login", "test", "doctor", "assist", "gui", "deploy")
 
 

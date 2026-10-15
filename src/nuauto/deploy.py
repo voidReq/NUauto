@@ -37,7 +37,7 @@ def web_code(path):
     return path.startswith("src/nuauto/") and path.endswith(".py") and os.path.basename(path) not in NOT_WEB
 # Imported from the new code before anything is copied (the modules the homelab runs, NUauto's page there too).
 MODULES = ["cli", "config", "sheet", "jobs", "daily", "web", "doctor", "sync", "deploy", "browser", "health", "intern",
-           "postings", "assist", "review", "screen", "remote", "gui", "onboard", "apply"]
+           "postings", "assist", "review", "screen", "remote", "gui", "onboard", "apply", "link"]
 UNIT_DIR = os.path.expanduser("~/.config/systemd/user")
 STATE_PATH = os.path.join(config.LOCAL_DIR, "deployed.json")
 LOG_PATH = os.path.join(config.LOGS_DIR, "deploy.log")

@@ -43,7 +43,7 @@ import threading
 import time
 from datetime import date, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 from nuauto import answers
 from nuauto import config
@@ -612,6 +612,8 @@ def state():
         # laptop can do (the homelab's page shows those as "on your laptop")
         "where": "homelab" if REMOTE else "laptop", "laptop_only": LAPTOP_ONLY if REMOTE else {},
         "remote_app": homelab_review(),  # (laptop) the homelab's NUauto page, when it has one
+        "homelab_link": link_state(),     # (laptop) this app's link to it: start there, its sessions, its runs
+        "commit": code_commit(),          # which code this machine runs (both pages show it)
         "internships": {"on": intern.ENABLED, "term": intern.TERM, "review": intern_count()},
         # which assistant sessions run now and what they want (the open screens reload their lists when this changes)
         "assistants": ",".join(f"{s.get('tab')}-{s.get('row')}:{s.get('slot')}:{(s.get('attention') or {}).get('kind', '')}"
@@ -630,6 +632,22 @@ def state():
     }
 
 
+_commit = {"at": 0.0, "sha": None}
+
+
+def code_commit():
+    """The commit this machine runs (the homelab: the one it deployed; a git checkout: its HEAD), short; read once a
+    minute at most. None when unknown (the packaged app, a homelab without deploy_from_git)."""
+    if now() - _commit["at"] > 60:
+        _commit["at"] = now()
+        if REMOTE and config.IS_SERVER:
+            sha = read_json(os.path.join(config.LOCAL_DIR, "deployed.json")).get("sha")
+        else:
+            sha = None if config.DEMO else health.code_here()
+        _commit["sha"] = sha[:7] if isinstance(sha, str) and sha else None
+    return _commit["sha"]
+
+
 ASSISTANT_WAITS = {"approve": "ready to submit: approve it", "waiting": "waiting for your answer",
                    "finish": "ended: did it go through?", "prompt": "Claude Code asks something in its terminal"}
 
@@ -641,14 +659,17 @@ def assistant_todo():
         return [{"kind": "assistant", "tab": s["tab"], "row": s["row"], "company": s["company"], "title": s["title"],
                  "status": s["status"], "text": s["text"][:1].lower() + s["text"][1:], "screen": f"#/assistant/{s['slot']}"}
                 for s in waiting_sessions()]
+    from nuauto import link
     out, base = [], homelab_review()
-    for where, sessions in (("window", assistants()["sessions"]), ("homelab", homelab_assistants() if base else [])):
+    here = link.linked()  # linked: the homelab's sessions' screens open in this app (else in your browser)
+    for where, sessions in (("window", assistants()["sessions"]), ("homelab", homelab_assistants() if base or here else [])):
         for s in sessions:
             kind = (s.get("attention") or {}).get("kind")
             if kind in ASSISTANT_WAITS:
+                screen = None if where == "window" else \
+                    f"#/assistant/h{s.get('slot')}" if here else f"{base}/#/assistant/{s.get('slot')}"
                 out.append({"kind": "assistant", "tab": s.get("tab"), "row": s.get("row"), "company": s.get("company") or "",
-                            "title": "", "status": kind, "text": ASSISTANT_WAITS[kind],
-                            "screen": f"{base}/#/assistant/{s.get('slot')}" if where == "homelab" else None})
+                            "title": "", "status": kind, "text": ASSISTANT_WAITS[kind], "screen": screen})
     return out
 
 
@@ -903,6 +924,10 @@ def act(body):
     args = body.get("args") or {}
     if REMOTE and kind in LAPTOP_ONLY:
         raise Refused(LAPTOP_ONLY[kind])
+    if kind == "apply" and args.get("on") == "homelab":  # (laptop) Run on the homelab: its page runs it, this app follows
+        r = homelab("POST", "/api/action", {"kind": "apply", "args": {k: args[k] for k in ("n", "row", "order") if k in args}})
+        homelab_soon()
+        return homelab_task_view(r)
     if kind == "apply":
         from nuauto import apply
         why = apply_list()["why_not"]
@@ -960,6 +985,10 @@ def act(body):
         row = args.get("row")
         if not str(row).isdigit():
             raise Refused("Which row?")
+        if args.get("on") == "homelab":  # (laptop) on the homelab: its page runs it, this app follows
+            r = homelab("POST", "/api/action", {"kind": "nuworks_side", "args": {"row": int(row)}})
+            homelab_soon()
+            return homelab_task_view(r)
         task = APP.start("nuworks_side", f"NUworks side of row {row}",
                          config.self_cmd("assist", "nuworks", str(int(row)), "--ui", "json"), env=VISIBLE, watch=True)
     elif kind == "assist":  # args.tab "other": a row of the Other jobs tab
@@ -968,6 +997,10 @@ def act(body):
             raise Refused("Which row?")
         if REMOTE:  # the homelab: its own tmux session (remote.start), answered on its Assistants screen here
             return remote_assist_start(args)
+        if args.get("on") == "homelab":  # (laptop) Start on the homelab: its page starts it (through the link)
+            r = homelab("POST", "/api/action", {"kind": "assist", "args": {"row": int(row), "tab": args.get("tab") or ""}})
+            homelab_soon()
+            return {"message": r.get("message") or "Started on the homelab."}
         tab = "other " if args.get("tab") == "other" else ""
         return open_terminal(f"{shlex.quote(config.self_exe())} assist {tab}{int(row)}",
                              "The assistant runs here. It asks you before anything is submitted.")
@@ -1008,6 +1041,27 @@ def act(body):
         if not link:
             raise Refused("The homelab could not be asked for a pairing link (is it reachable?).")
         return {"url": link}
+    elif kind in ("homelab_link", "homelab_unlink"):  # (laptop) this app as one of the homelab page's devices, or not
+        from nuauto import link
+        if REMOTE or config.DEMO and not config.DEMO_LINK or config.IS_SERVER or not config.REMOTE_APP:
+            raise Refused("NUauto's page on the homelab is off (Settings > Homelab > NUauto on your homelab).")
+        if kind == "homelab_unlink":
+            name = (read_json(link.PATH).get("name") or "")
+            link.forget()
+            if name and config.DEMO:
+                DEMO_HOMELAB["unpair"](name)
+            elif name:
+                from nuauto import sync
+                sync.remote(f"cd {shlex.quote(config.SERVER_DIR)} && .venv/bin/nuauto review unpair {shlex.quote(name)}",
+                            "unpair this app on the homelab")
+            homelab_soon()
+            return {"message": "Unlinked: the homelab's sessions and runs open in your browser again."}
+        try:
+            name = link.pair()
+        except link.NoLink as e:
+            raise Refused(str(e))
+        homelab_soon()
+        return {"message": f"Linked as {name}: the homelab's sessions and runs open in this app."}
     elif kind == "pair_device":  # (homelab) a one-time link for another of your devices: you open it there, press Pair
         if not REMOTE:
             raise Refused("Pairing is for NUauto on your homelab (Settings > NUauto on your homelab).")
@@ -1052,8 +1106,10 @@ def stop(body):
 def company():
     rows = need_rows()
     agent, other, site, retry = company_rows(rows, facts=True)
-    return {"agent": agent, "other": other, "site": site, "retry": retry, **assistants(),
-            "queue": queue_info() if REMOTE else None}
+    a = assistants()
+    # the homelab's queue: its own on its page; the laptop's app shows the homelab's (through the link) on each row
+    return {"agent": agent, "other": other, "site": site, "retry": retry, **a,
+            "queue": queue_info() if REMOTE else _homelab.get("queue") if a["linked"] and config.REMOTE_ASSIST else None}
 
 
 QUEUE_FOR = 20  # seconds the homelab's queue (two sheet reads) is reused between Company sites loads
@@ -1133,8 +1189,9 @@ def assistants():
     """The assistant sessions running now (assist.sessions: slot, row, tab, company, host, since) and how many may;
     homelab: the homelab's own sessions (remote_assist), so a row it works on offers no Start here."""
     from nuauto import assist
+    from nuauto import link
     return {"sessions": assist.sessions(), "slots": assist.slots(), "homelab": homelab_assistants(),
-            "homelab_review": homelab_review()}
+            "homelab_review": homelab_review(), "linked": not REMOTE and link.linked()}  # linked: Start on the homelab
 
 
 def homelab_review():
@@ -1147,26 +1204,82 @@ def homelab_review():
     return url.rstrip("/") if url.startswith("http") else None
 
 
-HOMELAB_EVERY = 60  # seconds between reads of the homelab's sessions (ssh, in the background)
-_homelab = {"at": 0.0, "sessions": [], "busy": False}
+HOMELAB_EVERY = 60  # seconds between reads of the homelab's sessions over ssh (in the background)
+LINK_EVERY = 20     # the same through the app's link (sessions, queue, its running task: one cheap request each)
+_homelab = {"at": 0.0, "sessions": [], "busy": False, "queue": None, "task": None, "commit": None, "error": None}
 
 
 def homelab_assistants():
-    """The homelab's assistant sessions (remote.homelab_sessions over ssh), read at most every HOMELAB_EVERY seconds in
-    the background (the last answer meanwhile). [] without remote_assist, and in view or demo mode (no ssh there)."""
-    if VIEW or config.DEMO or not config.REMOTE_ASSIST or config.IS_SERVER:
+    """The homelab's assistant sessions, read at most every HOMELAB_EVERY seconds in the background (the last answer
+    meanwhile): through the app's link to the homelab's page when it has one (then its queue and its running task too:
+    homelab_read), else over ssh (remote.homelab_sessions). [] without remote_assist, and in view or demo mode."""
+    if VIEW or config.DEMO and not config.DEMO_LINK or not config.REMOTE_APP or config.IS_SERVER:
         return []
-    if time.time() - _homelab["at"] > HOMELAB_EVERY and not _homelab["busy"]:
+    from nuauto import link
+    every = LINK_EVERY if link.linked() else HOMELAB_EVERY
+    if time.time() - _homelab["at"] > every and not _homelab["busy"]:
         _homelab["busy"] = True
+        threading.Thread(target=homelab_read, daemon=True).start()
+    return _homelab["sessions"] if config.REMOTE_ASSIST else []
 
-        def read():
+
+def homelab_read():
+    from nuauto import link
+    try:
+        if link.linked():
             try:
-                from nuauto import remote
-                _homelab["sessions"] = remote.homelab_sessions()
-            finally:
-                _homelab["at"], _homelab["busy"] = time.time(), False
-        threading.Thread(target=read, daemon=True).start()
-    return _homelab["sessions"]
+                co = link.call("GET", "/api/company")
+                st = link.call("GET", "/api/state")
+                _homelab.update(sessions=co.get("sessions") or [], queue=co.get("queue"), task=st.get("task"),
+                                commit=st.get("commit"), error=None)
+                return
+            except link.NoLink as e:  # unreachable a moment, or unpaired: what ssh still says
+                _homelab.update(queue=None, task=None, error=str(e))
+        from nuauto import remote
+        _homelab["sessions"] = remote.homelab_sessions() if config.REMOTE_ASSIST and config.HAS_SERVER and not config.DEMO else []
+    finally:
+        _homelab["at"], _homelab["busy"] = time.time(), False
+
+
+def homelab_soon():
+    """Read the homelab again at the next chance (something was started or answered there)."""
+    _homelab["at"] = 0
+
+
+def link_state():
+    """(laptop) The app's link to the homelab's page, for the page here: on, why not, the homelab's running task."""
+    from nuauto import link
+    if VIEW or config.DEMO and not config.DEMO_LINK or REMOTE or config.IS_SERVER or not config.REMOTE_APP:
+        return None
+    homelab_assistants()  # keeps the background read going
+    t = _homelab.get("task")
+    return {"on": link.linked(), "error": _homelab.get("error"), "commit": _homelab.get("commit"),
+            "task": {k: t.get(k) for k in ("id", "kind", "label", "state")} if t else None}
+
+
+def homelab(method, path, body=None, raw=False):
+    """(laptop) A request to the homelab's page through the link; its answer. Refused here with its reason."""
+    from nuauto import link
+    if REMOTE or VIEW or config.DEMO and not config.DEMO_LINK or config.IS_SERVER or not config.REMOTE_APP:
+        raise Refused("There is no homelab page to ask from here.")
+    try:
+        return link.call(method, path, body, raw=raw)
+    except link.Refused as e:
+        raise Refused(str(e))
+    except link.NoLink as e:
+        if str(e) == "not found on the homelab":
+            raise NotFound()
+        raise Refused(str(e))
+
+
+def homelab_task_view(r):
+    """A homelab task as the page here shows it: its pictures through this server (/api/homelab/file)."""
+    t = r.get("task") if isinstance(r, dict) else None
+    if t and t.get("screenshot"):
+        t["screenshot"] = t["screenshot"].replace("/api/file?", "/api/homelab/file?", 1)
+    if t:
+        t["where"] = "homelab"
+    return r
 
 
 def intern_facts(urls):
@@ -2030,6 +2143,10 @@ POST_ROUTES = {
     "/api/logins/export": logins_export,
     "/api/setup": setup_post,
     "/api/assistant": assistant_post,
+    # (laptop) the homelab's page through the link: a tap on one of its sessions' screens, its run's question and Stop
+    "/api/homelab/assistant": lambda body: (homelab_soon(), homelab("POST", "/api/assistant", body))[1],
+    "/api/homelab/answer": lambda body: homelab("POST", "/api/answer", body),
+    "/api/homelab/stop": lambda body: homelab("POST", "/api/stop", body),
     "/api/homelab": homelab_post,
     "/api/health/run": lambda body: APP.run_now(body.get("groups") or ["quick", "sheet", "claude"]) or {},
     "/api/quit": lambda body: (threading.Timer(0.3, APP.quit).start(), {})[1],
@@ -2144,6 +2261,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._static("index.html")
         if u.path.startswith("/static/"):
             return self._static(u.path[len("/static/"):])
+        hl = re.fullmatch(r"/api/homelab/(assistant/[1-9](/shot\.png)?|file|task)", u.path)
+        if hl:  # (laptop) the homelab's page through the link: its sessions' screens, its run, their pictures
+            return self._homelab_get(hl.group(1), q)
         found = re.fullmatch(r"/api/assistant/([1-9])(/shot\.png)?", u.path)
         if found:  # (homelab) one assistant session's screen, and its picture
             if not found.group(2):
@@ -2226,6 +2346,23 @@ class Handler(BaseHTTPRequestHandler):
         if route is None:
             return self._error(404, "not found")
         self._call(lambda: route(body))
+
+    def _homelab_get(self, sub, q):
+        if sub == "task":
+            after = int(q.get("after", 0)) if str(q.get("after", "0")).isdigit() else 0
+            return self._call(lambda: homelab_task_view(homelab("GET", f"/api/task?after={after}")))
+        if sub.startswith("assistant/") and not sub.endswith(".png"):
+            return self._call(lambda: homelab("GET", "/api/" + sub))
+        path = "/api/file?" + urlencode({"path": q.get("path", "")}) if sub == "file" else \
+            "/api/" + sub + ("?live=1" if q.get("live") else "")
+        try:
+            data, ctype = homelab("GET", path, raw=True)
+        except NotFound:
+            return self._error(404, "not found")
+        except Refused as e:
+            return self._error(409, str(e))
+        ctype = ctype.split(";")[0].strip()
+        return self._send(200, data, ctype if ctype.startswith("image/") or ctype == "text/plain" else "application/octet-stream")
 
     def _pair(self, raw, origin):
         from nuauto import review
@@ -2400,10 +2537,10 @@ def start_demo(argv):
         i = argv.index("--demo-state")
         states = argv[i + 1] if i + 1 < len(argv) else ""
         del argv[i:i + 2]
-    if "--remote" in argv:  # the homelab's app: its company-site rows for the made-up sessions
+    if "--remote" in argv or "--linked" in argv:  # the homelab's app (or one linked to it): rows for its made-up sessions
         states = ",".join(filter(None, [states, "homelab"]))
     folder = tempfile.mkdtemp(prefix="nuauto-demo-")
-    env = {**os.environ, "NUAUTO_STATE_DIR": folder, "NUAUTO_DEMO": "1"}
+    env = {**os.environ, "NUAUTO_STATE_DIR": folder, "NUAUTO_DEMO": "1", "NUAUTO_DEMO_LINK": "1" if "--linked" in argv else ""}
     r = subprocess.run(config.self_cmd("demo", "setup", states), env=env, capture_output=True, text=True)
     if r.returncode != 0:
         sys.exit(r.stderr.strip() or r.stdout.strip())
@@ -2449,6 +2586,8 @@ def main(argv):
         if ask_instance_to_open(lock):
             print("NUauto is already running: opened another window.")
             return
+    if config.DEMO_LINK:
+        demo_link()
     global SERVER
     SERVER = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     SERVER.daemon_threads = True
@@ -2490,6 +2629,59 @@ def main(argv):
     finally:
         if not VIEW:
             remove_lock()
+
+
+DEMO_HOMELAB = {}
+
+
+def demo_link():
+    """`nuauto gui --demo --linked`: a demo homelab page of its own (`nuauto gui --demo --remote`, a child process with its
+    own demo folder), and this demo app linked to it the way Settings > Link this app links one, so the laptop's homelab
+    parts (Start on the homelab, its sessions' screens here, Run on: the homelab) can be seen and tested. Both on
+    127.0.0.1, both on made-up data; no ssh (the pairing codes come from the demo page itself)."""
+    import atexit
+    import http.client
+    from nuauto import link
+    from nuauto import onboard
+    from nuauto import review
+    env = {k: v for k, v in os.environ.items() if k not in ("NUAUTO_STATE_DIR", "NUAUTO_DEMO", "NUAUTO_DEMO_LINK")}
+    child = subprocess.Popen(config.self_cmd("gui", "--demo", "--remote", "--no-open"), env=env, stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL, text=True, start_new_session=True)
+    atexit.register(lambda: child.poll() is None and child.terminate())
+    ready = json.loads(child.stdout.readline())
+    port, origin = ready["port"], f"http://127.0.0.1:{ready['port']}"
+    config.REMOTE_APP = config.REMOTE_ASSIST = True
+    onboard.save_config({"remote_app": True, "remote_assist": True})
+    config.LOCAL["web_listen_host"], review.PORT = "127.0.0.1", port  # the page's address (link.address, Open it)
+
+    def request(method, path, body=None, headers=None):
+        c = http.client.HTTPConnection("127.0.0.1", port, timeout=20)
+        c.request(method, path, body, {"Host": f"127.0.0.1:{port}", **(headers or {})})
+        r = c.getresponse()
+        out = r.getheader("Set-Cookie", ""), r.read()
+        c.close()
+        return out
+
+    def as_admin(method, path, body=None):  # the demo homelab's own first device: it hands out the codes ssh would bring
+        h = {"Cookie": f"{review_cookie()}={admin}"}
+        if body is not None:
+            h.update({"Origin": origin, "X-NUauto": "1", "Content-Type": "application/json"})
+        return json.loads(request(method, path, json.dumps(body) if body is not None else None, h)[1] or b"{}")
+
+    def unpair(name):
+        for d in as_admin("GET", "/api/devices").get("devices") or []:
+            if d.get("name") == name:
+                as_admin("POST", "/api/action", {"kind": "unpair", "args": {"id": d["id"]}})
+
+    cookie, _ = request("POST", "/pair", urlencode({"c": parse_qs(urlparse(ready["url"]).query)["c"][0],
+                                                    "name": "the demo homelab's own"}),
+                        {"Origin": origin, "Content-Type": "application/x-www-form-urlencoded"})
+    admin = cookie.split(";")[0].partition("=")[2]
+    review.pair_link_from_homelab = lambda name: as_admin("POST", "/api/action",
+                                                          {"kind": "pair_device", "args": {"name": name}}).get("link")
+    DEMO_HOMELAB.update(port=port, unpair=unpair)
+    link.forget()
+    link.pair("NUauto demo laptop")
 
 
 def main_remote_demo(argv):

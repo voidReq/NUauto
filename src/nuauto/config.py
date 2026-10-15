@@ -111,6 +111,8 @@ REMOTE_ASSIST = bool(LOCAL.get("remote_assist")) and HAS_SERVER
 # The NUauto app on the homelab too: the same screens as `nuauto gui`, from your phone (gui.serve_remote, inside nuauto-web,
 # on web_listen_host:8766, paired devices only; docs/REMOTE.md). The assistant there needs it (you answer it there).
 REMOTE_APP = HAS_SERVER and (REMOTE_ASSIST or bool(LOCAL.get("remote_app")))
+# `nuauto gui --demo --linked`: the laptop's demo app, linked to a demo homelab page of its own (gui.demo_link; nothing real)
+DEMO_LINK = DEMO and os.environ.get("NUAUTO_DEMO_LINK") == "1"
 # The homelab's copy of your writeups: sync.push puts each assist_writeups folder in ~/nuauto-notes/<its name> there.
 # The agent on the homelab reads only those and the resume (never ~/projects there: that holds the live NUauto).
 NOTES_COPY_DIR = os.path.expanduser("~/nuauto-notes")
