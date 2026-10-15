@@ -56,13 +56,16 @@ async function call(method, path, body) {
     throw new Error("NUauto is not running.");
   }
   offline(false);
-  const data = await r.json().catch(() => ({}));
+  // A body that can't be read (cut short by a reload, or not JSON) is an error, never an empty answer: a screen must
+  // not draw a job card (or anything) from {}
+  const data = await r.json().catch(() => null);
   if (r.status === 403) {
-    if (data.pair) gone(data.error, "This browser is not paired");  // the homelab's page: pair it first
+    if (data && data.pair) gone(data.error, "This browser is not paired");  // the homelab's page: pair it first
     else gone("This window belongs to an earlier start of NUauto. Open NUauto again from its icon.");
     throw new Error("Not allowed.");
   }
-  if (!r.ok) throw new Error(data.error || `Error ${r.status}`);
+  if (!r.ok) throw new Error((data && data.error) || `Error ${r.status}`);
+  if (data === null) throw new Error("NUauto's answer could not be read. Try again.");
   return data;
 }
 const api = { get: (p) => call("GET", p), post: (p, b) => call("POST", p, b) };

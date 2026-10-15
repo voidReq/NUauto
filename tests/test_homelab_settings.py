@@ -190,4 +190,9 @@ refused({"bitwarden_import": ["a;b"]}, "site text")
 refused({"bitwarden_import": ["$(id)"]}, "site text")
 refused({"bitwarden_import": ["a b"]}, "site text")
 
+# the page's answers are JSON a browser can read: a NaN or infinity (a taste score, say) becomes null
+nan, inf = float("nan"), float("inf")
+assert gui.to_json({"a": nan, "b": [inf, -inf, 1.5], "c": {"d": nan}}) == '{"a": null, "b": [null, null, 1.5], "c": {"d": null}}'
+assert gui.to_json({"x": [1, "s", None, True]}) == '{"x": [1, "s", null, true]}'
+
 print("All homelab settings checks passed.")

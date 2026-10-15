@@ -2036,6 +2036,23 @@ POST_ROUTES = {
 }
 
 
+def to_json(body):
+    """JSON a browser can read: a NaN or infinity (Python writes them, JSON has none: the page could not read the
+    answer at all) becomes null."""
+    try:
+        return json.dumps(body, allow_nan=False)
+    except ValueError:
+        def clean(o):
+            if isinstance(o, float) and o != o or o in (float("inf"), float("-inf")):
+                return None
+            if isinstance(o, dict):
+                return {k: clean(v) for k, v in o.items()}
+            if isinstance(o, (list, tuple)):
+                return [clean(v) for v in o]
+            return o
+        return json.dumps(clean(body), allow_nan=False)
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "nuauto"
     sys_version = ""
@@ -2075,7 +2092,7 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(403, {"error": NOT_PAIRED, "pair": True})
 
     def _send(self, code, body, ctype="application/json", headers=None):
-        data = body if isinstance(body, bytes) else (json.dumps(body) if ctype == "application/json" else body).encode()
+        data = body if isinstance(body, bytes) else (to_json(body) if ctype == "application/json" else body).encode()
         self.send_response(code)
         self.send_header("Content-Type", ctype + ("; charset=utf-8" if ctype.startswith(("text/", "application/j")) else ""))
         self.send_header("Content-Length", str(len(data)))
