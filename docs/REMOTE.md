@@ -219,17 +219,41 @@ FROM THE LAPTOP'S GUI (each thing in one place, 2026-10-14)
   same.
 - Today's "Only you can do these": a homelab session that waits for you is an item there (Open its screen).
 - Apply > Company sites: one line, how many assistants run here and on the homelab and how many wait for you; a row
-  the homelab works on has "assistant running on the homelab: open" (its screen). The page itself can't live inside
-  NUauto's window (it refuses frames, and its cookie belongs to the browser that paired), so it opens in your browser.
+  the homelab works on has "assistant running on the homelab: open" (its screen). Linked (below), that screen opens in
+  this window; else in your browser (the page refuses frames, and its cookie belongs to the browser that paired).
 - The homelab's own page has the same three places: Today (its sessions that wait for you), Company sites (the same
   line, plus what its queue starts by itself; each row's queue chip, Start now, a running session's Open), Settings >
   This homelab (its paired devices, its assistant's queue settings).
+
+THE LAPTOP'S LINK (link.py, 2026-10-15, my request: "as much support and smooth interaction between the two as possible")
+- Settings > Homelab > This app: Link this app makes the laptop's NUauto one of the page's paired devices: a one-time
+  pairing code from the homelab over ssh (`nuauto review pair` there), used up at once by the laptop's server. Its key:
+  local/homelab_link.json (600), never shown, never synced; the device is named "NUauto on <this computer>" in the
+  page's Paired devices. Unlink forgets it here and unpairs it there; unpaired there (Settings > This homelab), the app
+  forgets it at its next request and shows "not linked" until you press Link again.
+- The laptop's server makes every request itself, to the page's own address (Tailscale), as that device; the laptop's
+  page only ever talks to the laptop's server (/api/homelab/...). What the homelab's page refuses, it refuses here too,
+  with the same words: the same rules, checked in one place.
+- Linked, the laptop's app also: reads the homelab's sessions, queue and running task through it every 20 s (ssh every
+  60 s without it); opens a homelab session's screen inside this window (#/assistant/h<slot>: approve its Submit, reply,
+  end it); shows each company-site row's place in the homelab's queue, with "Start on the homelab" next to "Start here"
+  (greyed out with the queue's reason when it can't start there now); Apply's "Run on: This computer / The homelab"
+  (the homelab's page runs Apply on its virtual screen, one NUworks machine at a time as always; its log, screenshots,
+  questions and Stop come here); a run going on the homelab shows "Running on the homelab: Follow it here".
+- Not linked (or the page unreachable a moment): everything works as before; the homelab's screens open in your browser.
+- Same code on both: both pages show the commit they run (the side bar); with deploy_from_git the Homelab check warns
+  when the homelab runs another commit than this checkout (a branch here, or main not pulled yet).
 
 FOR AGENTS
 - `nuauto gui --demo --remote --no-open` (or `nuauto review demo`): the homelab's app on 127.0.0.1, on demo data with
   three made-up assistant sessions (review.demo_setup; demo.py's "homelab" rows); prints a pairing link (open it, press
   Pair). Nothing real is read or sent; Reply / End say there is no tmux. `--screenshots DIR`: its screens as
   homelab-*.png (phone and desktop width, light and dark). Tests: tests/test_homelab_app.py, tests/test_review.py.
+- `nuauto gui --demo --linked --no-open`: the laptop's demo app linked to a demo homelab page of its own (a child
+  `--demo --remote`, both on 127.0.0.1; the pairing codes come from that page, no ssh): Start on the homelab, its
+  sessions' screens in the app, Run on: the homelab. Test: tests/test_link.py.
+- One page, two places: every screen is opened on the laptop's demo, the linked demo and the homelab's demo
+  (tests/screens.py, from test_gui.py, test_link.py, test_homelab_app.py): the same menu, none empty, none failing.
 
 PROVEN FOR REAL (2026-10-11, a practice run on the homelab: a side install of the branch, demo mode's fake identity
 and sheet, Selenium's public test form; with the old review page)
@@ -246,3 +270,4 @@ NOT YET PROVEN FOR REAL
   Settings > Homelab's Check and Set it up on a real homelab.
 - The queue starting sessions by itself (nuauto-assist.timer), a laptop claim over ssh, the merge on your real answer
   banks and logins, a real application on the homelab, the laptop GUI's links to the homelab's sessions.
+- The laptop's link (demo mode only so far): pairing over ssh, Start on the homelab, an Apply run there followed here.

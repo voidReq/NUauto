@@ -17,6 +17,8 @@ import urllib.parse
 
 from playwright.sync_api import sync_playwright
 
+import screens
+
 STATE = tempfile.mkdtemp(prefix="nuauto-test-gui-")
 ENV = {**os.environ, "NUAUTO_STATE_DIR": STATE, "NUAUTO_DEMO": "1", "NUAUTO_DEMO_PACE": "0.02", "NUAUTO_DEMO_HEADLESS": "1", "PYTHONUNBUFFERED": "1"}
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -539,6 +541,11 @@ try:
         page.keyboard.press("Escape")
         page.click("h1, #page-title")
         page.wait_for_selector("[data-testid=health-popover]", state="detached")
+        # every screen, as test_homelab_app.py opens them on the homelab's page: the same menu, none empty or failing
+        nav, bad = screens.visit_all(page, URL.split("/?")[0])
+        assert nav == screens.NAV and not bad, (nav, bad)
+        page.goto(URL.split("/?")[0] + "/#/home")
+        page.wait_for_selector("[data-testid=week]")
 
         page.click("[data-testid=nav-review]")
         page.wait_for_selector("[data-testid=job-card]")

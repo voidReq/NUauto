@@ -169,13 +169,23 @@ GUI (`nuauto gui`, gui.py + gui_static/ + onboard.py + health.py + demo.py; adde
   answers and run logs / screenshots are hidden. Start it with --no-open --port 0 and open the printed URL in
   Playwright). Never start the real GUI (no --view) or click Start in one; it refuses to start inside a Claude Code
   shell anyway. Screens for review: `nuauto gui --demo --screenshots DIR`. The homelab's page: `nuauto gui --demo
-  --remote` (= `nuauto review demo`; prints a pairing link; --screenshots DIR too). Never use the real homelab page.
+  --remote` (= `nuauto review demo`; prints a pairing link; --screenshots DIR too); the laptop's app linked to it:
+  `nuauto gui --demo --linked`. Never use the real homelab page.
 - The same app on the homelab (2026-10-14; WHERE AM I): gui.REMOTE mode inside nuauto-web; paired-device cookie
   instead of the start secret; laptop-only actions refused there (gui.LAPTOP_ONLY, REMOTE_SETUP, REMOTE_SETTINGS_OFF).
   Settings, ratings, answers and the resume label changed on either page merge both ways (sync.share). Setting a
   homelab up is in the GUI too, for other users: Settings > Homelab (Check over ssh, Use this homelab, Set it up: a
   terminal window, `nuauto onboard homelab-setup`, each step asked first) and setup's optional Homelab step. Local mode
   (and the packaged app) is unchanged without one.
+- ONE APP, TWO PLACES (my request, 2026-10-15: "as 1:1 as possible; a change to one adds to the other"): the laptop's
+  window and the homelab's page are the same gui.py + gui_static/; every change to them applies to both. Something that
+  must differ goes behind state.where / gui.REMOTE (or "linked") and gets a check on each side: test_gui.py (laptop),
+  test_homelab_app.py (homelab), test_link.py (the linked laptop). tests/screens.py opens every screen in all three.
+  Both show the commit they run; the Homelab check warns when the two differ (deploy_from_git).
+- The laptop's link (link.py, 2026-10-15; docs/REMOTE.md THE LAPTOP'S LINK): Settings > Homelab > This app pairs the
+  laptop's app as one of the page's devices (key in local/homelab_link.json, 600). Then, from the laptop's window: Start
+  on the homelab (each row's place in its queue), its sessions' screens in the window (approve Submit there), Apply's
+  Run on: the homelab (its log, questions, Stop here). The laptop's server makes the requests; the page's rules apply.
 - Setup wizard (onboard.py): each step checks itself; preferences go in local_config.json "preferences"
   (jobs.DEFAULTS = my original settings). Health checks (health.py) never open a login page.
 - Its own window (window.py): macOS pywebview; Linux the system python3's GTK + WebKitGTK (window_gtk.py); else a
@@ -341,6 +351,7 @@ src/nuauto/: cli.py (the nuauto command)   config.py (all paths, hosts; reads lo
   doctor.py (health check)   inspect_form.py (read-only form lister)   assist.py (company-site agent)   accounts.py (its job-site logins)
   mail.py (the agent's email codes and links: read-only Gmail)   screen.py (the homelab assistant's virtual screen + browser view)
   review.py (pairing devices with the homelab's page; its assistant sessions' screens and queue, served by gui.py)   remote.py (its queue, and claims between the machines)
+  link.py (the laptop app's link to the homelab's page: a paired device; gui.homelab and /api/homelab/ use it)
   setup_sheet.py (sheet setup / `format` restyle)   gui.py (the window's server)   gui_static/ (its page)
   health.py (the checks behind doctor and the GUI)   onboard.py (setup wizard)   demo.py (demo mode fakes)
   window.py (which window) + window_gtk.py (the Linux window, run by the system python3)
@@ -364,7 +375,8 @@ local/ (gitignored, mode 700): everything personal or secret, on both machines:
 Generated (gitignored, repo root): data/, logs/, work/
 SECRETS (in local/), never print, log or copy their contents: token.json, session_cookies.json,
 client_secret.json, discord_webhook.txt, web_secret.txt, accounts.json (job-site logins; only `nuauto accounts export`
-writes them out, for my password manager), gmail_token.json (read-only Gmail login)
+writes them out, for my password manager), gmail_token.json (read-only Gmail login), homelab_link.json (the laptop
+app's device key for the homelab's page)
 
 COMMANDS (installed in .venv; no activation needed)
 nuauto gui             # the window (setup, review, apply, health); --demo: everything fake; --view: my real data, read-only (agents: only these two)
@@ -414,7 +426,9 @@ agent's `email` command). test_insights.py covers the Insights numbers (pay pars
 internship pool and postings.py (job-site links, parsing, the network guard on a local server, fetch tries, rules,
 Review queue, a whole update with Claude stood in for). test_deploy.py runs deploy.py on a throwaway git repo (copy, web restart only when needed, undo on failure). test_demo.py runs the real apply.py on demo mode's fake pages (stops, cap, re-login).
 test_gui.py covers the GUI server's security and flows; test_homelab_app.py the same app as the homelab serves it (demo
-`--remote`: pairing, refusals, sessions, queue, devices, a phone-width browser); test_review.py its handler's rules and the sessions' backend; test_view.py the read-only `--view` mode; test_setup.py the wizard; test_health.py the checks;
+`--remote`: pairing, refusals, sessions, queue, devices, a phone-width browser); test_link.py the laptop's link to it (pairing,
+calls, the /api/homelab/ routes, an Apply run there, unpairing; then `--demo --linked` in a browser); tests/screens.py (not a test:
+every screen, used by test_gui, test_homelab_app and test_link); test_review.py its handler's rules and the sessions' backend; test_view.py the read-only `--view` mode; test_setup.py the wizard; test_health.py the checks;
 test_window.py the packaged-app plumbing (self_cmd, the assistant's command, the window choice, clean env).
 
 ENVIRONMENT / STYLE

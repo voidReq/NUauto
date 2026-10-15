@@ -293,4 +293,10 @@ assert time.time() - out[0].at < 60
 assert health.newer("0.10.0", "0.9.1") and not health.newer("0.3.0", "0.3.0") and not health.newer("v1", "0.3.0")
 assert one(health.app_update).status == "off"  # a source install: no network call
 
+# the two machines' code: a warning only when both are known and differ (the homelab's page and this app could differ)
+assert health.same_code("a" * 40, "a" * 40) is None and health.same_code(None, "b" * 40) is None
+assert health.same_code("a" * 40, None) is None
+skew = health.same_code("abcdef1234", "1234567abc")
+assert skew["level"] == "WARN" and "the homelab runs 1234567, this computer abcdef1" in skew["msg"], skew
+
 print("All health checks passed.")

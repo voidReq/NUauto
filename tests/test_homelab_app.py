@@ -17,6 +17,8 @@ import urllib.parse
 
 from playwright.sync_api import sync_playwright
 
+import screens
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATE = tempfile.mkdtemp(prefix="nuauto-test-homelab-app-")
 ENV = {**os.environ, "NUAUTO_DEMO_HEADLESS": "1", "NUAUTO_DEMO_PACE": "0.02", "PYTHONUNBUFFERED": "1",
@@ -194,6 +196,9 @@ try:
         assert page.locator("[data-testid=assistants-bar]").count() == 1 and page.locator("[data-testid=queue-line]").count() == 1
         assert "3 of 3 running" in page.inner_text("[data-testid=assistants-running]")
         assert page.locator("a[data-testid$=-running][href^='#/assistant/']").count() == 3
+        # every screen, as test_gui.py opens them on the laptop's app: the same menu, none empty or failing
+        nav, bad = screens.visit_all(page, ORIGIN)
+        assert nav == screens.NAV and not bad, (nav, bad)
         b.close()
     assert not errors, errors
 finally:

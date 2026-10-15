@@ -170,8 +170,11 @@ async function pollState() {
   S.assistants = S.state.assistants;
   if ((sheetChanged || assistantsChanged) && S.screen && S.screen.refresh) S.screen.refresh();
   if (S.screen && S.screen.update) S.screen.update(S.state);
-  const t = S.state.task;
-  if (t && t.state === "running" && !S.taskTimer) pollTask();
+  const t = S.state.task;  // this machine's run: followed unless a run on the homelab is being followed and still going
+  if (t && t.state === "running" && !S.taskTimer && (S.taskWhere !== "homelab" || !(S.task && S.task.state === "running"))) {
+    S.taskWhere = "here";
+    pollTask();
+  }
 }
 
 async function pollHealth() {
@@ -192,7 +195,7 @@ async function pollTask() {
   let t;
   try {
     const known = S.task ? S.task.id : null;
-    const r = await api.get(`/api/task?after=${S.taskAfter}`);
+    const r = await api.get(taskPath(`/api/task?after=${S.taskAfter}`));
     t = r.task;
     if (t && t.id !== known) { S.taskLog = []; S.taskAfter = 0; if (known) return pollTask(); }
   } catch (e) { return; }
@@ -220,7 +223,28 @@ function taskFinished(t) {
 
 // A run the server just started (its reply's task): the page follows it (the taskbar, its log, its questions)
 function adoptTask(r) {
-  if (r && r.task) { S.task = r.task; S.taskLog = []; S.taskAfter = 0; S.lastTaskState[r.task.id] = "running"; pollTask(); }
+  if (r && r.task) {
+    S.taskWhere = r.task.where === "homelab" ? "homelab" : "here";  // a run on the homelab: followed through the link
+    S.task = r.task; S.taskLog = []; S.taskAfter = 0; S.lastTaskState[r.task.id] = "running"; pollTask();
+  }
+}
+
+// (laptop, linked) where a NUworks run you start goes: this computer (its Firefox window) or the homelab (its virtual
+// screen; you follow it here). Remembered for the session.
+function canRunThere() { return !!(S.state && S.state.homelab_link && S.state.homelab_link.on); }
+function runOn() { return canRunThere() && sessionStorage.getItem("runOn") === "homelab" ? "homelab" : "here"; }
+function runArgs(args) { return runOn() === "homelab" ? { ...args, on: "homelab" } : args; }
+
+// The followed run's own API: this machine's, or (the laptop's app, through its link) the homelab's
+function taskPath(path) { return S.taskWhere === "homelab" ? path.replace("/api/", "/api/homelab/") : path; }
+
+// (laptop) follow the run going on the homelab (Apply there, or the NUworks side)
+function followHomelabTask() {
+  const t = S.state && S.state.homelab_link && S.state.homelab_link.task;
+  if (!t) return;
+  S.taskWhere = "homelab";
+  S.task = { ...t, log: [], log_total: 0 }; S.taskLog = []; S.taskAfter = 0; S.lastTaskState[t.id] = t.state;
+  pollTask();
 }
 
 async function action(kind, args) {
@@ -285,7 +309,8 @@ function renderShell() {
     el("b", { text: "Demo mode. " }), "Nothing here is real: a fake sheet, fake NUworks pages, fake Claude. Nothing is sent anywhere.") :
     st.view ? el("div", { class: "demo-banner", testid: "view-banner" },
       el("b", { text: "View only. " }), "This is your real data, read-only: nothing can be changed or started, and saved answers and run screenshots are hidden.") : "");
-  fill($("#side-foot"), el("div", { text: `v${st.version}` + (st.where === "homelab" ? " · on your homelab" : st.mode === "homelab" ? " · homelab" : "") }));
+  fill($("#side-foot"), el("div", { testid: "side-version", title: st.commit ? `The code's commit: ${st.commit} (the same on both machines when each runs main)` : null,
+    text: `v${st.version}` + (st.commit ? ` · ${st.commit}` : "") + (st.where === "homelab" ? " · on your homelab" : st.mode === "homelab" ? " · homelab" : "") }));
 }
 
 const STRIP = ["google", "sheet", "nuworks", "claude", "homelab", "bitwarden"];
@@ -350,7 +375,7 @@ function renderTaskbar() {
   const onApply = S.route === "apply" && t && t.kind === "apply";
   if (!t || t.state !== "running" || t.background || onApply) { bar.hidden = true; return; }
   bar.hidden = false;
-  fill(bar, el("span", { class: "spinner" }), el("span", { text: `${t.label}…`, testid: "taskbar-label" }),
+  fill(bar, el("span", { class: "spinner" }), el("span", { text: `${t.label}${S.taskWhere === "homelab" ? " (on the homelab)" : ""}…`, testid: "taskbar-label" }),
     el("button", { class: "btn small ghost", text: "Log", onclick: () => showLog(t) }),
     t.kind === "apply" ? el("a", { class: "btn small ghost", href: "#/apply", text: "View" }) : null,
     el("button", { class: "btn small danger", text: "Stop", testid: "taskbar-stop", onclick: () => stopTask(t) }));
@@ -358,7 +383,7 @@ function renderTaskbar() {
 
 async function stopTask(t, force) {
   try {
-    await api.post("/api/stop", { task: t.id, force: !!force });
+    await api.post(taskPath("/api/stop"), { task: t.id, force: !!force });
     toast(force ? "Force-stopped." : "Stopping (like Ctrl+C)…");
   } catch (e) { fail(e); }
 }
@@ -384,7 +409,7 @@ function renderQuestion() {
   S.openQuestion = `${t.id}:${q.id}`;
   const reply = async (r) => {
     try {
-      await api.post("/api/answer", { task: t.id, id: q.id, reply: r });
+      await api.post(taskPath("/api/answer"), { task: t.id, id: q.id, reply: r });
       S.closeQuestion && S.closeQuestion();
       S.closeQuestion = null;
       pollTask();
@@ -953,7 +978,7 @@ screens.apply = async (view) => {
   const sortOf = (k) => { const v = sessionStorage.getItem("applySort:" + k); return SORT_OPTS[k].includes(v) ? v : SORT_OPTS[k][0]; };
   let kind = sessionStorage.getItem("applyKind") || "";  // one kind of work, or "" = all (shared by the three tabs)
   const shown = (rows) => sortRows(kind ? rows.filter((r) => kindOf(r) === kind) : rows, sortOf(tab));
-  let drawnRunning = null;
+  let drawnRunning = null, drawnHomelab = "";
   // The "At most" box is made once and moved into each redraw, so what you typed (and the focus) is never lost.
   const atMost = el("input", { type: "number", min: "1", id: "apply-n", testid: "apply-n", "aria-label": "At most this many", placeholder: "all" });
   const head = el("div"), runBox = el("div"), tabs = el("div", { class: "tabs", role: "tablist", "aria-label": "Apply" }),
@@ -1053,9 +1078,13 @@ screens.apply = async (view) => {
         el("h2", { text: w.room ? `You can apply to ${plural(w.room, "more job")} this week` : "Weekly limit reached" }),
         el("p", { class: "small muted" }, `${w.applied} of ${w.max} ${w.label} · ${w.total} of ${w.max_total} in total` + (w.next ? ` · new week ${w.next}` : "") + " · ", el("a", { href: "#/settings", text: "change the limit" }))),
       drawnRunning ? null : el("div", { class: "row" },
+        canRunThere() ? el("div", { class: "seg", role: "group", "aria-label": "Run on", testid: "run-on" },
+          ...[["here", "This computer"], ["homelab", "The homelab"]].map(([k, label]) => el("button", { "aria-pressed": String(runOn() === k),
+            testid: `run-on-${k}`, text: label, onclick: () => { sessionStorage.setItem("runOn", k); draw(); } }))) : null,
         el("label", { class: "small muted" }, "At most ", atMost),
         el("button", { class: "btn primary big", testid: "btn-start-apply", disabled: !!data.why_not || !!(S.task && S.task.state === "running"),
-          text: "Start applying", onclick: startApply }))),
+          text: runOn() === "homelab" ? "Start on the homelab" : "Start applying", onclick: startApply }))),
+      followNote(),
       data.why_not ? el("div", { class: "note warn", testid: "apply-why", text: data.why_not }) :
         el("p", { class: "small muted", text: (onHomelab() ? "Approved in the sheet is your go-ahead. Each job is filled and submitted in a browser on the homelab, which you watch and use from here (its link shows when it starts), one at a time, 30–60 s apart. Only one machine applies at a time." : "Approved in the sheet is your go-ahead. Each job is filled and submitted in a visible Firefox window, one at a time, 30–60 s apart.") + " Every form is screenshotted before Submit. Questions without a saved answer come up here. A job that sends you to the company's own site, or needs something only you can give (a cover letter, a transcript), stops (nothing submitted) and shows up under the Company sites and By hand tabs. Stop works like Ctrl+C." })));
     drawTabs();
@@ -1071,7 +1100,7 @@ screens.apply = async (view) => {
     const waiting = live && t.wait_until && t.wait_until > now;
     fill(runBox, el("div", { class: "card", testid: "apply-run" },
       el("div", { class: "row between runtop" }, el("div", { class: "row" }, live ? el("span", { class: "spinner" }) : null,
-        el("h2", { text: live ? (waiting ? `Next job in ${Math.ceil(t.wait_until - now)} s` : "Applying…") : `Last run: ${t.state}` })),
+        el("h2", { text: live ? (waiting ? `Next job in ${Math.ceil(t.wait_until - now)} s` : S.taskWhere === "homelab" ? "Applying on the homelab…" : "Applying…") : `Last run${S.taskWhere === "homelab" ? " on the homelab" : ""}: ${t.state}` })),
         live ? el("div", { class: "row" }, el("button", { class: "btn danger", testid: "btn-stop", text: "Stop", onclick: () => stopTask(t) }),
           el("button", { class: "btn ghost small", text: "Force stop", title: "Only if Stop does nothing", onclick: () =>
             confirmBox("Force stop?", "Kills the run at once. If Submit was already clicked, that row stays Needs Human: check NUworks.", "Force stop", () => stopTask(t, true), { danger: true }) })) : null),
@@ -1091,21 +1120,32 @@ screens.apply = async (view) => {
   }
 
   function applyRow(r) {
-    confirmBox(`Apply to ${r.company}?`, `${r.title} is filled and submitted now in ${onHomelab() ? "a browser on the homelab you can watch from here" : "a visible Firefox window"}, the same way Start does it. Only this job.`,
-      "Apply now", async () => { if (await action("apply", { row: r.row })) draw(); });
+    confirmBox(`Apply to ${r.company}?`, `${r.title} is filled and submitted now in ${onHomelab() || runOn() === "homelab" ? "a browser on the homelab you can watch from here" : "a visible Firefox window"}, the same way Start does it. Only this job.`,
+      "Apply now", async () => { if (await action("apply", runArgs({ row: r.row }))) draw(); });
   }
 
   async function startApply() {
     const n = atMost.value;
-    const r = await action("apply", n ? { n, order: sortOf("nuworks") } : { order: sortOf("nuworks") });
+    const r = await action("apply", runArgs(n ? { n, order: sortOf("nuworks") } : { order: sortOf("nuworks") }));
     if (r) draw();
+  }
+
+  // (laptop, linked) a run going on the homelab that this app is not following yet: one tap follows it here
+  function followNote() {
+    const t = S.state && S.state.homelab_link && S.state.homelab_link.task;
+    if (!t || t.state !== "running" || (S.taskWhere === "homelab" && S.task && S.task.id === t.id)) return null;
+    return el("div", { class: "note accent", testid: "homelab-run" }, el("b", { text: "Running on the homelab: " }), t.label, " ",
+      el("button", { class: "btn small", text: "Follow it here", testid: "btn-follow-homelab", onclick: () => { followHomelabTask(); draw(); } }));
   }
 
   await reload();
   if (S.focus === "company") S.focus = null;
   // refresh: the sheet changed (a run finished, a row was applied, something was done elsewhere): read the lists again
   return { task: () => { drawRun(); if (S.task && S.task.state !== "running") reload(); },
-    update: () => { if (running() !== drawnRunning) draw(); }, refresh: reload, reload };
+    update: () => {  // redraw when a run starts or ends here, or one starts or ends on the homelab (its "Follow it here")
+      const ht = S.state && S.state.homelab_link && S.state.homelab_link.task, key = ht ? `${ht.id}:${ht.state}` : "";
+      if (running() !== drawnRunning || key !== drawnHomelab) { drawnHomelab = key; draw(); }
+    }, refresh: reload, reload };
 };
 
 // ---- Company sites (a tab of the Apply screen): Needs Human rows for the assistant, company sites still owed, and
@@ -1123,9 +1163,11 @@ function assistantStart(d, r, tab, testid, args) {
 
 function assistantStartButton(d, r, tab, testid, args) {
   const remote = (d.homelab || []).find((s) => s.tab === tab && s.row === r.row);
-  if (remote) {  // the homelab's assistant has this row: its screen is in NUauto on the homelab (in your browser)
+  if (remote) {  // the homelab's assistant has this row: its screen, in this app (linked) or in NUauto on the homelab
     const wait = remote.attention && remote.attention.kind;
     const text = wait ? "assistant on the homelab: waiting for you" : "assistant running on the homelab";
+    if (d.linked) return el("a", { class: "btn small" + (wait ? " primary" : ""), href: `#/assistant/h${remote.slot}`,
+      testid: `${testid}-homelab`, text: `${text}: open` });
     return d.homelab_review ? el("button", { class: "btn small" + (wait ? " primary" : ""), testid: `${testid}-homelab`,
       text: `${text}: open`, title: "Its screen in NUauto on your homelab, in your browser",
       onclick: () => openExternal(`${d.homelab_review}/#/assistant/${remote.slot}`) }) :
@@ -1143,31 +1185,34 @@ function assistantStartButton(d, r, tab, testid, args) {
       text: wait === "approve" ? `assistant: approve in its window (slot ${running.slot})`
         : wait ? `assistant waiting for you (slot ${running.slot})` : `assistant running (slot ${running.slot})` });
   }
-  const q = onHomelab() && S.queue && S.queue.rows ? S.queue.rows[`${tab}-${r.row}`] : null;
-  if (q && !q.start) {  // the homelab's queue: why it can't start now (a slot, its job site, the cap, check first...)
-    return el("span", { class: "chip" + (q.group === "check" || q.group === "laptop" ? " warn" : ""), testid: `${testid}-queue`, text: q.text });
-  }
-  if (onHomelab()) {
-    return el("span", { class: "row" }, q && q.group === "next" ? el("span", { class: "chip accent", testid: `${testid}-queue`, text: q.text }) : null,
-      el("button", { class: "btn small primary", text: "Start now", testid, disabled: args.disabled || false,
-        title: "Starts its session here on the homelab now (you answer it on its screen)", onclick: async (e) => {
-          const btn = e.currentTarget;
-          btn.disabled = true;
-          btn.textContent = "Starting…";
-          const ok = await action("assist", args.body);
-          setTimeout(() => { if (S.screen && S.screen.reload) S.screen.reload(); }, ok ? 9000 : 0);  // its session shows up in a few seconds
-        } }));
-  }
-  const full = (d.sessions || []).length >= (d.slots || 1);
-  return el("button", { class: "btn small primary", text: "Start assistant", testid, disabled: full || (args.disabled || false),
-    title: full ? `${d.slots} assistants are running (the most at once): finish one first` : "", onclick: (e) => {
-      // a few seconds greyed out: a second click would start the same job twice (and each start reads the sheet)
+  // the homelab's queue (its own page, or the laptop's app through the link): this row's place in it
+  const q = S.queue && S.queue.rows ? S.queue.rows[`${tab}-${r.row}`] : null;
+  const chip = q && (q.group === "next" || !q.start) ? el("span", { class: "chip" + (q.group === "next" ? " accent" :
+    q.group === "check" || q.group === "laptop" ? " warn" : ""), testid: `${testid}-queue`, text: q.text }) : null;
+  // Start on the homelab: there (its own Start now) or from the laptop's app (its link); the queue says when it can't
+  const there = onHomelab() || d.linked && S.queue;
+  const startThere = there ? el("button", { class: "btn small" + (onHomelab() ? " primary" : ""), testid: onHomelab() ? testid : `${testid}-homelab-start`,
+    text: onHomelab() ? "Start now" : "Start on the homelab", disabled: args.disabled || !!(q && !q.start),
+    title: q && !q.start ? q.text : "Starts its session on the homelab now (you answer it on its screen)", onclick: async (e) => {
       const btn = e.currentTarget;
       btn.disabled = true;
       btn.textContent = "Starting…";
-      setTimeout(() => { if (btn.isConnected) { btn.disabled = false; btn.textContent = "Start assistant"; } }, 5000);
+      const ok = await action("assist", onHomelab() ? args.body : { ...args.body, on: "homelab" });
+      setTimeout(() => { if (S.screen && S.screen.reload) S.screen.reload(); }, ok ? 9000 : 0);  // its session shows up in a few seconds
+    } }) : null;
+  if (onHomelab()) return el("span", { class: "row" }, chip, startThere);
+  const full = (d.sessions || []).length >= (d.slots || 1);
+  const startHere = el("button", { class: "btn small primary", text: there ? "Start here" : "Start assistant", testid, disabled: full || (args.disabled || false),
+    title: full ? `${d.slots} assistants are running (the most at once): finish one first` : "", onclick: (e) => {
+      // a few seconds greyed out: a second click would start the same job twice (and each start reads the sheet)
+      const btn = e.currentTarget;
+      const label = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "Starting…";
+      setTimeout(() => { if (btn.isConnected) { btn.disabled = false; btn.textContent = label; } }, 5000);
       action("assist", args.body);
     } });
+  return there ? el("span", { class: "row" }, chip, startHere, startThere) : startHere;
 }
 
 // One line at the top of Company sites, the same on both machines: how many assistants run (here, and on the homelab),
@@ -1218,7 +1263,7 @@ function companyCards(d) {
         jobFacts(r), el("div", { class: "small muted", text: r.notes.slice(-160) })), el("div", { class: "row" }, linkOut(r.url, "Open job"),
         el("button", { class: "btn small primary", text: "Submit on NUworks too", testid: `retry-btn-${r.row}`,
           onclick: () => confirmBox("Submit on NUworks too?", `${r.company} · ${r.title} is Applied on the company site. This submits the same job on NUworks.`,
-            "Submit on NUworks", () => action("nuworks_side", { row: r.row })) }))))))  : null];
+            "Submit on NUworks", () => action("nuworks_side", runArgs({ row: r.row }))) }))))))  : null];
 }
 
 // ---- By hand on NUworks (a tab of the Apply screen): rows only you can finish there (a cover letter, a transcript...)
@@ -1546,7 +1591,9 @@ async function openLogFile(d, run, file) {
 // at the bottom: the browser and its terminal, its latest message, then the Submit to approve (or the end question),
 // then the reply box. It asks again every few seconds; what you are typing is kept.
 screens.assistant = async (view) => {
-  const slot = S.param;
+  // #/assistant/<slot>: a session here (the homelab's page); #/assistant/h<slot>: the homelab's, in the laptop's app (its link)
+  const there = String(S.param || "").startsWith("h"), slot = String(S.param || "").replace(/^h/, "");
+  const api_ = there ? "/api/homelab/assistant" : "/api/assistant";
   let d = null, version = null, timer = null, first = true;
   const note = el("input", { type: "text", placeholder: "A note for the agent (when you decline)", "aria-label": "Note", testid: "as-note" });
   const reply = el("textarea", { rows: "4", maxlength: "4000", "aria-label": "Reply", testid: "as-reply" });
@@ -1559,7 +1606,7 @@ screens.assistant = async (view) => {
   async function send(body, busy) {
     if (busy) { busy.disabled = true; busy.textContent = busy.dataset.busy || "Working…"; }
     try {
-      const r = await api.post("/api/assistant", { slot: Number(slot), ...body });
+      const r = await api.post(api_, { slot: Number(slot), ...body });
       toast(r.message);
       if (body.do === "reply") reply.value = "";
       if (r.closing) { location.hash = "#/company"; return; }
@@ -1577,7 +1624,7 @@ screens.assistant = async (view) => {
     const parts = [el("div", { class: "row between" }, el("a", { href: "#/company", text: "← Company sites" }),
       el("span", { class: `chip ${word === "working" ? "ok" : word === "answered" ? "accent" : "warn"}`, testid: "as-status", text: d.text })),
     el("div", { class: "card" }, el("h2", { text: d.company || "Assistant" }),
-      el("p", { class: "small muted", text: [d.title, d.where, d.host, `slot ${d.slot}`].filter(Boolean).join(" · ") }))];
+      el("p", { class: "small muted", text: [d.title, d.where, d.host, `slot ${d.slot}`, there ? "on the homelab" : null].filter(Boolean).join(" · ") }))];
     if (d.browser) {
       parts.push(el("div", { class: "card stack", testid: "as-browser" }, el("div", { class: "row between" }, el("h2", { text: "The browser" }),
         el("div", { class: "row" }, el("span", { class: "small muted" }, "password ", el("code", { text: d.browser.password })),
@@ -1601,7 +1648,7 @@ screens.assistant = async (view) => {
       parts.push(el("div", { class: "card attn", id: "as-ask", testid: "as-approval" }, el("h2", { text: "Ready to submit" }),
         el("p", {}, "It wants to ", el("b", { text: a.what }), el("br"), el("span", { class: "small muted", text: `on ${a.url}` })),
         el("pre", { class: "log", text: a.why }),
-        a.shot ? el("img", { class: "shot", src: `/api/assistant/${slot}/shot.png?a=${encodeURIComponent(a.id)}`, alt: "The screen when it asked" }) : null,
+        a.shot ? el("img", { class: "shot", src: `${api_}/${slot}/shot.png?a=${encodeURIComponent(a.id)}`, alt: "The screen when it asked" }) : null,
         a.waiting ? null : el("p", { class: "small muted", text: "The assistant stopped waiting for this; Approve tells it to do it now (good for 10 minutes, this action on this page only)." }),
         el("div", { class: "row" }, btn("Approve: submit", "btn primary", { do: "approve", id: a.id }, "Approving…", "as-approve"),
           note, btn("Decline", "btn danger", () => ({ do: "decline", id: a.id, note: note.value }), "Declining…", "as-decline"))));
@@ -1638,7 +1685,7 @@ screens.assistant = async (view) => {
   async function load() {
     clearTimeout(timer);
     try {
-      d = await api.get(`/api/assistant/${encodeURIComponent(slot)}`);
+      d = await api.get(`${api_}/${encodeURIComponent(slot)}`);
     } catch (e) {
       if (!view.isConnected || S.gone) return;
       if (S.offline) { timer = setTimeout(load, 4000); return; }  // the homelab can't be reached a moment: ask again
@@ -1648,7 +1695,7 @@ screens.assistant = async (view) => {
     }
     if (!view.isConnected) return;
     if (d.version !== version) { version = d.version; draw(); } else { term.textContent = d.terminal || "(not readable)"; }
-    if (d.browser && ["working", "approve", "waiting"].includes(d.status)) live.src = `/api/assistant/${slot}/shot.png?live=${Date.now()}`;
+    if (d.browser && ["working", "approve", "waiting"].includes(d.status)) live.src = `${api_}/${slot}/shot.png?live=${Date.now()}`;
     timer = setTimeout(load, 4000);
   }
   await load();
@@ -1893,6 +1940,7 @@ function homelabAssistantPanel(ha, done) {
       el("button", { class: "btn small", text: "Pair this computer", testid: "ha-pair", onclick: pairThisComputer }),
       ha.review_url ? el("button", { class: "btn small ghost", text: "Open it", testid: "ha-open", onclick: () => openExternal(`${ha.review_url}/`) }) : null,
       el("span", { class: "small muted", text: "A phone: on the homelab, nuauto review pair --discord (or Settings > Paired devices on its page)." })) : null,
+    ha.app ? linkRow(done) : null,
     el("hr", { class: "sep" }),
     el("div", { class: "row between" }, el("div", { class: "row" }, el("b", { text: "Its assistant" }),
       el("span", { class: `chip ${ha.on ? "ok" : "off"}`, text: ha.on ? "on" : "off", testid: "ha-status" })),
@@ -1900,6 +1948,23 @@ function homelabAssistantPanel(ha, done) {
         onclick: () => saveSettings({ remote_assist: !ha.on }, ha.on ? "Off: the homelab runs no assistant." : "On: the homelab can run the assistant (and has its page).", done) })),
     el("p", { class: "small muted", text: "Company-site applications run there too, in a virtual browser, so they go on with this computer off. Discord tells you when one needs you; you answer it, approve each Submit and solve captchas on its page. The homelab needs a few packages once: docs/REMOTE.md." }),
     queue);
+}
+
+// This app's link to the homelab's page (link.py): with it, Start on the homelab, its sessions' screens and its Apply
+// runs work inside this window. Linking pairs this app as one of the page's devices (its key stays on this computer).
+function linkRow(done) {
+  const l = S.state && S.state.homelab_link;
+  if (!l) return null;
+  return el("div", { class: "stack", testid: "ha-link" },
+    el("div", { class: "row between" }, el("div", { class: "row" }, el("b", { text: "This app" }),
+      el("span", { class: `chip ${l.on ? (l.error ? "warn" : "ok") : "off"}`, testid: "ha-link-status",
+        text: l.on ? (l.error ? "linked: can't reach it now" : "linked") : "not linked" })),
+      el("button", { class: "btn small" + (l.on ? "" : " primary"), testid: "ha-link-toggle", text: l.on ? "Unlink" : "Link this app",
+        onclick: async () => { if (await action(l.on ? "homelab_unlink" : "homelab_link")) { await pollState(); done(); } } })),
+    el("p", { class: "small muted", text: l.on ?
+      "The homelab's assistant sessions open here (approve its Submit, reply), and Start on the homelab and Run on: the homelab work from this window." :
+      "Link it to start sessions and Apply runs on the homelab from this window, and open its sessions here instead of in your browser. It pairs this app as one of the page's devices (over ssh, once)." }),
+    l.on && l.error ? el("div", { class: "note warn small", testid: "ha-link-error", text: l.error }) : null);
 }
 
 // Settings > Homelab (the laptop, a source install): which homelab this computer works with. Check asks it over ssh

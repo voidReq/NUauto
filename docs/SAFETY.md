@@ -99,6 +99,15 @@ COMPANY-SITE AGENT (assist.py, prompts/ASSIST_PROMPT.md)
   Bitwarden, setup's file steps, Quit); a device can't unpair itself; the agent's browser and WebFetch never open the
   user's own network there | gui.Handler (REMOTE), serve_remote, LAPTOP_ONLY, REMOTE_SETUP, REMOTE_SETTINGS_OFF,
   REMOTE_POSTS_OFF; review.pair, device, session, terminal; assist.own_network | test_review, test_homelab_app, test_assist
+- The laptop app's link to that page (link.py, Settings > Homelab > This app): it is one of the page's paired devices, so
+  the page's own rules apply to everything it asks, unchanged (what the page refuses, the app refuses with its words).
+  Paired only when you press Link (a one-time code fetched over ssh, used at once); the key in local/homelab_link.json
+  (600), never sent to the laptop's page, never synced, never logged; the laptop's server alone talks to the homelab's
+  page (the laptop's page only to /api/homelab/<assistant, file, task, answer, stop>, behind its own cookie and checks);
+  answers passed through only as images or plain text (anything else as a download, never as a page); unpaired there =
+  forgotten here at the next request; never on the homelab itself, in view mode or in plain demo mode | link.pair, call,
+  forget; gui.homelab, Handler._homelab_get, link_state | test_link (in-process against the demo page, then the
+  `--demo --linked` app in a browser)
 - A restart of nuauto-web never cuts off a NUworks run its page started: the deploy waits while one runs (or an update)
   | deploy.Deploy.update_running | test_deploy (the waiting; not the process pattern)
 - The homelab's queue starts only approved rows (Other jobs Approved, Needs Human stopped at a company site), only with

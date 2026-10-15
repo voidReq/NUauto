@@ -1048,7 +1048,7 @@ from nuauto import gui  # noqa: E402
 
 reads, gate = [], threading.Event()
 remote.homelab_sessions = lambda: (reads.append(1), gate.wait(5), [{"slot": 1, "tab": "other", "row": 3}])[2]
-real_flags = (gui.VIEW, config.DEMO, config.REMOTE_ASSIST, config.IS_SERVER)
+real_flags = (gui.VIEW, config.DEMO, config.REMOTE_ASSIST, config.IS_SERVER, config.REMOTE_APP)
 
 
 def fresh_cache():
@@ -1064,13 +1064,13 @@ def wait_idle():
 
 
 try:
-    config.REMOTE_ASSIST, config.IS_SERVER, config.DEMO, gui.VIEW = True, False, False, False
-    for name, vals in (("VIEW", (True, False, True, False)), ("DEMO", (False, True, True, False)),
-                       ("no remote_assist", (False, False, False, False)), ("on the homelab", (False, False, True, True))):
-        gui.VIEW, config.DEMO, config.REMOTE_ASSIST, config.IS_SERVER = vals
+    config.REMOTE_ASSIST, config.IS_SERVER, config.DEMO, gui.VIEW, config.REMOTE_APP = True, False, False, False, True
+    for name, vals in (("VIEW", (True, False, True, False, True)), ("DEMO", (False, True, True, False, True)),
+                       ("no homelab page", (False, False, False, False, False)), ("on the homelab", (False, False, True, True, True))):
+        gui.VIEW, config.DEMO, config.REMOTE_ASSIST, config.IS_SERVER, config.REMOTE_APP = vals
         fresh_cache()
         assert gui.homelab_assistants() == [] and reads == [] and gui._homelab["busy"] is False, name
-    gui.VIEW, config.DEMO, config.REMOTE_ASSIST, config.IS_SERVER = False, False, True, False
+    gui.VIEW, config.DEMO, config.REMOTE_ASSIST, config.IS_SERVER, config.REMOTE_APP = False, False, True, False, True
     fresh_cache()
     assert gui.homelab_assistants() == []                                    # the first call: nothing yet, a read starts
     assert gui._homelab["busy"] is True
@@ -1095,7 +1095,7 @@ try:
     wait_idle()
     assert gui._homelab["busy"] is False and gui._homelab["at"] > 0
 finally:
-    gui.VIEW, config.DEMO, config.REMOTE_ASSIST, config.IS_SERVER = real_flags
+    gui.VIEW, config.DEMO, config.REMOTE_ASSIST, config.IS_SERVER, config.REMOTE_APP = real_flags
     threading.excepthook = threading.__excepthook__
 
 # ---- the GUI's Homelab assistants card: the review page's address, Pair this computer, the browser tool's screenshots

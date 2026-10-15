@@ -12,6 +12,7 @@ sheet's contents.
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -313,6 +314,36 @@ def bitwarden():
     return [check("bitwarden", "Bitwarden", OK, "Logged in; every login NUauto made is in your vault.")]
 
 
+def code_here():
+    """The commit this computer's code is (a git checkout), or None (the packaged app, no git)."""
+    if config.FROZEN or not os.path.exists(os.path.join(config.PROJECT_DIR, ".git")):
+        return None
+    try:
+        r = subprocess.run(["git", "-C", config.PROJECT_DIR, "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return (r.stdout.strip() or None) if r.returncode == 0 else None
+
+
+def code_there():
+    """The commit the homelab runs (deploy_from_git: its local/deployed.json), or None when that can't be told."""
+    from nuauto import sync
+    try:
+        r = subprocess.run(sync.SSH + [config.SERVER, f"cat {shlex.quote(config.SERVER_DIR)}/local/deployed.json"],
+                           capture_output=True, text=True, timeout=20)
+        return (json.loads(r.stdout).get("sha") or None) if r.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired, ValueError, AttributeError):
+        return None
+
+
+def same_code(here, there):
+    """A WARN result when the two machines run different code (both known), else None. Pure."""
+    if not here or not there or here == there:
+        return None
+    return {"level": "WARN", "msg": f"the homelab runs {there[:7]}, this computer {here[:7]} (a branch here, or main not "
+                                    "pulled yet: git pull): its page and this app may differ"}
+
+
 def homelab():
     if not config.HAS_SERVER or config.IS_SERVER:
         return [check("homelab", "Homelab", OFF, "Not used (everything runs on this machine).")]
@@ -320,6 +351,10 @@ def homelab():
     results = doctor.server_results()
     if results is None:
         return [check("homelab", "Homelab", FAIL, "Can't reach the homelab over ssh (Tailscale up?).")]
+    if config.DEPLOY_FROM_GIT:  # (without it this computer pushes its own code there: the same by construction)
+        skew = same_code(code_here(), code_there())
+        if skew:
+            results = results + [{"where": "homelab", **skew}]
     bad = [r for r in results if r["level"] == "FAIL"]
     warn = [r for r in results if r["level"] == "WARN"]
     if bad:

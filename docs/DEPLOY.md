@@ -113,6 +113,8 @@ SECRETS AND STATE (never print or log any of these; all mode 600)
   gui.lock              yes     (yes)    the running GUI (pid, port, a secret that only opens a window); not synced (the
                                          homelab's: nuauto-web's, with its page on)
   review_devices.json   no      (yes)    the devices paired with the homelab's page (key hashes only); never synced
+  homelab_link.json     (yes)   no       the laptop app's device key for the homelab's page (Settings > Homelab > This
+                                         app: Link; link.py); never synced; Unlink removes it (and unpairs it there)
   answers.json, answers_other.json  with NUauto on the homelab (remote_app / remote_assist) merged both ways by
                                      sync.share (either page, and the assistant, can change them); else laptop only
   profile.json          the NUworks resume label: with NUauto on the homelab merged both ways (Apply runs there too);
