@@ -7,8 +7,11 @@ a password; logins happen in Google's and NUworks' own pages.
   python -m nuauto.onboard resume-labels   read the Resume dropdown's options from a real NUworks Apply popup
   python -m nuauto.onboard terms           read NUworks' list of co-op terms (for the term preference)
   python -m nuauto.onboard launcher        add NUauto to your apps menu / ~/Applications (install.sh runs it)
-Both are read-only (hidden browser, domain lock on, nothing filled or submitted) and save what they read in
+The first two are read-only (hidden browser, domain lock on, nothing filled or submitted) and save what they read in
 local/onboard.json for the wizard.
+  python -m nuauto.onboard homelab-check <ssh name> [<folder>]   what that homelab has (read-only, over ssh)
+  python -m nuauto.onboard homelab-setup   set the homelab up, step by step, each asked first (Settings > Homelab)
+  python -m nuauto.onboard homelab-deploy on|off [<fork address>]   the homelab deploys GitHub's main by itself, or not
 
 Never imports daily.py: it sets AUTO_HEADLESS for its whole process, and the GUI's runs must keep a visible browser.
 """
@@ -17,6 +20,7 @@ import json
 import os
 import plistlib
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -76,10 +80,11 @@ def local_config():
 
 def save_config(updates):
     """Merge into local/local_config.json (not secret: mode 644, like before) and into this process's config."""
-    cfg = {**local_config(), **updates}
     os.makedirs(config.LOCAL_DIR, mode=0o700, exist_ok=True)
     os.chmod(config.LOCAL_DIR, 0o700)
-    write_json(config.LOCAL_CONFIG_PATH, cfg, mode=0o644)
+    with config.settings_lock():  # (sync merges the homelab's copy into it)
+        cfg = {**local_config(), **updates}
+        write_json(config.LOCAL_CONFIG_PATH, cfg, mode=0o644)
     config.LOCAL = cfg
     config.SHEET_ID = cfg.get("sheet_id", "")
     config.WEEK_START = date.fromisoformat(cfg["week_start"]) if cfg.get("week_start") else None
@@ -677,14 +682,20 @@ def steps(checks):
     add("extras", "Notifications, automatic updates, app icon", False, "Optional.", optional=True,
         discord=os.path.exists(config.DISCORD_WEBHOOK_PATH), scheduler=kind, scheduled=scheduler_enabled() if kind else False,
         homelab=config.HAS_SERVER, launcher=launcher_exists(), mac=sys.platform == "darwin", mac_app=bool(mac_app()))
+    ii = internships_info()
+    add("internships", "Summer internships (optional)", ii["on"], "Optional. Internships from public lists (not on "
+        "NUworks), read from the companies' own sites and scored like your co-ops; approved ones go in the sheet's "
+        "Other jobs tab, with no weekly limit.", optional=True, **ii)
     pm = password_manager(checks)
     add("password_manager", "Password manager (Bitwarden)", pm["on"] and (pm["check"] or {}).get("status") == health.OK,
         "Optional. Your own job-site logins for the assistant, and the ones it makes put into your vault.",
         optional=True, **pm)
-    ha = homelab_assistant()
-    if ha["available"]:
-        add("homelab_assistant", "Assistant on your homelab", ha["on"], "Optional. Company-site applications go on with "
-            "this computer off; you answer and approve from your phone.", optional=True, **ha)
+    hl = homelab_link()
+    if hl["available"]:  # one step: which homelab, then (once NUauto runs with it) its page and its assistant
+        ha = homelab_assistant()
+        add("homelab", "A homelab (optional)", hl["on"], "Optional. An always-on computer checks for new jobs and sends "
+            "your Discord messages, so this one can be off; NUauto's page and its assistant can run there too, for your "
+            "phone. Without one, everything runs here.", optional=True, **hl, assistant=ha if ha["available"] else None)
     return out
 
 
@@ -703,20 +714,209 @@ def password_manager(checks):
             "bw": not config.DEMO and bool(shutil.which("bw") or config.tool_path("bw"))}
 
 
-def homelab_assistant():
-    """Settings' and setup's Assistant on your homelab part (optional; homelab mode only, docs/REMOTE.md)."""
+def homelab_assistant(here=False):
+    """Settings' and setup's NUauto on your homelab part (optional; homelab mode only, docs/REMOTE.md): its page for your
+    phone (remote_app) and its assistant (remote_assist). here: asked by the homelab's own page (its queue settings)."""
     from nuauto import remote
     cfg = local_config()
     slots = cfg.get("assist_slots")
     from nuauto import review
     on = bool(cfg.get("remote_assist"))
-    url = review.page_url() if on else ""
-    return {"available": bool(config.HAS_SERVER and not config.IS_SERVER and not config.FROZEN),
-            "on": on, "auto": bool(remote.auto_tabs(cfg)),
+    app = on or bool(cfg.get("remote_app"))
+    url = review.page_url() if app else ""
+    return {"available": bool(config.HAS_SERVER and not config.IS_SERVER and not config.FROZEN) or here,
+            "on": on, "app": app, "auto": bool(remote.auto_tabs(cfg)),
             "auto_tabs": {"nuworks": "jobs" in remote.auto_tabs(cfg), "other": "other" in remote.auto_tabs(cfg)},
             "hours": list(remote.hours()),
             "slots": slots if isinstance(slots, int) and not isinstance(slots, bool) and 1 <= slots <= 3 else 3,
             "review_url": url.rstrip("/") if url.startswith("http") else None}
+
+
+def homelab_link():
+    """Settings' and setup's Homelab part (optional): the homelab this computer works with (local_config.json's server
+    fields; docs/DEPLOY.md). Never in the packaged app: it is always local mode. saved: what the file says now; on: what
+    this process runs with (a change takes a restart of NUauto)."""
+    cfg = local_config()
+    return {"available": not config.FROZEN, "on": config.HAS_SERVER, "saved": bool(cfg.get("server_hostname")),
+            "ssh": cfg.get("server_ssh") or "", "hostname": cfg.get("server_hostname") or "",
+            "dir": cfg.get("server_dir") or "", "listen": cfg.get("web_listen_host") or "",
+            "deploy_from_git": bool(cfg.get("deploy_from_git")), "deploy_repo": cfg.get("deploy_repo") or "",
+            "web_base_url": cfg.get("web_base_url") or "", "default_dir": HOMELAB_DIR}
+
+
+HOMELAB_DIR = "projects/auto"  # under the homelab user's home: the units in deploy/systemd/ run from %h/projects/auto
+SSH_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$")   # an ~/.ssh/config alias, a host, or user@host
+HOMELAB_UNITS = ("nuauto-daily.timer", "nuauto-weekly.timer", "nuauto-intern.timer", "nuauto-web.service",
+                 "nuauto-deploy.timer", "nuauto-assist.timer")
+# What homelab_probe asks the homelab (read-only): one key=value per line. $1: the project folder (under $HOME).
+PROBE = r'''d="$HOME/$1"
+echo "hostname=$(hostname)"
+echo "tailscale=$(tailscale ip -4 2>/dev/null | head -n 1)"
+[ -d "$d" ] && echo dir=1 || echo dir=0
+[ -x "$d/.venv/bin/nuauto" ] && echo venv=1 || echo venv=0
+if command -v uv >/dev/null 2>&1 || [ -x "$HOME/.local/bin/uv" ]; then echo uv=1; else echo uv=0; fi
+if command -v claude >/dev/null 2>&1 || [ -x "$HOME/.local/bin/claude" ]; then echo claude=1; else echo claude=0; fi
+echo "linger=$(loginctl show-user "$USER" -p Linger --value 2>/dev/null)"
+for u in ''' + " ".join(HOMELAB_UNITS) + r'''; do echo "unit.$u=$(systemctl --user is-enabled "$u" 2>/dev/null)"; done
+for t in Xvfb x11vnc websockify tmux npx; do command -v "$t" >/dev/null 2>&1 && echo "tool.$t=1" || echo "tool.$t=0"; done
+'''
+
+
+def homelab_probe(ssh_name, folder=HOMELAB_DIR):
+    """What the homelab (`ssh <ssh_name>`, a key, no password: BatchMode) has: its hostname, its Tailscale address, and
+    how much of NUauto is set up there. Read-only. {"ok": False, "why"} when it can't be asked."""
+    from nuauto import sync
+    if not SSH_NAME.match(ssh_name or ""):
+        return {"ok": False, "why": "The ssh name is a host, user@host, or an alias from ~/.ssh/config (no spaces)."}
+    if not re.fullmatch(r"[A-Za-z0-9._/-]{1,200}", folder or "") or ".." in folder or folder.startswith("/"):
+        return {"ok": False, "why": "The folder is a path under the homelab user's home, like projects/auto."}
+    try:
+        r = subprocess.run(sync.SSH + [ssh_name, "sh", "-s", "--", folder], input=PROBE, capture_output=True,
+                           text=True, timeout=40)
+    except (OSError, subprocess.TimeoutExpired):
+        return {"ok": False, "why": f"ssh {ssh_name} did not answer in time (Tailscale up? the right name?)."}
+    if r.returncode != 0 and "hostname=" not in r.stdout:
+        return {"ok": False, "why": f"ssh {ssh_name} failed: it needs a key (no password prompt), as in "
+                                    "docs/DEPLOY.md. " + (r.stderr.strip().splitlines() or [""])[-1][:200]}
+    found = dict(line.split("=", 1) for line in r.stdout.splitlines() if "=" in line)
+    tools = {k[5:]: v == "1" for k, v in found.items() if k.startswith("tool.")}
+    return {"ok": True, "hostname": found.get("hostname", ""), "tailscale": found.get("tailscale", ""),
+            "dir": found.get("dir") == "1", "venv": found.get("venv") == "1", "uv": found.get("uv") == "1",
+            "claude": found.get("claude") == "1", "linger": found.get("linger") == "yes",
+            "units": {k[5:]: v for k, v in found.items() if k.startswith("unit.")},
+            "assist_tools_missing": [t for t, ok in tools.items() if not ok], "folder": folder}
+
+
+def homelab_save(ssh_name, hostname, folder, listen):
+    """Use this homelab (or none: hostname ""): local_config.json's server fields. Takes a restart of NUauto."""
+    import ipaddress
+    if not hostname:
+        save_config({"server_hostname": ""})
+        return homelab_link()
+    if not SSH_NAME.match(ssh_name or "") or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]{0,99}", hostname):
+        raise Refused("Check the ssh name and the hostname (Check fills them in).")
+    if not re.fullmatch(r"[A-Za-z0-9._/-]{1,200}", folder or "") or ".." in folder or folder.startswith("/"):
+        raise Refused("The folder is a path under the homelab user's home, like projects/auto.")
+    try:
+        ip = ipaddress.ip_address(listen)
+    except ValueError:
+        raise Refused("The homelab's Tailscale address is an IP like 100.101.102.103 (Check fills it in).")
+    if ip.is_unspecified or ip.is_loopback:
+        raise Refused("Its pages listen on its Tailscale address only: not 0.0.0.0 or 127.0.0.1.")
+    save_config({"server_hostname": hostname, "server_ssh": ssh_name, "server_dir": folder,
+                 "web_listen_host": str(ip)})
+    return homelab_link()
+
+
+def _ask(what):
+    """y = do it, s = skip it, q = stop the setup here."""
+    while True:
+        a = input(f"\n{what}\n  Do it? [y]es / [s]kip / [q]uit: ").strip().lower()
+        if a in ("y", "s", "q"):
+            if a == "q":
+                sys.exit("Stopped. Run it again any time: what is done stays done.")
+            return a == "y"
+
+
+REPO_URL = re.compile(r"^https://[A-Za-z0-9.-]+/[A-Za-z0-9._/-]+$")
+
+
+def homelab_deploy(on, repo=None):
+    """`python -m nuauto.onboard homelab-deploy on|off [<repo>]` (Settings > Homelab > Deploys, run as a GUI task): the
+    homelab deploys GitHub's main by itself (deploy_from_git; docs/DEPLOY.md, TURN ON DEPLOY FROM GITHUB), or the laptop
+    pushes its code again. repo: another fork's address ("" = this project's)."""
+    from nuauto import sync
+    if config.FROZEN or not config.HAS_SERVER or config.IS_SERVER:
+        sys.exit("Deploys are set on your laptop (a source install) with a homelab in use.")
+    if repo is not None and repo and not REPO_URL.match(repo):
+        sys.exit("The fork's address is an https:// git address, like https://github.com/you/NUauto.git.")
+    if on:
+        print("Copying this computer's code there once (it carries the deploy tool and its timer)...")
+        sync.push(code=True)
+        units = [os.path.join(config.PROJECT_DIR, "deploy", "systemd", f) for f in ("nuauto-deploy.service", "nuauto-deploy.timer")]
+        ok = sync.remote("mkdir -p .config/systemd/user", "make the units folder") and \
+            sync._run(["rsync", "-a", "-e", " ".join(sync.SSH)] + units + [f"{config.SERVER}:.config/systemd/user/"], "copy the deploy timer") and \
+            sync.remote("systemctl --user daemon-reload && systemctl --user enable --now nuauto-deploy.timer", "turn the deploy timer on")
+        if not ok:
+            sys.exit("The homelab's deploy timer could not be turned on (is the homelab reachable?): nothing changed.")
+    else:
+        sync.remote("systemctl --user disable --now nuauto-deploy.timer", "turn the deploy timer off")
+    save_config({"deploy_from_git": bool(on), **({"deploy_repo": repo} if repo is not None else {})})
+    config.DEPLOY_FROM_GIT = bool(on) and config.HAS_SERVER
+    sync.push(code=not on)  # the setting itself (and, off, this computer's code again)
+    print("The homelab deploys GitHub's main by itself now (every 5 minutes)." if on else
+          "The homelab gets its code from this computer again (each push).")
+
+
+def internships_info():
+    """Settings' and setup's Summer internships part (optional; local_config "internships"; docs/PIPELINE.md)."""
+    from nuauto import intern
+    raw = local_config().get("internships")
+    cfg = raw if isinstance(raw, dict) else {}
+    lists = {**intern.DEFAULTS["lists"], **(cfg["lists"] if isinstance(cfg.get("lists"), dict) else {})}
+    return {"on": isinstance(raw, dict) or raw is True, "term": cfg.get("term") or intern.DEFAULTS["term"],
+            "threshold": cfg.get("threshold"), "lists": lists, "names": dict(intern.NAMES),
+            "default_lists": dict(intern.DEFAULTS["lists"]), "co_op_bar": jobs.PREFS["threshold"]}
+
+
+def homelab_setup():
+    """`python -m nuauto.onboard homelab-setup` (Settings > Homelab > Set it up opens it in a terminal window): the
+    steps of docs/DEPLOY.md's SET UP A HOMELAB, one at a time, each asked first. sudo asks for the homelab's password in
+    this terminal (NUauto never sees it). Run it again any time: each step is safe to repeat."""
+    from nuauto import sync
+    if config.FROZEN or not config.HAS_SERVER or config.IS_SERVER:
+        sys.exit("Run this on your laptop, from a source install, after Settings > Homelab > Use this homelab "
+                 "(and a restart of NUauto).")
+    host, folder = config.SERVER, config.SERVER_DIR
+    q = shlex.quote
+    run = lambda cmd, tty=False: subprocess.run(sync.SSH[:1] + (["-t"] if tty else []) + sync.SSH[1:]  # noqa: E731
+                                                + [host, cmd]).returncode
+    print(f"Setting up NUauto on {host} (folder ~/{folder}). Each step asks first; s skips it.")
+    if run("true") != 0:
+        sys.exit(f"ssh {host} does not work without a password yet: set up a key first (docs/DEPLOY.md).")
+    if folder.rstrip("/") != HOMELAB_DIR:
+        print(f"Note: the timers in deploy/systemd/ run NUauto from ~/{HOMELAB_DIR}. Another folder needs drop-ins "
+              "(systemctl --user edit <unit>; docs/DEPLOY.md).")
+    if _ask("1. Copy NUauto there: the code, your settings, resume, Google login and Discord webhook (sync.push)."):
+        sync.push(code=True)
+    if _ask("2. Its Python: uv (installed for your user if missing), a Python 3.12 venv with NUauto in it, and "
+            "Playwright's Firefox (a few minutes)."):
+        run(f"cd {q(folder)} && export PATH=\"$HOME/.local/bin:$PATH\" && "
+            "(command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh) && "
+            "(test -x .venv/bin/python || uv venv --python 3.12 .venv) && uv pip install --python .venv/bin/python -e . && "
+            ".venv/bin/python -m playwright install firefox", tty=True)
+    if os.path.exists(os.path.join(config.DATA_DIR, "pool.json")) and \
+            _ask("3. Copy your job data (data/) there, so it doesn't score every job again."):
+        sync._run(sync.RSYNC + ["data/", f"{sync.REMOTE}/data/"], "copy data")
+    client = os.path.join(config.LOCAL_DIR, "client_secret.json")
+    if os.path.exists(client) and _ask("4. Copy your Google client (local/client_secret.json, mode 600) there."):
+        sync._run(sync.RSYNC + [client, f"{sync.REMOTE}/local/client_secret.json"], "copy the Google client")
+        sync.lock_remote_local()
+    if _ask("5. Claude Code there: installed for your user if missing, then started once, so you log in and trust "
+            "the folder (in Claude: log in if it asks, answer Yes to trust the folder, then type /exit)."):
+        run(f"export PATH=\"$HOME/.local/bin:$PATH\"; (command -v claude >/dev/null || curl -fsSL "
+            f"https://claude.ai/install.sh | bash) && cd {q(folder)} && claude", tty=True)
+    if os.path.exists(config.COOKIES_PATH) and _ask("6. Copy your NUworks session there (the browser profile)."):
+        sync.push_session()
+    elif not os.path.exists(config.COOKIES_PATH):
+        print("\n6. No NUworks session on this computer yet: run `nuauto login` once, then this again.")
+    units = ["nuauto-daily.timer", "nuauto-weekly.timer", "nuauto-intern.timer", "nuauto-web.service"] + \
+        (["nuauto-deploy.timer"] if config.DEPLOY_FROM_GIT else []) + (["nuauto-assist.timer"] if config.REMOTE_ASSIST else [])
+    if _ask("7. Its timers and web page (systemd user units), running even when nobody is logged in there "
+            "(loginctl enable-linger: sudo asks for the homelab's password here). Turns on: " + ", ".join(units)):
+        sync.remote("mkdir -p .config/systemd/user", "make the units folder")
+        unit_dir = os.path.join(config.PROJECT_DIR, "deploy", "systemd")
+        files = sorted(os.path.join(unit_dir, f) for f in os.listdir(unit_dir))
+        sync._run(["rsync", "-a", "-e", " ".join(sync.SSH)] + files + [f"{host}:.config/systemd/user/"], "copy the units")
+        run('sudo loginctl enable-linger "$USER"', tty=True)
+        run("systemctl --user daemon-reload && systemctl --user enable --now " + " ".join(units))
+    if config.REMOTE_ASSIST and _ask("8. The assistant's tools there: the virtual screen and its browser view, tmux, "
+                                     "and the browser tool's own Firefox (sudo apt install: Debian / Ubuntu)."):
+        from nuauto import assist
+        run("sudo apt install -y xvfb x11vnc novnc nodejs npm tmux && "
+            f"npx -y -p {q(assist.MCP_PACKAGE)} playwright install firefox", tty=True)
+    print("\nDone. Check it: Settings > Health > Run all checks now (or `nuauto doctor`); then `nuauto update` runs "
+          "one update there.")
 
 
 def complete(step_list):
@@ -862,6 +1062,12 @@ def read_terms():
 def main(argv):
     if argv == ["launcher"]:  # install.sh
         print(f"App launcher: {launcher_create()}")
+    elif argv == ["homelab-setup"]:  # Settings > Homelab > Set it up (a terminal window)
+        homelab_setup()
+    elif argv[:1] == ["homelab-deploy"] and argv[1:2] in (["on"], ["off"]) and len(argv) <= 3:
+        homelab_deploy(argv[1] == "on", argv[2] if len(argv) == 3 else None)
+    elif argv[:1] == ["homelab-check"] and len(argv) in (2, 3):
+        print(json.dumps(homelab_probe(*argv[1:]), indent=1))
     elif argv == ["resume-labels"]:
         read_resume_labels()
     elif argv == ["terms"]:

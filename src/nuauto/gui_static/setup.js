@@ -278,12 +278,17 @@
       return [box];
     },
 
+    internships(s, redraw) {
+      return [internshipsPanel(s.data, () => redraw())];
+    },
+
     password_manager(s, redraw) {
       return [passwordManagerPanel(s.data, () => redraw())];
     },
 
-    homelab_assistant(s, redraw) {
-      return [homelabAssistantPanel(s.data, () => redraw())];
+    homelab(s, redraw) {  // which homelab; then, once NUauto runs with one, its page and its assistant (as in Settings)
+      return [homelabLinkPanel(s.data, () => redraw()), s.data.assistant ? [el("hr", { class: "sep" }),
+        el("h3", { text: "NUauto on your homelab" }), homelabAssistantPanel(s.data.assistant, () => redraw())] : null];
     },
 
     extras(s, redraw) {
@@ -351,13 +356,15 @@
             chip(s.status)),
           isOpen ? el("div", { class: "body" }, ...BODY[s.id](s, () => load(true)).filter(Boolean)) : null);
       }));
-      view.replaceChildren(
+      view.replaceChildren(...[
+        data.where === "homelab" ? el("div", { class: "note accent", testid: "setup-homelab" }, el("b", { text: "This is NUauto on your homelab. " }),
+          "Setup is done in NUauto on your laptop (it picks files and opens logins there); the homelab gets the settings from it. Here you can change your preferences, Discord and the resume label; the other steps say so if you try.") : null,
         el("div", { class: "card" }, el("div", { class: "row between" }, el("div", {},
           el("h2", { text: data.complete ? "You're set up" : "Set up NUauto" }),
           el("p", { class: "small muted", text: `${done} of ${steps.length} steps done. Each step checks itself; come back any time from Settings.` })),
           data.complete ? el("a", { class: "btn primary", href: "#/home", text: "Go to Today", testid: "setup-finish" }) : null),
           el("div", { class: "bar" }, el("span", { testid: "setup-bar" }))),
-        list);
+        list].filter(Boolean));
       view.querySelector("[data-testid=setup-bar]").style.width = Math.round((100 * done) / steps.length) + "%";
     }
     await load(true);

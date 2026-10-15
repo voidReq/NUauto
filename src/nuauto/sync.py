@@ -1,14 +1,17 @@
 """Laptop <-> homelab sync over Tailscale (ssh + rsync). Used by the `nuauto` command on the laptop.
 
-The homelab owns the job data (it runs the update); the laptop owns your ratings.
+The homelab owns the job data (it runs the update); the laptop owns your ratings (both machines' once NUauto runs on
+the homelab too: then they are merged, below).
   pull()          homelab data/ -> laptop (everything except ratings.json)
-  push()          laptop -> homelab: ratings.json, code, local_config.json, resume, Google token (only if newer).
-                  Not the code when "deploy_from_git" is on: the homelab then deploys main from GitHub itself (deploy.py)
+  push()          laptop -> homelab: ratings.json, code, local_config.json, resume, Google token and Discord webhook
+                  (only if newer). Not the code when "deploy_from_git" is on: the homelab then deploys main from GitHub
+                  itself (deploy.py)
   deploy_now()    start that deploy on the homelab now
   push_session()  laptop -> homelab: NUworks browser profile + session cookies (after `nuauto login`)
-  share()         with "remote_assist" on (the assistant runs on the homelab too): the answer banks and the job-site
-                  logins, merged both ways (merge_bank, merge_accounts); push() also sends the Gmail login and a copy of
-                  your writeups (~/nuauto-notes there)
+  share()         with NUauto on the homelab too (REMOTE_APP: its page for your phone, its assistant): what either machine
+                  may change, merged both ways: the answer banks (merge_bank), your settings, the NUworks resume label and
+                  your ratings (merge_dict: per setting / per job), and with "remote_assist" the job-site logins
+                  (merge_accounts); push() also sends the Gmail login and a copy of your writeups (~/nuauto-notes there)
 Secrets are copied file-to-file with rsync (or as JSON over ssh, under each file's lock) and never printed.
 """
 import fcntl
@@ -58,7 +61,7 @@ def ssh(command, timeout=None):
 
 def pull():
     ok = _run(RSYNC + ["--exclude", "ratings.json", f"{REMOTE}/data/", "data/"], "pull")
-    if config.REMOTE_ASSIST:
+    if config.REMOTE_APP:
         share()
     return ok
 
@@ -95,13 +98,19 @@ def push(code=None):
     if code is None:
         code = not config.DEPLOY_FROM_GIT
     ok = remote_dirs("local", "data", "docs")
-    if os.path.exists(config.LOCAL_CONFIG_PATH):  # before the code, which reads it
+    # NUauto on the homelab can change settings and ratings there too: merged both ways first (share), then only what
+    # that could not carry (an older homelab, a file it doesn't have yet) is copied over
+    merged = SHARED_FILES if config.REMOTE_APP and share() else set()
+    if os.path.exists(config.LOCAL_CONFIG_PATH) and SETTINGS not in merged:  # before the code, which reads it
         ok &= _run(RSYNC + ["-c", "local/local_config.json", f"{REMOTE}/local/local_config.json"], "push local config")
     if code:
         ok &= _run(RSYNC + ["-c", "-R"] + CODE + [f"{REMOTE}/"], "push code")
     if os.path.exists("docs/STATUS.md"):  # local log (gitignored); agents on the homelab read it too
         ok &= _run(RSYNC + ["-c", "docs/STATUS.md", f"{REMOTE}/docs/STATUS.md"], "push status")
-    ok &= _run(RSYNC + ["data/ratings.json", f"{REMOTE}/data/ratings.json"], "push ratings")
+    if RATINGS not in merged:
+        ok &= _run(RSYNC + ["data/ratings.json", f"{REMOTE}/data/ratings.json"], "push ratings")
+    if os.path.exists(config.DISCORD_WEBHOOK_PATH):  # the homelab sends the Discord messages (newer there: kept)
+        ok &= _run(RSYNC + ["-u", "local/discord_webhook.txt", f"{REMOTE}/local/discord_webhook.txt"], "push Discord webhook")
     if os.path.exists(config.LAPTOP_RESUME):
         ok &= _run(RSYNC + ["-c", config.LAPTOP_RESUME, f"{REMOTE}/local/resume.pdf"], "push resume")
     if config.REMOTE_ASSIST and config.LAPTOP_TRANSCRIPT and os.path.exists(config.LAPTOP_TRANSCRIPT):
@@ -116,7 +125,6 @@ def push(code=None):
         if os.path.exists(mail.TOKEN):  # the assistant there reads its email codes too
             ok &= _run(RSYNC + ["-u", mail.TOKEN, f"{REMOTE}/local/gmail_token.json"], "push Gmail login")
         ok &= push_notes()
-        ok &= share()
     ok &= lock_remote_local()
     return ok
 
@@ -145,11 +153,17 @@ def push_session():
     return ok
 
 
-# ---------- the assistant on the homelab too ("remote_assist"): what both machines' assistants share ----------
+# ---------- NUauto on the homelab too (REMOTE_APP): what both machines may change, merged both ways ----------
 
 BANKS = ("answers.json", "answers_other.json")   # in local/; lists of entries, keyed by their question
-ACCOUNTS = "accounts.json"                       # in local/; {site: login}
-BASE = "share_base.json"                         # in local/ (laptop): the banks as both machines last agreed
+ACCOUNTS = "accounts.json"                       # in local/; {site: login} (only with remote_assist)
+SETTINGS = "local_config.json"                   # in local/; merged per setting
+PROFILE = "profile.json"                         # in local/; the NUworks resume label (Apply runs on the homelab too)
+RATINGS = "ratings.json"                         # in data/; merged per job
+FILES = (SETTINGS, PROFILE, RATINGS)             # the {key: value} files merge_dict merges
+MACHINE_KEYS = {"tools"}                         # settings of the laptop alone (its tool paths): the laptop's always win
+SHARED_FILES = set()                             # which of FILES the last share() merged (push copies the others)
+BASE = "share_base.json"                         # in local/ (laptop): the banks and FILES as both machines last agreed
 NOTES_MAX = 50_000_000                           # a writeups folder bigger than this is not copied (not notes)
 UNREADABLE = "unreadable"                        # what shared_out sends for a file it can't read (left alone)
 
@@ -232,6 +246,75 @@ def merge_gone(mine, theirs):
     return out
 
 
+_NONE = object()  # a key a copy does not have
+
+
+def merge_dict(base, mine, theirs, own=(), their=()):
+    """Three-way merge of two copies of one {key: value} file (settings, the NUworks profile, ratings) that both started
+    from base (the last merge): per key, the side that changed it since base wins; both changed it: mine, and it is
+    listed. A key one side removed while the other left it as it was is removed. own / their: keys taken from mine /
+    theirs alone (the laptop's tool paths). mine / theirs None = not known (missing): as if unchanged since base.
+    Returns (merged, [conflicting keys]). Pure (tests/test_share.py)."""
+    b = base if isinstance(base, dict) else {}
+    m = mine if isinstance(mine, dict) else b
+    t = theirs if isinstance(theirs, dict) else b
+    out, conflicts = {}, []
+    for k in list(m) + [k for k in t if k not in m]:
+        mk, tk, bk = m.get(k, _NONE), t.get(k, _NONE), b.get(k, _NONE)
+        if k in own:
+            pick = mk
+        elif k in their:
+            pick = tk
+        elif mk == tk or tk == bk:
+            pick = mk
+        elif mk == bk:
+            pick = tk
+        else:
+            pick = mk
+            conflicts.append(k)
+        if pick is not _NONE:
+            out[k] = pick
+    return out, conflicts
+
+
+def file_path(name):
+    return os.path.join(config.DATA_DIR if name == RATINGS else config.LOCAL_DIR, name)
+
+
+def read_file(name):
+    """One of FILES as this machine has it now (None: missing; UNREADABLE: bad JSON, left alone)."""
+    return _read_json(file_path(name), None)
+
+
+def merge_into_file(name, base, theirs, laptop):
+    """Merge another machine's copy of one of FILES into this one's, under its lock. laptop: this machine is the laptop
+    (the laptop's tool paths win either way). Returns (merged, conflicts); (None, []) when either side can't be read."""
+    from nuauto import jobs
+    own, their = (MACHINE_KEYS, ()) if laptop else ((), MACHINE_KEYS)
+    if theirs == UNREADABLE:
+        return None, []
+    if name == RATINGS:
+        with jobs.ratings_locked() as ratings:
+            merged, conflicts = merge_dict(base, dict(ratings), theirs)
+            ratings.clear()
+            ratings.update(merged)
+        return merged, conflicts
+    with config.settings_lock():
+        mine = read_file(name)
+        if mine == UNREADABLE:
+            return None, []
+        merged, conflicts = merge_dict(base, mine, theirs, own if name == SETTINGS else (),
+                                       their if name == SETTINGS else ())
+        if merged != mine and (merged or mine is not None):
+            path = file_path(name)
+            tmp = path + ".tmp"
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644 if name == SETTINGS else 0o600)
+            with os.fdopen(fd, "w") as f:
+                json.dump(merged, f, indent=2)
+            os.replace(tmp, path)
+    return merged, conflicts
+
+
 def _read_json(path, default):
     """The file's JSON; default when it doesn't exist; UNREADABLE when it can't be read (bad JSON: perhaps being edited
     by hand): such a file is left alone, never merged over."""
@@ -262,8 +345,8 @@ def _bank_lock():
 
 
 def shared_out():
-    """(homelab) The answer banks, their deletion records and the job-site logins, each read under its lock, as one
-    JSON object on stdout: read by the laptop's share() over ssh, never shown."""
+    """(homelab) The answer banks, their deletion records, FILES and (remote_assist) the job-site logins, each read
+    under its lock, as one JSON object on stdout: read by the laptop's share() over ssh, never shown."""
     from nuauto import accounts
     from nuauto import answers
     lock = _bank_lock()
@@ -272,11 +355,13 @@ def shared_out():
         out["gone"] = answers.gone_all()
     finally:
         lock.close()
-    try:
-        with accounts.locked() as data:
-            out[ACCOUNTS] = dict(data)
-    except ValueError:  # accounts.json can't be read: left alone
-        out[ACCOUNTS] = UNREADABLE
+    out.update({n: read_file(n) for n in FILES})
+    if config.REMOTE_ASSIST:  # the logins are only the assistant's
+        try:
+            with accounts.locked() as data:
+                out[ACCOUNTS] = dict(data)
+        except ValueError:  # accounts.json can't be read: left alone
+            out[ACCOUNTS] = UNREADABLE
     json.dump(out, sys.stdout)
 
 
@@ -322,8 +407,12 @@ def merge_into_accounts(theirs):
 
 def shared_in(payload):
     """(homelab) Merge what the laptop's share() sent: per bank {"base": what it read here, "merged": its result}, the
-    deletion records and its logins. A change made here in the meantime is kept (it shows up as this side's change)."""
+    deletion records, FILES the same way, and its logins. A change made here in the meantime is kept (it shows up as
+    this side's change)."""
     merge_into_banks({n: payload[n] for n in BANKS if n in payload}, payload.get("gone") or {})
+    for n in FILES:
+        if isinstance(payload.get(n), dict) and isinstance(payload[n].get("merged"), dict):
+            merge_into_file(n, payload[n].get("base"), payload[n]["merged"], laptop=False)
     if payload.get(ACCOUNTS) not in (None, UNREADABLE):
         merge_into_accounts(payload[ACCOUNTS])
 
@@ -340,10 +429,12 @@ def _remote_py(command, stdin=None):
 
 
 def share():
-    """Laptop, with "remote_assist": the answer banks (and their deletion records) and the job-site logins of both
-    machines, merged both ways (an answer saved by the assistant on either one is there for the next run on both).
-    True if it went through."""
-    if not config.REMOTE_ASSIST or config.IS_SERVER:
+    """Laptop, with NUauto on the homelab too (REMOTE_APP): the answer banks (and their deletion records), FILES
+    (settings, the NUworks resume label, ratings) and, with "remote_assist", the job-site logins of both machines, merged
+    both ways (an answer saved, a setting changed or a job rated on either one is there on both). True if it went
+    through; SHARED_FILES then says which of FILES it merged (an older homelab sends none: push() copies them)."""
+    SHARED_FILES.clear()
+    if not config.REMOTE_APP or config.IS_SERVER:
         return True
     out = _remote_py("shared-out")
     try:
@@ -351,7 +442,7 @@ def share():
     except ValueError:
         theirs = None
     if not isinstance(theirs, dict):
-        print("(sync: could not read the homelab's answers and logins; using this computer's)")
+        print("(sync: could not read the homelab's answers and settings; using this computer's)")
         return False
     base_path = os.path.join(config.LOCAL_DIR, BASE)
     base = _read_json(base_path, {})
@@ -360,20 +451,34 @@ def share():
     conflicts, skipped = merge_into_banks(parts, theirs.get("gone") or {})
     from nuauto import answers
     merged = {n: _read_json(os.path.join(config.LOCAL_DIR, n), None) for n in BANKS if n not in skipped}
-    logins, clashes = merge_into_accounts(theirs.get(ACCOUNTS))
-    # The homelab merges our result with what it had when we read it as the base: whatever its assistants saved in
-    # the meantime stays.
+    files, changed_both = {}, []
+    for n in FILES:  # only what the homelab has (a missing or unreadable copy there: push() copies this one)
+        if isinstance(theirs.get(n), dict):
+            # no merge yet: the laptop's copy as it is (what push() used to copy over), never an old copy's leftovers
+            result, c = merge_into_file(n, base[n] if n in base else theirs[n], theirs[n], laptop=True)
+            if result is not None:
+                files[n] = result
+                changed_both += [f"{k} ({n})" for k in c]
+    logins, clashes = None, []
+    if config.REMOTE_ASSIST and ACCOUNTS in theirs:
+        logins, clashes = merge_into_accounts(theirs[ACCOUNTS])
+    # The homelab merges our result with what it had when we read it as the base: whatever it saved in the meantime
+    # (its assistants' answers, its page's settings and ratings) stays.
     payload = {**{n: {"base": theirs.get(n), "merged": merged[n]} for n in merged if merged[n] != UNREADABLE},
+               **{n: {"base": theirs[n], "merged": v} for n, v in files.items()},
                "gone": answers.gone_all(), **({ACCOUNTS: logins} if logins is not None else {})}
     ok = _remote_py("shared-in", stdin=json.dumps(payload)) is not None
     if ok:
-        _write_secret(base_path, {n: v for n, v in merged.items() if v not in (None, UNREADABLE)})
+        _write_secret(base_path, {**{n: v for n, v in merged.items() if v not in (None, UNREADABLE)}, **files})
+        SHARED_FILES.update(files)
     else:
-        print("(sync: could not send the answers and logins to the homelab; next time)")
+        print("(sync: could not send the answers and settings to the homelab; next time)")
     for n in skipped:
         print(f"(sync: {n} can't be read on one of the machines (bad JSON?): left alone, not merged)")
     if conflicts:
         print(f"(sync: changed on both machines, this computer's answer kept: {', '.join(conflicts[:5])})")
+    if changed_both:
+        print(f"(sync: changed on both machines, this computer's kept: {', '.join(changed_both[:5])})")
     if clashes:
         print(f"(sync: two passwords for {', '.join(clashes[:5])} (an account made on each machine): both kept; "
               "`nuauto accounts` lists them)")

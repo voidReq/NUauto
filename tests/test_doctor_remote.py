@@ -42,10 +42,11 @@ except OSError:
 
 
 def run():
-    """What check_remote_assist says now: [(level, msg)]."""
+    """What check_remote_assist and check_remote_app (NUauto's page) say now: [(level, msg)]."""
     doctor.results.clear()
     doctor.fails.clear()
     doctor.check_remote_assist()
+    doctor.check_remote_app()
     return [(r["level"], r["msg"]) for r in doctor.results]
 
 
@@ -154,7 +155,7 @@ if PORT_FREE:
     try:
         out = run()
         assert only(out, "FAIL") == [], out
-        assert "the review page answers on 127.0.0.1:8766" in only(out, "ok"), out
+        assert "NUauto's page answers on 127.0.0.1:8766" in only(out, "ok"), out
         assert only(out, "WARN") == []
     finally:
         srv.close()
@@ -165,23 +166,25 @@ if PORT_FREE:
 else:
     print("note: something holds 127.0.0.1:8766 here; the review-page sub-check was skipped")
 
-# ---- server() runs it only with remote_assist
+# ---- server() runs the assistant's checks only with remote_assist; the page's with remote_app or remote_assist
 calls = []
 real = {n: getattr(doctor, n) for n in ("sh", "check_files", "check_google_login", "check_web_fresh", "check_claude",
-                                        "check_remote_assist")}
+                                        "check_remote_assist", "check_remote_app")}
 real_is_server = config.IS_SERVER
 try:
     doctor.sh = lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "yes" if "show-user" in cmd else "success"
                                                               if "show" in cmd else "enabled" if "is-enabled" in cmd else "active", "")
     for name in ("check_files", "check_google_login", "check_web_fresh", "check_claude"):
         setattr(doctor, name, lambda *a, **kw: None)
-    doctor.check_remote_assist = lambda: calls.append(1)
+    doctor.check_remote_assist = lambda: calls.append("assist")
+    doctor.check_remote_app = lambda: calls.append("app")
     config.IS_SERVER = True
-    for local, expected in (({}, 0), ({"remote_assist": False}, 0), ({"remote_assist": True}, 1)):
+    for local, expected in (({}, []), ({"remote_assist": False}, []), ({"remote_assist": True}, ["assist", "app"]),
+                            ({"remote_app": True}, ["app"])):
         calls.clear()
         config.LOCAL = local
         doctor.server()
-        assert len(calls) == expected, (local, calls)
+        assert calls == expected, (local, calls)
 finally:
     config.IS_SERVER = real_is_server
     for n, f in real.items():

@@ -20,6 +20,7 @@ LAPTOP, HOMELAB = os.path.join(tmp, "laptop"), os.path.join(tmp, "homelab")
 for p in (LAPTOP, HOMELAB):
     os.makedirs(p, mode=0o700)
 config.LOCAL_DIR = LAPTOP  # never the real local/
+config.DATA_DIR = os.path.join(LAPTOP, "data")
 config.LOGS_DIR = os.path.join(tmp, "logs")
 
 from nuauto import accounts  # noqa: E402
@@ -174,13 +175,14 @@ assert set(got) == {"a.md", os.path.join("sub", "b.md"), os.path.join("sub", "de
 
 @contextlib.contextmanager
 def at(folder):
-    """Run as the machine whose local/ is folder."""
-    old = config.LOCAL_DIR, accounts.PATH, accounts.LOCK
-    config.LOCAL_DIR, accounts.PATH, accounts.LOCK = folder, os.path.join(folder, "accounts.json"), os.path.join(folder, "accounts.lock")
+    """Run as the machine whose local/ is folder (and whose data/ is folder/data)."""
+    old = config.LOCAL_DIR, config.DATA_DIR, accounts.PATH, accounts.LOCK
+    config.LOCAL_DIR, config.DATA_DIR = folder, os.path.join(folder, "data")
+    accounts.PATH, accounts.LOCK = os.path.join(folder, "accounts.json"), os.path.join(folder, "accounts.lock")
     try:
         yield
     finally:
-        config.LOCAL_DIR, accounts.PATH, accounts.LOCK = old
+        config.LOCAL_DIR, config.DATA_DIR, accounts.PATH, accounts.LOCK = old
 
 
 def write_bank(folder, name, entries):
@@ -216,9 +218,14 @@ def out_of(folder):
 
 write_bank(HOMELAB, "answers.json", [e("city", "Boston")])
 write_accounts(HOMELAB, {"acme.com": login("pw1", "2026-10-01")})
+old_flags = config.REMOTE_ASSIST, config.REMOTE_APP, config.IS_SERVER
+config.REMOTE_ASSIST = config.REMOTE_APP = True
 o = out_of(HOMELAB)
 assert o["answers.json"] == [e("city", "Boston")] and o["answers_other.json"] is None and list(o["accounts.json"]) == ["acme.com"]
-assert o["gone"] == {}
+assert o["gone"] == {} and o["local_config.json"] is None and o["profile.json"] is None and o["ratings.json"] is None
+config.REMOTE_ASSIST = False  # the homelab's page alone (no assistant there): the logins stay where they are
+assert "accounts.json" not in out_of(HOMELAB)
+config.REMOTE_ASSIST = True
 with at(HOMELAB):
     conflicts, skipped = sync.merge_into_banks({"answers.json": {"base": [e("city", "Boston")], "merged": [e("city", "Boston"), e("email", "a")]}}, {})
 assert conflicts == [] and skipped == [] and names(read_bank(HOMELAB, "answers.json")) == ["city", "email"]
@@ -306,14 +313,13 @@ def run_share():
 
 real_remote = sync._remote_py
 sync._remote_py = fake_remote
-old_flags = config.REMOTE_ASSIST, config.IS_SERVER
 try:
-    # off, or on the homelab itself: nothing happens, no ssh
-    config.REMOTE_ASSIST, config.IS_SERVER = False, False
+    # off (no NUauto on the homelab), or on the homelab itself: nothing happens, no ssh
+    config.REMOTE_ASSIST, config.REMOTE_APP, config.IS_SERVER = False, False, False
     assert run_share() == (True, "") and calls == []
-    config.REMOTE_ASSIST, config.IS_SERVER = True, True
+    config.REMOTE_ASSIST, config.REMOTE_APP, config.IS_SERVER = True, True, True
     assert run_share() == (True, "") and calls == []
-    config.REMOTE_ASSIST, config.IS_SERVER = True, False
+    config.REMOTE_ASSIST, config.REMOTE_APP, config.IS_SERVER = True, True, False
 
     # first share: no base file; the union goes both ways; the base is written after the send
     write_bank(LAPTOP, "answers.json", [e("email", "a@x.com"), e("city", "Boston")])
@@ -519,20 +525,101 @@ try:
     laptop_before = open(os.path.join(LAPTOP, "accounts.json")).read()
     assert run_share()[0] and open(os.path.join(HOMELAB, "accounts.json")).read() == "{nope" and open(os.path.join(LAPTOP, "accounts.json")).read() == laptop_before
 
-    # pull() shares only with remote_assist
+    # pull() shares only with NUauto on the homelab (its page, its assistant)
     ran, shared = [], []
     real_run, real_share = sync._run, sync.share
     sync._run = lambda cmd, what: ran.append(what) or True
     sync.share = lambda: shared.append(1) or True
     try:
-        config.REMOTE_ASSIST = False
+        config.REMOTE_APP = False
         assert sync.pull() is True and shared == []
-        config.REMOTE_ASSIST = True
+        config.REMOTE_APP = True
         assert sync.pull() is True and shared == [1] and ran == ["pull", "pull"]
     finally:
         sync._run, sync.share = real_run, real_share
+
+    # ---- settings, the NUworks resume label and ratings: per key, both ways (FILES)
+    def write_json(path, data):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(data, f)
+
+    os.remove(os.path.join(LAPTOP, "answers_other.json"))  # (the unreadable one from above)
+    cfg_l, cfg_h = os.path.join(LAPTOP, "local_config.json"), os.path.join(HOMELAB, "local_config.json")
+    rat_l, rat_h = os.path.join(LAPTOP, "data", "ratings.json"), os.path.join(HOMELAB, "data", "ratings.json")
+    write_json(cfg_l, {"sheet_id": "S", "max_per_week": 11, "tools": {"claude": "/laptop/claude"}, "remote_hours": [9, 22]})
+    write_json(cfg_h, {"sheet_id": "S", "max_per_week": 11, "tools": {"claude": "/laptop/claude"}, "remote_hours": [9, 22]})
+    write_json(rat_l, {"1": {"label": 1, "date": "2026-10-01"}})
+    write_json(rat_h, {"1": {"label": 1, "date": "2026-10-01"}})
+    write_json(os.path.join(HOMELAB, "profile.json"), {"resume_label": "Old"})
+    write_json(os.path.join(LAPTOP, "profile.json"), {"resume_label": "Old"})
+    # the first merge (no base yet): the laptop's copy as it is, as push() copied it before (an old homelab copy's
+    # leftovers never come back)
+    write_json(cfg_h, {**json.load(open(cfg_h)), "max_per_week": 9, "internships": {}})
+    write_json(rat_h, {**json.load(open(rat_h)), "old": {"label": 0, "date": "2026-09-01"}})
+    ok, printed = run_share()                                                 # agree once: the base
+    assert ok and sync.SHARED_FILES == {"local_config.json", "profile.json", "ratings.json"}
+    for cfg in (cfg_l, cfg_h):
+        c = json.load(open(cfg))
+        assert c["max_per_week"] == 11 and "internships" not in c, (cfg, c)
+    assert sorted(json.load(open(rat_h))) == ["1"] == sorted(json.load(open(rat_l)))
+    # the homelab's page changed the cap and rated a job; the laptop changed the hours and the resume label and rated another
+    write_json(cfg_h, {**json.load(open(cfg_h)), "max_per_week": 14, "tools": {"claude": "/homelab/claude"}})
+    write_json(rat_h, {**json.load(open(rat_h)), "2": {"label": 0, "date": "2026-10-14"}})
+    write_json(cfg_l, {**json.load(open(cfg_l)), "remote_hours": [8, 20]})
+    write_json(rat_l, {**json.load(open(rat_l)), "3": {"label": 1, "date": "2026-10-14"}})
+    write_json(os.path.join(LAPTOP, "profile.json"), {"resume_label": "New"})
+    ok, printed = run_share()
+    assert ok and printed == "", printed
+    for cfg in (cfg_l, cfg_h):
+        c = json.load(open(cfg))
+        assert c["max_per_week"] == 14 and c["remote_hours"] == [8, 20] and c["sheet_id"] == "S", (cfg, c)
+        assert c["tools"] == {"claude": "/laptop/claude"}, (cfg, c)              # the laptop's tool paths, on both
+    for rat in (rat_l, rat_h):
+        assert sorted(json.load(open(rat))) == ["1", "2", "3"], rat
+    for folder in (LAPTOP, HOMELAB):
+        assert json.load(open(os.path.join(folder, "profile.json"))) == {"resume_label": "New"}
+    assert stat.S_IMODE(os.stat(os.path.join(HOMELAB, "profile.json")).st_mode) == 0o600   # written by the merge
+    assert stat.S_IMODE(os.stat(cfg_h).st_mode) == 0o644
+    # changed on both: the laptop's kept, and said; a rating taken away on one side (Undo) goes on both
+    write_json(cfg_h, {**json.load(open(cfg_h)), "max_per_week": 15})
+    write_json(cfg_l, {**json.load(open(cfg_l)), "max_per_week": 12})
+    r = json.load(open(rat_h))
+    del r["2"]
+    write_json(rat_h, r)
+    ok, printed = run_share()
+    assert ok and "max_per_week (local_config.json)" in printed, printed
+    assert json.load(open(cfg_l))["max_per_week"] == 12 == json.load(open(cfg_h))["max_per_week"]
+    assert sorted(json.load(open(rat_l))) == ["1", "3"] == sorted(json.load(open(rat_h)))
+    # an older homelab sends no FILES: nothing of them is merged (push() then copies them, as before)
+    real_out = sync.shared_out
+    try:
+        sync.shared_out = lambda: print(json.dumps({"answers.json": [], "answers_other.json": None, "gone": {}}))
+        ok, _ = run_share()
+        assert ok and sync.SHARED_FILES == set()
+    finally:
+        sync.shared_out = real_out
+    # the homelab can't be asked: nothing merged, push() copies them
+    state["fail_out"] = True
+    ok, printed = run_share()
+    assert not ok and sync.SHARED_FILES == set() and "could not read the homelab's" in printed
+    state["fail_out"] = False
 finally:
     sync._remote_py = real_remote
-    config.REMOTE_ASSIST, config.IS_SERVER = old_flags
+    config.REMOTE_ASSIST, config.REMOTE_APP, config.IS_SERVER = old_flags
+
+# ---- merge_dict alone (pure)
+m, c = sync.merge_dict({"a": 1, "b": 2, "c": 3}, {"a": 1, "b": 20, "c": 3, "d": 4}, {"a": 10, "b": 2, "e": 5})
+assert m == {"a": 10, "b": 20, "d": 4, "e": 5} and c == []      # c: gone on their side, unchanged on mine: gone
+m, c = sync.merge_dict({"a": 1}, {"a": 2}, {"a": 3})
+assert m == {"a": 2} and c == ["a"]
+m, c = sync.merge_dict({"t": 1}, {"t": 2}, {"t": 3}, own={"t"})
+assert m == {"t": 2} and c == []
+m, c = sync.merge_dict({"t": 1}, {"t": 2}, {"t": 3}, their={"t"})
+assert m == {"t": 3} and c == []
+m, c = sync.merge_dict(None, {"a": 1}, None)                     # nothing known on their side: mine as it is
+assert m == {"a": 1} and c == []
+m, c = sync.merge_dict({"a": 1}, None, {"a": 1, "b": 2})         # mine missing: as if unchanged
+assert m == {"a": 1, "b": 2}
 
 print("All share checks passed.")

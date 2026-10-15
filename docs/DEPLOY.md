@@ -18,13 +18,20 @@ MODES
                      the file: with deploy_from_git the repo's copy is installed over it.
     deploy_from_git  true = the homelab deploys GitHub's main by itself (DEPLOYING A CHANGE); the laptop stops
                      pushing code. deploy_repo: the URL of another fork (default: this project's GitHub repo).
-    web_base_url, web_listen_host   the Mark-done page (below); "" = no Mark links.
+    web_base_url, web_listen_host   the Mark-done page (below); "" = no Mark links. web_listen_host (the Tailscale IP)
+                     is also where NUauto's page for your phone and the assistant's browser views listen.
+    remote_app       true = NUauto's page on the homelab too (the same app, for your phone; docs/REMOTE.md);
+                     remote_assist (its assistant) turns it on as well.
+  The GUI sets all of these up (a source install): Settings > Homelab (Check, Use this homelab, Set it up; its code:
+  deploy_from_git and your fork's deploy_repo; the Mark-done links' web_base_url), or setup's optional Homelab step;
+  the same card's NUauto on your homelab part for remote_app / remote_assist.
   Below, `ssh homelab` means ssh to server_ssh.
 
 MACHINES (homelab mode)
 - Laptop. Where code is edited; the git repo. Runs everything interactive: the GUI (`nuauto gui`, docs/GUI.md),
   approve, rate, apply (a real terminal or the GUI, and a visible browser), `nuauto login` (manual SSO),
-  `nuauto login google`. Owns data/ratings.json and the resume (local_config.json resume_path).
+  `nuauto login google`. Owns the resume (local_config.json resume_path) and the settings (with NUauto's page on the
+  homelab, settings and data/ratings.json changed there are merged back: SYNC).
 - Homelab = PROD. Key-based ssh from the laptop (e.g. over Tailscale). venv made with uv
   (Python 3.12), claude CLI logged in (~/.local/bin/claude, or on PATH), user lingering on
   (user timers run without anyone logged in). Owns data/ (the job pool). NOT a git checkout:
@@ -67,12 +74,17 @@ Unit files live in this repo (deploy/systemd/) and are installed in ~/.config/sy
 - nuauto-deploy.timer -> nuauto-deploy.service: `nuauto deploy` every 5 minutes (deploy_from_git only): looks at
   GitHub's main; a new commit is unpacked aside, imported as a check, then its changed files are copied in, the
   package is reinstalled if pyproject.toml changed, changed unit files are installed (daemon-reload, timers
-  restarted, new ones enabled) and nuauto-web restarts only if web.py or a module it uses changed. A commit that
-  does not import, or a web that does not come back, is undone and Discord says so once. It waits while an
-  update (`nuauto daily`, `nuauto intern update`) runs. Record: local/deployed.json; log: logs/deploy.log.
+  restarted, new ones enabled) and nuauto-web restarts when a module it runs changed (deploy.web_code: any module
+  but cli, daily, deploy, selftest, window_gtk, inspect_form; its page's own files are read per request). A commit
+  that does not import, or a web that does not come back, is undone and Discord says so once. It waits while an
+  update (`nuauto daily`, `nuauto intern update`) or a NUworks run started from NUauto's page (`nuauto apply`, `nuauto
+  assist nuworks`: nuauto-web's children, which a restart would cut off) runs. Record: local/deployed.json; log:
+  logs/deploy.log.
 - nuauto-web.service: `nuauto web`, always on (Restart=on-failure). Listens on web_listen_host:8765
-  only (web.LISTEN). With remote_assist it also serves the assistant's review page on web_listen_host:8766
-  (review.py; never add 8766 to the tunnel: Tailscale only, docs/REMOTE.md). Serves the signed Discord links: GET = confirm page only, POST (button)
+  only (web.LISTEN). With remote_app or remote_assist it also serves NUauto's page for your phone on
+  web_listen_host:8766 (gui.serve_remote: the same app as `nuauto gui`, paired devices only; never add 8766 to the
+  tunnel: Tailscale only, docs/REMOTE.md); the runs started there (Apply on its virtual screen, the NUworks side) are its
+  children; its update button starts nuauto-daily.service. Serves the signed Discord links: GET = confirm page only, POST (button)
   changes the sheet. Every link is HMAC-signed with web_secret.txt for one action on one
   row + job. Log: logs/web.log.
 - Don't also schedule the update on the laptop while the homelab runs it: two runs = double
@@ -81,10 +93,10 @@ Unit files live in this repo (deploy/systemd/) and are installed in ~/.config/sy
 SECRETS AND STATE (never print or log any of these; all mode 600)
   file                  laptop  homelab  how it gets to the homelab
   token.json            yes     yes      sync.push (only if newer), after `nuauto login google`
-  client_secret.json    yes     yes      copied by hand once (Google OAuth Desktop client)
+  client_secret.json    yes     yes      copied once (Settings > Homelab > Set it up, or by hand; Google OAuth Desktop client)
   session_cookies.json  yes     yes      `nuauto login` on the laptop (sync.push_session)
   browser_profile/      yes     yes      same as session_cookies.json
-  discord_webhook.txt   yes     yes      copied by hand
+  discord_webhook.txt   yes     yes      sync.push (only if newer: one saved on the homelab's page stays)
   web_secret.txt        no      yes      created by `nuauto web` on first start. Replacing it breaks
                                          every Mark link already sent.
   assist_profile/       yes     (yes)    company-site logins of `nuauto assist`; never synced (with remote_assist the
@@ -98,14 +110,17 @@ SECRETS AND STATE (never print or log any of these; all mode 600)
                                          upload; with remote_assist sync.push copies it there (via a 600 copy in local/)
   gmail_token.json      yes     (yes)    the read-only Gmail login for the assistant's email codes (`nuauto login gmail`;
                                          renewed by `nuauto login google`); with remote_assist sync.push (if newer)
-  gui.lock              yes     no       the running GUI (pid, port, a secret that only opens a window); not synced
-  answers.json, answers_other.json  with remote_assist merged both ways by sync.share (the assistant runs on both
-                                     machines); else laptop only in practice, not synced
-  profile.json          laptop only in practice (apply runs on the laptop); not synced
-  (yes) = only with "remote_assist" (the company-site assistant on the homelab too, docs/REMOTE.md).
-Not secret, gitignored, pushed by sync.push: local_config.json (personal settings),
-docs/STATUS.md (your local log), google_login.txt (date of the last Google login), the resume
-(as local/resume.pdf on the homelab).
+  gui.lock              yes     (yes)    the running GUI (pid, port, a secret that only opens a window); not synced (the
+                                         homelab's: nuauto-web's, with its page on)
+  review_devices.json   no      (yes)    the devices paired with the homelab's page (key hashes only); never synced
+  answers.json, answers_other.json  with NUauto on the homelab (remote_app / remote_assist) merged both ways by
+                                     sync.share (either page, and the assistant, can change them); else laptop only
+  profile.json          the NUworks resume label: with NUauto on the homelab merged both ways (Apply runs there too);
+                        else laptop only, not synced
+  (yes) = only with "remote_assist" or "remote_app" (NUauto on the homelab too, docs/REMOTE.md).
+Not secret, gitignored, pushed by sync.push: local_config.json (personal settings; with NUauto on the homelab merged
+both ways per setting by sync.share instead), data/ratings.json (the same), docs/STATUS.md (your local log),
+google_login.txt (date of the last Google login), the resume (as local/resume.pdf on the homelab).
 
 GOOGLE SHEETS LOGIN (gspread + OAuth)
 - OAuth only: gspread.oauth(...), token in token.json (chmod 600). No service accounts (many
@@ -127,7 +142,11 @@ SYNC (sync.py; runs automatically inside `nuauto` on the laptop, homelab mode on
 - After approve / rate / status / login google: push to the homelab: local_config.json, the
   code (files listed in sync.CODE: pyproject.toml, src/nuauto/, prompts/, docs; rsync -c; NOT with deploy_from_git:
   then the homelab deploys main itself), docs/STATUS.md, data/ratings.json, the resume,
-  token.json (if newer), google_login.txt.
+  token.json (if newer), google_login.txt, discord_webhook.txt (if newer).
+- With NUauto on the homelab (remote_app / remote_assist; its page can change settings and ratings too): every pull
+  and push first merges both machines' answer banks, local_config.json, profile.json and data/ratings.json, per
+  question / setting / job (sync.share; docs/REMOTE.md, WHAT LIVES WHERE); push then copies only what that could not
+  carry (an older homelab).
 - `nuauto update`: push, start nuauto-daily.service on the homelab, show its log tail, pull.
 - `nuauto login`: copy browser_profile/ + session_cookies.json to the homelab (refuses while
   the homelab update is running, because that uses the profile).
@@ -151,7 +170,8 @@ The old way, without deploy_from_git:
 3. New module (src/nuauto/) or prompt file (prompts/)? Add it to sync.PACKAGE / sync.CODE (tests/test_sync.py
    fails if you forget). New dependency in pyproject.toml? Reinstall on the homelab:
    ssh homelab 'cd ~/projects/auto && uv pip install --python .venv/bin/python -e .'
-4. Changed web.py or a module it uses (config, sheet, jobs)? Restart it:
+4. Changed a module nuauto-web runs (web.py, and with NUauto's page there most of them: deploy.web_code)? Restart it,
+   when no NUworks run of its page is going:
    ssh homelab systemctl --user restart nuauto-web
    (daily/weekly runs start fresh each time; no restart needed.)
 5. Changed a unit file in deploy/systemd/? Install it by hand:
@@ -178,6 +198,11 @@ TURN ON DEPLOY FROM GITHUB (once, after this is merged to main)
 Turn it off: set it to false (the laptop pushes code again) and `systemctl --user disable --now nuauto-deploy.timer`.
 
 SET UP (OR REBUILD) A HOMELAB
+The GUI does all of this (a source install): Settings > Homelab (or setup's optional Homelab step): its ssh name ->
+Check (over ssh, read-only: its hostname and Tailscale address, what NUauto has there) -> Use this homelab (fills the
+server fields) -> restart NUauto -> Set it up: a terminal window running `nuauto onboard homelab-setup`, which does
+steps 2-6 below one at a time, each asked first (sudo asks for the homelab's password in that window; NUauto never sees
+it), and 7's checks are the Homelab chip. By hand:
 1. Linux with systemd; `ssh homelab` works from the laptop with a key (BatchMode).
    Fill in the server fields of local_config.json (see MODES). If the hostname, path or IP
    changes later, update them there (and your tunnel's ingress rule).
@@ -190,8 +215,8 @@ SET UP (OR REBUILD) A HOMELAB
            .venv/bin/python -m playwright install firefox
            (if Firefox won't start: sudo .venv/bin/python -m playwright install-deps firefox)
    Install the claude CLI (curl -fsSL https://claude.ai/install.sh | bash) and log in once (run `claude`).
-4. Copy by hand into local/, mode 600: client_secret.json, discord_webhook.txt (and web_secret.txt from the
-   old machine if you want old Mark links to keep working).
+4. Copy into local/, mode 600: client_secret.json (discord_webhook.txt comes with sync.push; web_secret.txt from the
+   old machine by hand, if you want old Mark links to keep working).
 5. Laptop: `nuauto login` (copies the NUworks session).
 6. Units: scp deploy/systemd/* homelab:.config/systemd/user/
           ssh homelab 'sudo loginctl enable-linger $USER'   # asks for the sudo password

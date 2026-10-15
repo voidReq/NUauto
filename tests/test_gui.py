@@ -226,11 +226,11 @@ try:
     for bad in ("myworkday", ["a"], ["x" * 61], ["two words"], ["a/b"], ["a;rm -rf"], ["$(id)"], ["ok.site", "bad site"], None):
         post("/api/settings", {"bitwarden_import": bad}, expect=409)
     assert "bitwarden_import" not in json.load(open(local_config))
-    for body in ({"remote_assist": True}, {"remote_auto": True}, {"remote_hours": [9, 22]}, {"assist_slots": 2},
+    for body in ({"remote_assist": True}, {"remote_auto": True}, {"remote_hours": [9, 22]},
                  {"remote_assist": "yes"}, {"remote_hours": [22, 9]}):
         post("/api/settings", body, expect=409)  # no homelab (server_hostname): refused before anything is saved
     cfg_now = json.load(open(local_config))
-    assert not any(k in cfg_now for k in ("remote_assist", "remote_auto", "remote_hours", "assist_slots")), cfg_now
+    assert not any(k in cfg_now for k in ("remote_assist", "remote_auto", "remote_hours")), cfg_now
     s3 = post("/api/settings", {"password_manager": "bitwarden", "bitwarden_import": [" myworkday ", "", "amazon.jobs"]})
     assert s3["password_manager"]["on"] and s3["password_manager"]["only"] == ["myworkday", "amazon.jobs"], s3["password_manager"]
     assert json.load(open(local_config))["password_manager"] == "bitwarden"
@@ -269,12 +269,70 @@ try:
     post("/api/settings", {"password_manager": "", "bitwarden_import": ["myworkday"]})  # off again (the page part below turns it on)
     assert get("/api/settings")["password_manager"]["on"] is False
     # assistants side by side: a running one (its slot's lock held, as by a live `nuauto assist`) shows on its row
-    # (the state string is "<this computer's>|<the homelab's>": empty on both sides without remote_assist)
+    # (the state string is "<this computer's>|<the homelab's>": empty on both sides without remote_assist; each
+    # session with what it waits for, so the open screen updates when that changes)
     assert get("/api/company")["sessions"] == [] and get("/api/company")["slots"] == 3 and get("/api/state")["assistants"] == "|"
     with hold_slot(1, {"row": 7, "tab": "other", "company": "Basalt Bio", "host": "jobs.example.net"}):
         assert [(s["slot"], s["row"], s["tab"]) for s in get("/api/other")["sessions"]] == [(1, 7, "other")]
-        assert get("/api/state")["assistants"] == "other-7:1|"
+        assert get("/api/state")["assistants"] == "other-7:1:|"
     assert get("/api/other")["sessions"] == [] and get("/api/state")["assistants"] == "|"  # it ended: the slot is free
+    # the laptop's page: nothing is the laptop's only (it is the laptop); the homelab's own parts are not here
+    st = get("/api/state")
+    assert st["where"] == "laptop" and st["laptop_only"] == {} and st["remote_app"] is None
+    assert not [t for t in st["todo"] if t["kind"] == "assistant"]               # no assistant waits for you here
+    with hold_slot(1, {"row": 7, "tab": "other", "company": "Basalt Bio", "host": "jobs.example.net", "run": STATE}):
+        # one waiting for you (its attention file, as Claude Code's hooks write it): Today's first to-do, in its window
+        att = os.path.join(STATE, "attention.json")
+        json.dump({"kind": "approve", "since": time.time(), "said": "Ready"}, open(att, "w"))
+        try:
+            first = get("/api/state")["todo"][0]
+            assert first["kind"] == "assistant" and first["status"] == "approve" and first["screen"] is None, first
+        finally:
+            os.remove(att)
+    assert get("/api/company")["queue"] is None
+    assert request("GET", "/api/assistant/1")[0] == 404 and request("GET", "/api/assistant/1/shot.png")[0] == 404
+    post("/api/assistant", {"slot": 1, "do": "approve", "id": "x"}, expect=409)
+    post("/api/action", {"kind": "pair_device", "args": {"name": "x"}}, expect=409)
+    post("/api/action", {"kind": "unpair", "args": {"id": "0" * 12}}, expect=409)
+    post("/api/devices", {}, expect=404)
+    assert request("GET", "/pair?c=x")[0] == 404 and request("GET", "/s/1")[0] == 404            # (the homelab's only)
+    # Settings > Homelab: check one (the demo answers with made-up facts, no ssh), then what can be saved
+    assert get("/api/settings")["homelab"]["available"] and not get("/api/settings")["homelab"]["on"]
+    probe = post("/api/homelab", {"action": "check", "ssh": "homelab"})
+    assert probe["ok"] and probe["tailscale"] == "100.64.0.42"
+    post("/api/homelab", {"action": "save", "ssh": "homelab", "hostname": "lab", "folder": "projects/auto", "listen": "0.0.0.0"},
+         expect=409)
+    post("/api/homelab", {"action": "setup"}, expect=409)                       # no homelab used yet
+    post("/api/homelab", {"action": "deploy", "on": True}, expect=409)
+    post("/api/homelab", {"action": "nope"}, expect=409)
+    # what a user sets for themselves, all in Settings (or setup): the writeups, assistants at once (no homelab needed),
+    # the Mark-done page's address, the Gmail login, Summer internships (on / off, term, bar, lists)
+    s = post("/api/settings", {"assist_writeups": [" ~/notes/writeups ", ""], "assist_slots": 2})
+    assert s["settings"]["assist_writeups"] == ["~/notes/writeups"] and s["assist_slots"] == 2
+    assert json.load(open(local_config))["assist_slots"] == 2
+    post("/api/settings", {"assist_slots": 3})
+    for bad in ("http://x.example", "nope", "https://x example"):
+        post("/api/settings", {"web_base_url": bad}, expect=409)
+    assert post("/api/settings", {"web_base_url": "https://mark.example.com/"})["settings"]["web_base_url"] == "https://mark.example.com"
+    post("/api/settings", {"web_base_url": ""})
+    assert "Demo" in post("/api/action", {"kind": "login_gmail"}, expect=409)["error"]
+    assert get("/api/settings")["gmail"] == {"ready": False, "days_left": None}
+    was_interns = json.load(open(local_config)).get("internships")
+    for bad in ({"on": "yes"}, {"on": True, "term": ""}, {"on": True, "threshold": 0}, {"on": True, "threshold": "x"},
+                {"on": True, "lists": {"nope": ""}}, {"on": True, "lists": {"simplify": "http://plain.example/x"}}):
+        post("/api/settings", {"internships": bad}, expect=409)
+    ii = post("/api/settings", {"internships": {"on": True, "term": " Summer  2028 ", "threshold": "62",
+                                                "lists": {"simplify": "https://raw.example.com/S2028/listings.json", "vansh": ""}}})["internships"]
+    assert ii["on"] and ii["term"] == "Summer 2028" and ii["threshold"] == 62 and ii["lists"]["vansh"] == ""
+    assert get("/api/state")["internships"]["term"] == "Summer 2028"                  # this process took it at once
+    assert post("/api/settings", {"internships": {"on": True, "threshold": ""}})["internships"]["threshold"] is None
+    assert post("/api/settings", {"internships": {"on": False}})["internships"]["on"] is False
+    assert json.load(open(local_config))["internships"] is False
+    post("/api/settings", {"internships": {"on": True}})
+    cfg = json.load(open(local_config))
+    cfg["internships"] = was_interns
+    json.dump(cfg, open(local_config, "w"))
+    get("/api/settings")
     for bad in (0, 31, "lots", 2.5, True, None):
         post("/api/settings", {"max_per_week": bad}, expect=409)
     assert post("/api/settings", {"max_per_week": "7"})["max_per_week"] == 7
@@ -909,7 +967,8 @@ fetch("{target}", {{method: "POST", credentials: "include", body: {json.dumps(bo
         with hold_slot(2, {"row": harbor_row, "tab": "other", "company": "Harbor Embedded", "host": "jobs.example-ats.com"}):
             page.wait_for_selector(f"[data-testid=other-assist-{harbor_row}-running]", timeout=20000)
             assert page.inner_text(f"[data-testid=other-assist-{harbor_row}-running]") == "assistant running (slot 2)"
-            assert "1 of 3 assistants running" in page.inner_text("[data-testid=assistants-running]")
+            assert "Assistants: 1 of 3 running here" in page.inner_text("[data-testid=assistants-running]")
+            assert page.locator("[data-testid=assistants-bar]").count() == 1      # one line for the whole tab
         page.wait_for_selector(f"[data-testid=other-assist-{harbor_row}]", timeout=20000)
         # Start: greyed out for a few seconds (a second click would start the same job twice), then back
         start = page.locator(f"[data-testid=other-assist-{harbor_row}]")

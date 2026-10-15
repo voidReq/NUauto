@@ -20,8 +20,8 @@ from nuauto import config
 from nuauto import sync
 
 UNITS = ["nuauto-daily.timer", "nuauto-weekly.timer", "nuauto-web.service"]
-WEB_FILES = ("web.py", "config.py", "sheet.py", "jobs.py",  # nuauto-web needs a restart when these change (= deploy.WEB_CODE)
-             "review.py", "assist.py", "screen.py", "accounts.py", "answers.py", "remote.py")
+# nuauto-web needs a restart when any module changes but these (it runs NUauto's page too: = deploy.NOT_WEB)
+NOT_WEB = ("__main__.py", "cli.py", "daily.py", "deploy.py", "selftest.py", "window_gtk.py", "inspect_form.py")
 JSON = "--json" in sys.argv
 fails = []
 results = []  # every say(), for --json
@@ -216,6 +216,8 @@ def server():
     check_claude()
     if config.LOCAL.get("remote_assist"):
         check_remote_assist()
+    if config.LOCAL.get("remote_assist") or config.LOCAL.get("remote_app"):
+        check_remote_app()
     free_gb = shutil.disk_usage(config.PROJECT_DIR).free / 1e9
     if free_gb < 2:
         say("WARN", f"only {free_gb:.1f} GB free on the homelab")
@@ -225,7 +227,6 @@ def check_remote_assist():
     """What the company-site assistant needs on the homelab (docs/REMOTE.md, TURN IT ON). Only config and the standard
     library: this file may run against older code there."""
     import glob
-    import socket
     gone = [t for t in ("Xvfb", "x11vnc", "websockify", "npx", "tmux") if not shutil.which(t)]
     if not any(os.path.exists(os.path.join(d, "vnc.html")) for d in ("/usr/share/novnc", "/usr/share/webapps/novnc")):
         gone.append("novnc")
@@ -241,15 +242,21 @@ def check_remote_assist():
     except (OSError, ValueError):
         trusted = None
     if not trusted:
-        say("WARN", f"Claude Code may ask whether to trust {config.STATE_DIR} at the first session (the review page "
-                    f"can't answer that): once, ssh -t homelab 'cd {config.STATE_DIR} && claude', then /exit")
+        say("WARN", f"Claude Code may ask whether to trust {config.STATE_DIR} at the first session (NUauto's page "
+                    f"can't answer that): once, ssh -t homelab 'cd {config.STATE_DIR} && claude', then /exit "
+                    "(the laptop's Settings > Homelab > Log in to Claude there)")
+
+
+def check_remote_app():
+    """NUauto's page for your phone (gui.serve_remote, inside nuauto-web; docs/REMOTE.md). Only the standard library."""
+    import socket
     host = (config.LOCAL.get("web_listen_host") or "").strip()
     try:
         socket.create_connection((host, 8766), timeout=3).close()
-        say("ok", f"the review page answers on {host}:8766")
+        say("ok", f"NUauto's page answers on {host}:8766")
     except OSError:
-        say("FAIL", "the review page does not answer on :8766: systemctl --user restart nuauto-web (it starts it "
-                    "when remote_assist is on)")
+        say("FAIL", "NUauto's page does not answer on :8766: systemctl --user restart nuauto-web (it starts it when "
+                    "remote_app or remote_assist is on)")
 
 
 def check_web_fresh():
@@ -260,8 +267,8 @@ def check_web_fresh():
     if not up.isdigit():
         return
     started = time.time() - int(up)
-    newer = [n for n in WEB_FILES
-             if os.path.getctime(os.path.join(config.SRC_DIR, n)) > started]
+    newer = [n for n in sorted(os.listdir(config.SRC_DIR)) if n.endswith(".py") and n not in NOT_WEB
+             and os.path.getctime(os.path.join(config.SRC_DIR, n)) > started]
     if newer:
         say("WARN", f"{', '.join(newer)} changed after nuauto-web started: systemctl --user restart nuauto-web")
 

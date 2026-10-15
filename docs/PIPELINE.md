@@ -92,7 +92,9 @@ A second pool for jobs that are not on NUworks: SimplifyJobs' Summer 2027 list (
 Summer2027-Internships, dev branch, .github/scripts/listings.json; their own scripts only build the README).
 On when local_config.json has "internships" (an object; {} = defaults: term "Summer 2027", the list's URL, per run
 300 postings read by plain requests, 40 by the hidden browser, 120 scored; "threshold": the bar to enter the pool,
-default the co-ops' bar). Mine: on (2026-10-10), threshold 60 (2026-10-11; the co-ops stay at 65).
+default the co-ops' bar). Mine: on (2026-10-10), threshold 60 (2026-10-11; the co-ops stay at 65). Set in the GUI too
+(Settings > Summer internships, or setup's optional step): on / off, the term, the bar, each list's address (a new
+year's lists are new repos: changing the term moves the addresses with it); off saves false.
 - Runs: the homelab every 2 hours (nuauto-intern.timer, :40 on even hours New York) and after each NUworks update
   (daily.py); one at a time (data/intern/update.lock). The list changes every 30 min; it is downloaded only when it
   changed (ETag). Each step does only new work, a limited amount per run: the first runs work through the backlog

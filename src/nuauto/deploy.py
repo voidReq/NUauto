@@ -3,12 +3,13 @@
 Needs "deploy_from_git": true in local_config.json (then the laptop stops pushing code: sync.push). The repo is
 public, so nothing here needs a login. Each run:
   1. asks GitHub for main's commit; the same one as the last deploy = nothing to do
-  2. waits while an update (`nuauto daily`, `nuauto intern update`) is running; the next run tries again
+  2. waits while an update (`nuauto daily`, `nuauto intern update`) or a NUworks run of NUauto's page there is running;
+     the next run tries again
   3. fetches the commit, unpacks it into work/deploy/stage and imports the modules the homelab runs from there:
      a broken commit never reaches the live files (Discord says so once; the old code keeps running)
   4. copies the changed files over the live ones (the old ones are kept, to undo), reinstalls if pyproject.toml
      changed, installs changed unit files (daemon-reload; timers restarted, new ones enabled), and restarts
-     nuauto-web only when web.py or a module it uses changed. If it does not come back, everything is undone.
+     nuauto-web only when a module it runs changed (web_code). If it does not come back, everything is undone.
   5. records the commit in local/deployed.json, one line in logs/deploy.log, one Discord message
 `nuauto deploy` on the laptop starts a run on the homelab now (no waiting for the timer) and shows its log.
 """
@@ -26,14 +27,17 @@ from nuauto import config
 DIRS = ["src/nuauto", "prompts", "docs", "deploy/systemd"]
 FILES = ["pyproject.toml", "README.md", "CLAUDE.md", "CONTRIBUTING.md", "local_config.example.json"]
 UNIT_SRC = "deploy/systemd"
-# nuauto-web keeps the code it started with: restart it when one of these changed (doctor warns about the same list).
-WEB_CODE = ["src/nuauto/web.py", "src/nuauto/config.py", "src/nuauto/sheet.py", "src/nuauto/jobs.py",
-            # the assistant's review page runs inside nuauto-web too (remote_assist)
-            "src/nuauto/review.py", "src/nuauto/assist.py", "src/nuauto/screen.py", "src/nuauto/accounts.py",
-            "src/nuauto/answers.py", "src/nuauto/remote.py"]
-# Imported from the new code before anything is copied (the modules the homelab runs; not the GUI's).
+# nuauto-web keeps the code it started with, and with NUauto's page on the homelab (gui.serve_remote) that is most of
+# the package: it restarts when any module changed but these, which never run inside it (doctor warns the same way).
+# Its page's own files (gui_static/) are read on every request: no restart for those.
+NOT_WEB = ("__main__.py", "cli.py", "daily.py", "deploy.py", "selftest.py", "window_gtk.py", "inspect_form.py")
+
+
+def web_code(path):
+    return path.startswith("src/nuauto/") and path.endswith(".py") and os.path.basename(path) not in NOT_WEB
+# Imported from the new code before anything is copied (the modules the homelab runs, NUauto's page there too).
 MODULES = ["cli", "config", "sheet", "jobs", "daily", "web", "doctor", "sync", "deploy", "browser", "health", "intern",
-           "postings", "assist", "review", "screen", "remote"]
+           "postings", "assist", "review", "screen", "remote", "gui", "onboard", "apply"]
 UNIT_DIR = os.path.expanduser("~/.config/systemd/user")
 STATE_PATH = os.path.join(config.LOCAL_DIR, "deployed.json")
 LOG_PATH = os.path.join(config.LOGS_DIR, "deploy.log")
@@ -70,7 +74,10 @@ class Deploy:
         return subprocess.run(["systemctl", "--user", *args], capture_output=True, text=True, timeout=120)
 
     def update_running(self):
-        return subprocess.run(["pgrep", "-f", "nuauto (daily|intern update)"], capture_output=True).returncode == 0
+        """An update, or a NUworks run started from NUauto's page here (a child of nuauto-web: a restart would cut it
+        off mid-application). The assistant's sessions run in scopes of their own: a restart leaves them be."""
+        return subprocess.run(["pgrep", "-f", "nuauto (daily|intern update|apply|assist nuworks)"],
+                              capture_output=True).returncode == 0
 
     def install_deps(self):
         uv = shutil.which("uv") or os.path.expanduser("~/.local/bin/uv")
@@ -236,7 +243,7 @@ class Deploy:
             if state.get("sha") == wanted:
                 return 0
             if self.update_running():
-                self.say(f"update is running; will deploy {wanted[:7]} on the next run")
+                self.say(f"an update or a NUworks run is running; will deploy {wanted[:7]} on the next run")
                 return 0
             sha = self.fetch()
         except (DeployError, OSError, subprocess.SubprocessError) as e:
@@ -252,7 +259,7 @@ class Deploy:
             if "pyproject.toml" in changed:
                 self.install_deps()
             installed = self.install_units(units)
-            web = bool(set(changed) & set(WEB_CODE)) or "pyproject.toml" in changed or \
+            web = any(web_code(p) for p in changed) or "pyproject.toml" in changed or \
                 any(n == "nuauto-web.service" for n, _ in installed)
             if web:
                 restarted = True

@@ -1,9 +1,12 @@
-"""Offline checks for review.py (the phone review page for the assistant on the homelab). Run: python tests/test_review.py
+"""Offline checks for review.py and the homelab's app (gui.serve_remote: the assistant's screen on your phone). Run: python tests/test_review.py
 
-No ssh, no network beyond 127.0.0.1: the real HTTP handler runs on a free local port, the sessions are lock files in a
-temp folder, and the terminal is a real tmux session when tmux is installed (else those checks are skipped).
+No ssh, no network beyond 127.0.0.1: the real gui.Handler runs in REMOTE mode on a free local port (paired devices only), the
+sessions are lock files in a temp folder, and the terminal is a real tmux session when tmux is installed (else those checks
+are skipped). review.py's JSON (view, act, queue_view, start_now) is checked through the app's own endpoints; the page itself
+(#/assistant/<slot>) runs in headless Firefox when Playwright has one.
 """
 import http.client
+import io
 import json
 import os
 import random
@@ -34,13 +37,9 @@ from nuauto import accounts  # noqa: E402
 from nuauto import assist  # noqa: E402
 from nuauto import review  # noqa: E402
 
-with socket.socket() as sk:
-    sk.bind(("127.0.0.1", 0))
-    PORT = sk.getsockname()[1]
-review.PORT = PORT
 config.LOCAL = {**config.LOCAL, "web_listen_host": "127.0.0.1"}
-HOST = f"127.0.0.1:{PORT}"
-ORIGIN = f"http://{HOST}"
+# the homelab's app: on, as nuauto-web would run it (no homelab sessions are read over ssh: IS_SERVER)
+config.IS_SERVER, config.REMOTE_ASSIST, config.REMOTE_APP = True, True, True
 HAVE_TMUX = shutil.which("tmux") is not None
 
 
@@ -49,8 +48,9 @@ def device_count():
 
 
 # ---- pairing: one use, ten minutes
+review.PORT = 8766  # (the link's port; the real server's is set below)
 link = review.make_pairing("phone")
-assert link.startswith(f"{ORIGIN}/pair?c=")
+assert link.startswith("http://127.0.0.1:8766/pair?c=")
 code = parse_qs(urlparse(link).query)["c"][0]
 assert len(code) >= 20 and code not in open(review.PAIRING).read()           # only its hash is kept
 assert oct(os.stat(review.PAIRING).st_mode & 0o777) == "0o600"
@@ -69,36 +69,71 @@ assert review.pair(old) is None
 code2 = parse_qs(urlparse(review.make_pairing("x" * 100)).query)["c"][0]
 key2 = review.pair(code2)                                                     # no name given: the link's, cut short
 assert len(review.device(key2)["name"]) == 40
-assert review.form_token(key) == review.form_token(key) and review.form_token(key) != review.form_token(key2)
-assert len(review.form_token(key)) == 32 and key not in review.form_token(key)
-with review._locked(review.DEVICES) as d:
-    d.clear()
-assert review.device(key) is None
 
-# ---- the page: a real server, a fake session
-srv = ThreadingHTTPServer(("127.0.0.1", PORT), review.Handler)
+# a device's id: a short stable name for the app's list, made from the key's hash, never the key itself
+assert re.fullmatch(r"[0-9a-f]{12}", dev["id"]) and dev["id"] == review.device(key)["id"] == review.device_id(review._hash(key))
+assert dev["id"] != review.device(key2)["id"] and key not in dev["id"] and key2 not in review.device(key2)["id"]
+listing = review.devices()
+assert [d_["name"] for d_ in listing] == ["My phone", "x" * 40] or [d_["name"] for d_ in listing] == ["x" * 40, "My phone"]
+assert {d_["id"] for d_ in listing} == {dev["id"], review.device(key2)["id"]} and all(d_["paired"] for d_ in listing)
+assert all(set(d_) == {"id", "name", "paired"} for d_ in listing)
+assert key not in json.dumps(listing) and key2 not in json.dumps(listing) and review._hash(key) not in json.dumps(listing)
+assert [d_["paired"] for d_ in listing] == sorted(d_["paired"] for d_ in listing)   # oldest first
+# unpair: by id, by name, "--all"; what is not there is zero
+assert review.unpair("nobody") == 0 and review.unpair("") == 0 and review.unpair("0" * 12) == 0 and len(review.devices()) == 2
+assert review.unpair(dev["id"]) == 1 and review.device(key) is None and review.device(key2) is not None
+assert review.unpair("x" * 40) == 1 and review.device(key2) is None and review.devices() == [] and device_count() == 0
+k3, k4 = (review.pair(parse_qs(urlparse(review.make_pairing(n_)).query)["c"][0]) for n_ in ("three", "four"))
+assert review.unpair("--all") == 2 and review.device(k3) is None and review.device(k4) is None and review.devices() == []
+key2 = None
+
+# ---- the app: a real server in REMOTE mode, a fake session
+from nuauto import gui  # noqa: E402
+
+gui.REMOTE = True
+srv = ThreadingHTTPServer(("127.0.0.1", 0), gui.Handler)
+srv.daemon_threads = True
+PORT = srv.server_address[1]
+gui.APP.port, gui.APP.remote_host = PORT, "127.0.0.1"
+review.PORT = PORT
+HOST = f"127.0.0.1:{PORT}"
+ORIGIN = f"http://{HOST}"
 threading.Thread(target=srv.serve_forever, daemon=True).start()
+assert review.make_pairing("probe").startswith(f"{ORIGIN}/pair?c=")
+review.unpair("--all")
 
 
-def req(method, path, headers=None, form=None, cookie=None, host=HOST):
+def req(method, path, headers=None, form=None, cookie=None, host=HOST, body=None):
+    """Any request; form = an urlencoded body (the pairing page's), body = a JSON object. -> (status, headers, bytes)."""
     conn = http.client.HTTPConnection("127.0.0.1", PORT, timeout=10)
     h = {"Host": host, **(headers or {})}
     if cookie:
         h["Cookie"] = f"{review.COOKIE}={cookie}"
-    body = None
+    data = None
     if form is not None:
-        body = urlencode(form)
+        data = urlencode(form)
         h["Content-Type"] = "application/x-www-form-urlencoded"
-    conn.request(method, path, body=body, headers=h)
+    elif body is not None:
+        data = json.dumps(body)
+        h.setdefault("Content-Type", "application/json")
+    conn.request(method, path, body=data, headers={k: v for k, v in h.items() if v is not None})
     r = conn.getresponse()
-    data = r.read()
-    out = (r.status, {k.lower(): v for k, v in r.getheaders()}, data)
+    out = (r.status, {k.lower(): v for k, v in r.getheaders()}, r.read())
     conn.close()
     return out
 
 
-def text(resp):
-    return resp[2].decode()
+def J(resp):
+    return json.loads(resp[2])
+
+
+def get(path, cookie=None, **kw):
+    return req("GET", path, cookie=cookie, **kw)
+
+
+def post(path, body, cookie=None, origin=ORIGIN, headers=None, **kw):
+    """A POST the way the page sends it (JSON, X-NUauto, its Origin); a header set to None is left out."""
+    return req("POST", path, headers={"X-NUauto": "1", "Origin": origin, **(headers or {})}, body=body, cookie=cookie, **kw)
 
 
 run = os.path.join(config.LOGS_DIR, "20261011-120000_assist_row7")
@@ -137,50 +172,102 @@ try:
     hold_slot(2, other_run)
 
     # who may talk to it: this server's own Host, and only paired devices
-    assert req("GET", "/", host="evil.example")[0] == 400 and req("POST", "/pair", form={"c": "x"}, host="evil.example")[0] == 400
-    assert req("GET", "/", host=f"localhost:{PORT}")[0] == 400                 # exactly the Tailscale address, like the Mark page
-    assert req("GET", "/")[0] == 403 and req("GET", "/s/1")[0] == 403 and req("GET", "/s/1/v")[0] == 403
-    assert req("GET", "/s/1/shot.png")[0] == 403 and req("GET", "/", cookie="not-a-key")[0] == 403
-    assert req("GET", "/poll.js")[0] == 200                                    # the page's own script: nothing in it
+    assert get("/", host="evil.example")[0] == 403 and req("POST", "/pair", form={"c": "x"}, host="evil.example")[0] == 403
+    assert post("/api/assistant", {"slot": 1}, host="evil.example")[0] == 403
+    assert get("/", host=f"localhost:{PORT}")[0] == 403                        # exactly the Tailscale address, like the Mark page
+    assert get("/static/app.js", host=f"localhost:{PORT}")[0] == 403 and get("/pair?c=x", host="evil.example")[0] == 403
+    for path in ("/api/assistant/1", "/api/assistant/1/shot.png", "/api/devices", "/api/assistant/2", "/api/nope"):
+        r = get(path)
+        assert r[0] == 403 and J(r)["pair"] is True and J(r)["error"], path   # unpaired: the page is told to show the pairing help
+        assert get(path, cookie="not-a-key")[0] == 403, path
+    assert get("/")[0] == 200 and get("/static/app.js")[0] == 200 and get("/static/app.css")[0] == 200   # the page's own code: public
+    assert get("/static/nope.js")[0] == 404 and get("/static/..%2fgui.py")[0] == 404 and get("/static/app.py")[0] == 404
+    r = post("/api/assistant", {"slot": 1, "do": "approve", "id": "ap1"})
+    assert r[0] == 403 and J(r)["pair"] is True                                # a POST with no cookie: not paired
 
     # pairing: GET only shows a form; the code is used up by the POST
     code = parse_qs(urlparse(review.make_pairing("phone")).query)["c"][0]
-    r = req("GET", f"/pair?c={code}")
-    assert r[0] == 200 and "<form method=post" in text(r) and f"value='{code}'" in text(r) and "Set-Cookie" not in r[1]
-    assert req("GET", f"/pair?c={code}")[0] == 200 and device_count() == 0     # still unused
+    r = get(f"/pair?c={code}")
+    assert r[0] == 200 and r[1]["content-type"].startswith("text/html")
+    assert "<form method=post action=/pair" in r[2].decode() and f"value='{code}'" in r[2].decode() and "set-cookie" not in r[1]
+    assert get(f"/pair?c={code}")[0] == 200 and device_count() == 0            # still unused
     assert req("POST", "/pair", form={"c": "wrong"})[0] == 403 and device_count() == 0
     assert req("POST", "/pair", headers={"Origin": "http://evil.example"}, form={"c": code})[0] == 403 and device_count() == 0
+    assert req("POST", "/pair", headers={"Origin": "null"}, form={"c": code})[0] == 403 and device_count() == 0
     r = req("POST", "/pair", form={"c": code, "name": "Phone"})
-    assert r[0] == 200 and "Paired" in text(r) and device_count() == 1
+    assert r[0] == 200 and "Paired" in r[2].decode() and device_count() == 1
     cookie_line = r[1]["set-cookie"]
     assert cookie_line.startswith(f"{review.COOKIE}=") and "HttpOnly" in cookie_line and "SameSite=Strict" in cookie_line
+    assert "Path=/" in cookie_line
     KEY = cookie_line.split(";")[0].split("=", 1)[1]
     assert review.device(KEY)["name"] == "Phone"
     assert req("POST", "/pair", form={"c": code, "name": "Phone"})[0] == 403 and device_count() == 1   # used up
-    assert "Not paired" in text(req("POST", "/pair", form={"c": code}))
+    assert "Not paired" in req("POST", "/pair", form={"c": code})[2].decode()
     for m in ("GET", "POST"):  # an old pairing link opened again on a paired device: straight to the page
-        r = req(m, f"/pair?c={code}", cookie=KEY) if m == "GET" else req(m, "/pair", form={"c": code}, cookie=KEY)
+        r = get(f"/pair?c={code}", cookie=KEY) if m == "GET" else req(m, "/pair", form={"c": code}, cookie=KEY)
         assert r[0] == 303 and r[1]["location"] == "/" and device_count() == 1, (m, r[0])
+    # the form posted from the page's own origin pairs too (a browser sends its Origin on a form post)
+    code_o = parse_qs(urlparse(review.make_pairing("tablet")).query)["c"][0]
+    r = req("POST", "/pair", headers={"Origin": ORIGIN}, form={"c": code_o, "name": "Tab"})
+    assert r[0] == 200 and "set-cookie" in r[1] and device_count() == 2
+    assert review.unpair("Tab") == 1 and device_count() == 1
 
     # headers on every answer
-    for r in (req("GET", "/", cookie=KEY), req("GET", "/"), req("GET", "/pair?c=x"), req("GET", "/poll.js")):
+    for r in (get("/", cookie=KEY), get("/"), get("/pair?c=x"), get("/static/app.js"), get("/api/assistant/1", cookie=KEY),
+              get("/api/assistant/1"), get("/api/nope", cookie=KEY), post("/api/assistant", {"slot": 1}, cookie=KEY)):
         h = r[1]
         assert h["cache-control"] == "no-store" and h["x-frame-options"] == "DENY" and h["x-content-type-options"] == "nosniff"
-        assert "default-src 'none'" in h["content-security-policy"] and "frame-ancestors 'none'" in h["content-security-policy"]
+        assert "default-src 'self'" in h["content-security-policy"] and "frame-ancestors 'none'" in h["content-security-policy"]
         assert h["referrer-policy"] == "same-origin"   # (no-referrer makes Firefox send "Origin: null" on form posts)
 
-    # the list: this session only (the other's run folder is outside logs/), names escaped
-    r = req("GET", "/", cookie=KEY)
-    page = text(r)
-    assert r[0] == 200 and "Firmware Intern" in page and "/s/1" in page and "Ready to submit: click &#x27;Submit&#x27;" in page
-    assert "Hidden Co" not in page and "/s/2" not in page and "<b>Robotics</b>" not in page and "&lt;b&gt;Robotics&lt;/b&gt;" in page
-    assert req("GET", "/s/2", cookie=KEY)[0] == 404 and req("GET", "/s/3", cookie=KEY)[0] == 404
-    assert req("GET", "/s/0", cookie=KEY)[0] == 404 and req("GET", "/nope", cookie=KEY)[0] == 404
-    assert req("GET", "/s/1/other", cookie=KEY)[0] == 404 and req("GET", "/s/2/v", cookie=KEY)[0] == 404
+    # the old review page's links (in Discord messages) land on the assistant's screen, with or without the cookie
+    for p_ in ("/s/1", "/s/1/v", "/s/2"):
+        r = get(p_)
+        assert r[0] == 303 and r[1]["location"] == f"/#/assistant/{p_[3]}", p_
+    assert get("/s/0")[0] != 303 and get("/s/1x")[0] != 303
 
-    # the list reloads by itself when sessions change (/v); a queue row a session here works on links to it, in green
-    assert "data-poll='/v'" in text(req("GET", "/", cookie=KEY))
-    assert text(req("GET", "/v", cookie=KEY)).strip() == review.index_version() and req("GET", "/v")[0] == 403
+    # the session's view: this session only (the other's run folder is outside logs/); raw text, the page escapes it
+    r = get("/api/assistant/1", cookie=KEY)
+    assert r[0] == 200 and r[1]["content-type"].startswith("application/json")
+    v = J(r)
+    assert v["slot"] == 1 and v["tab"] == "other" and v["row"] == 7 and v["status"] == "approve", v
+    assert v["company"] == "Acme <b>Robotics</b>" and v["title"] == "Firmware Intern" and v["where"] == "Other jobs row 7"
+    assert v["text"] == "Ready to submit: click 'Submit'", v["text"]
+    assert v["message"] == f"Please confirm these guesses {EVIL}", "the agent's message comes back as it is"
+    a_ = v["approval"]
+    assert a_ == {"id": "ap1", "what": "click 'Submit'", "url": "https://acme.example/apply",
+                  "why": "NUAUTO: guesses: Graduation = May 2029", "waiting": True, "shot": False, "answered": None, "by": None}, a_
+    assert v["browser"] is None and "terminal" in v and v["tmux"] == (TMUX_NAME if HAVE_TMUX else "")
+    for p_ in ("/api/assistant/2", "/api/assistant/3", "/api/assistant/0", "/api/assistant/1/other", "/api/assistant/2/shot.png",
+               "/api/assistant/x", "/api/nope"):
+        assert get(p_, cookie=KEY)[0] == 404, p_
+    assert "Hidden Co" not in json.dumps(v) and "hidden message" not in json.dumps(v)
+    r = post("/api/assistant", {"slot": 2, "do": "approve", "id": "ap1"}, cookie=KEY)    # the hidden session: refused
+    assert r[0] == 409 and "ended" in J(r)["error"] and not os.path.exists(os.path.join(other_run, assist.DECISION))
+    assert post("/api/assistant", {"slot": 7, "do": "approve", "id": "ap1"}, cookie=KEY)[0] == 409
+    assert post("/api/assistant", {"slot": "x", "do": "approve"}, cookie=KEY)[0] == 409
+
+    # the app's own endpoints that name the paired device: the list (no keys, which one asks), pairing another, unpairing
+    r = get("/api/devices", cookie=KEY)
+    assert r[0] == 200 and J(r)["this"] == review.device(KEY)["id"] and [d_["name"] for d_ in J(r)["devices"]] == ["Phone"]
+    assert KEY not in r[2].decode() and review._hash(KEY) not in r[2].decode()
+    r = post("/api/action", {"kind": "pair_device", "args": {"name": "  my   laptop "}}, cookie=KEY)
+    assert r[0] == 200 and J(r)["link"].startswith(f"{ORIGIN}/pair?c=") and J(r)["minutes"] == 10, r[2]
+    code_l = parse_qs(urlparse(J(r)["link"]).query)["c"][0]
+    assert review.pair(code_l) and [d_["name"] for d_ in review.devices()].count("my laptop") == 1   # (name tidied)
+    assert post("/api/action", {"kind": "pair_device", "args": {"name": "x" * 99}}, cookie=KEY)[0] == 200
+    assert post("/api/action", {"kind": "pair_device"})[0] == 403                                        # no cookie
+    other_id = next(d_["id"] for d_ in review.devices() if d_["name"] == "my laptop")
+    r = post("/api/action", {"kind": "unpair", "args": {"id": review.device(KEY)["id"]}}, cookie=KEY)  # this very device
+    assert r[0] == 409 and "this device" in J(r)["error"] and review.device(KEY)
+    for bad in ("", "nope", "../x", review._hash(KEY)):
+        assert post("/api/action", {"kind": "unpair", "args": {"id": bad}}, cookie=KEY)[0] == 409, bad
+    r = post("/api/action", {"kind": "unpair", "args": {"id": other_id}}, cookie=KEY)
+    assert r[0] == 200 and J(r)["gone"] == 1 and "my laptop" not in [d_["name"] for d_ in J(r)["devices"]]
+    review.unpair("x" * 40)
+    assert [d_["name"] for d_ in review.devices()] == ["Phone"]
+
+    # the queue (remote.py's inputs faked): each row's group, what it says, whether you can start it now
     from nuauto import remote  # noqa: E402
 
     def cand(row, host):
@@ -190,106 +277,153 @@ try:
     remote.queue_inputs = lambda: ([cand(7, "acme.example"), cand(9, "b.example"), cand(11, "c.example")],
                                    [{"tab": "other", "row": 7, "host": "acme.example"}],           # slot 1's session (row 7)
                                    [{"tab": "other", "row": 9, "host": "b.example"}], {}, 2, None)  # the laptop's claim on row 9
+    real_claims, real_start, real_record = remote.live_claims, remote.start, remote.record_started
+    remote.live_claims = lambda *a, **k: [{"tab": "other", "row": 9, "host": "b.example"}]
+    started, recorded = [], []
+    remote.start = lambda tab, row: started.append((tab, row)) or None
+    remote.record_started = lambda c, auto=True: recorded.append((c["row"], auto))
     try:
-        page_q = text(req("GET", "/", cookie=KEY))
-        assert "<a class=ok href='/s/1'>A session is working on it" in page_q    # row 7 is slot 1's session
-        assert "The laptop's assistant is working on it" in page_q              # row 9: a laptop claim, no session here
-        assert page_q.count("Start now") == 1 and "name=row value='11'" in page_q   # only row 11 can start
-        assert "1 slot free" not in page_q and "2 slots free" in page_q
-        # Drop (not applying): only on rows no session works on; the row becomes Failed through sheet.drop, with the reason
-        assert page_q.count("action='/drop'") == 1 and "<option value=duplicate>" in page_q
+        q = review.queue_view()
+        rows = q["rows"]
+        assert rows["other-7"]["group"] == "running" and rows["other-7"]["slot"] == 1 and rows["other-7"]["start"] is False
+        assert rows["other-9"]["group"] == "running" and rows["other-9"]["text"] == "the laptop's assistant is working on it"
+        assert rows["other-9"]["slot"] is None and rows["other-9"]["start"] is False
+        assert [k for k, r_ in rows.items() if r_["start"]] == ["other-11"] and rows["other-11"]["group"] in ("next", "ready")
+        assert q["free"] == 2 and [g["key"] for g in q["groups"]][0] == "running" and q["hours"] == list(remote.hours())
+        assert [rows[k]["order"] for k in ("other-7", "other-9", "other-11")] == [0, 1, 2]
+
+        # Start now: only a row that can start; the answer says why not (HTTP 409); the paired device's name goes in the log
+        def start_now(row, tab="other", cookie=KEY, **kw):
+            return post("/api/action", {"kind": "assist", "args": {"row": row, "tab": tab}}, cookie=cookie, **kw)
+        assert start_now(11, cookie=None)[0] == 403 and started == []
+        r = start_now(11)
+        assert r[0] == 200 and J(r)["started"] is True and J(r)["message"].startswith("Started Q Co"), r[2]
+        assert started == [("other", 11)] and recorded == [(11, False)]
+        assert "Phone started other row 11 (Q Co)" in open(os.path.join(config.LOGS_DIR, "review.log")).read()
+        for row_ in (7, 9):                                                                   # a session / the laptop has it
+            r = start_now(row_)
+            assert r[0] == 409 and J(r)["error"].startswith("Not started:"), (row_, r[2])
+        r = start_now(99)
+        assert r[0] == 409 and "not in the queue" in J(r)["error"]
+        r = start_now(11, tab="jobs")                                                         # the other tab has no row 11
+        assert r[0] == 409 and "not in the queue" in J(r)["error"]
+        assert post("/api/action", {"kind": "assist", "args": {"row": "abc", "tab": "other"}}, cookie=KEY)[0] == 409
+        remote.start = lambda tab, row: "tmux is not installed"
+        r = start_now(11)
+        assert r[0] == 409 and J(r)["error"] == "Not started: tmux is not installed", r[2]
+        assert started == [("other", 11)] and recorded == [(11, False)]                      # nothing more was started
+
+        # Drop (not applying): the row becomes Failed through sheet.drop with the reason; never one a session or the laptop has
         from nuauto import sheet  # noqa: E402
         dropped, real = [], (sheet.open_other, sheet.drop)
         sheet.open_other = lambda interactive=True: "ws"
-        sheet.drop = lambda ws, n, url, why: dropped.append((ws, n, url, why))
+
+        def fake_drop(ws, n, url, why):
+            if url != "https://x.example/a":
+                raise sheet.SheetError(f"Row {n} holds another job now.")
+            dropped.append((ws, n, url, why))
+        sheet.drop = fake_drop
         try:
-            f = {"tab": "other", "row": "11", "url": "https://x.example/a", "why": "duplicate"}
-            assert review.drop_now(f, "phone").startswith("Dropped Q Co") and dropped == [("ws", 11, "https://x.example/a", "duplicate")]
-            assert review.drop_now({**f, "row": "7"}, "phone").startswith("Not dropped: an assistant")    # slot 1's session
-            assert review.drop_now({**f, "row": "9"}, "phone").startswith("Not dropped: an assistant")    # the laptop's claim
-            assert review.drop_now({**f, "url": "https://other.example/"}, "phone").startswith("Not dropped: it is not")
-            assert review.drop_now({**f, "why": "bored"}, "phone") == "Nothing to do." and len(dropped) == 1
+            f = {"action": "drop", "tab": "other", "row": 11, "url": "https://x.example/a", "why": "duplicate"}
+            assert post("/api/mark", f, cookie=None)[0] == 403 and dropped == []
+            r = post("/api/mark", f, cookie=KEY)
+            assert r[0] == 200 and dropped == [("ws", 11, "https://x.example/a", "duplicate")], r[2]
+            r = post("/api/mark", {**f, "row": 7}, cookie=KEY)                                # slot 1's session
+            assert r[0] == 409 and "assistant is working" in J(r)["error"]
+            r = post("/api/mark", {**f, "row": 9}, cookie=KEY)                                # the laptop's claim
+            assert r[0] == 409 and "laptop's assistant" in J(r)["error"]
+            r = post("/api/mark", {**f, "url": "https://other.example/"}, cookie=KEY)          # the row holds another job
+            assert r[0] == 409 and "another job" in J(r)["error"]
+            r = post("/api/mark", {**f, "why": "bored"}, cookie=KEY)
+            assert r[0] == 409 and J(r)["error"] == "Unknown reason." and len(dropped) == 1
+            assert post("/api/mark", {**f, "action": "nope"}, cookie=KEY)[0] == 409 and len(dropped) == 1
         finally:
             sheet.open_other, sheet.drop = real
     finally:
         remote.queue_inputs = real_queue
+        remote.live_claims, remote.start, remote.record_started = real_claims, real_start, real_record
 
-    # the session page: what it will do, the message (escaped)
-    r = req("GET", "/s/1", cookie=KEY)
-    page = text(r)
-    # while it works or waits on a Submit, the screen and terminal refresh in place (/s/1/term: paired devices only)
-    assert "data-live='/s/1'" in page and "id=live-term" in page    # (live-shot only with a browser view)
-    assert req("GET", "/s/1/term", cookie=KEY)[0] == 200 and req("GET", "/s/1/term")[0] == 403
-    # like a chat, newest at the bottom: the terminal, the latest message, the Submit question right under it, then
-    # the reply box with End session; opens at the Submit question
-    assert page.index("Its terminal") < page.index("Its latest message") < page.index("Ready to submit") < page.index("id=reply")
-    assert page.index("id=reply") < page.index(">End session<") and "data-scroll='approve'" in page
-    assert r[0] == 200 and "Ready to submit" in page and "click &#x27;Submit&#x27;" in page and "https://acme.example/apply" in page
-    assert "guesses: Graduation = May 2029" in page and "Approve: submit" in page and "Decline" in page
-    assert EVIL not in page and "&lt;script&gt;alert(1)&lt;/script&gt;" in page, "the agent's message is escaped"
-    assert page.count("<script") == 1 and "<script src='/poll.js'>" in page   # only the page's own script
-    assert "shot.png" not in page                                              # no screenshot of that question yet
-    token = re.search(r"name=t value='([0-9a-f]+)'", page).group(1)
-    assert token == review.form_token(KEY)
-
-    # answering: a paired device's form token, this server's Origin
-    answer = {"t": token, "id": "ap1", "d": "approve"}
-    assert req("POST", "/s/1/approve", form={k: v for k, v in answer.items() if k != "t"}, cookie=KEY)[0] == 403
-    assert req("POST", "/s/1/approve", form={**answer, "t": "0" * 32}, cookie=KEY)[0] == 403
-    assert req("POST", "/s/1/approve", form={**answer, "t": review.form_token(key2)}, cookie=KEY)[0] == 403
-    assert req("POST", "/s/1/approve", form=answer)[0] == 403                                 # no cookie
-    assert req("POST", "/s/1/approve", headers={"Origin": "http://evil.example"}, form=answer, cookie=KEY)[0] == 403
-    assert req("POST", "/s/1/approve", headers={"Origin": "null"}, form=answer, cookie=KEY)[0] == 403
-    assert not os.path.exists(os.path.join(run, assist.DECISION))
-    r = req("POST", "/s/1/approve", headers={"Origin": ORIGIN}, form=answer, cookie=KEY)
-    assert r[0] == 303 and r[1]["location"].startswith("/s/1?m=Approved")
-    dec = assist.read_json(os.path.join(run, assist.DECISION))
+    # answering: a paired device, the page's headers (X-NUauto, JSON), this server's Origin
+    answer = {"slot": 1, "do": "approve", "id": "ap1"}
+    decision_path = os.path.join(run, assist.DECISION)
+    assert post("/api/assistant", answer, cookie=KEY, headers={"X-NUauto": None})[0] == 403          # not sent by the page
+    assert post("/api/assistant", answer, cookie=KEY, headers={"X-NUauto": "0"})[0] == 403
+    assert req("POST", "/api/assistant", headers={"Origin": ORIGIN, "X-NUauto": "1", "Content-Type": "text/plain"},
+               body=answer, cookie=KEY)[0] == 403                                                      # a form's kind of body
+    assert req("POST", "/api/assistant", headers={"Origin": ORIGIN, "X-NUauto": "1", "Content-Type": None},
+               body=answer, cookie=KEY)[0] == 403
+    assert post("/api/assistant", answer, origin="http://evil.example", cookie=KEY)[0] == 403
+    assert post("/api/assistant", answer, origin="null", cookie=KEY)[0] == 403
+    assert post("/api/assistant", answer, origin=f"http://localhost:{PORT}", cookie=KEY)[0] == 403   # exactly this server's own
+    assert post("/api/assistant", answer, cookie=None)[0] == 403                                      # no cookie
+    assert post("/api/assistant", answer, cookie="not-a-key")[0] == 403
+    assert not os.path.exists(decision_path)                                                          # none of those did anything
+    r = post("/api/assistant", answer, cookie=KEY)
+    assert r[0] == 200 and J(r)["message"] == "Approved." and "closing" not in J(r), r[2]
+    dec = assist.read_json(decision_path)
     assert dec["id"] == "ap1" and dec["decision"] == "approve" and dec["by"] == "Phone", dec
     assert "REVIEW PAGE approve by Phone" in open(os.path.join(run, "actions.log")).read()
-    os.remove(os.path.join(run, assist.DECISION))
-    r = req("POST", "/s/1/approve", form={**answer, "d": "decline", "note": "wrong\nphone  number"}, cookie=KEY)
-    dec = assist.read_json(os.path.join(run, assist.DECISION))
-    assert r[0] == 303 and dec["decision"] == "decline" and dec["note"] == "wrong phone number" and dec["by"] == "Phone"
-    os.remove(os.path.join(run, assist.DECISION))
-    r = req("POST", "/s/1/approve", form={**answer, "id": "old-id"}, cookie=KEY)              # another question: gone
-    assert r[0] == 303 and "gone" in r[1]["location"] and not os.path.exists(os.path.join(run, assist.DECISION))
-    assert req("POST", "/s/1/approve", form={**answer, "d": "maybe"}, cookie=KEY)[0] == 303   # not approve / decline: nothing
-    assert not os.path.exists(os.path.join(run, assist.DECISION))
-    assert req("POST", "/s/2/approve", form=answer, cookie=KEY)[1]["location"] == "/"         # the hidden session: nothing
+    v = J(get("/api/assistant/1", cookie=KEY))                                    # until the guard picks it up: said so, once
+    assert v["approval"]["answered"] == "approve" and v["approval"]["by"] == "Phone"
+    os.remove(decision_path)
+    r = post("/api/assistant", {**answer, "do": "decline", "note": "wrong\nphone  number"}, cookie=KEY)
+    dec = assist.read_json(decision_path)
+    assert r[0] == 200 and J(r)["message"] == "Declined." and dec["decision"] == "decline" and dec["by"] == "Phone"
+    assert dec["note"] == "wrong phone number", dec
+    assert J(get("/api/assistant/1", cookie=KEY))["approval"]["answered"] == "decline"
+    os.remove(decision_path)
+    r = post("/api/assistant", {**answer, "id": "old-id"}, cookie=KEY)              # another question: gone
+    assert r[0] == 200 and "gone" in J(r)["message"] and not os.path.exists(decision_path)
+    r = post("/api/assistant", {**answer, "id": ""}, cookie=KEY)
+    assert "gone" in J(r)["message"] and not os.path.exists(decision_path)
+    r = post("/api/assistant", {**answer, "do": "maybe"}, cookie=KEY)              # not approve / decline: nothing
+    assert r[0] == 200 and J(r)["message"] == "Nothing to do." and not os.path.exists(decision_path)
+    assert J(post("/api/assistant", {"slot": 1}, cookie=KEY))["message"] == "Nothing to do."          # no "do"
+    assert post("/api/assistant", [1, 2], cookie=KEY)[0] == 400                      # not a JSON object
+    assert req("POST", "/api/assistant", headers={"X-NUauto": "1", "Origin": ORIGIN, "Content-Type": "application/json"},
+               cookie=KEY, form=None, body=None)[0] == 409                           # no body at all = {}: no slot, refused
+    assert not os.path.exists(decision_path)
 
     # the poll: one version string that changes with the message and the question
-    v1 = text(req("GET", "/s/1/v", cookie=KEY))
-    assert re.fullmatch(r"[0-9a-f]{16}", v1) and v1 in page and text(req("GET", "/s/1/v", cookie=KEY)) == v1
+    v1 = J(get("/api/assistant/1", cookie=KEY))["version"]
+    assert re.fullmatch(r"[0-9a-f]{16}", v1) and J(get("/api/assistant/1", cookie=KEY))["version"] == v1
     assist.write_private(os.path.join(run, assist.MESSAGE), b"a new question?")
-    v2 = text(req("GET", "/s/1/v", cookie=KEY))
-    assert v2 != v1
+    v2 = J(get("/api/assistant/1", cookie=KEY))["version"]
+    assert v2 != v1 and J(get("/api/assistant/1", cookie=KEY))["message"] == "a new question?"
     assist.write_private(os.path.join(run, assist.APPROVAL), {**approval, "waiting": False})
-    assert text(req("GET", "/s/1/v", cookie=KEY)) != v2
+    assert J(get("/api/assistant/1", cookie=KEY))["version"] != v2
+    assert J(get("/api/assistant/1", cookie=KEY))["approval"]["waiting"] is False
     assist.write_private(os.path.join(run, assist.APPROVAL), approval)
 
     # the screen when it asked
-    assert req("GET", "/s/1/shot.png", cookie=KEY)[0] == 404
+    assert get("/api/assistant/1/shot.png", cookie=KEY)[0] == 404
     PNG = b"\x89PNG\r\n\x1a\nfake"
     assist.write_private(os.path.join(run, assist.SHOT), PNG)
-    r = req("GET", "/s/1/shot.png?a=ap1", cookie=KEY)
+    r = get("/api/assistant/1/shot.png?a=ap1", cookie=KEY)
     assert r[0] == 200 and r[1]["content-type"] == "image/png" and r[2] == PNG
-    assert "shot.png?a=ap1" in text(req("GET", "/s/1", cookie=KEY))
-    assert req("GET", "/s/1/shot.png?live=1", cookie=KEY)[0] == 404            # live: the screen itself (none in a test)
-    assert req("GET", "/s/2/shot.png", cookie=KEY)[0] == 404
+    assert get("/api/assistant/1/shot.png", cookie=None)[0] == 403
+    assert J(get("/api/assistant/1", cookie=KEY))["approval"]["shot"] is True
+    assert get("/api/assistant/1/shot.png?live=1", cookie=KEY)[0] == 404        # live: the screen itself (none in a test)
+    assert get("/api/assistant/2/shot.png", cookie=KEY)[0] == 404
 
-    # the browser's link and password only on the page for a paired device
+    # the browser's link and password only for a paired device (the JSON of an unpaired one is the pairing answer)
     assist.write_private(os.path.join(run, "view.json"), {"url": "http://100.64.0.1:6081/vnc.html", "password": "pw123456"})
-    page = text(req("GET", "/s/1", cookie=KEY))
-    assert "http://100.64.0.1:6081/vnc.html" in page and "pw123456" in page and "shot.png?live=" in page
-    assert "pw123456" not in text(req("GET", "/")) and "pw123456" not in text(req("GET", "/", cookie=KEY))
+    v = J(get("/api/assistant/1", cookie=KEY))
+    assert v["browser"] == {"url": "http://100.64.0.1:6081/vnc.html", "password": "pw123456"}
+    for r in (get("/api/assistant/1"), get("/"), get("/api/assistant/1", cookie="not-a-key"), get("/s/1")):
+        assert "pw123456" not in r[2].decode() and "100.64.0.1" not in r[2].decode()
     os.remove(os.path.join(run, "view.json"))
 
     # no tmux for the session: a reply says so, nothing is typed
     assist.write_private(os.path.join(run, "state.json"), {**state, "tmux": None})
-    r = req("POST", "/s/1/reply", form={"t": token, "text": "hi"}, cookie=KEY)
-    assert r[0] == 303 and "tmux" in r[1]["location"] and "Could" in r[1]["location"], r[1]["location"]
+    r = post("/api/assistant", {"slot": 1, "do": "reply", "text": "hi"}, cookie=KEY)
+    assert r[0] == 200 and "tmux" in J(r)["message"] and J(r)["message"].startswith("Could not"), r[2]
+    r = post("/api/assistant", {"slot": 1, "do": "exit"}, cookie=KEY)
+    assert "tmux" in J(r)["message"] and J(r)["message"].startswith("Could not")
+    assert "tmux" in J(post("/api/assistant", {"slot": 1, "do": "interrupt"}, cookie=KEY))["message"]
     assist.write_private(os.path.join(run, "state.json"), state)
-    assert "Nothing" in req("POST", "/s/1/reply", form={"t": token, "text": "  "}, cookie=KEY)[1]["location"]
+    for text_ in ("  ", "", None):
+        assert J(post("/api/assistant", {"slot": 1, "do": "reply", "text": text_}, cookie=KEY))["message"] == "Nothing to send."
     for bad in ("evil; rm", "a b", "", "x:y"):
         try:
             review.target({"state": {"tmux": bad}})
@@ -320,33 +454,32 @@ try:
             time.sleep(0.3)
             assert "$(echo injected) ; `x` -t 'quote\"" in review.terminal(sess)
             assert "hello from the phone" in review.terminal(sess)
-            # the page's Reply, Finish and keys
-            r = req("POST", "/s/1/reply", form={"t": token, "text": "typed by reply"}, cookie=KEY)
-            assert r[0] == 303 and "Sent" in r[1]["location"]
-            r = req("POST", "/s/1/finish", form={"t": token, "a": "y"}, cookie=KEY)              # not at the finish question
-            assert "Nothing" in r[1]["location"]
+            assert "hello from the phone" in J(get("/api/assistant/1", cookie=KEY))["terminal"]   # the screen's terminal
+            # the screen's Reply, Finish and keys
+            r = post("/api/assistant", {"slot": 1, "do": "reply", "text": "typed by reply"}, cookie=KEY)
+            assert r[0] == 200 and J(r)["message"] == "Sent."
+            r = post("/api/assistant", {"slot": 1, "do": "finish", "answer": "y"}, cookie=KEY)    # not at the finish question
+            assert J(r)["message"] == "Nothing to do." and "closing" not in J(r)
             assist.write_private(os.path.join(run, assist.ATTENTION), {"kind": "finish", "since": 1, "time": 1, "said": ""})
-            page = text(req("GET", "/s/1", cookie=KEY))
-            assert "The session ended" in page and "Yes, it went through" in page and "Reply" not in page   # no reply box then
-            assert "did it go through?" in text(req("GET", "/", cookie=KEY))
-            r = req("POST", "/s/1/finish", form={"t": token, "a": "y"}, cookie=KEY)
-            assert r[1]["location"].startswith("/?m=") and "Thanks" in r[1]["location"]   # back to the list at once
-            # one tap is enough: the page says your answer (not the question again) while the run closes
+            v = J(get("/api/assistant/1", cookie=KEY))
+            assert v["status"] == "finish" and v["text"] == "The session ended: did it go through?" and v["message"] == ""
+            r = post("/api/assistant", {"slot": 1, "do": "finish", "answer": "y"}, cookie=KEY)
+            assert J(r)["closing"] is True and "Thanks" in J(r)["message"]                       # back to the list at once
+            # one tap is enough: the screen says your answer (not the question again) while the run closes
             assert assist.read_json(os.path.join(run, assist.ATTENTION))["kind"] == "answered"
-            page = text(req("GET", "/s/1", cookie=KEY))
-            assert "marking it Applied" in page and "Yes, it went through" not in page and "Reply" not in page
-            assert "You said it went through" in text(req("GET", "/", cookie=KEY))
-            r = req("POST", "/s/1/finish", form={"t": token, "a": "y"}, cookie=KEY)
-            assert "Already answered" in unquote(r[1]["location"])
-            r = req("POST", "/s/1/key", form={"t": token, "k": "exit"}, cookie=KEY)
-            assert "Ending" in r[1]["location"]
+            v = J(get("/api/assistant/1", cookie=KEY))
+            assert v["status"] == "answered" and "marking it Applied" in v["text"] and v["message"] == ""
+            r = post("/api/assistant", {"slot": 1, "do": "finish", "answer": "y"}, cookie=KEY)
+            assert "Already answered" in J(r)["message"] and J(r)["closing"] is True
+            r = post("/api/assistant", {"slot": 1, "do": "exit"}, cookie=KEY)
+            assert "Ending" in J(r)["message"]
             time.sleep(0.5)
             pane = review.terminal(review.session(1))
             assert "typed by reply" in pane and "/exit" in pane and pane.count("\ny") >= 1, pane
             log = open(os.path.join(run, "actions.log")).read()
             assert "REVIEW PAGE reply by Phone (14 characters)" in log and "did it go through: y (by Phone)" in log
             assert "ended the session (by Phone)" in log
-            assert req("POST", "/s/1/key", form={"t": token, "k": "interrupt"}, cookie=KEY)[0] == 303
+            assert J(post("/api/assistant", {"slot": 1, "do": "interrupt"}, cookie=KEY))["message"] == "Interrupted."
             # a site password the run used never shows in the terminal text
             real_passwords = accounts.passwords
             accounts.passwords = lambda sites: ["S3cretPw!x"] if sites else []
@@ -356,15 +489,20 @@ try:
                 assert "S3cretPw!x" in review.terminal({**sess, "state": {**sess["state"], "password_sites": []}})
                 hidden = review.terminal({**sess, "state": {**sess["state"], "password_sites": ["acme.example"]}})
                 assert "S3cretPw!x" not in hidden and assist.HIDDEN in hidden and "my password is" in hidden
+                assist.write_private(os.path.join(run, "state.json"), {**state, "password_sites": ["acme.example"]})
+                r = get("/api/assistant/1", cookie=KEY)                              # nor in the screen's JSON
+                assert "S3cretPw!x" not in r[2].decode() and assist.HIDDEN in J(r)["terminal"]
             finally:
                 accounts.passwords = real_passwords
+                assist.write_private(os.path.join(run, "state.json"), state)
             subprocess.run(["tmux", "kill-session", "-t", f"={TMUX_NAME}"])
             assert review.terminal(sess) == ""                                  # a gone session: nothing, no error
+            assert J(get("/api/assistant/1", cookie=KEY))["terminal"] == ""
         finally:
             subprocess.run(["tmux", "kill-session", "-t", f"={TMUX_NAME}"], capture_output=True)
 
-    # "do it on the laptop": the page's End and No buttons write laptop.json, mark the sheet row (the real
-    # sheet.mark_on_laptop on an in-memory worksheet), then type /exit or n; a failure to mark is a message, never an error
+    # "do it on the laptop": End and No write laptop.json, mark the sheet row (the real sheet.mark_on_laptop on an in-memory
+    # worksheet), then type /exit or n; a failure to mark is a message, never an error
     from nuauto import sheet  # noqa: E402
 
     class CellWS:
@@ -416,66 +554,78 @@ try:
         typed_laptop.clear(), opened.clear()
         ws_now[0] = fresh_sheet()
 
+    def tap(body, cookie=KEY, **kw):
+        return post("/api/assistant", {"slot": 1, **body}, cookie=cookie, **kw)
+
     MARK = assist.LAPTOP_MARK
     sheet.open_other, sheet.open_worksheet = fake_open("other"), fake_open("jobs")
     review.type_into = fake_type
     real_end = review.end_session
     review.end_session = lambda sess: fake_type(sess, "/exit")  # (End session types /exit itself, with its pause and retry)
     try:
-        # the buttons: the reply card (End session next to End: do it on the laptop), the finish card, none while a prompt waits
-        reset("waiting")
-        page = text(req("GET", "/s/1", cookie=KEY))
-        assert "End: do it on the laptop" in page and "name=k value=laptop" in page and ">End session<" in page
-        assert "the homelab never starts it again" in page
-        reset("finish")
-        page = text(req("GET", "/s/1", cookie=KEY))
-        assert "No: do it on the laptop" in page and "name=a value=laptop" in page and "Yes, it went through" in page
-        assert "value=laptop data-busy=Saving" in page and "End: do it on the laptop" not in page      # (no reply card then)
-        reset("approve")                                                     # Claude Code's own permission question
-        page = text(req("GET", "/s/1", cookie=KEY))
-        assert "value=laptop" not in page and "do it on the laptop" not in page
+        # which state each one is in decides what the screen offers (its buttons) and what a tap does
+        for kind, approval_on, word in (("waiting", False, "waiting"), ("finish", False, "finish"), ("approve", False, "prompt"),
+                                        ("approve", True, "approve"), ("answered", False, "answered")):
+            reset(kind, approval_on)
+            assert J(get("/api/assistant/1", cookie=KEY))["status"] == word, (kind, approval_on)
+        # a Claude Code permission prompt: no reply, no End (Enter would pick its first option)
+        reset("approve")
+        assert J(tap({"do": "reply", "text": "x"}))["message"].startswith("Not sent: Claude Code is asking")
+        assert J(tap({"do": "exit"}))["message"].startswith("Not sent: Claude Code is asking") and typed_laptop == []
 
         # End: do it on the laptop (the session's working or waiting for you): marked, then /exit typed
         reset("waiting")
-        r = req("POST", "/s/1/key", form={"t": token, "k": "laptop"}, cookie=KEY)
-        assert r[0] == 303 and "Left for the laptop: marked in your sheet" in unquote(r[1]["location"]), r[1]["location"]
+        r = tap({"do": "laptop"})
+        assert r[0] == 200 and "Left for the laptop: marked in your sheet" in J(r)["message"], r[2]
         assert typed_laptop == [(1, "/exit", True)], typed_laptop
         assert oct(os.stat(laptop_file).st_mode & 0o777) == "0o600" and assist.read_json(laptop_file)["by"] == "Phone"
         assert ws_now[0].values[6][4] == f"match 90% | {MARK} (the site showed it a sign-in page with no way in)", ws_now[0].values[6]
         assert ws_now[0].values[6][3] == "Approved" and ws_now[0].calls == ["E7"] and opened == [("other", False)]
         assert "do it on the laptop (by Phone)" in open(os.path.join(run, "actions.log")).read()
-        r = req("POST", "/s/1/key", form={"t": token, "k": "laptop"}, cookie=KEY)    # again: still marked once, /exit again is harmless
+        r = tap({"do": "laptop"})    # again: still marked once, /exit again is harmless
         assert ws_now[0].calls == ["E7"] and ws_now[0].values[6][4].count(MARK) == 1
         # a Submit waiting for approval is not a permission prompt: it still works
         reset("approve", approval_on=True)
-        assert "Left for the laptop" in unquote(req("POST", "/s/1/key", form={"t": token, "k": "laptop"}, cookie=KEY)[1]["location"])
+        assert "Left for the laptop" in J(tap({"do": "laptop"}))["message"]
         assert typed_laptop == [(1, "/exit", True)]
         # not while Claude Code asks its own question (Enter would pick its first option): nothing written, nothing typed
         reset("approve")
-        r = req("POST", "/s/1/key", form={"t": token, "k": "laptop"}, cookie=KEY)
-        assert "Nothing" in r[1]["location"] and typed_laptop == [] and not os.path.exists(laptop_file)
+        r = tap({"do": "laptop"})
+        assert J(r)["message"] == "Nothing to do." and typed_laptop == [] and not os.path.exists(laptop_file)
         assert ws_now[0].calls == [] and opened == []
+        # not at the finish question either (that one has its own No button)
+        reset("finish")
+        assert J(tap({"do": "laptop"}))["message"] == "Nothing to do." and typed_laptop == [] and not os.path.exists(laptop_file)
         # the NUworks tab's session marks the NUworks tab (state tab "jobs")
         reset("waiting", tab="jobs")
-        req("POST", "/s/1/key", form={"t": token, "k": "laptop"}, cookie=KEY)
+        tap({"do": "laptop"})
         assert opened == [("jobs", False)] and ws_now[0].calls == ["E7"]
-        # a missing / forged token or an unpaired device: nothing
+        # an unpaired device, a missing header or another origin: nothing
         reset("waiting")
-        assert req("POST", "/s/1/key", form={"t": "0" * 32, "k": "laptop"}, cookie=KEY)[0] == 403
-        assert req("POST", "/s/1/key", form={"t": token, "k": "laptop"})[0] == 403
-        assert req("POST", "/s/1/key", form={"t": token, "k": "laptop"}, cookie=KEY, headers={"Origin": "http://evil.example"})[0] == 403
+        assert tap({"do": "laptop"}, cookie=None)[0] == 403
+        assert tap({"do": "laptop"}, cookie="not-a-key")[0] == 403
+        assert tap({"do": "laptop"}, headers={"X-NUauto": None})[0] == 403
+        assert tap({"do": "laptop"}, origin="http://evil.example")[0] == 403
+        assert tap({"do": "laptop"}, origin="null")[0] == 403
         assert typed_laptop == [] and not os.path.exists(laptop_file) and ws_now[0].calls == []
 
         # No: do it on the laptop (the finish question): marked, then n typed (so the run records "laptop", never Applied)
         reset("finish")
-        r = req("POST", "/s/1/finish", form={"t": token, "a": "laptop"}, cookie=KEY)
-        assert r[0] == 303 and "Left for the laptop: marked in your sheet" in unquote(r[1]["location"])
+        r = tap({"do": "finish", "answer": "laptop"})
+        assert r[0] == 200 and "Left for the laptop: marked in your sheet" in J(r)["message"] and J(r)["closing"] is True
         assert typed_laptop == [(1, "n", True)] and assist.read_json(laptop_file)["by"] == "Phone"
         assert ws_now[0].values[6][4].count(MARK) == 1 and ws_now[0].values[6][3] == "Approved"
+        att = assist.read_json(os.path.join(run, assist.ATTENTION))
+        assert att["kind"] == "answered" and att["answer"] == "n"
+        assert "leaving the row as it was" in J(get("/api/assistant/1", cookie=KEY))["text"]
         for kind in ("waiting", "approve"):                                   # only at the finish question
             reset(kind)
-            r = req("POST", "/s/1/finish", form={"t": token, "a": "laptop"}, cookie=KEY)
-            assert "Nothing" in r[1]["location"] and typed_laptop == [] and not os.path.exists(laptop_file) and ws_now[0].calls == [], kind
+            r = tap({"do": "finish", "answer": "laptop"})
+            assert J(r)["message"] == "Nothing to do." and typed_laptop == [] and not os.path.exists(laptop_file), kind
+            assert ws_now[0].calls == [], kind
+        # a wrong answer at the finish question: nothing typed
+        reset("finish")
+        assert J(tap({"do": "finish", "answer": "maybe"}))["message"] == "Nothing to do." and typed_laptop == []
 
         # mark_laptop on its own: what it tells you, and that it never raises
         def mark(**over):
@@ -516,11 +666,12 @@ try:
         msg = review.mark_laptop(review.session(1), "Phone")
         assert msg == "Left for the laptop; the sheet could not be marked (RuntimeError)." and os.path.exists(laptop_file)
         assert "Google" not in msg
-        # and through the page the same failure is a normal answer: the session is still ended
+        # and through the app the same failure is a normal answer: the session is still ended
         reset("waiting")
         ws_now[0] = RuntimeError("Google is down")
-        r = req("POST", "/s/1/key", form={"t": token, "k": "laptop"}, cookie=KEY)
-        assert r[0] == 303 and "could not be marked" in unquote(r[1]["location"]) and typed_laptop == [(1, "/exit", True)]
+        r = tap({"do": "laptop"})
+        assert r[0] == 200 and "could not be marked" in J(r)["message"] and typed_laptop == [(1, "/exit", True)]
+        assert "Google" not in r[2].decode()
     finally:
         sheet.open_other, sheet.open_worksheet = real_sheet
         review.type_into = real_type_into
@@ -530,9 +681,9 @@ try:
                 os.remove(name)
         assist.write_private(os.path.join(run, "state.json"), state)
 
-    # the body of a POST is read only for a paired device (no waiting on a body from anyone else)
-    def raw_post(path, headers, cookie=None, body=b""):
-        conn = http.client.HTTPConnection("127.0.0.1", PORT, timeout=5)
+    # a POST whose body can't be read as JSON: refused or answered, never a crash; the server keeps serving
+    def raw_post(path, headers, cookie=None, body=b"", timeout=5):
+        conn = http.client.HTTPConnection("127.0.0.1", PORT, timeout=timeout)
         conn.putrequest("POST", path, skip_host=True, skip_accept_encoding=True)
         for k, v in {"Host": HOST, **headers}.items():
             conn.putheader(k, v)
@@ -544,16 +695,25 @@ try:
         conn.close()
         return out
 
-    t0 = time.time()
-    assert raw_post("/s/1/approve", {"Content-Length": "5000"})[0] == 403          # promises a body, sends none: refused at once
-    assert raw_post("/start", {"Content-Length": "5000"}, cookie="not-a-key")[0] == 403
-    assert time.time() - t0 < 3
-    for bad in ("abc", "-5", "", "1e3", " "):                                       # no crash, treated as no body
-        assert raw_post("/s/1/approve", {"Content-Length": bad}, cookie=KEY)[0] == 403, bad     # (no token without a body)
+    page_headers = {"X-NUauto": "1", "Origin": ORIGIN, "Content-Type": "application/json"}
+    for bad in ("abc", "-5", "", "1e3", " "):                                        # no crash, treated as no body
+        # (no readable length: not an object, 400; an empty length is no body = {}: no slot, 409)
+        assert raw_post("/api/assistant", {**page_headers, "Content-Length": bad}, cookie=KEY)[0] == (409 if not bad.strip() else 400), bad
+        assert raw_post("/api/assistant", {**page_headers, "Content-Length": bad})[0] == 403, bad              # (not paired)
         assert raw_post("/pair", {"Content-Length": bad})[0] == 403, bad
-    assert req("GET", "/", cookie=KEY)[0] == 200                                       # still serving
+    assert raw_post("/api/assistant", {**page_headers, "Content-Length": "9"}, cookie=KEY, body=b"{not json")[0] == 400
+    assert raw_post("/api/assistant", {**page_headers, "Content-Length": "2"}, cookie=KEY, body=b"[]")[0] == 400
+    assert raw_post("/api/assistant", {**page_headers, "Content-Length": "5000000"}, cookie=KEY)[0] == 400   # too big: not read
+    # a client that promises a body and goes away leaves nothing stuck: the next request is answered
+    with socket.create_connection(("127.0.0.1", PORT), timeout=5) as sk:
+        head = "".join(f"{k}: {v}\r\n" for k, v in {"Host": HOST, **page_headers, "Content-Length": "5000",
+                                                    "Cookie": f"{review.COOKIE}={KEY}"}.items())
+        sk.sendall(f"POST /api/assistant HTTP/1.1\r\n{head}\r\n".encode())
+        sk.shutdown(socket.SHUT_WR)                                                    # ... and sends none of it
+        assert sk.recv(200).startswith(b"HTTP/1.1 409")                                # (an empty body: no slot)
+    assert get("/api/assistant/1", cookie=KEY)[0] == 200                               # still serving
 
-    # the page in a real browser: Firefox's own form posts (Origin, cookies, redirects), not just hand-made requests
+    # the page in a real browser: Firefox's own form posts and fetches (Origin, cookies, redirects), not hand-made requests
     try:
         from playwright.sync_api import sync_playwright
         pw = sync_playwright().start()
@@ -567,7 +727,6 @@ try:
         browser = None
     if browser:
         from http.server import BaseHTTPRequestHandler, HTTPServer
-        decision_path = os.path.join(run, assist.DECISION)
         for name in (assist.DECISION, assist.SHOT):
             if os.path.exists(os.path.join(run, name)):
                 os.remove(os.path.join(run, name))
@@ -580,6 +739,22 @@ try:
         evil = None
         try:
             page = browser.new_context().new_page()
+            errors = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            # the page before pairing: its code is public, its data is not (it says so)
+            page.goto(f"{ORIGIN}/")
+            page.wait_for_selector("[data-testid=gone]")    # the page knows it is not paired (it got the 403)
+            page.wait_for_timeout(1500)
+            assert "not paired" in page.inner_text("#view")                 # the pairing help stays on screen
+            page.goto(f"{ORIGIN}/#/assistant/1")                   # (an old Discord link, opened before pairing)
+            page.wait_for_timeout(500)
+            assert page.locator("[data-testid=as-approve]").count() == 0 and "Acme" not in page.inner_text("body")
+            assert "not paired" in page.inner_text("#view")
+            page.goto("about:blank")
+            page.goto(f"{ORIGIN}/#/assistant/1")                   # opened fresh: the same
+            page.wait_for_selector("[data-testid=gone]")
+            page.wait_for_timeout(1000)
+            assert "not paired" in page.inner_text("#view") and page.locator("[data-testid=as-gone]").count() == 0
             # pairing through the form: GET shows it, the button pairs this browser
             before = device_count()
             page.goto(review.make_pairing("tablet"))
@@ -590,38 +765,75 @@ try:
             assert device_count() == before + 1 and "Test Browser" in [d_["name"] for d_ in assist.read_json(review.DEVICES).values()]
             cookies = {c_["name"]: c_ for c_ in page.context.cookies()}
             assert cookies[review.COOKIE]["httpOnly"] and cookies[review.COOKIE]["sameSite"] == "Strict"
-            # the session page, then Approve (a real form post: its Origin must be accepted)
-            page.goto(f"{ORIGIN}/s/1")
-            page.wait_for_selector("text=Approve: submit")
-            assert "&lt;b&gt;" not in page.inner_text("body") and "<b>now</b>" in page.inner_text("body")   # shown as text
-            page.click("text=Approve: submit")
-            page.wait_for_selector("text=Approved.")
-            dec = assist.read_json(decision_path)
+            # the assistant's screen, then Approve (a real fetch: its Origin and X-NUauto must be accepted)
+            page.goto(f"{ORIGIN}/#/assistant/1")
+            page.wait_for_selector("[data-testid=as-approve]")
+            assert page.inner_text("[data-testid=as-status]") == "Ready to submit: click 'Submit'"
+            body_text = page.inner_text("[data-testid=as-message]")
+            assert "<b>now</b>" in body_text                                       # the agent's text is shown as text
+            assert "Acme <b>Robotics</b>" in page.inner_text("#view") and page.locator("#view b", has_text="Robotics").count() == 0
+            assert page.locator("#view b", has_text="now").count() == 0                # (no markup came out of any text)
+            assert page.locator("[data-testid=as-approval]").inner_text().count("guesses: Graduation = May 2029") == 1
+            assert not os.path.exists(os.path.join(run, assist.DECISION))
+            page.click("[data-testid=as-approve]")
+            page.wait_for_selector("text=Approved: it is submitting now")
+            dec = assist.read_json(os.path.join(run, assist.DECISION))
             assert dec["decision"] == "approve" and dec["by"] == "Test Browser" and dec["id"] == "ap1", dec
-            # until the guard picks your answer up, the page says so: no second Approve to tap
-            assert "Approved: it is submitting now" in page.inner_text("body") and page.locator("text=Approve: submit").count() == 0
-            os.remove(decision_path)                                    # (the guard took it)
-            page.goto(f"{ORIGIN}/s/1")
+            # until the guard picks your answer up, the screen says so: no second Approve to tap
+            assert page.locator("[data-testid=as-approve]").count() == 0 and "Test Browser" in page.inner_text("[data-testid=as-approval]")
+            assert "REVIEW PAGE approve by Test Browser" in open(os.path.join(run, "actions.log")).read()
+            os.remove(os.path.join(run, assist.DECISION))                         # (the guard took it)
+            page.reload()
+            page.wait_for_selector("[data-testid=as-approve]")
             # Decline with a note, the same way
-            page.fill("input[name=note]", "not this one")
-            page.click("button:has-text('Decline')")
-            page.wait_for_selector("text=Declined.")
-            dec = assist.read_json(decision_path)
+            page.fill("[data-testid=as-note]", "not this one")
+            page.click("[data-testid=as-decline]")
+            page.wait_for_selector("text=Declined: it will not submit")
+            dec = assist.read_json(os.path.join(run, assist.DECISION))
             assert dec["decision"] == "decline" and dec["note"] == "not this one" and dec["by"] == "Test Browser"
-            os.remove(decision_path)
+            os.remove(os.path.join(run, assist.DECISION))
             # Reply: typed into the terminal (recorded here)
-            page.goto(f"{ORIGIN}/s/1")
-            page.fill("textarea[name=text]", "hello from firefox")
-            page.click("button:has-text('Send')")
-            page.wait_for_selector("text=Sent.")
+            page.reload()
+            page.wait_for_selector("[data-testid=as-reply]")
+            page.fill("[data-testid=as-reply]", "hello from firefox")
+            page.click("[data-testid=as-send]")
+            page.wait_for_selector("[data-testid=toast]:has-text('Sent.')")
             assert typed_in_browser == [(1, "hello from firefox")], typed_in_browser
             assert "REVIEW PAGE reply by Test Browser (18 characters)" in open(os.path.join(run, "actions.log")).read()
-            # the index and its Start now flash come back through the browser too
-            page.goto(f"{ORIGIN}/")
-            assert page.locator("a[href='/s/1']").count() == 1
-            # a page on another origin cannot press the buttons, even with this browser's cookie (and a valid token)
-            attack_html = (f"<form method=post action='{ORIGIN}/s/1/approve'><input name=t value='{token}'>"
-                           "<input name=id value='ap1'><input name=d value='approve'><button id=go>go</button></form>").encode()
+            # a Claude Code permission prompt of its own: no reply box, no Approve
+            assist.write_private(os.path.join(run, assist.ATTENTION), {"kind": "approve", "since": 1, "time": 1, "said": ""})
+            os.remove(os.path.join(run, assist.APPROVAL))
+            page.reload()
+            page.wait_for_selector("[data-testid=as-prompt]")
+            assert page.locator("[data-testid=as-send]").count() == 0 and page.locator("[data-testid=as-approve]").count() == 0
+            # the end question: the three answers, and "do it on the laptop" next to End while it works
+            assist.write_private(os.path.join(run, assist.ATTENTION), {"kind": "finish", "since": 1, "time": 1, "said": ""})
+            page.reload()
+            page.wait_for_selector("[data-testid=as-yes]")
+            assert page.locator("[data-testid=as-no]").count() == 1 and page.locator("[data-testid=as-no-laptop]").count() == 1
+            assert page.locator("[data-testid=as-laptop]").count() == 0 and page.locator("[data-testid=as-send]").count() == 0
+            assist.write_private(os.path.join(run, assist.ATTENTION), {"kind": "waiting", "since": 1, "time": 1, "said": ""})
+            page.reload()
+            page.wait_for_selector("[data-testid=as-exit]")
+            assert page.locator("[data-testid=as-laptop]").count() == 1 and page.locator("[data-testid=as-interrupt]").count() == 1
+            # a slot nobody runs in
+            page.goto(f"{ORIGIN}/#/assistant/3")
+            page.wait_for_selector("[data-testid=as-gone]")
+            # an old Discord link lands on the screen
+            page.goto(f"{ORIGIN}/s/1")
+            page.wait_for_selector("[data-testid=as-status]")
+            assert page.url.endswith("/#/assistant/1")
+            # a page on another origin cannot press the buttons, even with this browser's cookie (the same site to SameSite):
+            # a form can't send JSON, and a fetch with the page's headers is stopped by the browser (no CORS answer)
+            assist.write_private(os.path.join(run, assist.APPROVAL), approval)
+            assist.write_private(os.path.join(run, assist.ATTENTION), {"kind": "waiting", "since": 1, "time": 1, "said": ""})
+            attack_html = (f"<form id=f method=post enctype='text/plain' action='{ORIGIN}/api/assistant'>"
+                           "<input name='{\"slot\":1,\"do\":\"approve\",\"id\":\"ap1\",\"x\":\"' value='\"}'>"
+                           "<button id=go>go</button></form>"
+                           f"<script>window.result = 'pending'; fetch('{ORIGIN}/api/assistant', {{method: 'POST', credentials: 'include',"
+                           " headers: {'Content-Type': 'application/json', 'X-NUauto': '1'},"
+                           " body: JSON.stringify({slot: 1, do: 'approve', id: 'ap1'})})"
+                           ".then(() => { window.result = 'sent'; }).catch(() => { window.result = 'blocked'; });</script>").encode()
 
             class Evil(BaseHTTPRequestHandler):
                 def do_GET(self):
@@ -636,13 +848,15 @@ try:
             evil = HTTPServer(("127.0.0.1", 0), Evil)
             threading.Thread(target=evil.serve_forever, daemon=True).start()
             page.goto(f"http://127.0.0.1:{evil.server_address[1]}/")
-            assert not os.path.exists(decision_path)
+            page.wait_for_function("window.result !== 'pending'")
+            assert page.evaluate("window.result") == "blocked" and not os.path.exists(os.path.join(run, assist.DECISION))
             with page.expect_navigation():
                 page.click("#go")
-            assert "Wrong origin" in page.inner_text("body") and not os.path.exists(decision_path)
-            # a page that is not a form post at all (a link followed) never changes anything
-            page.goto(f"{ORIGIN}/s/1/approve")
-            assert not os.path.exists(decision_path)
+            assert "forbidden" in page.inner_text("body") and not os.path.exists(os.path.join(run, assist.DECISION))
+            # a page that is not a POST at all (a link followed) never changes anything
+            page.goto(f"{ORIGIN}/api/assistant/1")
+            assert not os.path.exists(os.path.join(run, assist.DECISION))
+            assert not [e_ for e_ in errors if "assistant" in e_], errors
         finally:
             review.type_into = real_type_into
             browser.close()
@@ -712,23 +926,23 @@ try:
                 raise AssertionError("typed into a pane that is not there")
             except ValueError:
                 pass
-            # and through the page (the pinned pane): Reply reaches the assistant only
+            # and through the app (the pinned pane): Reply reaches the assistant only
+            assist.write_private(os.path.join(run, assist.ATTENTION), {"kind": "waiting", "since": 1, "time": 1, "said": ""})
             assist.write_private(os.path.join(run, "state.json"), {**state, "tmux": S3, "tmux_pane": cat_pane})
-            r = req("POST", "/s/1/reply", form={"t": token, "text": "via the page"}, cookie=KEY)
-            assert r[0] == 303 and "Sent" in r[1]["location"]
+            r = post("/api/assistant", {"slot": 1, "do": "reply", "text": "via the page"}, cookie=KEY)
+            assert r[0] == 200 and J(r)["message"] == "Sent."
             time.sleep(0.4)
             assert "via the page" in pane_text(cat_pane) and "via the page" not in pane_text(shell_pane)
             assist.write_private(os.path.join(run, "state.json"), {**state, "tmux": S1})
-            r = req("POST", "/s/1/reply", form={"t": token, "text": "to the shell"}, cookie=KEY)
-            assert "nothing+was+typed" in r[1]["location"] or "nothing%20was%20typed" in r[1]["location"], r[1]["location"]
+            r = post("/api/assistant", {"slot": 1, "do": "reply", "text": "to the shell"}, cookie=KEY)
+            assert r[0] == 200 and J(r)["message"].startswith("Could not do that") and "nothing was typed" in J(r)["message"], r[2]
+            assist.write_private(os.path.join(run, "state.json"), {**state, "tmux": None})
             assist.write_private(os.path.join(run, "state.json"), state)
         finally:
             for n_ in (S1, S2, S3):
                 tm("kill-session", "-t", f"={n_}")
 
-    # unpairing: the cookie stops working
-    config.IS_SERVER, config.REMOTE_ASSIST = True, True
-    import io
+    # unpairing: the cookie stops working (by hand on the homelab: review.main; the app's list follows)
     out, sys.stdout = sys.stdout, io.StringIO()
     try:
         review.main(["unpair", "Phone"])
@@ -745,7 +959,12 @@ try:
     assert "Forgot 1 device." in said and (not browser or "Test Browser" in listing) and "Forgot" in empty
     assert "No paired devices" in empty and f"{ORIGIN}/pair?c=" in paired
     assert device_count() == 0
-    assert req("GET", "/", cookie=KEY)[0] == 403 and req("POST", "/s/1/approve", form=answer, cookie=KEY)[0] == 403
+    r = get("/api/assistant/1", cookie=KEY)
+    assert r[0] == 403 and J(r)["pair"] is True
+    assert post("/api/assistant", {"slot": 1, "do": "approve", "id": "ap1"}, cookie=KEY)[0] == 403
+    assert get("/api/devices", cookie=KEY)[0] == 403 and post("/api/action", {"kind": "pair_device"}, cookie=KEY)[0] == 403
+    # (a cookie that was valid and is not now: the page is told to pair again; the public code still loads)
+    assert get("/", cookie=KEY)[0] == 200 and get(f"/pair?c={parse_qs(urlparse(paired.split('  ')[-1].strip()).query)['c'][0]}", cookie=KEY)[0] == 200
 finally:
     for h in holders:
         h.kill()

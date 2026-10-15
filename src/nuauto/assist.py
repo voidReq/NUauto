@@ -1764,12 +1764,18 @@ def run_locked(number, other, row, url, where, tab, slot, slot_lock):
     log_.write(f"{where.capitalize()} marked Applied (dated today).")
     if other:  # an Other jobs tab job is not on NUworks: nothing more to send
         return
-    if config.IS_SERVER:  # NUworks submits only with you at the laptop (a terminal or the GUI), never from the homelab
+    if config.IS_SERVER:  # NUworks submits only when you start them (a terminal, or a tap on NUauto's page): not here
         sheet.append_note(ws, row.number, row.url, HOMELAB_NUWORKS_NOTE.format(row=row.number))
-        log_.write(f"The NUworks side is left for the laptop: `nuauto assist nuworks {row.number}` there, or the GUI's "
-                   "Apply > Company sites.")
+        log_.write(f"The NUworks side waits for you: Apply > Company sites (NUauto's page), or `nuauto assist nuworks "
+                   f"{row.number}`.")
         return
-    nuworks_side(ws, row.number)
+    from nuauto import remote
+    try:
+        with remote.nuworks_turn():
+            nuworks_side(ws, row.number)
+    except remote.NuworksBusy as e:
+        print(f"The NUworks side is not submitted now: {e} Retry it from Apply > Company sites (or `nuauto assist nuworks "
+              f"{row.number}`).")
 
 
 # At the end of a row's Notes when the homelab's browser can't do it (a site that refuses an automated browser shows it
@@ -1810,8 +1816,9 @@ def ask_line(prompt, timeout=None):
 
 
 # In Notes after a homelab run of a NUworks job; "NUworks side NOT submitted" puts the row in the GUI's retry list.
-HOMELAB_NUWORKS_NOTE = ("NUworks side NOT submitted yet (the company site was done on the homelab, which never submits on "
-                        "NUworks): run `nuauto assist nuworks {row}` on the laptop, or Apply > Company sites.")
+HOMELAB_NUWORKS_NOTE = ("NUworks side NOT submitted yet (the company site was done on the homelab; its NUworks side waits "
+                        "for you): Apply > Company sites in NUauto (the laptop's or the homelab's page), or `nuauto "
+                        "assist nuworks {row}` on the laptop.")
 
 
 def nuworks_side_blocked(notes):
@@ -1904,18 +1911,24 @@ def main(argv):
         sys.exit(__doc__)
     if not args:
         return list_rows()
-    if args[0] in ("auto", "queue", "start", "sessions", "claim", "unclaim"):  # the homelab's queue and claims
-        from nuauto import remote
+    if args[0] in ("auto", "queue", "start", "sessions", "claim", "unclaim", "nuworks-turn", "nuworks-done"):
+        from nuauto import remote  # the homelab's queue, claims and NUworks turn
         return remote.main(args)
     if args[0] == "other":
         return main_other(args[1:], url)
     if len(args) == 2 and args[0] == "nuworks" and args[1].isdigit():  # retry / catch up the NUworks side
         from nuauto import apply
+        from nuauto import remote
         from nuauto import sheet
-        if config.IS_SERVER:
-            sys.exit("The NUworks side runs on the laptop (you at a terminal or the GUI), never on the homelab.")
+        if config.IS_SERVER and not config.REMOTE_APP:
+            sys.exit("The NUworks side runs on the laptop (you at a terminal or the GUI); on the homelab only from "
+                     "NUauto's page there (Settings > NUauto on your homelab, on the laptop).")
         apply.refuse_unattended(ui)  # a real NUworks submit: you at a terminal or the GUI, never an agent
-        return nuworks_side(sheet.open_worksheet(), int(args[1]), answers.JsonIO() if ui == "json" else None)
+        try:
+            with remote.nuworks_turn():
+                return nuworks_side(sheet.open_worksheet(), int(args[1]), answers.JsonIO() if ui == "json" else None)
+        except remote.NuworksBusy as e:
+            sys.exit(f"Not now: {e}")
     if len(args) == 1 and args[0].isdigit():
         from nuauto import sheet
         try:

@@ -74,7 +74,7 @@ def homelab(on):
 
 # ---- no homelab: every remote key is refused, whatever its value, and nothing is saved
 homelab(False)
-for body in ({"remote_assist": True}, {"remote_auto": False}, {"remote_hours": [9, 22]}, {"assist_slots": 2},
+for body in ({"remote_assist": True}, {"remote_auto": False}, {"remote_hours": [9, 22]}, {"remote_app": True},
              {"remote_assist": True, "resume_label": "x"}):
     refused(body, "needs a homelab")
 assert gui.settings_get()["homelab_assistant"]["available"] is False
@@ -82,8 +82,12 @@ assert gui.settings_get()["homelab_assistant"]["available"] is False
 config.HAS_SERVER, config.IS_SERVER = True, True
 refused({"remote_assist": True}, "needs a homelab")
 config.IS_SERVER, config.FROZEN = False, True
-refused({"assist_slots": 2}, "needs a homelab")
+refused({"remote_hours": [9, 22]}, "needs a homelab")
 config.FROZEN = False
+# assistants at once: the laptop's own sessions side by side too, so no homelab needed (2026-10-14)
+for bad in (0, 4, "2", True):
+    refused({"assist_slots": bad}, "1, 2 or 3")
+assert "assist_slots" not in saved()
 
 # ---- with a homelab: what is accepted
 homelab(True)
@@ -185,5 +189,10 @@ refused({"bitwarden_import": ["a" * 61]}, "site text")
 refused({"bitwarden_import": ["a;b"]}, "site text")
 refused({"bitwarden_import": ["$(id)"]}, "site text")
 refused({"bitwarden_import": ["a b"]}, "site text")
+
+# the page's answers are JSON a browser can read: a NaN or infinity (a taste score, say) becomes null
+nan, inf = float("nan"), float("inf")
+assert gui.to_json({"a": nan, "b": [inf, -inf, 1.5], "c": {"d": nan}}) == '{"a": null, "b": [null, null, 1.5], "c": {"d": null}}'
+assert gui.to_json({"x": [1, "s", None, True]}) == '{"x": [1, "s", null, true]}'
 
 print("All homelab settings checks passed.")

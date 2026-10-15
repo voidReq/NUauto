@@ -15,8 +15,17 @@ APPLYING (apply.py, sheet.py)
 - Weekly cap (fixed weeks from local_config week_start, else the last 7 days) | sheet.max_per_week() (default MAX_PER_WEEK = 11; local_config "max_per_week" 1-30, anything else = 11; Settings in the GUI), sheet.week_window, sheet.check_limits; apply.main checks before every row | test_sheet (7-day edge, limit refuses, the setting's bounds), test_gui (settings refuse bad values), test_demo (a run refuses up front)
 - Total cap | sheet.MAX_TOTAL = 99, same check_limits | test_sheet (counts only; the total refusal itself is not tested)
 - Applied row with no/odd date is an error, never guessed | sheet.applied_dates | test_sheet
-- One application at a time, 30-60 s apart | apply.main loop, time.sleep(random.uniform(30, 60)) | no test
-- apply submits only with you there: a real terminal, or the GUI (`--ui json` only as a child of the running GUI, its pid in local/gui.lock); never inside a Claude Code shell (CLAUDECODE); the same for `assist nuworks <row>`; assist.run needs a terminal | apply.refuse_unattended (isatty / answers.json_ui_allowed / CLAUDECODE), apply.main, assist.main | test_demo (CLAUDECODE and --ui json refusals), test_answers (json_ui_allowed)
+- One application at a time, 30-60 s apart | apply.run_rows loop, time.sleep(random.uniform(30, 60)) | no test
+- One machine submits on NUworks at a time (with NUauto's page on the homelab, both can run Apply; each counts the
+  weekly cap before each submit): the homelab's runs take the turn there (it lasts while that process lives), the
+  laptop's ask for it over ssh (it lasts until given back, at most 3 h); refused = not started ("Not now: ..."). The
+  homelab unreachable: the laptop goes ahead and says so | remote.nuworks_turn, take_turn, give_turn; apply.main;
+  assist.main (nuworks), assist.run_locked | test_remote
+- apply submits only with you there: a real terminal, or the GUI (`--ui json` only as a child of the running GUI, its
+  pid in local/gui.lock: on the homelab the nuauto-web process serving NUauto's page, started by a paired device's tap,
+  its browser on a virtual screen you watch: gui.run_screen); never inside a Claude Code shell (CLAUDECODE); the same for
+  `assist nuworks <row>`; assist.run needs a terminal | apply.refuse_unattended (isatty / answers.json_ui_allowed /
+  CLAUDECODE), apply.main, assist.main | test_demo (CLAUDECODE and --ui json refusals), test_answers (json_ui_allowed)
 - Row can never be sent twice | sheet.mark_submit_started (row becomes Needs Human BEFORE the Submit click); sheet.resolve_submit only accepts a marked row | test_sheet (submit-safety checks)
 - Screenshot before Submit, and after | browser.RunLog.screenshot ("filled_popup", "after_submit") in apply.fill_popup / submit_flow | no test
 - Every action logged per application under logs/ | browser.RunLog | no test
@@ -69,10 +78,10 @@ COMPANY-SITE AGENT (assist.py, prompts/ASSIST_PROMPT.md)
   captcha_target, decide | test_assist
 - On the homelab (remote_assist only): the browser view listens on web_listen_host (the Tailscale IP; never every
   address), the shared screen itself on 127.0.0.1 only, behind a password made per run that is shown only in the
-  session's terminal; the agent reads only the writeups copy and the resume; never a NUworks submit there (the row is
-  left for the laptop) | screen.listen_host, commands; config (IS_SERVER read paths); assist.run, assist.main |
-  test_screen, test_assist
-- On the homelab a Submit-type action is approved only on the review page, by a paired device: the guard writes the
+  session's terminal; the agent reads only the writeups copy and the resume; the NUworks side of a company-site
+  application done there is never sent by itself: it waits for your tap (Company sites, either machine's page) |
+  screen.listen_host, commands; config (IS_SERVER read paths); assist.run, assist.main | test_screen, test_assist
+- On the homelab a Submit-type action is approved only on NUauto's page there (its Assistants screen), by a paired device: the guard writes the
   question (what, page, review_lines, a screenshot) and waits up to assist.WAIT for an answer with that question's id;
   no answer or an error = blocked. A later Approve is a pass for exactly that action on that page with the same typed
   values (typed_print), once, for assist.GRANT_TTL, and only for a question the guard asked this run; typing or another
@@ -80,11 +89,18 @@ COMPANY-SITE AGENT (assist.py, prompts/ASSIST_PROMPT.md)
   hook died becomes a pass, never a lost answer. The browser tool writes only in the run's browser/ folder, never next
   to the guard's files | assist.pre_hook, open_approval, remote_decision, take_grant, withdraw, session;
   review.answer_approval, hook_alive | test_assist, test_review
-- The review page: Tailscale IP only (port 8766, not the tunnel's), paired devices only (one-time pairing link, 10 min;
-  a random key in an HttpOnly SameSite=Strict cookie, its hash on the homelab), its own Host, a form token from the key
-  and a matching Origin on every POST; run folders under logs/ only; site passwords taken out of the terminal it shows;
-  the agent's browser and WebFetch never open the user's own network there | review.Handler, pair, device, form_token,
-  session, terminal; assist.own_network | test_review, test_assist
+- NUauto's page on the homelab (the same app as the laptop's, gui.serve_remote inside nuauto-web; "remote_app", or
+  "remote_assist"): web_listen_host only (the Tailscale IP; port 8766, not the tunnel's; refused when it is not set or
+  every address), paired devices only (one-time pairing link, 10 min; a random key in an HttpOnly SameSite=Strict
+  cookie, its hash on the homelab), its own Host, and on every POST X-NUauto: 1, JSON and a matching Origin (the pairing
+  form: the Origin); the page's own code is served to anyone (a link tapped in Discord arrives without the cookie),
+  every /api needs a paired device; run folders under logs/ only; site passwords taken out of the terminal it shows;
+  what needs the laptop itself is refused there with the reason (logins, terminal windows, its files and folders,
+  Bitwarden, setup's file steps, Quit); a device can't unpair itself; the agent's browser and WebFetch never open the
+  user's own network there | gui.Handler (REMOTE), serve_remote, LAPTOP_ONLY, REMOTE_SETUP, REMOTE_SETTINGS_OFF,
+  REMOTE_POSTS_OFF; review.pair, device, session, terminal; assist.own_network | test_review, test_homelab_app, test_assist
+- A restart of nuauto-web never cuts off a NUworks run its page started: the deploy waits while one runs (or an update)
+  | deploy.Deploy.update_running | test_deploy (the waiting; not the process pattern)
 - The homelab's queue starts only approved rows (Other jobs Approved, Needs Human stopped at a company site), only with
   remote_assist and remote_auto (per tab: remote.auto_tabs), in remote_hours, into free slots, one per job site, NUworks rows under the weekly cap,
   each row once by itself (a session that ended without Applied waits for the user: no repeat, so no second submit);
@@ -94,9 +110,11 @@ COMPANY-SITE AGENT (assist.py, prompts/ASSIST_PROMPT.md)
   site; only one of your own logins that shares a company word with it; before that neither a sign-in nor a new account
   there | accounts.candidates_for, link, find, password_for; assist.decide (link-login -> ask), link_login_cmd |
   test_accounts
-- The answer banks and job-site logins shared with the homelab: merged under each file's lock, a login never dropped,
-  sent as JSON over ssh and never printed; the writeups copy holds only files the agent may read | sync.share,
-  merge_bank, merge_accounts, notes_files | test_share
+- The answer banks, settings, the NUworks resume label and ratings shared with the homelab (and, with its assistant, the
+  job-site logins): merged under each file's lock (per question, setting, job), a login never dropped, nothing deleted
+  by a missing copy, the laptop's tool paths always the laptop's, sent as JSON over ssh and never printed; the writeups
+  copy holds only files the agent may read | sync.share, merge_bank, merge_dict, merge_into_file, merge_accounts,
+  notes_files; config.settings_lock, jobs.ratings_locked | test_share
 - Enter key and type(submit=true) ask first | assist.decide (ENTER_KEYS, browser_type) | test_assist
 - Except on a sign-in page (assist.sign_in_page) or the job's own posting before anything is filled in (assist.posting_page:
   the row's link, a language part like /en-US/ aside, no form boxes on it but a job search box): there Enter, and the

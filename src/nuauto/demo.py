@@ -14,6 +14,8 @@ Forced problems (--demo-state, saved in local/demo_state.json so child processes
   nuworks-relogin     NUworks session expired; the one-click SSO re-login works
   nuworks-password    NUworks session expired and SSO asks for a password (you must log in)
   cap-reached         11 applications already this week
+  homelab             company-site rows for the homelab's queue (`nuauto gui --demo --remote` adds it; its made-up
+                      assistant sessions run on three of them: review.demo_setup)
 
   nuauto demo setup [state,...] | update | login_nuworks | login_claude | claude ... | state <name> on|off
 """
@@ -30,7 +32,7 @@ import gspread
 
 from nuauto import config
 
-STATES = {"fresh", "google-expired", "claude-logged-out", "nuworks-relogin", "nuworks-password", "cap-reached"}
+STATES = {"fresh", "google-expired", "claude-logged-out", "nuworks-relogin", "nuworks-password", "cap-reached", "homelab"}
 SHEET_ID = "DEMO-SHEET"
 RESUME_LABEL = "Demo Student | Resume"
 HOST = "https://northeastern-csm.symplicity.com"
@@ -325,6 +327,34 @@ def OTHER_ROWS(today):
              "Applied on the company site (nuauto assist; you pressed Submit).", (today - timedelta(days=3)).isoformat())]
 
 
+# --demo-state homelab: more company-site rows, for the homelab's queue. (NUworks job id or None, company, title, the
+# company's application link, match, done on the laptop). Sessions (review.DEMO_SESSIONS) run on Acme, Beacon, Cobalt.
+HOMELAB_MAIN = [("900161", "Cobalt Labs", "Security Engineering Co-op", "https://cobalt.example/careers/31", 86, False),
+                ("900162", "Delta Devices", "Firmware Co-op", "https://delta.wd5.myworkdayjobs.com/en-US/jobs/21", 88, False),
+                ("900163", "Ember Health", "Security Analyst Co-op", "https://careers.ember.example/jobs/22", 74, False),
+                ("900164", "Fjord Motors", "Controls Co-op", "https://fjord.icims.com/jobs/23/job", 70, True)]
+HOMELAB_OTHER = [(None, "Acme Robotics", "Embedded Software Intern", "https://acme.wd1.myworkdayjobs.com/careers/job/11", 90, False),
+                 (None, "Beacon Systems", "Hardware Test Intern", "https://jobs.lever.co/beacon/15", 81, False),
+                 (None, "Garnet Aerospace", "Avionics Intern", "https://job-boards.greenhouse.io/garnet/jobs/30", 84, False),
+                 (None, "Helix Semiconductor", "Hardware Intern", "https://jobs.lever.co/helix/31", 79, False),
+                 (None, "Iris Security", "Red Team Intern", "https://jobs.ashbyhq.com/iris/32", 77, False),
+                 (None, "Kestrel Defense", "Embedded Intern", "https://kestrel.icims.com/jobs/34/job", 71, True),
+                 (None, "Maple Grid", "Power Systems Intern", "https://maple.example/jobs/36", 66, False)]
+
+
+def homelab_rows():
+    """(main tab rows, Other jobs tab rows) of the homelab state, as sheet rows."""
+    from nuauto import assist
+    from urllib.parse import urlparse as parse
+
+    def notes(link, match, laptop, external):
+        text = (f"External application: {parse(link).hostname} -> {link} | " if external else "") + f"match {match}%"
+        return text + (f" | {assist.LAPTOP_MARK} (the site showed it a sign-in page with no way in)" if laptop else "")
+    main = [[_url(i), c, t, "Needs Human", notes(link, m, lap, True), ""] for i, c, t, link, m, lap in HOMELAB_MAIN]
+    other = [[link, c, t, "Approved", notes(link, m, lap, False), ""] for _, c, t, link, m, lap in HOMELAB_OTHER]
+    return main, other
+
+
 def _url(i):
     return f"{HOST}/students/app/jobs/detail/{i}"
 
@@ -492,8 +522,16 @@ def setup(state_names=()):
     rows.append([_url("900140"), "Maple Controls", "Firmware Test Co-op", "Applied",
                  "Applied on the company site (nuauto assist; you pressed Submit). NUworks side NOT submitted: "
                  "the session expired.", (today - timedelta(days=10)).isoformat()])
+    other = [list(r) for r in OTHER_ROWS(today)]
+    if "homelab" in state_names:
+        more_main, more_other = homelab_rows()
+        rows += more_main
+        other += more_other
+        cfg = json.load(open(config.LOCAL_CONFIG_PATH))
+        _write(config.LOCAL_CONFIG_PATH, {**cfg, "remote_assist": True, "assist_slots": 3, "web_listen_host": "127.0.0.1",
+                                          "remote_auto": {"nuworks": False, "other": True}}, mode=0o644)
     _write(_path(f"demo_sheet_{SHEET_ID}.json"), {"title": "NUauto jobs (demo)", "rows": rows})
-    _write(_path(f"demo_sheet_{SHEET_ID}.other.json"), {"rows": [list(sheet.HEADERS)] + [list(r) for r in OTHER_ROWS(today)]})
+    _write(_path(f"demo_sheet_{SHEET_ID}.other.json"), {"rows": [list(sheet.HEADERS)] + other})
 
 
 def update():

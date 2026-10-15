@@ -4,21 +4,17 @@ step, ask_line, review's queue and Start now, gui.homelab_assistants. Run: pytho
 No ssh, no sheet, no network, no real DNS. State is a temp folder. tmux (when installed) runs on a private socket
 (TMUX_TMPDIR) and no systemd scope is ever made.
 """
-import http.client
 import io
 import json
 import os
 import re
 import shlex
-import socket
 import subprocess
 import sys
 import tempfile
 import threading
 import time
 from datetime import date, datetime, timedelta
-from http.server import ThreadingHTTPServer
-from urllib.parse import parse_qs, unquote, urlencode, urlparse
 
 STATE = tempfile.mkdtemp(prefix="nuauto-test-remote-")
 os.environ["NUAUTO_STATE_DIR"] = STATE
@@ -914,36 +910,7 @@ finally:
     (assist.find_other_row, assist.run_locked, remote.claim_on_homelab, remote.unclaim_on_homelab,
      remote.claimed) = real_find, real_locked, real_claim, real_unclaim, real_claimed
 
-# ---- review: the queue on the index page, and Start now
-config.LOCAL = {**config.LOCAL, "web_listen_host": "127.0.0.1"}
-with socket.socket() as sk:
-    sk.bind(("127.0.0.1", 0))
-    PORT = sk.getsockname()[1]
-review.PORT = PORT
-HOST = f"127.0.0.1:{PORT}"
-srv = ThreadingHTTPServer(("127.0.0.1", PORT), review.Handler)
-threading.Thread(target=srv.serve_forever, daemon=True).start()
-
-
-def req(method, path, form=None, cookie=None, headers=None):
-    conn = http.client.HTTPConnection("127.0.0.1", PORT, timeout=10)
-    h = {"Host": HOST, **(headers or {})}
-    if cookie:
-        h["Cookie"] = f"{review.COOKIE}={cookie}"
-    body = None
-    if form is not None:
-        body = urlencode(form)
-        h["Content-Type"] = "application/x-www-form-urlencoded"
-    conn.request(method, path, body=body, headers=h)
-    r = conn.getresponse()
-    data = r.read()
-    out = (r.status, {k.lower(): v for k, v in r.getheaders()}, data.decode())
-    conn.close()
-    return out
-
-
-KEY = review.pair(parse_qs(urlparse(review.make_pairing("phone")).query)["c"][0], "Phone")
-TOKEN = review.form_token(KEY)
+# ---- review: the queue for the app's Company sites (review.queue_view), and Start now (review.start_now)
 c1 = {**cand("other", 12, "a.example"), "company": "Acme <i>Co</i>"}
 c2, c3, c4, c5 = cand("other", 13, "b.example"), cand("other", 14, "c.example"), cand("other", 15, "d.example"), cand("jobs", 16, "e.example")
 c6, c7 = cand("other", 17, "f.example"), {**cand("other", 18, "g.example"), "laptop": True}
@@ -970,157 +937,110 @@ remote.start = lambda tab, rown: started_now.append((tab, rown)) or None
 remote.record_started = lambda c, auto=True: recorded.append((c, auto))
 
 
-def cards(page):
-    """{row: its card's text} of the queue part of the index page."""
-    return {int(m.group(1)): m.group(0) for m in re.finditer(
-        r"<div class=card><b>.*?(?:NUworks|Other jobs) row (\d+).*?(?=<div class=card><b>|\Z)", page, re.S)}
-
-
-def both():
-    """The queue's two tabs as one page (NUworks, then Other jobs)."""
-    return req("GET", "/?tab=jobs", cookie=KEY)[2] + req("GET", "/?tab=other", cookie=KEY)[2]
-
-
-def start_rows(page):
-    return sorted(int(x) for x in re.findall(r"name=row value='(\d+)'", page))
-
-
 def set_inputs(cands, running=(), claims=(), records=None, free=2, left=None):
     INPUTS[0] = (list(cands), list(running), list(claims), records or {}, free, left)
 
 
+def startable(q):
+    return sorted(int(k.split("-")[1]) for k, v in q["rows"].items() if v["start"])
+
+
+real_sessions_fn = assist.sessions
+assist.sessions = lambda: []  # (nothing runs in this temp folder: no "a session is working on it" here)
 try:
     # two free slots, a session on b.example, no NUworks applications left: each row is judged on its own
-    page = both()
-    assert "<h3>Queue</h3>" in page and "Starts by itself: off" in page and "9:00-22:00" in page and "2 slots free" in page
-    assert "Acme &lt;i&gt;Co&lt;/i&gt;" in page and "<i>Co</i>" not in page
-    assert start_rows(page) == [12, 14, 15] and page.count("Start now") == 3        # c1, c3 (had a session) and c4: all startable
-    assert "name=tab value='other'" in page
-    cs = cards(page)
-    assert sorted(cs) == [12, 13, 14, 15, 16, 17, 18], sorted(cs)                      # candidate order, every row shown
-    assert "ready to start" in cs[12] and "starts next by itself" not in cs[12]       # remote_auto is off
-    assert W_BUSY in cs[13] and "Start now" not in cs[13]
-    assert W_ONCE in cs[14] and "Start now" in cs[14]
-    assert "ready to start" in cs[15] and "Start now" in cs[15]                          # no longer "waiting for a free slot"
-    assert "used up" in cs[16] and "nobody said whether it went through" in cs[17] and W_LAPTOP.split(" (")[0] in cs[18]
-    assert all("Start now" not in cs[n] for n in (13, 16, 17, 18))
-    config.LOCAL = {**config.LOCAL, "remote_auto": True, "remote_hours": [8, 20]}
-    page = both()
-    cs = cards(page)
-    assert "Starts by itself: on" in page and "8:00-20:00" in page
-    assert "starts next by itself" in cs[12] and "starts next by itself" in cs[15] and W_ONCE in cs[14]   # (the timer's own plan)
+    q = review.queue_view()
+    assert q["auto"] == [] and q["hours"] == [9, 22] and q["free"] == 2 and q["left"] == 0
+    assert [g["key"] for g in q["groups"]] == ["running", "next", "ready", "wait", "check", "laptop"]
+    assert startable(q) == [12, 14, 15]                                                   # c1, c3 (had a session), c4
+    rows = q["rows"]
+    assert sorted(rows) == ["jobs-16", "other-12", "other-13", "other-14", "other-15", "other-17", "other-18"]
+    assert [k for k, _ in sorted(rows.items(), key=lambda kv: kv[1]["order"])] == \
+        ["other-12", "other-13", "other-14", "other-15", "jobs-16", "other-17", "other-18"]   # the queue's own order
+    assert rows["other-12"] == {"group": "ready", "text": "ready to start", "start": True, "order": 0, "slot": None}
+    assert rows["other-13"]["group"] == "wait" and rows["other-13"]["text"] == W_BUSY and not rows["other-13"]["start"]
+    assert rows["other-14"]["group"] == "ready" and rows["other-14"]["text"] == W_ONCE
+    assert rows["jobs-16"]["text"] == W_USED and rows["jobs-16"]["group"] == "wait"
+    assert rows["other-17"]["group"] == "check" and rows["other-17"]["text"] == remote.OUTCOME_UNKNOWN
+    assert rows["other-18"]["group"] == "laptop" and rows["other-18"]["text"] == W_LAPTOP
+    # starting by itself: on for the Other jobs tab only, its hours
+    config.LOCAL = {**config.LOCAL, "remote_auto": {"nuworks": False, "other": True}, "remote_hours": [8, 20]}
+    q = review.queue_view()
+    assert q["auto"] == ["other"] and q["hours"] == [8, 20]
+    assert q["rows"]["other-12"]["group"] == "next" and q["rows"]["other-12"]["text"] == "starts next by itself"
+    assert q["rows"]["other-15"]["group"] == "next" and q["rows"]["other-14"]["text"] == W_ONCE   # (the timer's own plan)
     config.LOCAL = {k: v for k, v in config.LOCAL.items() if k not in ("remote_auto", "remote_hours")}
+    # a session here on a row: "running", with its slot (the row's button opens its screen)
+    assist.sessions = lambda: [{"tab": "other", "row": 12, "slot": 2, "host": "a.example"}]
+    q = review.queue_view()
+    assert q["rows"]["other-12"] == {**q["rows"]["other-12"], "group": "running", "slot": 2, "start": False}
+    assist.sessions = lambda: []
+    # a laptop claim (no session here): running, the laptop's
+    set_inputs([c1], claims=[{"tab": "other", "row": 12, "host": "a.example"}])
+    assert review.queue_view()["rows"]["other-12"]["text"] == "the laptop's assistant is working on it"
 
-    # tabs: NUworks first by default; each tab's rows grouped (next, ready, waiting, check first, the laptop folded)
-    config.LOCAL = {**config.LOCAL, "remote_auto": {"nuworks": False, "other": True}}
-    page = req("GET", "/", cookie=KEY)[2]
-    assert "<nav class=tabs><a href='/?tab=jobs' class='on'>NUworks <span class=chip>1</span></a>" in page, page
-    assert "<a href='/?tab=other' class=''>Other jobs <span class=chip>6</span></a>" in page
-    assert sorted(cards(page)) == [16] and "Starts by itself: off" in page and "NUworks applications left now: 0" in page
-    page = req("GET", "/?tab=other", cookie=KEY)[2]
-    assert sorted(cards(page)) == [12, 13, 14, 15, 17, 18] and "Starts by itself: on" in page and "applications left" not in page
-    heads = re.findall(r"(Working on it now|Starts next by itself|Ready: start it yourself|Waiting|Check first|Do it on the laptop) "
-                       r"<span class=chip>(\d+)", page)
-    assert heads == [("Starts next by itself", "2"), ("Ready: start it yourself", "1"), ("Waiting", "1"), ("Check first", "1"),
-                     ("Do it on the laptop", "1")], heads
-    at = {n: page.index(f"Other jobs row {n} ") for n in (12, 13, 14, 15, 17, 18)}
-    assert at[12] < at[15] < at[14] < at[13] < at[17] < at[18]
-    assert page.index("<details class=group>") < at[18] and "<details class=group open" not in page
-    assert req("GET", "/?tab=bogus", cookie=KEY)[2].count("class='on'>NUworks") == 1
-    set_inputs([cand("other", 12, "a.example")])                                  # nothing on NUworks: Other jobs opens
-    assert "class='on'>Other jobs" in req("GET", "/", cookie=KEY)[2]
-    INPUTS[0] = (([c1, c2, c3, c4, c5, c6, c7], RUNNING_B, [], RECORDS, 2, 0))
-    config.LOCAL = {k: v for k, v in config.LOCAL.items() if k != "remote_auto"}
-
-    # 2 free slots, 4 eligible rows on different hosts: all four get Start now (it used to be only the top two)
+    # 2 free slots, 4 eligible rows on different hosts: all four can start (not only the top two)
     four = [cand("other", n, f"h{n}.example") for n in (21, 22, 23, 24)]
     set_inputs(four, free=2)
-    page = both()
-    assert start_rows(page) == [21, 22, 23, 24] and "2 slots free" in page and "waiting for a free slot" not in page
-    # none free: no button anywhere, each says waiting for a free slot
-    set_inputs(four, free=0)
-    page = both()
-    assert start_rows(page) == [] and "Start now" not in page and "every slot is in use" in page
-    assert page.count("waiting for a free slot") == 4
-    set_inputs(four, free=1)
-    page = both()
-    assert start_rows(page) == [21, 22, 23, 24] and "1 slot free" in page and "1 slots" not in page
-    # two rows on one site with nothing running: both can be started individually (starting one blocks the other after)
-    same = [cand("other", 31, "same.example"), cand("other", 32, "same.example")]
-    set_inputs(same, free=2)
-    page = both()
-    assert start_rows(page) == [31, 32]
-    # a running session's site blocks only that site's rows
+    assert startable(review.queue_view()) == [21, 22, 23, 24]
+    set_inputs(four, free=0)                                                       # none free: each says so
+    q = review.queue_view()
+    assert startable(q) == [] and all(v["text"] == W_SLOT for v in q["rows"].values()) and q["free"] == 0
+    # two rows on one site with nothing running: both can be started (starting one blocks the other after)
+    set_inputs([cand("other", 31, "same.example"), cand("other", 32, "same.example")], free=2)
+    assert startable(review.queue_view()) == [31, 32]
+    # a running session's site blocks only that site's rows; a laptop claim the same
     mixed = [cand("other", 41, "h1.example"), cand("other", 42, "h2.example"), cand("jobs", 43, "h1.example")]
     set_inputs(mixed, running=[{"tab": "other", "row": 99, "host": "h1.example"}], free=2)
-    page = both()
-    cs = cards(page)
-    assert start_rows(page) == [42] and page.count("another session is on h1.example") == 2
-    assert "Start now" in cs[42] and "another session is on h1.example" in cs[41] and "another session is on h1.example" in cs[43]
-    set_inputs(mixed, claims=[{"tab": "other", "row": 77, "host": "h2.example"}], free=2)   # the laptop's claim: the same
-    assert start_rows(both()) == [41, 43]
+    q = review.queue_view()
+    assert startable(q) == [42] and q["rows"]["other-41"]["text"] == "another session is on h1.example" == q["rows"]["jobs-43"]["text"]
+    set_inputs(mixed, claims=[{"tab": "other", "row": 77, "host": "h2.example"}], free=2)
+    assert startable(review.queue_view()) == [41, 43]
     # a NUworks row with the applications used up cannot start; an Other jobs row can
     set_inputs([cand("jobs", 51, "j.example"), cand("other", 52, "k.example")], free=2, left=0)
-    assert start_rows(both()) == [52]
-    # the first GROUP_MAX of a group only
-    set_inputs([cand("other", n, f"h{n}.example") for n in range(60, 60 + review.GROUP_MAX + 5)], free=5)
-    assert both().count("Start now") == review.GROUP_MAX and "and 5 more" in both()
+    assert startable(review.queue_view()) == [52]
     set_inputs([])
-    assert "Nothing approved is waiting" in both()
-    INPUTS[0] = RuntimeError("sheet")
-    assert "Queue not readable now (RuntimeError)" in both()
-    INPUTS[0] = remote.RecordError("assist_auto.json can't be read")
-    assert "Queue not readable now (RecordError)" in both()
+    assert review.queue_view()["rows"] == {}
+    # a queue that can't be read: an error (the app's Company sites says so and still shows its rows: gui.queue_info)
+    for bad in (RuntimeError("sheet"), remote.RecordError("assist_auto.json can't be read")):
+        INPUTS[0] = bad
+        try:
+            review.queue_view()
+        except (RuntimeError, remote.RecordError):
+            pass
+        else:
+            raise AssertionError("an unreadable queue was not said")
     INPUTS[0] = (([c1, c2, c3, c4, c5, c6, c7], RUNNING_B, [], RECORDS, 2, 0))
 
-    def post_start(form, token=TOKEN, **kw):
-        r = req("POST", "/start", form={"t": token, **form}, cookie=KEY, **kw)
-        return r[0], unquote(r[1].get("location", ""))
-
-    # who may press it
-    assert req("POST", "/start", form={"tab": "other", "row": "12"}, cookie=KEY)[0] == 403
-    assert req("POST", "/start", form={"t": "0" * 32, "tab": "other", "row": "12"}, cookie=KEY)[0] == 403
-    assert req("POST", "/start", form={"t": TOKEN, "tab": "other", "row": "12"})[0] == 403
-    assert post_start({"tab": "other", "row": "12"}, headers={"Origin": "http://evil.example"})[0] == 403
-    assert started_now == []
-    # a row you can start: recorded as started by hand (auto False)
-    code, where = post_start({"tab": "other", "row": "12"})
-    assert code == 303 and where == "/?tab=other&m=Started Acme <i>Co</i>." and started_now == [("other", 12)] and recorded == [(c1, False)]
-    # one with an earlier session (the queue leaves it to you): you may
+    # Start now: a row you can start is started and recorded as started by hand (auto False), logged with the device
+    assert review.start_now({"tab": "other", "row": "12"}, "Phone") == (True, "Started Acme <i>Co</i>: it shows up here in a few seconds.")
+    assert started_now == [("other", 12)] and recorded == [(c1, False)]
+    assert "Phone started other row 12" in open(os.path.join(config.LOGS_DIR, "review.log")).read()
     started_now.clear(); recorded.clear()
-    assert "Started" in post_start({"tab": "other", "row": "14"})[1] and started_now == [("other", 14)] and recorded == [(c3, False)]
-    # a row behind others in the queue starts too (not only the top `free` ones)
+    assert review.start_now({"tab": "other", "row": 14}, "Phone")[0] and recorded == [(c3, False)]       # had a session: yours
     started_now.clear(); recorded.clear()
-    assert "Started" in post_start({"tab": "other", "row": "15"})[1] and started_now == [("other", 15)] and recorded == [(c4, False)]
+    assert review.start_now({"tab": "other", "row": "15"}, "Phone")[0] and started_now == [("other", 15)]  # behind others: too
     started_now.clear(); recorded.clear()
     # the others say why, and nothing starts
-    for form, why in (({"tab": "other", "row": "13"}, W_BUSY), ({"tab": "jobs", "row": "16"}, W_USED),
-                      ({"tab": "other", "row": "17"}, remote.OUTCOME_UNKNOWN), ({"tab": "other", "row": "18"}, W_LAPTOP)):
-        assert post_start(form)[1] == f"/?tab={form['tab']}&m=Not started: {why}.", form
-    set_inputs([c1, c4], free=0)                                                     # no free slot: the row's own reason
-    assert post_start({"tab": "other", "row": "15"})[1] == f"/?tab=other&m=Not started: {W_SLOT}."
+    for f, why in (({"tab": "other", "row": "13"}, W_BUSY), ({"tab": "jobs", "row": "16"}, W_USED),
+                   ({"tab": "other", "row": "17"}, remote.OUTCOME_UNKNOWN), ({"tab": "other", "row": "18"}, W_LAPTOP)):
+        assert review.start_now(f, "Phone") == (False, f"Not started: {why}."), f
+    set_inputs([c1, c4], free=0)
+    assert review.start_now({"tab": "other", "row": "15"}, "Phone") == (False, f"Not started: {W_SLOT}.")
     INPUTS[0] = (([c1, c2, c3, c4, c5, c6, c7], RUNNING_B, [], RECORDS, 2, 0))
-    gone = "m=Not started: it is not in the queue (not Approved, or not a company-site application)."
-    for form in ({"tab": "other", "row": "999"}, {"tab": "jobs", "row": "12"}):
-        assert post_start(form)[1] == f"/?tab={form['tab']}&{gone}", form
-    for form in ({"tab": "bogus", "row": "12"}, {"row": "12"}, {}):
-        assert post_start(form)[1] == "/?m=Nothing to do.", form
-    for form in ({"tab": "other", "row": "x"}, {"tab": "other"}):
-        assert post_start(form)[1] == "/?tab=other&m=Nothing to do.", form
+    gone = "Not started: it is not in the queue (not Approved, or not a company-site application)."
+    for f in ({"tab": "other", "row": "999"}, {"tab": "jobs", "row": "12"}):
+        assert review.start_now(f, "Phone") == (False, gone), f
+    for f in ({"tab": "bogus", "row": "12"}, {"row": "12"}, {}, {"tab": "other", "row": "x"}, {"tab": "other"}):
+        assert review.start_now(f, "Phone") == (False, "Nothing to do."), f
     assert started_now == [] and recorded == []
     # tmux refuses: said, not recorded
     remote.start = lambda tab, rown: "tmux session nuauto-other-12 exists already"
-    assert post_start({"tab": "other", "row": "12"})[1] == "/?tab=other&m=Not started: tmux session nuauto-other-12 exists already"
+    assert review.start_now({"tab": "other", "row": "12"}, "Phone") == (False, "Not started: tmux session nuauto-other-12 exists already")
     assert recorded == []
-    # the start is logged with the device's name
     remote.start = lambda tab, rown: None
-    assert post_start({"tab": "other", "row": "12"})[0] == 303
-    assert "Phone started other row 12" in open(os.path.join(config.LOGS_DIR, "review.log")).read()
-    # the flash is escaped on the page
-    page = req("GET", "/?m=" + "%3Cscript%3Ex%3C%2Fscript%3E", cookie=KEY)[2]
-    assert "<script>x</script>" not in page and "&lt;script&gt;x&lt;/script&gt;" in page
 finally:
-    srv.shutdown()
+    assist.sessions = real_sessions_fn
     restore("queue_inputs", "start", "record_started")
 
 # ---- gui.homelab_assistants: a cached background read
@@ -1343,5 +1263,80 @@ gh = [dict(a, row=n, url=u, host=assist.site_key(u)) for n, u in ((30, g1), (31,
 go, rest = remote.plan(gh, [{"tab": "other", "row": 9, "host": assist.site_key("https://job-boards.greenhouse.io/zeta/jobs/3")}],
                        [], {}, 2)
 assert [x["row"] for x, _ in go] == [30, 31] and rest == []
+
+# ---- the NUworks turn: one machine submits on NUworks at a time (both can run Apply with NUauto on the homelab)
+real_turn_path, real_homelab, real_flags = remote.NUWORKS_TURN, remote._homelab, (config.REMOTE_APP, config.IS_SERVER, config.DEMO)
+remote.NUWORKS_TURN = os.path.join(tempfile.mkdtemp(), "nuworks_turn.json")
+try:
+    assert remote.turn_holder(None) is None and remote.turn_holder({"by": "x"}) is None
+    assert remote.turn_holder({"by": "homelab", "pid": os.getpid()}) == "homelab"
+    dead = subprocess.Popen([sys.executable, "-c", "pass"])
+    dead.wait()
+    assert remote.turn_holder({"by": "homelab", "pid": dead.pid}) is None                   # its run has ended
+    assert remote.turn_holder({"by": "laptop", "since": time.time() - 60}) == "laptop"
+    assert remote.turn_holder({"by": "laptop", "since": time.time() - remote.NUWORKS_TURN_HOURS * 3600 - 1}) is None
+    # the homelab's run holds it: the laptop's is refused, and the other way round; the same machine again is fine
+    assert remote.take_turn("homelab", os.getpid()) is None
+    why = remote.take_turn("laptop")
+    assert why and why.startswith("the homelab is applying on NUworks now"), why
+    assert remote.take_turn("homelab", os.getpid()) is None
+    remote.give_turn("laptop")                                                    # not the laptop's: stays
+    assert remote.turn_holder(json.load(open(remote.NUWORKS_TURN))) == "homelab"
+    remote.give_turn("homelab")
+    assert not os.path.exists(remote.NUWORKS_TURN)
+    assert remote.take_turn("laptop") is None and remote.take_turn("homelab", os.getpid()).startswith("the laptop is applying")
+    remote.give_turn("laptop")
+    # nuworks_turn(): off without NUauto on the homelab (nothing asked); on the homelab, around a run
+    config.REMOTE_APP, config.IS_SERVER, config.DEMO = False, False, False
+    asked = []
+    remote._homelab = lambda *a, **k: asked.append(a) or (0, "")
+    with remote.nuworks_turn():
+        pass
+    assert asked == []
+    config.REMOTE_APP, config.IS_SERVER = True, True
+    with remote.nuworks_turn():
+        assert remote.turn_holder(json.load(open(remote.NUWORKS_TURN))) == "homelab"
+        assert remote.take_turn("laptop") is not None
+    assert not os.path.exists(remote.NUWORKS_TURN) and asked == []
+    remote.take_turn("laptop")
+    try:
+        with remote.nuworks_turn():
+            raise AssertionError("ran while the laptop holds the turn")
+    except remote.NuworksBusy as e:
+        assert "the laptop is applying" in str(e)
+    remote.give_turn("laptop")
+    # the laptop asks the homelab over ssh, gives it back after (also after an error); refused: NuworksBusy with why
+    config.IS_SERVER = False
+    with remote.nuworks_turn():
+        assert asked == [("nuworks-turn",)]
+    assert asked == [("nuworks-turn",), ("nuworks-done",)]
+    asked.clear()
+    try:
+        with remote.nuworks_turn():
+            raise KeyError("in the run")
+    except KeyError:
+        pass
+    assert asked == [("nuworks-turn",), ("nuworks-done",)]
+    remote._homelab = lambda *a, **k: asked.append(a) or (3, "the homelab is applying on NUworks now (...)\n")
+    asked.clear()
+    try:
+        with remote.nuworks_turn():
+            raise AssertionError("ran while the homelab holds the turn")
+    except remote.NuworksBusy as e:
+        assert str(e) == "the homelab is applying on NUworks now (...)" and asked == [("nuworks-turn",)]
+    # the homelab can't be reached: the laptop goes ahead, and says so (nothing to give back)
+    remote._homelab = lambda *a, **k: asked.append(a) or (None, "")
+    asked.clear()
+    buf, real_out = io.StringIO(), sys.stdout
+    sys.stdout = buf
+    try:
+        with remote.nuworks_turn():
+            pass
+    finally:
+        sys.stdout = real_out
+    assert "could not be asked" in buf.getvalue() and asked == [("nuworks-turn",)]
+finally:
+    remote.NUWORKS_TURN, remote._homelab = real_turn_path, real_homelab
+    config.REMOTE_APP, config.IS_SERVER, config.DEMO = real_flags
 
 print("All remote checks passed.")

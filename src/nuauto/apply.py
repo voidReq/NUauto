@@ -12,6 +12,7 @@ site, unknown field, ...) the row becomes Needs Human with the reason in Notes a
 the run moves on. Unexpected errors, an expired session or an unclear submit stop the run.
 """
 import argparse
+import contextlib
 import json
 import os
 import random
@@ -466,6 +467,16 @@ def main(argv=None):
     io = answers.JsonIO() if args.ui == "json" else answers.TerminalIO() if sys.stdin.isatty() else answers.NoTerminalIO()
     browser.RunLog.events = io.event
     ws = sheet.open_worksheet()
+    from nuauto import remote
+    try:  # one machine submits on NUworks at a time (with NUauto on the homelab, both can run Apply)
+        with remote.nuworks_turn() if args.submit else contextlib.nullcontext():
+            run_rows(args, ws, resume_label, entries, io)
+    except remote.NuworksBusy as e:
+        sys.exit(f"Not now: {e}")
+
+
+def run_rows(args, ws, resume_label, entries, io):
+    """The run: Approved rows in order (or just --row), the limits checked again before each one."""
     seen = set()  # rows already handled in this run (a row you answered "n" to stays Approved)
     first = True
     while True:
