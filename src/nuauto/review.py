@@ -509,7 +509,7 @@ def queue_state(c, inputs, by_itself, here, tabs):
         if c["tab"] in tabs and first is None:
             return "next", "starts next by itself", True
         return "ready", ("had a session already: start it yourself" if first and first.startswith("had a session")
-                         else "ready to start"), True
+                         else "by hand on NUworks: start it yourself" if first == remote.HAND_WHY else "ready to start"), True
     return ("laptop" if why == remote.LAPTOP_WHY else "check" if why == remote.OUTCOME_UNKNOWN else "wait"), why, False
 
 

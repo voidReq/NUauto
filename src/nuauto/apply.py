@@ -462,6 +462,9 @@ def main(argv=None):
     args.submit = not args.dry_run
     if args.submit:
         refuse_unattended(args.ui)
+        from nuauto import assist
+        if assist.nuworks_session():  # one application at a time on NUworks
+            sys.exit(assist.NUWORKS_BUSY)
 
     resume_label = load_resume_label()
     entries = answers.load()

@@ -483,6 +483,29 @@ try:
         time.sleep(0.2)
     assert get("/api/state")["week"] == week_before
 
+    # a row that stopped on NUworks for something only you can give: the assistant may work it there (hand); one whose
+    # Submit click is unresolved may not, and says why
+    data = json.load(open(main_file))
+    n_hand = len(data["rows"]) + 1
+    data["rows"] += [[NU + "999990", "Basalt", "Intern", "Needs Human", "Popup requires Cover Letter: attach by hand on NUworks.", ""],
+                     [NU + "999991", "Gneiss", "Intern", "Needs Human", "SUBMIT CLICKED - confirm the outcome on NUworks", ""]]
+    json.dump(data, open(main_file, "w"))
+    post("/api/health/run", {"groups": ["sheet"]})
+    for _ in range(100):
+        manual = {r["company"]: r for r in get("/api/jobs?tab=nuworks")["sections"]["manual"]}
+        if "Basalt" in manual:
+            break
+        time.sleep(0.2)
+    assert manual["Basalt"]["hand"] and manual["Basalt"]["row"] == n_hand and manual["Basalt"]["hand_why"] is None, manual
+    assert not manual["Gneiss"]["hand"] and "unresolved" in manual["Gneiss"]["hand_why"], manual
+    data["rows"] = data["rows"][:n_hand - 1]
+    json.dump(data, open(main_file, "w"))
+    post("/api/health/run", {"groups": ["sheet"]})
+    for _ in range(100):
+        if not any(r["company"] == "Basalt" for r in get("/api/jobs?tab=nuworks")["sections"]["manual"]):
+            break
+        time.sleep(0.2)
+
     # an approved internship's Undo still works after the list moved on (approved = in the sheet = not in the next list)
     beacon = next(j for j in get("/api/review?mode=approve&source=intern")["jobs"] if j["title"] == "Frontend Engineering Intern")
     done = post("/api/decide", {"id": beacon["id"], "decision": "approve", "mode": "approve"})

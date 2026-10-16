@@ -97,7 +97,8 @@ SCREENS
                  soonest, pay per hour (insights.hourly; unclear pay last); the server sorts (apply.apply_order, GET
                  /api/jobs?tab=nuworks&order=) and Start runs `nuauto apply --order <it>`; filtered, "Start still goes
                  through all N"), Company site needed (Needs Human rows stopped at an external application: the assistant),
-                 By hand on NUworks (Needs Human rows only you can finish there: a cover letter, a transcript), Still owed
+                 By hand on NUworks (Needs Human rows only you can finish there: a cover letter, a transcript; the assistant can work them
+                 on NUworks with you: each row's Start, or why it can't), Still owed
                  (submitted on NUworks, the company site still wants you: Mark the company site done; the NUworks side to
                  send again: Submit on NUworks too), Applied, Proposed, Dropped or failed, Other rows; recent runs folded at
                  the end. The other tab: Ready to apply (Approved: the assistant), Applied, Proposed, Dropped or failed,

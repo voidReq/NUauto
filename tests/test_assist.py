@@ -324,6 +324,18 @@ assert assist.assist_target(f"External application: {H}", f"https://{H}/careers/
 nu = "https://northeastern-csm.symplicity.com/students/app/jobs/detail/abc"
 assert "NUworks itself" in assist.assist_target(f"External application: {H}", nu)[1]
 assert "NUworks itself" in assist.assist_target(f"External application: x -> {nu}")[1]
+# a row that stopped on NUworks for something only you can give: the agent may work it on NUworks itself (its own job
+# page only); never a company-site row, an unresolved Submit, a passed deadline, another link, or a row not Needs Human
+from nuauto import sheet as sheet_  # noqa: E402
+NUJOB = "https://northeastern-csm.symplicity.com/students/app/jobs/detail/abc123"
+hand_row = lambda notes, url=NUJOB, status="Needs Human": sheet_.Row(5, url, "Co", "T", status, notes, "")  # noqa: E731
+assert assist.by_hand_target(hand_row("Popup requires Cover Letter: attach by hand on NUworks.")) == (NUJOB, None)
+assert assist.by_hand_target(hand_row(f"External application: {H} -> https://{H}/j"))[0] is None
+assert "unresolved" in assist.by_hand_target(hand_row(sheet_.SUBMIT_MARK + " ..."))[1]
+assert "deadline" in assist.by_hand_target(hand_row("deadline passed (2026-10-01); not attempted"))[1]
+assert "not a NUworks job page" in assist.by_hand_target(hand_row("Popup requires Cover Letter", url=f"https://{H}/jobs/detail/1"))[1]
+assert "not a NUworks job page" in assist.by_hand_target(hand_row("Popup requires Cover Letter", url="https://northeastern-csm.symplicity.com/students/app/home"))[1]
+assert "not Needs Human" in assist.by_hand_target(hand_row("x", status="Approved"))[1]
 
 # links in Notes
 assert assist.link_from_notes(f"External application: {H} -> https://{H}/careers/job/X_1") == f"https://{H}/careers/job/X_1"
@@ -404,6 +416,49 @@ assert bank("alias", "E-mail Address*", "email")["value"] == "me@example.com"  #
 assert answers.find(answers.load(), "email")["aliases"].count("e-mail address") == 1
 assert "never saved" in bank("save", "Date*", date_.today().strftime("%m/%d/%Y"))["error"]  # today's date: once, never saved
 assert answers.find(answers.load(), "date") is None
+# a cover letter: written for this application, one --para per paragraph; shown in the end list (an essay guess);
+# confirm makes the PDF, the only cover letter the guard lets be uploaded; never saved in the answer bank
+assert "--para" in bank("letter")["error"]
+assert "at most" in bank("letter", "--para", "word " * 700)["error"]
+assert assist.check_bash(state(), " ".join(state()["answer_cmd"]) + ' letter --para "Dear Hiring Team," --para "I like it, really."') is None
+bank_before = open(config.ANSWERS_PATH).read()
+r = bank("letter", "--para", "Dear Hiring Team,", "--para", "I would like to join Acme (the firmware team).", "--para", "Sincerely, Demo")
+assert r["status"] == "letter_draft" and r["words"] == 14, r
+assert any(g["label"] == "cover letter" and g["essay"] for g in bank("guesses")["open"])
+assert state()["letter"]["pdf"] is None
+blocked(state(), B + "browser_file_upload", {"paths": [os.path.join(d, assist.BROWSER_DIR, "upload", "cover_letter.pdf")]}, "ANSWER letter")
+made = bank("confirm", "cover letter")
+pdf = made["file"]
+assert made["status"] == "confirmed" and os.path.exists(pdf) and os.path.dirname(pdf).endswith(os.path.join(assist.BROWSER_DIR, "upload"))
+from pypdf import PdfReader  # noqa: E402
+assert "the firmware team" in PdfReader(pdf).pages[0].extract_text()
+ok(state(), B + "browser_file_upload", {"paths": [pdf]})                                    # this application's letter
+assert any("Cover letter for this application" in line and "14 words" in line for line in assist.review_lines(state()))
+assert open(config.ANSWERS_PATH).read() == bank_before                                      # nothing saved
+again = bank("letter", "--para", "Dear Team,", "--para", "A new version.")                  # their changes: a new draft...
+assert again["status"] == "letter_draft" and not os.path.exists(pdf) and state()["letter"]["pdf"] is None  # ...the old PDF gone
+assert any(g["label"] == "cover letter" for g in bank("guesses")["open"])                    # and it is open again
+pdf = bank("confirm", "cover letter")["file"]
+
+
+import time  # noqa: E402
+
+
+class _Log:
+    lines = []
+
+    def write(self, msg):
+        self.lines.append(msg)
+
+
+assist.after_session(d, time.time(), _Log())                                                 # the session ends: gone
+assert not os.path.exists(pdf) and "letter" not in state() and any("removed" in m for m in _Log.lines)
+# a by-hand session holds NUworks' own site lock: `nuauto apply` and the NUworks side wait for it
+assert not assist.nuworks_session()
+held_nu = assist.take_site(NUJOB)
+assert held_nu and assist.nuworks_session()
+held_nu.close()
+assert not assist.nuworks_session()
 # unknown: the agent gets the saved answers to work it out from; never always-ask or leave-blank ones
 saved = bank("answer", "Your e-mail*")["saved"]
 assert {"question": "email", "answer": "me@example.com"} in saved and {"question": "city", "answer": "Boston"} in saved

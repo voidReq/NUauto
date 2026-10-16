@@ -88,6 +88,8 @@ THE QUEUE (remote.py; nuauto-assist.timer every 10 minutes runs `nuauto assist a
   09:00-22:00 New York time, whatever clock the homelab runs on), so no pings at night: the only hours it starts
   sessions by itself (one already running goes on; you can start one yourself any time). It takes effect at the timer's
   next run (every 10 minutes).
+- By-hand NUworks rows (stopped on NUworks for a cover letter, a transcript...: docs/ASSIST.md) are listed too but never
+  start by themselves (they need you there: NUworks' sign-in in its browser view, your letter): Start now.
 - What it starts: Approved rows of the Other jobs tab and Needs Human rows stopped at a company site, best first:
   closing within a week, then match % (the "match NN%" in Notes), then sheet order. Into free slots (assist_slots),
   one session per job site, never a row or site the laptop holds (claims). NUworks rows only while the weekly cap and

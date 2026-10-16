@@ -153,7 +153,7 @@ src/nuauto/: cli.py (the nuauto command)   config.py (all paths, hosts; reads lo
   browser.py (login/open, domain lock, cookies)   answers.py (answer bank)   jobs.py (pool + viewers)   fields.py (what you study: per-field starting preferences, kinds of work)
   daily.py (homelab update + Discord)   web.py (Mark-done page, homelab)   sync.py (laptop<->homelab)   deploy.py (homelab: deploys main)
   doctor.py (health check)   inspect_form.py (read-only form lister)   assist.py (company-site agent)   accounts.py (its job-site logins)
-  mail.py (the agent's email codes and links: read-only Gmail)   screen.py (the homelab assistant's virtual screen + browser view)
+  letter.py (a cover letter as a PDF, for the one application it was written for)   mail.py (the agent's email codes and links: read-only Gmail)   screen.py (the homelab assistant's virtual screen + browser view)
   review.py (pairing devices with the homelab's page; its assistant sessions' screens and queue, served by gui.py)   remote.py (its queue, and claims between the machines)
   link.py (the laptop app's link to the homelab's page: a paired device; gui.homelab and /api/homelab/ use it)
   setup_sheet.py (sheet setup / `format` restyle)   gui.py (the window's server)   gui_static/ (its page)

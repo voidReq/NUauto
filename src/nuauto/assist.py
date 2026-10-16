@@ -65,7 +65,8 @@ INTERACT = {"browser_click", "browser_type", "browser_fill_form", "browser_selec
 SUBMIT_RE = re.compile(r"^\s*(submit|submit (my |your |the )?application|send( my)? application|apply|apply now|"
                        r"finish|complete( my)? application|confirm( and submit)?)\s*$", re.I)
 ENTER_KEYS = {"enter", "numpadenter", "return"}
-BASH_COMMANDS = {"answer", "guess", "guesses", "save", "once", "confirm", "alias", "blank", "email", "wait", "link-login"}
+BASH_COMMANDS = {"answer", "guess", "guesses", "save", "once", "confirm", "alias", "blank", "email", "wait", "link-login",
+                 "letter"}
 MAX_ANSWER = 300  # one line; enough for a "30 word limit" answer, not an essay (an essay is typed into its field)
 MAX_WHY = 200     # a guess's reason: a few words
 REF_LINE = re.compile(r'^(?P<indent>\s*)-\s+(?P<role>[a-z]+)(?:\s+"(?P<name>(?:[^"\\]|\\.)*)")?(?P<attrs>[^\n]*?)\[ref=(?P<ref>[^\]\s]+)\](?P<tail>[^\n]*)$')
@@ -148,8 +149,8 @@ def link_from_notes(notes):
 
 def assist_target(notes, url_override=None):
     """(url, None) if this Needs Human row is a company-site application the agent may work on, else
-    (None, reason). NUworks itself is never driven by the agent (apply.py does NUworks); rows stopped for
-    something on NUworks (cover letter, transcript...) are yours."""
+    (None, reason). NUworks itself is never this target (apply.py does NUworks); rows stopped for something on NUworks
+    (cover letter, transcript...) are by_hand_target's."""
     external = (notes or "").startswith("External application")
     if not external:
         return None, f"not a company-site application ({(notes or 'no notes')[:70]}): yours on NUworks"
@@ -157,6 +158,45 @@ def assist_target(notes, url_override=None):
     if not url:
         return None, "the notes name the site but not the link: add --url <posting link>"
     return check_link(url)
+
+
+def by_hand_target(row):
+    """(url, None) if the agent may work this Needs Human row on NUworks itself (my call, 2026-10-16): it stopped there
+    for something only you can give (a cover letter, a transcript, a free-text question...), and its link is the
+    NUworks job page; else (None, reason). Never a company-site row (assist_target's), never one whose Submit click is
+    unresolved (check NUworks first), never one past its deadline."""
+    from nuauto import sheet
+    notes = row.notes or ""
+    if row.status != "Needs Human":
+        return None, f"it is {row.status or 'not marked'}, not Needs Human"
+    if notes.startswith("External application"):
+        return None, "a company-site application (the assistant works it on that site)"
+    if notes.startswith(sheet.SUBMIT_MARK):
+        return None, "its Submit click is still unresolved: check NUworks first"
+    if notes.startswith("deadline passed"):
+        return None, "its deadline has passed"
+    u = urlparse(row.url or "")
+    if u.scheme != "https" or host(row.url) not in config.ALLOWED_HOSTS or not re.search(r"/jobs/detail/\w+", u.path):
+        return None, "its link is not a NUworks job page"
+    return row.url, None
+
+
+NUWORKS_BUSY = "Not now: an assistant is applying on NUworks (a by-hand row): one application at a time there. Finish it first."
+
+
+def nuworks_session():
+    """Does an assistant on this machine work a by-hand row on NUworks right now (it holds NUworks' site lock)? Then
+    `nuauto apply` waits: one application at a time on NUworks."""
+    path = os.path.join(config.LOCAL_DIR, "assist_sites", re.sub(r"[^a-z0-9.-]", "_", sorted(config.ALLOWED_HOSTS)[0]) + ".lock")
+    if not os.path.exists(path):
+        return False
+    with open(path, "a+") as f:
+        try:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        fcntl.flock(f, fcntl.LOCK_UN)
+    return False
 
 
 def check_link(url):
@@ -393,6 +433,12 @@ def review_lines(state):
     if extra:
         lines.append("Typed with no saved answer or guess behind it (check these):")
         lines += [f"  - {name} = {cut(value)!r}" for name, value in extra[:8]]
+    letter_ = state.get("letter") or {}
+    if letter_.get("pdf"):
+        lines.append(f"Cover letter for this application: the text you approved ({letter_['words']} words, starts "
+                     f"{cut(letter_['paragraphs'][0])!r}), uploaded as {os.path.basename(letter_['pdf'])}.")
+    if state.get("hand"):
+        lines.append("This is a NUworks application: it counts toward your weekly limit.")
     return lines
 
 
@@ -584,11 +630,13 @@ def decide(state, tool, inp):
         return deny(OWN_NETWORK) if config.IS_SERVER and own_network(inp["url"]) else ALLOW
     if name == "browser_file_upload":
         paths = inp.get("paths") or []
-        resume, transcript = state.get("resume"), state.get("transcript")
-        allowed = {f for f in (resume, transcript) if f}
-        if all(os.path.realpath(os.path.expanduser(p)) in allowed for p in paths):
+        resume, transcript, letter_ = state.get("resume"), state.get("transcript"), (state.get("letter") or {}).get("pdf")
+        allowed = {f for f in (resume, transcript, letter_) if f}
+        if all(os.path.realpath(os.path.expanduser(p)) in allowed for p in paths):  # (none: the file chooser cancelled)
             return ALLOW
-        return deny(f"Only the resume can be uploaded: {resume}" + (f" (or the transcript: {transcript})" if transcript else ""))
+        return deny(f"Only the resume can be uploaded: {resume}" + (f" (or the transcript: {transcript})" if transcript else "")
+                    + (f" (or this application's cover letter: {letter_})" if letter_ else
+                       " (a cover letter: ANSWER letter, then the user approves it)"))
     if name == "browser_press_key":
         if inp.get("key", "").lower() in ENTER_KEYS:
             if sign_in_page(state["refs"]):
@@ -923,14 +971,17 @@ def _bank(argv):
     ap.add_argument("--page", default="")
     ap.add_argument("--why", default="")
     ap.add_argument("--essay", action="store_true")
+    ap.add_argument("--para", action="append", default=[])
     a = ap.parse_args(argv)
     d = run_dir()
     out = {}
     with state_file(os.path.join(d, "state.json")) as state:
         b = Bank(other=state.get("tab") == "other")
         entries = b.entries
-        if a.cmd != "guesses" and not (a.label or "").strip():
+        if a.cmd not in ("guesses", "letter") and not (a.label or "").strip():
             out = {"error": f"{a.cmd} needs the field's label."}
+        elif a.cmd == "letter":
+            out = draft_letter(state, a.para)
         elif a.cmd == "guesses":
             out = {"status": "guesses", **guess_list(state)}
         elif a.cmd == "answer":
@@ -969,6 +1020,8 @@ def _bank(argv):
                 settle(state, a.label, "confirmed", g["value"])
                 issue(state, a.label, g["value"])
                 out = {"status": "confirmed", "value": g["value"], "saved": False}
+                if label_key(a.label) == LETTER and (state.get("letter") or {}).get("paragraphs"):
+                    out.update(make_letter(state, d))
         elif a.cmd == "alias":
             target = answers.find(entries, a.value or "")
             if not target:
@@ -991,6 +1044,43 @@ def _bank(argv):
                 out = {"status": "leave_blank", "saved": True}
     log(d, f"bank {a.cmd} {a.label!r} -> {out.get('status') or out.get('error')}")
     print(json.dumps(out))
+
+
+LETTER = "cover letter"  # the letter's entry in the run's guesses (the end list shows it in full)
+MAX_LETTER = 600         # words: a cover letter, not a statement
+
+
+def draft_letter(state, paragraphs):
+    """`letter --para "<paragraph>" --para ...`: the cover letter the agent drafted for THIS application (never saved
+    or reused: a new one per application). It goes in the end list as an essay guess; the user approves or edits it
+    there; `confirm "cover letter"` then makes the PDF to upload. A new draft replaces the old one (and its PDF)."""
+    paras = [" ".join(p.split()) for p in paragraphs if p.strip()]
+    words = sum(len(p.split()) for p in paras)
+    if not paras:
+        return {"error": 'letter takes the letter, one --para "<paragraph>" per paragraph (greeting and sign-off too).'}
+    if words > MAX_LETTER:
+        return {"error": f"That is {words} words: a cover letter is at most {MAX_LETTER}."}
+    old = (state.get("letter") or {}).get("pdf")
+    if old and os.path.exists(old):
+        os.remove(old)
+    state["letter"] = {"paragraphs": paras, "words": words, "pdf": None}
+    state.setdefault("guesses", {})[LETTER] = {
+        "label": LETTER, "value": f"letter draft: {paras[0][:60]}...", "why": "written for this application", "options": [],
+        "page": state.get("page", ""), "essay": True, "always_ask": False, "resolved": None}
+    return {"status": "letter_draft", "words": words,
+            "next": "Show the whole letter in the end list. When the user approves it (or after a new letter with their "
+                    'changes), run confirm "cover letter": that makes the PDF to upload.'}
+
+
+def make_letter(state, d):
+    """The approved letter as a PDF in the run's upload folder (the browser tool uploads only from there), for this
+    application only: the guard lets it be uploaded, the Submit question names it, the session's end removes it."""
+    from nuauto import letter
+    folder = os.path.join(d, BROWSER_DIR, "upload")
+    os.makedirs(folder, mode=0o700, exist_ok=True)
+    pdf = letter.write(state["letter"]["paragraphs"], os.path.join(folder, "cover_letter.pdf"))
+    state["letter"]["pdf"] = os.path.realpath(pdf)
+    return {"file": state["letter"]["pdf"], "next": "Upload this file where the page asks for a cover letter."}
 
 
 def link_login_cmd(argv):
@@ -1481,16 +1571,25 @@ def attention_main(kind):
 # ---------- launcher (nuauto assist) ----------
 
 def find_row(number, url_override):
+    """The NUworks tab's row: a company-site application (assist_target), or one that stopped on NUworks for something
+    only you can give (by_hand_target: the agent works it on NUworks itself). (rows, row, url, by_hand)."""
     from nuauto import sheet
     ws = sheet.open_worksheet()
     rows = sheet.read_rows(ws)
     row = next((r for r in rows if r.number == number), None)
     if row is None or row.status != "Needs Human":
         sys.exit(f"Row {number} is not a Needs Human row.")
-    url, why = assist_target(row.notes, url_override)
+    if (row.notes or "").startswith("External application"):
+        url, why = assist_target(row.notes, url_override)
+        hand = False
+    else:
+        if url_override:
+            sys.exit(f"Row {number} is worked on its own NUworks page: no --url.")
+        url, why = by_hand_target(row)
+        hand = True
     if why:
         sys.exit(f"Row {number} ({row.company}): {why}.")
-    return rows, row, url
+    return rows, row, url, hand
 
 
 def find_other_row(number, url_override):
@@ -1503,6 +1602,16 @@ def find_other_row(number, url_override):
     if why:
         sys.exit(f"{sheet.OTHER_TAB} row {number} ({row.company}): {why}.")
     return rows, row, url
+
+
+def hand_note(row):
+    """THIS RUN's lines for a by-hand row: it is NUworks itself (NUWORKS ROWS in the rules), why it stopped, the resume to
+    pick."""
+    from nuauto import health
+    label = health.resume_label()
+    return ("This is a NUworks job (NUWORKS ROWS in your rules): NUauto's own run stopped on its Apply popup because: "
+            f"{(row.notes or 'no reason noted')[:200]}\n"
+            f"Resume to pick in the popup's Resume list (exactly this text): {label or 'not set: ask the user'}\n")
 
 
 OTHER_NOTE = ("This job is not on NUworks (the sheet's Other jobs tab): nothing is submitted on NUworks afterwards. "
@@ -1560,7 +1669,16 @@ def scrub(folder, since, secrets_):
 
 def after_session(d, started, log_):
     """When the agent's session ends: the site passwords it used go out of Claude Code's session log and the run's
-    folder (Playwright MCP's saved snapshots)."""
+    folder (Playwright MCP's saved snapshots); this application's cover letter (its PDF and its text) is removed."""
+    try:
+        with state_file(os.path.join(d, "state.json")) as state:
+            made = state.pop("letter", None)
+        if made:
+            if made.get("pdf") and os.path.exists(made["pdf"]):
+                os.remove(made["pdf"])
+            log_.write(f"This application's cover letter ({made.get('words')} words) was removed: it is never kept.")
+    except Exception as e:  # never in the way of the y/n question that follows
+        log_.write(f"Could not remove the cover letter ({type(e).__name__}).")
     try:
         with open(os.path.join(d, "state.json")) as f:
             sites = json.load(f).get("password_sites") or []
@@ -1583,11 +1701,13 @@ def rules_text(answer_cmd):
         return f.read().replace("ANSWER ", " ".join(shlex.quote(a) for a in answer_cmd) + " ")
 
 
-def context_text(where, row, url, other, resume, read_roots, answer_cmd, writeups=(), view_url=None, transcript=None):
+def context_text(where, row, url, other, resume, read_roots, answer_cmd, writeups=(), view_url=None, transcript=None,
+                 hand=False):
     email = accounts.account_email()
     own = accounts.own_login(url)  # one of your own logins (imported from Bitwarden) for this site
     return (f"\n\nTHIS RUN\n{where.capitalize()}: {row.company} | {row.title}\nPosting: {url}\n"
             + (OTHER_NOTE if other else "")
+            + (hand_note(row) if hand else "")
             + ("This browser runs on the user's homelab, not in front of them. They read your messages and answer on "
                "their phone (a review page), and they see and use this browser there too (for a captcha: say there is "
                "one and wait for them). A Submit-type action waits for their approval on that page: if it comes back "
@@ -1663,9 +1783,15 @@ def run(number, url_override, other=False):
         rows, row, url = find_other_row(number, url_override)
         where = f"{sheet.OTHER_TAB} row {number}"
     else:
-        rows, row, url = find_row(number, url_override)
+        rows, row, url, hand = find_row(number, url_override)
         sheet.check_limits(rows)
         where = f"row {number}"
+    hand = not other and hand
+    if hand:  # one application at a time on NUworks: not while an Apply run submits there
+        from nuauto import browser
+        holder = browser.profile_holder() or {}
+        if str(holder.get("what", "")).split(" ")[-1] in ("apply", "assist"):
+            sys.exit("Not now: an Apply run is submitting on NUworks. Start this when it is done.")
     tab = "other" if other else "jobs"
     # side by side (up to slots() at once): this row in one session only, a free slot (its own browser profile), and
     # this job site in one session only. The locks are held until this run ends (after the y/n question), and let go
@@ -1703,7 +1829,14 @@ def run(number, url_override, other=False):
             if note:
                 print(f"(Note: {note}.)")
         try:
-            return run_locked(number, other, row, url, where, tab, slot, slot_lock)
+            if not hand:
+                return run_locked(number, other, row, url, where, tab, slot, slot_lock)
+            from nuauto import remote
+            try:  # one machine submits on NUworks at a time (with NUauto on the homelab, both can apply there)
+                with remote.nuworks_turn():
+                    return run_locked(number, other, row, url, where, tab, slot, slot_lock, hand=True)
+            except remote.NuworksBusy as e:
+                sys.exit(f"Not now: {e}")
         finally:
             if claim_held:
                 remote.unclaim_on_homelab(tab, number)
@@ -1712,9 +1845,9 @@ def run(number, url_override, other=False):
             lock.close()
 
 
-def run_locked(number, other, row, url, where, tab, slot, slot_lock):
+def run_locked(number, other, row, url, where, tab, slot, slot_lock, hand=False):
     """The session itself, once run() holds this row, a slot and the job site (and, from the laptop, the homelab's
-    claim): the agent in this terminal, then "Did you press Submit?"."""
+    claim): the agent in this terminal, then "Did you press Submit?". hand: a by-hand row, worked on NUworks itself."""
     from nuauto import browser
     from nuauto import sheet
     log_ = browser.RunLog(f"assist_{'other_' if other else ''}row{number}")
@@ -1744,7 +1877,7 @@ def run_locked(number, other, row, url, where, tab, slot, slot_lock):
              "transcript_src": os.path.realpath(transcript_src) if transcript else None, "transcript": transcript,
              "company": row.company, "job_title": row.title, "job_url": url, "row_url": row.url, "password_sites": [],
              "guesses": {}, "typed": {}, "account_email": accounts.account_email() or "", "where": where,
-             "slot": slot, "view_url": view.url if view else None, "tmux": tmux_session() if view else None,
+             "slot": slot, "view_url": view.url if view else None, "tmux": tmux_session() if view else None, "hand": hand,
              # the pane this runs in: the review page types only there (never another window of that tmux session)
              "tmux_pane": os.environ.get("TMUX_PANE") if view and re.fullmatch(r"%\d+", os.environ.get("TMUX_PANE", "")) else None}
     with open(os.path.join(d, "state.json"), "w") as f:
@@ -1752,7 +1885,7 @@ def run_locked(number, other, row, url, where, tab, slot, slot_lock):
     profile = slot_profile(slot)
     os.makedirs(profile, mode=0o700, exist_ok=True)
     cmd = session(d, answer_cmd, read_roots, profile, rules_text(answer_cmd) + context_text(
-        where, row, url, other, resume, read_roots, answer_cmd, writeups, view.url if view else None, transcript), where,
+        where, row, url, other, resume, read_roots, answer_cmd, writeups, view.url if view else None, transcript, hand), where,
         view.display if view else None)
     log_.write(f"{where.capitalize()}: {row.company} | {row.title} -> {host(url)} (assistant slot {slot} of {slots()})")
     if view:  # the password only here, on your screen: never in a log or a Discord message
@@ -1800,9 +1933,10 @@ def run_locked(number, other, row, url, where, tab, slot, slot_lock):
             log_.write(f"Not submitted; {where} stays {row.status}.")
         return
     ws = sheet.open_other() if other else sheet.open_worksheet()
-    sheet.mark_applied_by_hand(ws, row.number, row.url, how="on the company site (nuauto assist; you pressed Submit)")
+    sheet.mark_applied_by_hand(ws, row.number, row.url, how="on NUworks (nuauto assist; you pressed Submit)" if hand else
+                               "on the company site (nuauto assist; you pressed Submit)")
     log_.write(f"{where.capitalize()} marked Applied (dated today).")
-    if other:  # an Other jobs tab job is not on NUworks: nothing more to send
+    if other or hand:  # an Other jobs tab job is not on NUworks; a by-hand row was the NUworks application itself
         return
     if config.IS_SERVER:  # NUworks submits only when you start them (a terminal, or a tap on NUauto's page): not here
         sheet.append_note(ws, row.number, row.url, HOMELAB_NUWORKS_NOTE.format(row=row.number))
@@ -1964,6 +2098,8 @@ def main(argv):
             sys.exit("The NUworks side runs on the laptop (you at a terminal or the GUI); on the homelab only from "
                      "NUauto's page there (Settings > NUauto on your homelab, on the laptop).")
         apply.refuse_unattended(ui)  # a real NUworks submit: you at a terminal or the GUI, never an agent
+        if nuworks_session():
+            sys.exit(NUWORKS_BUSY)
         try:
             with remote.nuworks_turn():
                 return nuworks_side(sheet.open_worksheet(), int(args[1]), answers.JsonIO() if ui == "json" else None)

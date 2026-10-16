@@ -153,8 +153,15 @@ COMPANY-SITE AGENT (assist.py, prompts/ASSIST_PROMPT.md)
 - Bitwarden export: mode 600, logins matched on their own host only | accounts.export, bitwarden | test_assist
 - No page scripts; only tools in assist.TOOLS | assist.decide | test_assist
 - Navigation only to http(s) | assist.decide | test_assist
-- Uploads: only the run's copy of the resume (logs/<run>/upload/, resolved path) | assist.decide (browser_file_upload) | test_assist
-- Bash: only the answer-bank command (answer|guess|guesses|save|once|confirm|alias|blank|wait), no shell operators | assist.check_bash | test_assist
+- Uploads: only the run's copy of the resume and the transcript (logs/<run>/browser/upload/, resolved path), and this
+  application's cover letter once the user approved it (confirm "cover letter" makes it there; the session's end removes
+  it and its text; never in the answer bank) | assist.decide (browser_file_upload), draft_letter, make_letter,
+  after_session | test_assist
+- By-hand NUworks rows (2026-10-16): only a Needs Human row stopped on NUworks, its own job page, no unresolved Submit,
+  not past its deadline; one application at a time on NUworks: NUworks' site lock, the NUworks turn, not beside an
+  Apply run (and Apply / the NUworks side refuse while one runs); never started by the homelab's queue by itself |
+  assist.by_hand_target, run, nuworks_session; apply.main; remote.plan (HAND_WHY) | test_assist, test_remote, test_gui
+- Bash: only the answer-bank command (answer|guess|guesses|save|once|confirm|alias|blank|letter|email|wait|link-login), no shell operators | assist.check_bash | test_assist
 - Read/Glob/Grep only inside the resume and local_config.json assist_read_paths / assist_writeups; symlinks resolved | assist.check_read, assist.under | test_assist
 - Never read inside them: NUauto's local/ folders (this one and any checkout's, found at start), .ssh/.gnupg/.git/...,
   key / token / cookie / password / .env files; Grep may not search a folder holding a local/ | assist.secret_path,
