@@ -71,6 +71,27 @@ config.LOCAL = real
 # Applied with no date refuses (no guessing)
 expect(SheetError, lambda: check_limits(rows_with([("Applied", "")]), TODAY))
 
+# what you heard back (Accepted / Rejected) still counts: those applications went out (the week, and the total)
+R2 = rows_with([("Applied", "2026-09-30"), ("Accepted", "2026-09-30"), ("Rejected", "2026-09-29"), ("Rejected", "2026-09-10")])
+assert check_limits(R2, TODAY, seen={}) == (3, 4)
+expect(SheetError, lambda: check_limits(rows_with([("Rejected", "")]), TODAY, seen={}))  # a sent row needs its date
+# the total counts what NUworks has: a sent row NUworks says it has no application for (a company-site one whose
+# NUworks side never went out) doesn't count, but only while the row is as it was when NUworks was asked
+R3 = parse_rows([HEADERS, ["https://n/jobs/detail/a", "Co", "Job", "Applied", "NUworks side NOT submitted yet", "2026-09-30"],
+                 ["https://n/jobs/detail/b", "Co", "Job", "Applied", "", "2026-09-30"],
+                 ["https://n/jobs/detail/c", "Co", "Job", "Rejected", "", "2026-09-28"]])
+fp = {r.url.rsplit("/", 1)[1]: sheet.fingerprint(r) for r in R3}
+seen = {"a": {"applied": False, "fingerprint": fp["a"]}, "b": {"applied": True, "fingerprint": fp["b"]},
+        "c": {"applied": False, "fingerprint": "an earlier version of the row"}}
+assert sheet.not_on_nuworks(R3, seen) == {2} and sheet.total_count(R3, seen) == 2
+assert check_limits(R3, TODAY, seen=seen) == (3, 2)                       # the week still counts all three
+R3[0].notes += " NUworks side submitted."                                 # it changed since NUworks was asked: it counts
+assert sheet.total_count(R3, seen) == 3 and sheet.total_count(R3, {}) == 3  # (never asked: counts)
+many = rows_with([("Applied", "2026-09-01")] * sheet.MAX_TOTAL)
+gone = {str(i): {"applied": False, "fingerprint": sheet.fingerprint(r)} for i, r in enumerate(many[:3])}
+expect(LimitReached, lambda: check_limits(many, TODAY, seen={}))
+assert check_limits(many, TODAY, seen=gone)[1] == sheet.MAX_TOTAL - 3   # three of them never reached NUworks
+
 # only Approved rows are returned
 assert [r.number for r in sheet.approved(rows_with([("Proposed", ""), ("Approved", ""), ("Failed", "")]))] == [3]
 
@@ -120,6 +141,20 @@ expect(SheetError, lambda: sheet.drop(fresh(), 2, "https://x/other"))
 ws = fresh()
 sheet.mark_submit_started(ws, 2)
 expect(SheetError, lambda: sheet.drop(ws, 2, "https://x/1"))
+
+# set_outcome: Accepted / Rejected (or back to Applied) on a sent row only; the date stays (it went out that day), a
+# note says when it was marked; mark_applied_by_hand refuses a sent row
+ws = FakeWS([HEADERS, ["https://x/1", "Co", "Job", "Applied", "Applied by hand.", "2026-10-01"]])
+sheet.set_outcome(ws, 2, "https://x/1", "Rejected")
+assert ws.values[1][3:6] == ["Rejected", f"Rejected (marked {date.today():%Y-%m-%d}). Applied by hand.", "2026-10-01"], ws.values[1]
+sheet.set_outcome(ws, 2, "https://x/1", "Applied")
+assert ws.values[1][3] == "Applied" and ws.values[1][5] == "2026-10-01"
+sheet.set_outcome(ws, 2, "https://x/1", "Accepted")
+assert ws.values[1][3] == "Accepted"
+expect(SheetError, lambda: sheet.set_outcome(fresh(), 2, "https://x/1", "Rejected"))          # not sent: Approved
+expect(SheetError, lambda: sheet.set_outcome(ws, 2, "https://x/other", "Rejected"))           # another job now
+expect(SheetError, lambda: sheet.set_outcome(ws, 2, "https://x/1", "Failed"))                 # not an outcome
+expect(SheetError, lambda: sheet.mark_applied_by_hand(ws, 2, "https://x/1"))                   # Accepted: sent already
 
 # mark_on_laptop: the mark goes at the END of Notes (NUworks "External application" notes must keep starting the cell),
 # only on Approved / Needs Human rows, once, and only on the row that still holds the job

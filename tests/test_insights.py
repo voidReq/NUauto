@@ -73,6 +73,11 @@ c = insights.counted(Counter({"A": 9, "Other": 4, "B": 3, "C": 2, "D": 1}), top=
 assert c == [{"label": "A", "count": 9}, {"label": "B", "count": 3}, {"label": "Other", "count": 7}], c
 assert insights.counted(Counter({"A": 2, "B": 1}), top=2) == [{"label": "A", "count": 2}, {"label": "B", "count": 1}]
 
+# what you heard back still counts as applied (Accepted / Rejected); the statuses list them in the sheet's order
+s3 = insights.summarize(pool, details, [row(2, "1", "Applied"), row(3, "6", "Rejected"), row(4, "2", "Accepted")], today=TODAY)
+assert s3["applied"]["count"] == 3, s3["applied"]
+assert [x["label"] for x in s3["statuses"]] == ["Applied", "Accepted", "Rejected"], s3["statuses"]
+
 # empty everything: no crash, nothing made up
 e = insights.summarize([], {}, [], today=TODAY)
 assert e["pool"]["count"] == 0 and e["pool"]["pay"]["median"] is None and e["statuses"] == [] and e["rows"] == 0

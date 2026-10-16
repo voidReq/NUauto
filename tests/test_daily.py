@@ -22,6 +22,35 @@ daily.LOG_PATH = os.path.join(config.LOGS_DIR, "test.txt")
 sent = []
 daily.notify = lambda title, body="": sent.append((title, body))
 
+# the applications check (every run): asks NUworks about each sent row (jobs.check_applications) and logs what counts;
+# never changes the run's result, and never reads the real sheet here
+from nuauto import setup_sheet  # noqa: E402
+real_sheet_fns = (sheet.open_worksheet, sheet.read_rows, daily.jobs.check_applications, setup_sheet.ensure_dropdown)
+R_APPS = [sheet.Row(2, "https://n/jobs/detail/a", "Co", "T", "Applied", "NUworks side NOT submitted yet", "2026-10-01"),
+          sheet.Row(3, "https://n/jobs/detail/b", "Co", "T", "Rejected", "", "2026-10-02")]
+asked = []
+sheet.open_worksheet = lambda interactive=True: "ws"
+sheet.read_rows = lambda ws: R_APPS
+setup_sheet.ensure_dropdown = lambda ws: asked.append("dropdown")
+daily.jobs.check_applications = lambda rows: asked.append(len(rows)) or {
+    "a": {"applied": False, "fingerprint": sheet.fingerprint(R_APPS[0])}, "b": {"applied": True, "fingerprint": sheet.fingerprint(R_APPS[1])}}
+daily.applications()
+assert asked == ["dropdown", 2], asked
+log_text = open(daily.LOG_PATH).read()
+assert "applications: 1 count toward the total; NUworks has none for row 2" in log_text, log_text[-300:]
+def no_nuworks(rows):
+    raise SystemExit(daily.jobs.NOT_LOGGED_IN)
+daily.jobs.check_applications = no_nuworks
+daily.applications()                                        # NUworks wants a login: logged, nothing raised
+assert "applications check stopped" in open(daily.LOG_PATH).read()
+def no_sheet(interactive=True):
+    raise sheet.NotLoggedIn("no login")
+sheet.open_worksheet = no_sheet
+daily.applications()                                        # no sheet: logged, nothing raised
+assert "applications check skipped" in open(daily.LOG_PATH).read()
+sheet.open_worksheet, sheet.read_rows, daily.jobs.check_applications, setup_sheet.ensure_dropdown = real_sheet_fns
+daily.applications = lambda: None  # (main() below: never the real sheet or NUworks)
+
 # record_scan keeps per-run counts; scan_summary adds up the last 24 hours only
 daily.record_scan(12, 2)
 scans = daily.jobs.load(daily.SCANS, [])

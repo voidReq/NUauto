@@ -506,6 +506,27 @@ try:
             break
         time.sleep(0.2)
 
+    # what you heard back: Accepted / Rejected on a sent row (its own section; it still counts toward the limits: it went
+    # out), back to Applied again; never on a row that wasn't sent
+    week_now = get("/api/state")["week"]
+    sent = get("/api/jobs?tab=nuworks")["sections"]["applied"][0]
+    post("/api/mark", {"action": "outcome", "outcome": "Rejected", "row": sent["row"], "url": sent["url"]})
+    secs = get("/api/jobs?tab=nuworks")["sections"]
+    assert [r["row"] for r in secs["rejected"]] == [sent["row"]] and sent["row"] not in [r["row"] for r in secs["applied"]]
+    assert get("/api/state")["week"] == week_now and secs["rejected"][0]["notes"].startswith("Rejected (marked ")
+    post("/api/mark", {"action": "outcome", "outcome": "Applied", "row": sent["row"], "url": sent["url"]})
+    assert sent["row"] in [r["row"] for r in get("/api/jobs?tab=nuworks")["sections"]["applied"]]
+    approved_one = get("/api/jobs?tab=nuworks")["sections"]["approved"][0]
+    post("/api/mark", {"action": "outcome", "outcome": "Accepted", "row": approved_one["row"], "url": approved_one["url"]}, expect=409)
+    post("/api/mark", {"action": "outcome", "outcome": "Failed", "row": sent["row"], "url": sent["url"]}, expect=409)
+    # NUworks' answer about a sent row (the twice-daily update: data/applications.json): "not on NUworks" when it has none
+    with open(os.path.join(STATE, "data", "applications.json"), "w") as f:
+        json.dump({sent["url"].rstrip("/").split("/")[-1]: {"applied": False, "status": None, "expired": False,
+                   "interviewing": False, "checked": "2026-10-16T08:10", "row": sent["row"], "fingerprint": "x"}}, f)
+    nu = next(r for r in get("/api/jobs?tab=nuworks")["sections"]["applied"] if r["row"] == sent["row"])["nuworks"]
+    assert nu["applied"] is False and nu["current"] is False  # (about an earlier version of the row: it still counts)
+    os.remove(os.path.join(STATE, "data", "applications.json"))
+
     # an approved internship's Undo still works after the list moved on (approved = in the sheet = not in the next list)
     beacon = next(j for j in get("/api/review?mode=approve&source=intern")["jobs"] if j["title"] == "Frontend Engineering Intern")
     done = post("/api/decide", {"id": beacon["id"], "decision": "approve", "mode": "approve"})
@@ -657,10 +678,12 @@ try:
         page.click(f"[data-testid=more-nuworks-{applied_row}]")
         page.wait_for_selector("div.menu")
         assert [b.inner_text() for b in page.locator("div.menu button").all()] == \
-            ["I applied myself", "Drop (not applying)…", "Move to Summer 2027 internships…", "Remove from the sheet…"]
+            ["Mark accepted", "Mark rejected", "I applied myself", "Drop (not applying)…", "Move to Summer 2027 internships…",
+             "Remove from the sheet…"]  # (what you heard back: only on a sent row)
         for key in ("mark", "drop", "move", "remove"):
             assert page.locator(f"[data-testid=more-nuworks-{applied_row}-{key}]").is_disabled(), key  # (with a reason in its title)
         assert page.get_attribute(f"[data-testid=more-nuworks-{applied_row}-remove]", "title")
+        assert page.locator(f"[data-testid=more-nuworks-{applied_row}-rejected]").is_enabled()
         page.keyboard.press("Escape")
         page.wait_for_selector("div.menu", state="detached")
         applied.locator("summary").click()
@@ -701,7 +724,7 @@ try:
         # /api/jobs: the same Approved rows, in Start's order, as /api/apply; every section is there for both tabs
         jobs = get("/api/jobs?tab=nuworks")
         assert [r["row"] for r in jobs["sections"]["approved"]] == [r["row"] for r in get("/api/apply")["rows"]]
-        every = {"approved", "agent", "manual", "owed", "ready", "applied", "proposed", "closed", "rest"}  # (both tabs: the other tab's stay empty)
+        every = {"approved", "agent", "manual", "owed", "ready", "applied", "accepted", "rejected", "proposed", "closed", "rest"}  # (both tabs: the other tab's stay empty)
         assert set(jobs["sections"]) == every and jobs["sections"]["ready"] == [], list(jobs["sections"])
         assert jobs["tab"] == "nuworks" and jobs["order"] == "default" and jobs["week"] == get("/api/apply")["week"] and "history" in jobs
         assert [r["company"] for r in jobs["sections"]["agent"]] == ["Iron Valley Medical"], jobs["sections"]["agent"]

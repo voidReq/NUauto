@@ -584,6 +584,18 @@ function markRow(kind, t, tab) {  // tab "other": a row of the sheet's Other job
   });
 }
 
+// What you heard back on a sent application: Accepted or Rejected (or back to Applied). It still counts toward your
+// limits (it went out); the sheet's row says when you marked it.
+const SENT = ["Applied", "Accepted", "Rejected"];
+async function outcomeRow(t, outcome, tab) {
+  try {
+    await api.post("/api/mark", { action: "outcome", outcome, row: t.row, url: t.url, tab });
+    toast(outcome === "Applied" ? "Back to Applied." : `Marked ${outcome.toLowerCase()}.`);
+    pollState();
+    if (S.screen && S.screen.reload) S.screen.reload();
+  } catch (e) { fail(e); }
+}
+
 // Drop: you won't apply (closed, a duplicate, a bad location): the row becomes Failed with the reason in its Notes,
 // leaves every queue and stays in the sheet as your record (sheet.drop), so Review never offers the job again.
 const DROP_REASONS = [["closed", "It has closed"], ["duplicate", "A duplicate"], ["location", "Bad location"], ["other", "Other reason"]];
@@ -974,6 +986,8 @@ const NU_SECTIONS = [
   ["manual", "By hand on NUworks", "NUworks wants something only you can give (a cover letter, a transcript, an answer in your words). The assistant can do these with you on NUworks: it drafts the cover letter for you to approve, uploads it and your transcript, and asks you before it submits."],
   ["owed", "Still owed", "Submitted on one side; the other side still needs doing."],
   ["applied", "Applied", null],
+  ["accepted", "Accepted", null],
+  ["rejected", "Rejected", null],
   ["proposed", "Proposed", "Waiting for your OK: Review shows them first."],
   ["closed", "Dropped or failed", null],
   ["rest", "Other rows", null],
@@ -981,6 +995,8 @@ const NU_SECTIONS = [
 const OTHER_SECTIONS = [
   ["ready", "Ready to apply", "The assistant (Claude) applies on the company's site with you, and asks you before anything is submitted. No weekly or total limit here."],
   ["applied", "Applied", null],
+  ["accepted", "Accepted", null],
+  ["rejected", "Rejected", null],
   ["proposed", "Proposed", "Waiting for your OK: Review shows them first."],
   ["closed", "Dropped or failed", null],
   ["rest", "Other rows", null],
@@ -1153,7 +1169,11 @@ screens.apply = async (view) => {
       next = assistantStart(d, r, "other", `other-assist-${r.row}`, { disabled: !r.target, body: { row: r.row, tab: "other" } });
       open = r.target ? linkOut(r.target, "Open site") : null;
     } else {
-      about = [r.status === "Applied" && r.date ? `applied ${r.date}` : null, r.notes ? r.notes.slice(0, 140) : null].filter(Boolean).join(" · ");
+      about = [SENT.includes(r.status) && r.date ? `applied ${r.date}` : null, r.notes ? r.notes.slice(0, 140) : null].filter(Boolean).join(" · ");
+      const nu = r.nuworks;  // what NUworks said at the last check (the twice-daily update)
+      if (nu && nu.current && nu.applied === false) chips.push(el("span", { class: "chip warn", testid: `not-on-nuworks-${r.row}`,
+        text: "not on NUworks", title: `NUworks has no application for this job (checked ${nu.checked}): it doesn't count toward your total.` }));
+      if (nu && nu.applied && nu.interviewing) chips.push(el("span", { class: "chip accent", text: "interviewing (NUworks)" }));
     }
     const facts = r.match != null || r.score != null || r.pay ? jobFacts(r) : null;
     return el("li", { class: "job-row", testid: `job-${tab}-${r.row}` },
@@ -1167,7 +1187,12 @@ screens.apply = async (view) => {
   function rowMenu(d, key, r, other) {
     const t = other ? "other" : undefined, to = other ? "nuworks" : "other", busy = d.busy ? "A run is using the sheet: wait for it to end" : null;
     const live = r.status === "Approved" || r.status === "Needs Human";
+    // what you heard back, on a sent row: Accepted / Rejected (the one it is now: back to Applied)
+    const heard = !SENT.includes(r.status) ? [] : ["Accepted", "Rejected"].map((o) => r.status === o ?
+      ["Back to Applied", "applied", () => outcomeRow(r, "Applied", t)] :
+      [`Mark ${o.toLowerCase()}`, o.toLowerCase(), () => outcomeRow(r, o, t)]);
     return menuButton(`More for ${r.company}`, `more-${tab}-${r.row}`, [
+      ...heard,
       ["I applied myself", "mark", () => markRow("applied", r, t), live ? null : "Only for rows still to do (Approved or Needs Human)"],
       ["Drop (not applying)…", "drop", () => dropRow(r, t), live ? null : "Only Approved or Needs Human rows are dropped"],
       [`Move to ${names()[to]}…`, "move", () => moveRow(names(), other ? "other" : "nuworks", r, reload), r.locked || busy],
@@ -1510,10 +1535,11 @@ function svg(tag, attrs, ...kids) {
   return n;
 }
 // Status colors (state, not series): each always shown with its label and count in the legend.
-const STATUS_COLOR = { Proposed: "var(--off)", Approved: "var(--accent)", Applied: "var(--ok)", "Needs Human": "var(--warn)", Failed: "var(--fail)" };
+const STATUS_COLOR = { Proposed: "var(--off)", Approved: "var(--accent)", Applied: "var(--ok)", "Needs Human": "var(--warn)", Failed: "var(--fail)",
+  Accepted: "var(--win)", Rejected: "var(--faint)" };
 // Ring (and legend) order, chosen with the dataviz palette validator so no two neighbors are the hard-to-tell pairs
 // (red/amber, green/amber next to each other); labels, counts and 2px gaps carry identity too.
-const RING = ["Applied", "Needs Human", "Proposed", "Failed", "Approved"];
+const RING = ["Applied", "Needs Human", "Accepted", "Proposed", "Failed", "Rejected", "Approved"];
 const usd = (x) => x === null || x === undefined ? "—" : `$${x >= 100 || Number.isInteger(x) ? Math.round(x) : x.toFixed(2)}`;
 
 function donut(items, total) {
