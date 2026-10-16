@@ -515,10 +515,10 @@ try:
     second = subprocess.run([PY, "-m", "nuauto", "gui", "--no-open"], env=ENV, cwd=ROOT, capture_output=True, text=True,
                             timeout=60)
     assert second.returncode != 0 and "already running" in second.stderr, second.stderr
-    # the real window never starts inside a Claude Code shell
+    # from a Claude Code shell the real app opens its own window only: --no-open would print the agent its secret
     real = {k: v for k, v in ENV.items() if k != "NUAUTO_DEMO"} | {"NUAUTO_STATE_DIR": tempfile.mkdtemp(), "CLAUDECODE": "1"}
     r = subprocess.run([PY, "-m", "nuauto", "gui", "--no-open"], env=real, cwd=ROOT, capture_output=True, text=True, timeout=60)
-    assert r.returncode != 0 and "never starts inside a Claude Code session" in r.stderr, r.stderr
+    assert r.returncode != 0 and "opens its own window only" in r.stderr, r.stderr
 
     # ---------------------------------------------------------------- the page, in headless Firefox
     errors = []

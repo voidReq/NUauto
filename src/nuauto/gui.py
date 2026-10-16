@@ -22,8 +22,9 @@ How it is safe to run:
   questions come over answers.JsonIO and show as dialogs; Stop sends SIGINT to the child (the KeyboardInterrupt
   path Ctrl+C takes). If this process dies, the child's stdin closes and it stops the same way. On the homelab a run you
   watch (Apply, the NUworks side) gets a virtual screen and its browser view (screen.py), like the assistant's.
-- Real mode refuses to start inside a Claude Code shell (CLAUDECODE): agents use --demo (fake data) or --view
-  (real data, read-only).
+- Real mode may be started from a Claude Code shell (2026-10-16, my call: "i don't really care if claude launches it"):
+  its window opens for you, and you click Start there. Never with --no-open there (CLAUDECODE): that would print the
+  agent the URL with this start's secret. Agents test with --demo (fake data) or --view (real data, read-only).
 """
 import fcntl
 import hmac
@@ -2561,9 +2562,9 @@ def main(argv):
     VIEW = "--view" in argv
     if VIEW and config.DEMO:
         sys.exit("--view is for your real data; --demo is already fake. Use one of them.")
-    if os.environ.get("CLAUDECODE") and not config.DEMO and not VIEW:
-        sys.exit("The real NUauto window never starts inside a Claude Code session (it can submit applications). "
-                 "Agents use `nuauto gui --demo` (fake data) or `nuauto gui --view` (your real data, read-only).")
+    if os.environ.get("CLAUDECODE") and not config.DEMO and not VIEW and "--no-open" in argv:
+        sys.exit("From a Claude Code session the real NUauto opens its own window only (--no-open would give the "
+                 "agent its secret). Agents use `nuauto gui --demo` (fake data) or `nuauto gui --view` (read-only).")
     port = 0
     if "--port" in argv:
         i = argv.index("--port")
