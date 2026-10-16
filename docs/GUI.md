@@ -239,8 +239,9 @@ SAFETY MODEL (details and tests: docs/SAFETY.md)
   websites can't send that), and a matching Origin if one is sent. CSP: only this server's own files.
 - The page never receives a secret (token, cookies, webhook, client secret): only "set / not set".
 - Runs: `nuauto apply --ui json` / `nuauto assist nuworks <row> --ui json` work only as a child of the running GUI
-  (its pid in local/gui.lock) and never inside a Claude Code shell (CLAUDECODE). The real GUI refuses to start
-  there too: agents use --demo (fake) or --view (real data, read-only, below). Apply, logins and the NUworks side always get a visible browser (AUTO_HEADLESS
+  (its pid in local/gui.lock); `nuauto apply` itself never runs from a Claude Code shell (CLAUDECODE). The real GUI
+  may be opened from one (2026-10-16): its own window, for you to click Start; with --no-open it refuses there (it
+  would print the agent its secret). Agents test with --demo (fake) or --view (real data, read-only, below). Apply, logins and the NUworks side always get a visible browser (AUTO_HEADLESS
   cleared). Approved in the sheet stays the only go-ahead; caps unchanged.
 - Questions (answers.JsonIO): one JSON line per question on the child's stdout ("::nuauto:: " + JSON), the
   answer as one JSON line on its stdin. The same rules as typing: an option must be one of the choices, blank
@@ -290,7 +291,8 @@ DEMO MODE (demo.py) AND TESTING WITH AGENTS
   missing; approve, apply with a question, the fake sheet), in its own temp folder; exit 0 = this install works.
 - Demo runs nobody watches use a hidden browser: with NUAUTO_DEMO_HEADLESS=1 (tests and the self-test set it) or no
   screen (CI, containers). Real runs always open a visible browser.
-- Agents: only ever --demo or --view. Never start the real GUI (no --view), never click Start in a real one.
+- Agents: test with --demo or --view. They may open the real GUI's window for you (never --no-open), never click
+  Start in a real one.
 
 VIEW MODE (`nuauto gui --view`; gui.VIEW; added 2026-10-09 so an agent can look at your real screens)
 - Your real sheet and job data, read-only. Allowed inside a Claude Code shell (the real GUI is not). Prints its URL like

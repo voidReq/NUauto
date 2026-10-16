@@ -435,16 +435,17 @@ def apply_one(row, ws, args, resume_label, entries, io):
 
 
 def refuse_unattended(ui):
-    """Real submits need you there: a terminal you are at, or `nuauto gui` (it started this process). Never an
-    agent: Claude Code sets CLAUDECODE in every shell it runs. Demo mode submits nothing real."""
+    """Real submits need you there: a terminal you are at, or `nuauto gui` (it started this process after your Start,
+    also in a window an agent opened for you). Never an agent's own command: Claude Code sets CLAUDECODE in every
+    shell it runs. Demo mode submits nothing real."""
     if config.DEMO:
         return
-    if os.environ.get("CLAUDECODE"):
-        sys.exit("This submits real applications, so it never runs inside a Claude Code session. "
-                 "Run it yourself (a terminal or `nuauto gui`); agents use `nuauto gui --demo`.")
-    if ui == "json":
+    if ui == "json":  # a child of the running GUI (its pid in gui.lock), whoever opened its window
         if not answers.json_ui_allowed():
             sys.exit("--ui json is only for nuauto gui.")
+    elif os.environ.get("CLAUDECODE"):
+        sys.exit("This submits real applications, so it never runs inside a Claude Code session. "
+                 "Run it yourself (a terminal or `nuauto gui`); agents use `nuauto gui --demo`.")
     elif not sys.stdin.isatty():
         sys.exit("apply submits real applications; run it yourself in a terminal.")
 

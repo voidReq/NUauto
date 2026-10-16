@@ -218,6 +218,10 @@ r = subprocess.run([sys.executable, "-m", "nuauto", "apply"], capture_output=Tru
 assert r.returncode != 0 and "never runs inside a Claude Code session" in r.stderr, r.stderr
 r = subprocess.run([sys.executable, "-m", "nuauto", "apply", "--ui", "json"], capture_output=True, text=True, env=env)
 assert r.returncode != 0 and "only for nuauto gui" in r.stderr, r.stderr
+# --ui json from an agent's shell: still only as the running GUI's child (a window an agent opened runs your Start)
+r = subprocess.run([sys.executable, "-m", "nuauto", "apply", "--ui", "json"], capture_output=True, text=True,
+                   env=env | {"CLAUDECODE": "1"})
+assert r.returncode != 0 and "only for nuauto gui" in r.stderr, r.stderr
 r = subprocess.run([sys.executable, "-m", "nuauto", "assist", "nuworks", "3"], capture_output=True, text=True,
                    env=env | {"CLAUDECODE": "1"})
 assert r.returncode != 0 and "never runs inside a Claude Code session" in r.stderr, r.stderr
