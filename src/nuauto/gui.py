@@ -871,14 +871,23 @@ def review_done():
     return {}
 
 
-def insights_get():
-    """Pay, places, kinds of work (pool and applied) and the sheet's statuses. The pool numbers work without the sheet."""
+def insights_get(source="nuworks"):
+    """Pay, places, kinds of work (pool and applied) and the sheet tab's statuses: the NUworks co-ops, or (source
+    intern) the Summer internships and the Other jobs tab. The pool numbers work without the sheet."""
     from nuauto import insights
+    from nuauto import intern
+    both = {"internships": {"on": True, "term": intern.TERM} if intern.ENABLED else None}  # the screen's switch
+    if source == "intern" and intern.ENABLED:
+        try:
+            rows = other_rows(fresh=False)
+        except Exception:
+            rows = None
+        return {**insights.collect_intern(rows), "source": "intern", **both}
     try:
         APP.refresh_rows()
     except Exception:
         pass
-    return insights.collect(APP.rows)
+    return {**insights.collect(APP.rows), "source": "nuworks", **both}
 
 
 def apply_list(order="default"):
@@ -1288,7 +1297,7 @@ def intern_facts(urls):
     if not intern.ENABLED or not urls:
         return {}
     listings, scores = intern.load("listings.json", {}), intern.load("scores.json", {})
-    pool = {r["id"]: r for r in intern.load("pool.json", [])}
+    pool, cats = {r["id"]: r for r in intern.load("pool.json", [])}, intern.load("categories.json", {})
     out = {}
     for i, x in listings.items():
         s, p = scores.get(i), pool.get(i)
@@ -1296,8 +1305,11 @@ def intern_facts(urls):
             continue
         pay = (intern.load(f"details/{i}.json", None) or {}).get("pay") or None
         hour = insights.hourly(pay)
+        cat = p["category"] if p else cats.get(i)
+        cat = cat if cat in jobs.CATEGORIES else None  # (the Apply tab's kind-of-work filter)
         out[x["url"]] = {"match": s["match"], "score": p["rank"] if p else None, "score_text": jobs.rank_text(p) if p else None,
-                         "pay": pay, "pay_hour": hour[1] if hour else None, "posted_text": intern.posted_text(x)}
+                         "pay": pay, "pay_hour": hour[1] if hour else None, "posted_text": intern.posted_text(x),
+                         "category": cat, "category_label": jobs.category_label(cat) if cat else None}
     return out
 
 
@@ -1354,6 +1366,70 @@ def sheet_get():
         out[tab] = {"exists": True, "rows": [row_view(r, locked=manage.movable(r, tab, "move"),
                                                       remove_locked=manage.movable(r, tab, "remove")) for r in rows]}
     return {"tabs": out, "names": manage.TABS, "busy": running("apply", "nuworks_side")}
+
+
+def jobs_tab(tab="nuworks", order="default"):
+    """One tab of the Apply screen: every row of that sheet tab in sections, what is left to do first, each row with
+    why it can't be moved / removed (None = it can). nuworks: approved (in the order Start goes), agent (the company's
+    own site: the assistant), manual (only you can finish it on NUworks), owed (submitted on NUworks, the company site
+    still wants you; or the NUworks side to send again), applied, proposed, closed (Failed: dropped or failed), rest;
+    and the week, why Start can't run, recent runs. other: ready (Approved: the assistant), applied, proposed, closed,
+    rest. Both: the assistant sessions, how many may run, the homelab's queue."""
+    from nuauto import apply
+    from nuauto import assist
+    from nuauto import intern
+    from nuauto import manage
+    other = tab == "other"
+    rows = other_rows() if other else need_rows()
+    by_number = {r.number: r for r in rows}
+    facts = intern_facts({intern.clean_url(r.url) for r in rows}) if other else None
+
+    def locks(v):  # what Move and Remove allow on this row
+        r = by_number[v["row"]]
+        return {**v, "locked": manage.movable(r, tab, "move"), "remove_locked": manage.movable(r, tab, "remove")}
+
+    def view(r, **extra):
+        more = facts.get(intern.clean_url(r.url), {}) if other else {**closing(r), **job_facts(r, data)}
+        return locks(row_view(r, **more, **extra))
+    s = {k: [] for k in ("approved", "agent", "manual", "owed", "ready", "applied", "proposed", "closed", "rest")}
+    a = assistants()
+    out = {"tab": tab, "name": manage.TABS[tab], "busy": running("apply", "nuworks_side"), **a,
+           "queue": queue_info() if REMOTE else _homelab.get("queue") if a["linked"] and config.REMOTE_ASSIST else None}
+    later = {"Applied": "applied", "Proposed": "proposed", "Failed": "closed"}
+    if other:
+        for r in rows:
+            if r.status == "Approved":
+                url, why = assist.other_target(r)
+                s["ready"].append(view(r, target=url, host=urlparse(url).hostname if url else None, why=why))
+            else:
+                s[later.get(r.status, "rest")].append(view(r))
+        out["exists"] = bool(rows) or other_tab_exists()
+    else:
+        data = facts_data()
+        run = apply_list(order)
+        s["approved"] = [locks(v) for v in run["rows"]]
+        agent, manual, site, retry = company_rows(rows, facts=True)
+        s["agent"], s["manual"] = [locks(v) for v in agent], [locks(v) for v in manual]
+        s["owed"] = [{**locks(v), "owed": "site"} for v in site] + [{**locks(v), "owed": "retry"} for v in retry]
+        listed = {v["row"] for k in ("approved", "agent", "manual", "owed") for v in s[k]}
+        for r in rows:
+            if r.number not in listed and r.status not in ("Approved", "Needs Human"):  # (those are all listed above)
+                s[later.get(r.status, "rest")].append(view(r))
+        out.update(week=run["week"], why_not=run["why_not"], history=run["history"],
+                   order=order if order in apply.ORDERS else "default")
+    for k in ("applied", "closed"):
+        s[k].sort(key=lambda x: x["date"] or "", reverse=True)  # newest first
+    out["sections"] = s
+    return out
+
+
+def other_tab_exists():
+    """Is there an Other jobs tab yet (adding the first job makes it)?"""
+    try:
+        worksheet(other=True)
+        return True
+    except NoOtherTab:
+        return False
 
 
 def sheet_lookup(url):
@@ -1457,20 +1533,27 @@ def answers_put(body):
     entries = body.get("entries")
     if not isinstance(entries, list):
         raise Refused("Expected a list of entries.")
-    clean, seen = [], set()
+    clean, owner = [], {}  # each question and other wording -> the question of the entry that has it
     for e in entries:
         q = answers.norm(str((e or {}).get("question", "")))
         if not q:
             raise Refused("Every entry needs a question.")
-        keys = [q] + [answers.norm(str(a)) for a in e.get("aliases") or [] if str(a).strip()]
-        dup = [k for k in keys if k in seen]
-        if dup:
-            raise Refused(f"{dup[0]!r} appears twice. Each question (and alias) once.")
-        seen.update(keys)
+        if q in owner:
+            raise Refused(f"{q!r} is a question and also " + ("a second entry's question" if owner[q] == q else
+                          f"another wording of {owner[q]!r}") + ": keep it in one of them (search for it).")
+        owner[q] = q
+        aliases = []
+        for a in e.get("aliases") or []:
+            k = answers.norm(str(a))
+            # a wording matched already (its own question, a repeat, or an entry above, which wins: answers.find) does
+            # nothing here: left out
+            if k and k not in owner:
+                owner[k] = q
+                aliases.append(k)
         ft = e.get("field_type", "")
         if ft not in ("", "text", "select"):
             raise Refused(f"{q!r}: field type must be text or select.")
-        entry = {"question": q, "aliases": keys[1:], "answer": str(e.get("answer", "")).strip(),
+        entry = {"question": q, "aliases": aliases, "answer": str(e.get("answer", "")).strip(),
                  "field_type": ft, "date_added": str(e.get("date_added") or date.today().isoformat())[:10],
                  "always_ask": bool(e.get("always_ask"))}
         if e.get("leave_blank") and not entry["answer"]:  # "always leave blank" (the assistant's), until you answer it
@@ -2115,7 +2198,8 @@ GET_ROUTES = {
                                     q.get("q", "")[:200], q.get("category", "")[:40],
                                     "intern" if q.get("source") == "intern" else "nuworks"),
     "/api/apply": lambda q: apply_list(q.get("order", "default")),
-    "/api/insights": lambda q: insights_get(),
+    "/api/jobs": lambda q: jobs_tab("other" if q.get("tab") == "other" else "nuworks", q.get("order", "default")),
+    "/api/insights": lambda q: insights_get(q.get("source", "nuworks")),
     "/api/company": lambda q: company(),
     "/api/task": lambda q: {"task": APP.task.view(int(q.get("after", 0) or 0)) if APP.task else None},
     "/api/answers": lambda q: answers_get(q.get("bank", "nuworks")),
@@ -2546,6 +2630,12 @@ def start_demo(argv):
     os.execve(sys.executable, config.self_cmd("gui", *[a for a in argv if a != "--demo"]), env)
 
 
+def printed_url(url):
+    """The address the ready line prints. From a Claude Code shell (CLAUDECODE) the real app opens its own window for
+    you, so the line never hands the agent this start's secret: the address alone (demo and view mode: all of it)."""
+    return url.split("?")[0] if os.environ.get("CLAUDECODE") and not config.DEMO and not VIEW else url
+
+
 def main(argv):
     global VIEW
     argv = list(argv)
@@ -2597,7 +2687,8 @@ def main(argv):
     if config.HAS_SERVER and not VIEW:  # a view copies and changes no files
         threading.Thread(target=pull_loop, daemon=True).start()
     url = start_url()
-    print(json.dumps({"url": url, "port": APP.port, "demo": config.DEMO, "view": VIEW, "state_dir": config.STATE_DIR}), flush=True)
+    print(json.dumps({"url": printed_url(url), "port": APP.port, "demo": config.DEMO, "view": VIEW, "state_dir": config.STATE_DIR}),
+          flush=True)
     served = threading.Thread(target=SERVER.serve_forever, kwargs={"poll_interval": 0.5}, daemon=True)
     served.start()  # the main thread is for the window (macOS needs it there)
     if shots:

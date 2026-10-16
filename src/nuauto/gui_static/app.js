@@ -165,7 +165,7 @@ async function pollState() {
   // the sheet was read again (a run finished, a row was applied, another window changed it): lists show it at once
   const sheetChanged = S.rowsAt !== undefined && S.state.rows_at !== S.rowsAt;
   S.rowsAt = S.state.rows_at;
-  // an assistant started or ended (in its own terminal window): the Company sites lists say which rows have one
+  // an assistant started or ended (in its own terminal window): the Apply lists say which rows have one
   const assistantsChanged = S.assistants !== undefined && S.state.assistants !== S.assistants;
   S.assistants = S.state.assistants;
   if ((sheetChanged || assistantsChanged) && S.screen && S.screen.refresh) S.screen.refresh();
@@ -493,7 +493,7 @@ function questionMenu(box, q, reply) {
 // ------------------------------------------------------------------ screens
 
 const screens = {};
-const TITLES = { home: "Today", review: "Review", apply: "Apply", sheet: "Sheet", insights: "Insights", answers: "Answers",
+const TITLES = { home: "Today", review: "Review", apply: "Apply", insights: "Insights", answers: "Answers",
   settings: "Settings", setup: "Setup", logs: "Past runs", assistant: "Assistant" };
 
 // ---- Today
@@ -628,7 +628,7 @@ screens.review = async (view) => {
     el("button", { "aria-pressed": String(source === "nuworks"), testid: "source-nuworks", text: "NUworks co-ops", onclick: () => setSource("nuworks") }),
     el("button", { "aria-pressed": String(source === "intern"), testid: "source-intern", text: `${interns.term} internships`, onclick: () => setSource("intern") })) : null;
   // search: words or "quoted phrases" (all must appear in the posting), and/or one kind of work
-  const search = el("input", { type: "search", class: "grow", testid: "review-search", value: q, placeholder: 'Search: words or "a phrase"',
+  const search = el("input", { type: "search", class: "grow", testid: "review-search", value: q, placeholder: 'Search: words or "a phrase" (Ctrl+F)', "data-find": true,
     "aria-label": "Search the jobs to review" });
   const cat = el("select", { testid: "review-category", "aria-label": "Kind of work" });
   let timer = null;
@@ -702,11 +702,11 @@ screens.review = async (view) => {
       const toSites = mode === "approve" && source === "intern";  // approved internships wait in the Other jobs tab
       fill(body, el("div", { class: "card", testid: "review-empty" }, el("h2", { text: jobs.length ? "That's all of them" : "Nothing new to review" }),
         el("p", { class: "muted", text: mode !== "approve" ? "Ratings teach the ranking your taste (it needs 5 yes and 5 no)." :
-          toSites ? "Approved internships are in the Other jobs tab. Apply to them in Apply > Company sites." :
+          toSites ? `Approved internships wait in Apply > ${otherTabLabel()}.` :
           "Approved jobs are in your sheet. Apply to them next." }),
         el("div", { class: "row" }, jobs.length ? el("button", { class: "btn", text: "Back one", onclick: () => { i = Math.max(0, i - 1); show(); } }) : null,
-          el("a", { class: "btn primary", href: toSites ? "#/company" : mode === "approve" ? "#/apply" : "#/home",
-            text: toSites ? "Go to Company sites" : mode === "approve" ? "Go to Apply" : "Done" }))));
+          el("a", { class: "btn primary", href: toSites ? "#/other" : mode === "approve" ? "#/apply" : "#/home",
+            text: mode === "approve" ? "Go to Apply" : "Done" }))));
       return;
     }
     const j = jobs[i], mine = ++shown;
@@ -951,7 +951,7 @@ const SORTS = {
   closes: ["closing soonest", (r) => r.closes || null],
   pay: ["pay (per hour)", (r) => r.pay_hour == null ? null : -r.pay_hour],
   // the homelab's page: the queue's own order (what it starts next first; NUworks-tab rows)
-  queue: ["the queue's order", (r) => { const q = S.queue && S.queue.rows && S.queue.rows[`jobs-${r.row}`]; return q ? q.order : null; }],
+  queue: ["the queue's order", (r) => { const q = S.queue && S.queue.rows && S.queue.rows[r.qkey || `jobs-${r.row}`]; return q ? q.order : null; }],
 };
 const NO_KIND = "-";  // the kind-of-work filter's key for rows not sorted into one yet
 const kindOf = (r) => r.category || NO_KIND;
@@ -964,130 +964,245 @@ function sortRows(rows, how) {
     (a[0] === null ? 0 : a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0) || a[1] - b[1]).map((x) => x[2]);
 }
 
-// ---- Apply: three tabs. NUworks (the Approved rows Start works through), Company sites (the assistant, Other jobs,
-// sites still owed, the NUworks side to send again), and rows only you can finish on NUworks.
+// ---- Apply: your sheet's two tabs, each a tab here (NUworks co-ops: the weekly limit, Start goes through its Approved
+// rows; the Other jobs tab: Summer internships and other jobs not on NUworks, no limit, the assistant), and the
+// assistants running now. A sheet tab shows every one of its rows in sections, what is left to do first (the rest
+// folded); every row has the same buttons: what to do next, Open, and More (I applied myself, Drop, Move, Remove).
+const NU_SECTIONS = [
+  ["approved", "Ready to apply", "Start goes down this list in this order, and stops at your weekly limit."],
+  ["agent", "Company site needed", "These send you to the company's own site. The assistant (Claude) applies there with you, and asks you before anything is submitted."],
+  ["manual", "By hand on NUworks", "NUworks wants something only you can give (a cover letter, a transcript): finish these on NUworks."],
+  ["owed", "Still owed", "Submitted on one side; the other side still needs doing."],
+  ["applied", "Applied", null],
+  ["proposed", "Proposed", "Waiting for your OK: Review shows them first."],
+  ["closed", "Dropped or failed", null],
+  ["rest", "Other rows", null],
+];
+const OTHER_SECTIONS = [
+  ["ready", "Ready to apply", "The assistant (Claude) applies on the company's site with you, and asks you before anything is submitted. No weekly or total limit here."],
+  ["applied", "Applied", null],
+  ["proposed", "Proposed", "Waiting for your OK: Review shows them first."],
+  ["closed", "Dropped or failed", null],
+  ["rest", "Other rows", null],
+];
+const TODO = new Set(["approved", "agent", "manual", "owed", "ready"]);  // open unless you fold them; the rest start folded
+const findText = (r) => [r.company, r.title, r.notes, r.host, r.category_label, r.status, r.pay].join(" ").toLowerCase();
+
+// The Other jobs tab's name here: what it holds when Summer internships are on (state.internships).
+function otherTabLabel() {
+  const ii = S.state && S.state.internships;
+  return ii && ii.on && ii.term ? `${ii.term} internships` : "Other jobs";
+}
+
 screens.apply = async (view) => {
-  let data = null;
-  let sites = null, others = null;
-  const TABS = [["nuworks", "NUworks"], ["company", "Company sites"], ["manual", "By hand on NUworks"]];
+  const TABS = ["nuworks", "other", "assistants"];
   let tab = sessionStorage.getItem("applyTab");
-  if (!TABS.some(([k]) => k === tab)) tab = "nuworks";
-  if (S.focus === "company") { S.focus = null; tab = "company"; }  // Today's buttons and old #/company, #/other links
+  if (!TABS.includes(tab)) tab = "nuworks";
+  if (S.focus) { tab = S.focus === "other" ? "other" : "nuworks"; S.focus = null; }  // Today's buttons, #/company, #/other
+  const data = { nuworks: null, other: null };
   const SORT_OPTS = { nuworks: ["default", "score", "match", "closes", "pay"],
-    company: (onHomelab() ? ["queue"] : []).concat(["closes", "sheet", "score", "match", "pay"]),
-    manual: ["closes", "sheet", "score", "match", "pay"] };
+    other: (onHomelab() ? ["queue"] : []).concat(["score", "match", "pay", "sheet"]) };
   const sortOf = (k) => { const v = sessionStorage.getItem("applySort:" + k); return SORT_OPTS[k].includes(v) ? v : SORT_OPTS[k][0]; };
-  let kind = sessionStorage.getItem("applyKind") || "";  // one kind of work, or "" = all (shared by the three tabs)
-  const shown = (rows) => sortRows(kind ? rows.filter((r) => kindOf(r) === kind) : rows, sortOf(tab));
+  let kind = sessionStorage.getItem("applyKind") || "";  // one kind of work, or "" = all (shared by the tabs)
+  let words = [];  // the search box's words: a row shows when it has every one
+  let folded = {};  // the sections you opened or folded, "tab:section" -> open
+  try { folded = JSON.parse(sessionStorage.getItem("applyOpen") || "{}"); } catch (e) { folded = {}; }
   let drawnRunning = null, drawnHomelab = "";
-  // The "At most" box is made once and moved into each redraw, so what you typed (and the focus) is never lost.
+  // Made once and moved into each redraw, so what you typed (and the focus) is never lost.
   const atMost = el("input", { type: "number", min: "1", id: "apply-n", testid: "apply-n", "aria-label": "At most this many", placeholder: "all" });
-  const head = el("div"), runBox = el("div"), tabs = el("div", { class: "tabs", role: "tablist", "aria-label": "Apply" }),
-    pane = el("div", { role: "tabpanel", testid: "apply-pane" });
-  fill(view, head, runBox, tabs, pane);
+  const find = el("input", { type: "search", class: "grow", testid: "apply-search", "data-find": true,
+    placeholder: "Search this tab (Ctrl+F)", "aria-label": "Search the jobs in this tab" });
+  find.addEventListener("input", () => { words = find.value.toLowerCase().split(/\s+/).filter(Boolean); drawPane(); });
+  find.addEventListener("keydown", (e) => { if (e.key === "Escape") { find.value = ""; words = []; drawPane(); } });
+  // the pane: the tab's head (the week, Start), the toolbar (stays put while you type in its search), the sections
+  const runBox = el("div"), tabs = el("div", { class: "tabs", role: "tablist", "aria-label": "Apply" }),
+    headBox = el("div"), bar = el("div"), listBox = el("div"),
+    pane = el("div", { role: "tabpanel", id: "apply-pane", testid: "apply-pane" }, headBox, bar, listBox);
+  fill(view, runBox, tabs, pane);
 
   async function reload() {
-    const [a, c, o] = await Promise.allSettled([api.get("/api/apply?order=" + sortOf("nuworks")), api.get("/api/company"), api.get("/api/other")]);
-    sites = c.status === "fulfilled" ? c.value : { error: c.reason.message };
-    S.queue = sites.queue || null;  // (the homelab) each company-site row's place in its queue
-    others = o.status === "fulfilled" ? o.value : { error: o.reason.message };
-    if (a.status === "rejected") { fill(pane, el("div", { class: "note fail", text: a.reason.message })); drawTabs(); return; }
-    data = a.value;
+    const [n, o] = await Promise.allSettled([api.get(`/api/jobs?tab=nuworks&order=${sortOf("nuworks")}`), api.get("/api/jobs?tab=other")]);
+    data.nuworks = n.status === "fulfilled" ? n.value : { error: n.reason.message };
+    data.other = o.status === "fulfilled" ? o.value : { error: o.reason.message };
+    for (const [t, d] of Object.entries(data)) {  // each row's key in the homelab's queue (Sort: the queue's order)
+      if (ok(d)) Object.values(d.sections).flat().forEach((r) => { r.qkey = `${t === "other" ? "other" : "jobs"}-${r.row}`; });
+    }
+    S.queue = data.nuworks.queue || data.other.queue || null;  // (the homelab's queue) each company-site row's place in it
     draw();
   }
 
   function running() { return S.task && S.task.kind === "apply" && S.task.state === "running"; }
-
+  const ok = (d) => d && !d.error;
+  const names = () => ({ nuworks: "NUworks co-ops", other: otherTabLabel() });  // the tabs as this screen names them
+  function sessions() {  // the assistants running now: here (or, on the homelab's page, there) and on the homelab
+    const d = ok(data.nuworks) ? data.nuworks : ok(data.other) ? data.other : {};
+    return { d, here: d.sessions || [], there: d.homelab || [] };
+  }
+  const todo = (d, keys) => ok(d) ? keys.reduce((n, k) => n + d.sections[k].length, 0) : 0;
   function counts() {
-    const ok = sites && !sites.error;
-    return { nuworks: data ? data.rows.length : 0, company: (ok ? sites.agent.length + sites.site.length + sites.retry.length : 0) + (others && others.ready ? others.ready.length : 0), manual: ok ? sites.other.length : 0 };
+    const s = sessions();
+    return { nuworks: todo(data.nuworks, ["approved", "agent", "manual", "owed"]), other: todo(data.other, ["ready"]),
+      assistants: s.here.length + s.there.length };
   }
 
   function drawTabs() {
-    const n = counts();
-    fill(tabs, ...TABS.map(([k, label]) => el("button", { role: "tab", testid: `tab-${k}`, "aria-selected": String(tab === k), "aria-controls": "apply-pane",
+    const n = counts(), label = { nuworks: "NUworks co-ops", other: otherTabLabel(), assistants: "Assistants" };
+    fill(tabs, ...TABS.map((k) => el("button", { role: "tab", testid: `tab-${k}`, "aria-selected": String(tab === k), "aria-controls": "apply-pane",
       onclick: () => { tab = k; sessionStorage.setItem("applyTab", k); drawTabs(); drawPane(); } },
-      label, el("span", { class: "count", text: String(n[k]) }))));
+      label[k], el("span", { class: "count", text: String(n[k]) }))));
   }
 
-  // Sort by and Kind of work for this tab's rows (counts: this tab's NUworks rows of each kind)
-  function toolbar(rows) {
-    const how = sortOf(tab);
-    const sel = el("select", { testid: "apply-sort", "aria-label": tab === "nuworks" ? "Apply in this order" : "Sort the list by",
-      title: tab === "nuworks" ? "Start (and At most) goes down this list in this order." : null,
-      onchange: (e) => { sessionStorage.setItem("applySort:" + tab, e.target.value); if (tab === "nuworks") reload(); else drawPane(); } },
-      ...SORT_OPTS[tab].map((k) => el("option", { value: k, text: SORTS[k][0], selected: k === how })));
+  // Search, kind of work, the order, Add a job: the same for both sheet tabs
+  function drawBar() {
+    const d = data[tab];
+    if (tab === "assistants" || !ok(d)) return fill(bar);
+    if (find === document.activeElement) return;  // typing in the search: its box stays as it is
+    const rows = Object.values(d.sections).flat();
     const n = {};
     rows.forEach((r) => { n[kindOf(r)] = (n[kindOf(r)] || 0) + 1; });
-    const keys = Object.keys(n).sort((a, b) => n[b] - n[a] || a.localeCompare(b));
+    const keys = Object.keys(n).filter((k) => k !== NO_KIND || Object.keys(n).length > 1).sort((a, b) => n[b] - n[a] || a.localeCompare(b));
     if (kind && !n[kind]) keys.push(kind);
-    const cat = el("select", { testid: "apply-kind", "aria-label": "Kind of work",
+    const cat = keys.length ? el("select", { testid: "apply-kind", "aria-label": "Kind of work",
       onchange: (e) => { kind = e.target.value; sessionStorage.setItem("applyKind", kind); drawPane(); } },
-      el("option", { value: "", text: `All kinds of work (${rows.length})` }),
-      ...keys.map((k) => el("option", { value: k, text: `${kindLabel(k, rows)} (${n[k] || 0})`, selected: k === kind })));
-    return el("div", { class: "row end" }, el("label", { class: "small muted" }, "Show ", cat),
-      el("label", { class: "small muted" }, tab === "nuworks" ? "Apply in this order: " : "Sort the list by ", sel));
+      el("option", { value: "", text: "All kinds of work" }),
+      ...keys.map((k) => el("option", { value: k, text: `${kindLabel(k, rows)} (${n[k] || 0})`, selected: k === kind }))) : null;
+    const how = sortOf(tab);
+    const sel = el("select", { testid: "apply-sort", "aria-label": tab === "nuworks" ? "Apply in this order" : "Sort the list by",
+      title: tab === "nuworks" ? "Start (and At most) goes down Ready to apply in this order." : null,
+      onchange: (e) => { sessionStorage.setItem("applySort:" + tab, e.target.value); if (tab === "nuworks") reload(); else drawPane(); } },
+      ...SORT_OPTS[tab].map((k) => el("option", { value: k, text: (tab === "nuworks" ? "Order: " : "Sort: ") + SORTS[k][0], selected: k === how })));
+    fill(bar, el("div", { class: "row toolbar", testid: "apply-toolbar" }, find, cat, sel,
+      el("button", { class: "btn", testid: "add-job", text: "Add a job", onclick: () => addJob(tab === "other" ? "other" : "nuworks", (t) => { tab = t; sessionStorage.setItem("applyTab", t); reload(); }) })));
   }
 
   function drawPane() {
-    if (!data && tab === "nuworks") return;
-    if (tab === "nuworks") return fill(pane, toolbar(data.rows), nuworksCard(), pastCard());
-    if (!sites) return fill(pane, "");
-    if (sites.error) return fill(pane, el("div", { class: "note fail", text: sites.error }));
-    const lists = tab === "company" ? ["agent", "site", "retry"] : ["other"];
-    const sorted = { ...sites };
-    lists.forEach((k) => { sorted[k] = shown(sites[k]); });
-    const all = lists.flatMap((k) => sites[k]);
-    const hidden = all.length - lists.reduce((n, k) => n + sorted[k].length, 0);
-    const cards = tab === "company" ? companyCards(sorted).concat([otherCard(others)]) : manualCards(sorted);
-    const note = hidden ? el("p", { class: "small muted", testid: "apply-hidden",
-      text: `${plural(hidden, "row")} of other kinds of work not shown.` }) : null;
-    fill(pane, ...(cards.some(Boolean) ? [all.length ? toolbar(all) : null, note, ...cards] : [all.length ? toolbar(all) : null, note,
-      el("div", { class: "card" }, el("p", { class: "empty", text: hidden ? "Nothing of this kind of work here." : "Nothing that only you can finish on NUworks." }))]));
-  }
-
-  function nuworksCard() {
-    // already in the order Start goes (the server sorted them); place: where Start takes it
-    const rows = data.rows.map((r, k) => ({ ...r, place: k + 1 })).filter((r) => !kind || kindOf(r) === kind);
-    const total = data.rows.length;
-    return el("div", { class: "card" }, el("div", { class: "row between" },
-        el("h2", { text: rows.length === total ? `Approved (${total})` : `Approved: ${rows.length} of ${total} shown` }),
-        rows.length !== total ? el("span", { class: "small muted", testid: "apply-filter-note", text: `Start still goes through all ${total}, in this order.` }) : null),
-      rows.length ? el("ul", { class: "list", testid: "approved-list" }, ...rows.map((r) => el("li", { testid: `approved-${r.row}` },
-        el("div", { class: "what" }, el("span", { class: "muted", text: `${r.place}. `, title: `Start applies to this one ${ordinal(r.place)}` }), el("b", { text: r.company }), " · ", r.title,
-          jobFacts(r)),
-        el("div", { class: "row" }, r.company_site ? el("span", { class: "chip", text: "may also want the company's site", title: r.company_site }) : null,
-          dueChip(r), linkOut(r.url, "Open"),
-          el("button", { class: "btn small", testid: `btn-apply-row-${r.row}`, disabled: !!data.why_not || !!(S.task && S.task.state === "running"),
-            text: "Apply", title: "Apply to just this job now", onclick: () => applyRow(r) }))))) :
-        el("p", { class: "empty", text: total ? "None of this kind of work." : "Nothing approved yet. Approve jobs in Review." }));
-  }
-
-  function pastCard() {
-    return data.history.length ? el("div", { class: "card" }, el("div", { class: "row between" }, el("h2", { text: "Recent runs here" }),
-      el("a", { href: "#/logs", class: "btn small ghost", text: "All logs and screenshots" })),
-      el("ul", { class: "list" }, ...data.history.map((t) => el("li", {}, el("div", { class: "what" }, el("b", { text: t.label }), " · ",
-        el("span", { class: "muted", text: `${t.state} · ${ago(t.started)}` })))))) : "";
-  }
-
-  function draw() {
-    if (!data) return;
     drawnRunning = running();
-    const w = data.week;
-    fill(head, el("div", { class: "card" },
+    drawBar();
+    const d = data[tab];
+    fill(headBox, tab === "nuworks" && ok(d) ? weekCard(d) : null);
+    if (tab === "assistants") return fill(listBox, assistantsPane(sessions()));
+    if (!d) return fill(listBox, el("p", {}, el("span", { class: "spinner" })));
+    if (d.error) return fill(listBox, el("div", { class: "note fail", text: d.error }));
+    const filtering = !!(words.length || kind);
+    const fits = (r) => (!kind || kindOf(r) === kind) && words.every((w) => findText(r).includes(w));
+    let found = 0;
+    const cards = (tab === "nuworks" ? NU_SECTIONS : OTHER_SECTIONS).map(([key, title, note]) => {
+      let all = d.sections[key];
+      if (key === "approved") all = all.map((r, k) => ({ ...r, place: k + 1 }));  // where Start takes it
+      const first = key === "approved" || key === "ready";
+      if (!all.length && !first) return null;
+      const rows = all.filter(fits);
+      found += rows.length;
+      if (filtering && !rows.length) return null;
+      return section(d, key, title, note, all.length, key === "approved" ? rows : sortRows(rows, sortOf(tab)), filtering);
+    });
+    fill(listBox, filtering && !found ? el("div", { class: "card", testid: "apply-nothing" }, el("p", { class: "empty", text: "Nothing in this tab matches." }),
+        el("div", { class: "row center" }, el("button", { class: "btn", text: "Clear the search", onclick: () => {
+          find.value = ""; words = []; kind = ""; sessionStorage.setItem("applyKind", ""); drawBar(); drawPane(); } }))) : null,
+      ...cards, tab === "nuworks" ? pastCard(d) : null);
+  }
+
+  function section(d, key, title, note, total, rows, filtering) {
+    const id = `${tab}:${key}`;
+    const open = filtering || (id in folded ? folded[id] : TODO.has(key));
+    const box = el("details", { class: "card section", testid: `section-${tab}-${key}`, open });
+    box.addEventListener("toggle", () => {
+      if (filtering) return;  // a search opens every section with a match; your own choice stays for later
+      folded[id] = box.open;
+      sessionStorage.setItem("applyOpen", JSON.stringify(folded));
+    });
+    const empty = key === "approved" ? "Nothing approved yet. Approve jobs in Review." :
+      key === "ready" ? (d.exists ? "Nothing approved here. Approve internships in Review, or Add a job." : "No jobs yet. Approve internships in Review, or Add a job.") : "None.";
+    box.append(...[el("summary", {}, el("h2", { text: title }), el("span", { class: "count", text: rows.length === total ? String(total) : `${rows.length} of ${total}` })),
+      note ? el("p", { class: "small muted", text: note }) : null,
+      key === "approved" && rows.length !== total ? el("p", { class: "small muted", testid: "apply-filter-note", text: `Start still goes through all ${total}, in this order.` }) : null,
+      rows.length ? el("ul", { class: "list", testid: key === "approved" ? "approved-list" : `list-${tab}-${key}` }, ...rows.map((r) => jobRow(d, key, r))) :
+        el("p", { class: "empty", text: empty })].filter(Boolean));
+    return box;
+  }
+
+  // One row: who and what, its facts, a line about it; then its chips, what to do next, Open, and More.
+  function jobRow(d, key, r) {
+    const other = tab === "other";
+    let chips = [], next = null, open = linkOut(r.url, "Open"), about = null;
+    if (key === "approved") {
+      chips = [r.company_site ? el("span", { class: "chip", text: "may also want the company's site", title: r.company_site }) : null, dueChip(r)];
+      next = el("button", { class: "btn small", testid: `btn-apply-row-${r.row}`, disabled: !!d.why_not || !!(S.task && S.task.state === "running"),
+        text: "Apply", title: "Apply to just this job now", onclick: () => applyRow(r) });
+    } else if (key === "agent") {
+      chips = [dueChip(r)];
+      about = r.host;
+      next = assistantStart(d, r, "jobs", `assist-${r.row}`, { body: { row: r.row } });
+      open = linkOut(r.target, "Open site");
+    } else if (key === "manual") {
+      chips = [dueChip(r)];
+      about = r.notes || r.why;
+    } else if (key === "owed" && r.owed === "site") {
+      chips = [dueChip(r)];
+      about = (r.notes || "").slice(0, 160);
+      next = el("button", { class: "btn small primary", testid: `site-btn-${r.row}`, text: "Mark the company site done", onclick: () => markRow("site", r) });
+    } else if (key === "owed") {
+      about = (r.notes || "").slice(-160);
+      next = el("button", { class: "btn small primary", text: "Submit on NUworks too", testid: `retry-btn-${r.row}`,
+        onclick: () => confirmBox("Submit on NUworks too?", `${r.company} · ${r.title} is Applied on the company site. This submits the same job on NUworks.`,
+          "Submit on NUworks", () => action("nuworks_side", runArgs({ row: r.row }))) });
+    } else if (key === "ready") {
+      about = [r.posted_text, r.host || r.why].filter(Boolean).join(" · ");
+      next = assistantStart(d, r, "other", `other-assist-${r.row}`, { disabled: !r.target, body: { row: r.row, tab: "other" } });
+      open = r.target ? linkOut(r.target, "Open site") : null;
+    } else {
+      about = [r.status === "Applied" && r.date ? `applied ${r.date}` : null, r.notes ? r.notes.slice(0, 140) : null].filter(Boolean).join(" · ");
+    }
+    const facts = r.match != null || r.score != null || r.pay ? jobFacts(r) : null;
+    return el("li", { class: "job-row", testid: `job-${tab}-${r.row}` },
+      el("div", { class: "what" }, key === "approved" ? el("span", { class: "muted", text: `${r.place}. `, title: `Start applies to this one ${ordinal(r.place)}` }) : null,
+        el("b", { text: r.company || "(no company)" }), r.title ? ` · ${r.title}` : "", facts,
+        about ? el("div", { class: "small muted", text: about }) : null),
+      el("div", { class: "row" }, ...chips, el("span", { class: "acts" }, next, el("span", { class: "tail" }, open, rowMenu(d, key, r, other)))));
+  }
+
+  // More: the same four for every row (each greyed out with the reason when it can't be done to this one)
+  function rowMenu(d, key, r, other) {
+    const t = other ? "other" : undefined, to = other ? "nuworks" : "other", busy = d.busy ? "A run is using the sheet: wait for it to end" : null;
+    const live = r.status === "Approved" || r.status === "Needs Human";
+    return menuButton(`More for ${r.company}`, `more-${tab}-${r.row}`, [
+      ["I applied myself", "mark", () => markRow("applied", r, t), live ? null : "Only for rows still to do (Approved or Needs Human)"],
+      ["Drop (not applying)…", "drop", () => dropRow(r, t), live ? null : "Only Approved or Needs Human rows are dropped"],
+      [`Move to ${names()[to]}…`, "move", () => moveRow(names(), other ? "other" : "nuworks", r, reload), r.locked || busy],
+      ["Remove from the sheet…", "remove", () => removeRow(names(), other ? "other" : "nuworks", r, reload), r.remove_locked || busy, true],
+    ]);
+  }
+
+  function weekCard(d) {
+    const w = d.week;
+    return el("div", { class: "card", testid: "apply-week" },
       el("div", { class: "row between" }, el("div", {},
         el("h2", { text: w.room ? `You can apply to ${plural(w.room, "more job")} this week` : "Weekly limit reached" }),
         el("p", { class: "small muted" }, `${w.applied} of ${w.max} ${w.label} · ${w.total} of ${w.max_total} in total` + (w.next ? ` · new week ${w.next}` : "") + " · ", el("a", { href: "#/settings", text: "change the limit" }))),
       drawnRunning ? null : el("div", { class: "row" },
         canRunThere() ? el("div", { class: "seg", role: "group", "aria-label": "Run on", testid: "run-on" },
           ...[["here", "This computer"], ["homelab", "The homelab"]].map(([k, label]) => el("button", { "aria-pressed": String(runOn() === k),
-            testid: `run-on-${k}`, text: label, onclick: () => { sessionStorage.setItem("runOn", k); draw(); } }))) : null,
+            testid: `run-on-${k}`, text: label, onclick: () => { sessionStorage.setItem("runOn", k); drawPane(); } }))) : null,
         el("label", { class: "small muted" }, "At most ", atMost),
-        el("button", { class: "btn primary big", testid: "btn-start-apply", disabled: !!data.why_not || !!(S.task && S.task.state === "running"),
+        el("button", { class: "btn primary big", testid: "btn-start-apply", disabled: !!d.why_not || !!(S.task && S.task.state === "running"),
           text: runOn() === "homelab" ? "Start on the homelab" : "Start applying", onclick: startApply }))),
       followNote(),
-      data.why_not ? el("div", { class: "note warn", testid: "apply-why", text: data.why_not }) :
-        el("p", { class: "small muted", text: (onHomelab() ? "Approved in the sheet is your go-ahead. Each job is filled and submitted in a browser on the homelab, which you watch and use from here (its link shows when it starts), one at a time, 30–60 s apart. Only one machine applies at a time." : "Approved in the sheet is your go-ahead. Each job is filled and submitted in a visible Firefox window, one at a time, 30–60 s apart.") + " Every form is screenshotted before Submit. Questions without a saved answer come up here. A job that sends you to the company's own site, or needs something only you can give (a cover letter, a transcript), stops (nothing submitted) and shows up under the Company sites and By hand tabs. Stop works like Ctrl+C." })));
+      d.why_not ? el("div", { class: "note warn", testid: "apply-why", text: d.why_not }) :
+        el("details", { class: "how" }, el("summary", { text: "How Start works" }),
+          el("p", { class: "small muted", text: (onHomelab() ? "Approved in the sheet is your go-ahead. Each job is filled and submitted in a browser on the homelab, which you watch and use from here (its link shows when it starts), one at a time, 30–60 s apart. Only one machine applies at a time." : "Approved in the sheet is your go-ahead. Each job is filled and submitted in a visible Firefox window, one at a time, 30–60 s apart.") + " Every form is screenshotted before Submit. Questions without a saved answer come up here. A job that sends you to the company's own site, or needs something only you can give (a cover letter, a transcript), stops (nothing submitted) and moves to Company site needed or By hand on NUworks below. Stop works like Ctrl+C." })));
+  }
+
+  function pastCard(d) {
+    if (!d.history.length) return null;
+    const box = el("details", { class: "card section", testid: "section-nuworks-runs" },
+      el("summary", {}, el("h2", { text: "Recent runs here" }), el("span", { class: "count", text: String(d.history.length) })),
+      el("ul", { class: "list" }, ...d.history.map((t) => el("li", {}, el("div", { class: "what" }, el("b", { text: t.label }), " · ",
+        el("span", { class: "muted", text: `${t.state} · ${ago(t.started)}` }))))),
+      el("p", {}, el("a", { href: "#/logs", text: "All logs and screenshots" })));
+    return box;
+  }
+
+  function draw() {
     drawTabs();
     drawPane();
     drawRun();
@@ -1111,7 +1226,7 @@ screens.apply = async (view) => {
       el("div", { class: "runhead" },
         el("div", {}, live && t.row ? el("p", {}, el("span", { class: "muted", text: "Now: " }), el("b", { text: t.row.company }), " · ", t.row.title) : null,
           live ? (t.done_rows.length ? el("p", { class: "small muted", text: `${plural(t.done_rows.length, "job")} done in this run` }) : null) :
-            el("p", { class: "small muted", text: `${plural(t.done_rows.length, "job")} handled. Applied rows are in your sheet; anything that needs you is under Company sites or Today.` })),
+            el("p", { class: "small muted", text: `${plural(t.done_rows.length, "job")} handled. Applied rows are under Applied; anything that needs you is in its own section, and on Today.` })),
         t.screenshot ? el("div", {}, el("img", { class: "shot thumb", src: t.screenshot, alt: "Latest screenshot of the form", testid: "apply-shot",
           onclick: () => modal((box, close) => box.append(el("img", { class: "full", src: t.screenshot, alt: "Screenshot" }),
             el("div", { class: "foot" }, el("span"), el("button", { class: "btn primary", text: "Close", onclick: close }))), { label: "Screenshot" }) })) : null),
@@ -1122,13 +1237,13 @@ screens.apply = async (view) => {
 
   function applyRow(r) {
     confirmBox(`Apply to ${r.company}?`, `${r.title} is filled and submitted now in ${onHomelab() || runOn() === "homelab" ? "a browser on the homelab you can watch from here" : "a visible Firefox window"}, the same way Start does it. Only this job.`,
-      "Apply now", async () => { if (await action("apply", runArgs({ row: r.row }))) draw(); });
+      "Apply now", async () => { if (await action("apply", runArgs({ row: r.row }))) drawPane(); });
   }
 
   async function startApply() {
     const n = atMost.value;
     const r = await action("apply", runArgs(n ? { n, order: sortOf("nuworks") } : { order: sortOf("nuworks") }));
-    if (r) draw();
+    if (r) drawPane();
   }
 
   // (laptop, linked) a run going on the homelab that this app is not following yet: one tap follows it here
@@ -1136,23 +1251,165 @@ screens.apply = async (view) => {
     const t = S.state && S.state.homelab_link && S.state.homelab_link.task;
     if (!t || t.state !== "running" || (S.taskWhere === "homelab" && S.task && S.task.id === t.id)) return null;
     return el("div", { class: "note accent", testid: "homelab-run" }, el("b", { text: "Running on the homelab: " }), t.label, " ",
-      el("button", { class: "btn small", text: "Follow it here", testid: "btn-follow-homelab", onclick: () => { followHomelabTask(); draw(); } }));
+      el("button", { class: "btn small", text: "Follow it here", testid: "btn-follow-homelab", onclick: () => { followHomelabTask(); drawPane(); } }));
   }
 
   await reload();
-  if (S.focus === "company") S.focus = null;
   // refresh: the sheet changed (a run finished, a row was applied, something was done elsewhere): read the lists again
   return { task: () => { drawRun(); if (S.task && S.task.state !== "running") reload(); },
     update: () => {  // redraw when a run starts or ends here, or one starts or ends on the homelab (its "Follow it here")
       const ht = S.state && S.state.homelab_link && S.state.homelab_link.task, key = ht ? `${ht.id}:${ht.state}` : "";
-      if (running() !== drawnRunning || key !== drawnHomelab) { drawnHomelab = key; draw(); }
+      if (running() !== drawnRunning || key !== drawnHomelab) { drawnHomelab = key; drawPane(); }
     }, refresh: reload, reload };
 };
 
-// ---- Company sites (a tab of the Apply screen): Needs Human rows for the assistant, company sites still owed, and
-// the NUworks side to send again (only the sections that have rows show); then Other jobs (always shown).
-// Assistant sessions run side by side (up to d.slots, each in its own terminal window and browser): a row with one
-// running says so instead of offering another; with every slot in use, Start waits.
+// A small menu of row actions: [label, key, do it, why it can't (or null), danger]. One open at a time; Escape or a
+// click elsewhere closes it.
+function closeMenus() { document.querySelectorAll(".menu").forEach((m) => { m.previousSibling.setAttribute("aria-expanded", "false"); m.remove(); }); }
+document.addEventListener("click", (e) => { if (!e.target.closest(".more")) closeMenus(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && document.querySelector(".menu")) closeMenus(); });
+function menuButton(label, testid, items) {
+  const wrap = el("span", { class: "more" });
+  const btn = el("button", { class: "btn small ghost", text: "⋯", title: "More", "aria-label": label, "aria-haspopup": "menu",
+    "aria-expanded": "false", testid, onclick: () => {
+      const was = !!wrap.querySelector(".menu");
+      closeMenus();
+      if (was) return;
+      btn.setAttribute("aria-expanded", "true");
+      const menu = el("div", { class: "menu", role: "menu", "aria-label": label },
+        ...items.map(([text, key, run, why, danger]) => el("button", { role: "menuitem", class: danger ? "danger" : null, text, testid: `${testid}-${key}`,
+          disabled: !!why, title: why || null, onclick: () => { closeMenus(); run(); } })));
+      wrap.append(menu);
+      const first = menu.querySelector("button:not(:disabled)");
+      if (first) first.focus();
+    } });
+  wrap.append(btn);
+  return wrap;
+}
+
+// Add a job by hand (manage.py): to either sheet tab, Approved or Proposed; a NUworks link fills the company, title and
+// match from your job data. done(tab): the tab it went to.
+function addJob(tab, done) {
+  const form = { tab, url: "", company: "", title: "", status: "Approved" };
+  let info = null, seen = "";
+  modal((box, close) => {
+    const body = el("div");
+    async function look() {  // what your job data knows about this link (NUworks links: company, title, match)
+      const url = form.url.trim();
+      if (!url || url === seen) return;
+      seen = url;
+      try { info = await api.get("/api/sheet/lookup?url=" + encodeURIComponent(url)); } catch (e) { info = null; }
+      if (info && info.tab) form.tab = info.tab;
+      if (info && info.known) { form.company = form.company || info.company; form.title = form.title || info.title; }
+      const focused = document.activeElement && document.activeElement.dataset.testid;  // keep the cursor where it went
+      draw();
+      if (focused) { const n = body.querySelector(`[data-testid="${focused}"]`); if (n) n.focus(); }
+    }
+    async function add(e) {
+      e.preventDefault();
+      try {
+        const r = await api.post("/api/sheet", { action: "add", ...form });
+        close();
+        toast(`Added as row ${r.row} (${form.status}).`);
+        pollState();
+        done(r.tab);
+      } catch (err) { fail(err); }
+    }
+    function draw() {
+      const input = (k, props) => el("input", { ...props, value: form[k], oninput: (e) => { form[k] = e.target.value; } });
+      const seg = (k, opts, label) => el("div", { class: "seg", role: "group", "aria-label": label },
+        ...opts.map(([v, t]) => el("button", { type: "button", "aria-pressed": String(form[k] === v), testid: `add-${k}-${v}`, text: t,
+          onclick: () => { form[k] = v; draw(); } })));
+      const hint = !info ? (form.tab === "nuworks" ? "Paste a NUworks job link (…/students/app/jobs/detail/…): the company, title and match come from your job data when it has the job." :
+        "Paste the company's own posting (any https link that is not NUworks).") :
+        info.tab === null ? info.why :
+        info.tab === "other" ? "Not a NUworks job link: it goes in Other jobs." :
+        !info.known ? "A NUworks job your job data doesn't have yet: type the company and title." :
+        info.in_pool ? `In your pool: ${info.notes}.` : `In your job data: ${info.notes}.`;
+      fill(body, el("form", { class: "stack", onsubmit: add, testid: "add-form" },
+        el("div", { class: "row" }, seg("tab", [["nuworks", "NUworks co-op"], ["other", "Other job (not on NUworks)"]], "Which tab"),
+          seg("status", [["Approved", "Approved"], ["Proposed", "Proposed"]], "Status")),
+        el("label", { class: "field" }, "Link to the posting", input("url", { type: "url", placeholder: "https://", required: true, testid: "add-url", onchange: look })),
+        el("p", { class: "small muted", testid: "add-hint", text: hint }),
+        el("div", { class: "grid2" },
+          el("label", { class: "field" }, "Company", input("company", { type: "text", testid: "add-company" })),
+          el("label", { class: "field" }, "Job title", input("title", { type: "text", testid: "add-title" }))),
+        el("p", { class: "small muted", text: form.status === "Approved" ?
+          (form.tab === "nuworks" ? "Approved NUworks jobs are submitted by Start (your weekly limit applies)." : "Approved Other jobs are ready for the assistant (no limits there).") :
+          "Proposed: it waits in the sheet (Review shows it first) until you approve it." }),
+        el("div", { class: "foot" }, el("span"), el("div", { class: "row" }, el("button", { class: "btn", type: "button", text: "Cancel", onclick: close }),
+          el("button", { class: "btn primary", type: "submit", text: "Add", testid: "add-submit" })))));
+    }
+    draw();
+    box.append(el("h2", { text: "Add a job" }), body);
+    setTimeout(() => { const u = body.querySelector("[data-testid=add-url]"); if (u) u.focus(); }, 0);
+  }, { label: "Add a job", testid: "add-dialog" });
+}
+
+// Move a row to the sheet's other tab (its status, notes and date go with it), or remove it (its cells cleared: no row
+// is renumbered). names: {nuworks, other} the two tabs' names.
+function moveRow(names, tab, r, done) {
+  const to = tab === "nuworks" ? "other" : "nuworks";
+  const isNu = (u) => /^https:\/\/northeastern-csm\.symplicity\.com\//.test(u || "");
+  let link = (to === "nuworks") === isNu(r.url) ? r.url : "";  // the old link only if it fits the new tab
+  modal((box, close) => box.append(
+    el("h2", { text: `Move to ${names[to]}?` }),
+    el("p", { class: "muted", text: `${r.company} · ${r.title} (${r.status || "no status"}). Its status, notes and date go with it; the row here is cleared.` +
+      (to === "nuworks" ? " The NUworks tab needs the job's NUworks link (copy it from the job's page on NUworks)." : " Other jobs needs the company's own posting (not NUworks).") }),
+    r.status === "Applied" ? el("div", { class: "note warn", text: "It is Applied: in the NUworks tab it counts toward your weekly and total limits." }) : null,
+    el("label", { class: "field" }, `Link in ${names[to]}`, el("input", { type: "url", value: link, testid: "move-url", required: true,
+      placeholder: to === "nuworks" ? "https://northeastern-csm.symplicity.com/students/app/jobs/detail/…" : "https://", oninput: (e) => { link = e.target.value; } })),
+    el("div", { class: "foot" }, el("span"), el("div", { class: "row" },
+      el("button", { class: "btn", text: "Cancel", onclick: close }),
+      el("button", { class: "btn primary", text: "Move", testid: "move-yes", onclick: async () => {
+        try {
+          const out = await api.post("/api/sheet", { action: "move", tab, row: r.row, url: r.url, new_url: link });
+          close(); toast(`Moved to row ${out.row} of the ${names[out.tab]} tab.`); pollState(); done();
+        } catch (err) { fail(err); }
+      } })))), { label: "Move a job", testid: "move-dialog" });
+}
+
+function removeRow(names, tab, r, done) {
+  confirmBox("Remove this job?", `${r.company} · ${r.title} (${names[tab]} row ${r.row}). Its cells are cleared; the other rows keep their numbers.`,
+    "Remove", async () => {
+      try { await api.post("/api/sheet", { action: "remove", tab, row: r.row, url: r.url }); toast("Removed."); pollState(); done(); }
+      catch (err) { fail(err); }
+    }, { danger: true });
+}
+
+// Apply's Assistants tab: every session running now, here and on the homelab, each with where you answer it; the
+// queue's line on top (the homelab's page, or the laptop's app linked to it).
+function assistantsPane({ d, here, there }) {
+  const homelab = onHomelab();
+  const all = [...here.map((s) => ({ ...s, where: homelab ? "homelab" : "here", own: true })), ...there.map((s) => ({ ...s, where: "homelab", own: false }))];
+  const status = (s) => {
+    const k = s.attention && s.attention.kind;
+    return el("span", { class: "chip" + (k === "approve" ? " warn" : k ? " accent" : " ok"), testid: "assistant-status",
+      text: k === "approve" ? "wants to Submit: approve" : k ? "waiting for you" : "working" });
+  };
+  const open = (s) => {
+    const wait = s.attention && s.attention.kind;
+    if (s.own && homelab) return el("a", { class: "btn small" + (wait ? " primary" : ""), href: `#/assistant/${s.slot}`, text: "Open its screen" });
+    if (s.own) return el("span", { class: "chip", text: "in its terminal window" });
+    if (d.linked) return el("a", { class: "btn small" + (wait ? " primary" : ""), href: `#/assistant/h${s.slot}`, text: "Open its screen" });
+    return d.homelab_review ? el("button", { class: "btn small" + (wait ? " primary" : ""), text: "Open its screen", title: "In NUauto on your homelab, in your browser",
+      onclick: () => openExternal(`${d.homelab_review}/#/assistant/${s.slot}`) }) : null;
+  };
+  return [assistantsBar(d),
+    el("div", { class: "card", testid: "assistants-list" }, el("h2", { text: "Running now" }),
+      all.length ? el("ul", { class: "list" }, ...all.map((s) => el("li", { testid: `assistant-${s.where}-${s.slot}` },
+        el("div", { class: "what" }, el("b", { text: s.company || "a job" }), ` · ${s.tab === "other" ? otherTabLabel().replace(/s$/, "") : "NUworks co-op"}, row ${s.row}`,
+          el("div", { class: "small muted", text: [s.host, s.where === "here" ? `this computer, slot ${s.slot}` : `the homelab, slot ${s.slot}`,
+            s.since && ago(s.since) ? `started ${ago(s.since)}` : null].filter(Boolean).join(" · ") }),
+          s.attention && s.attention.said ? el("div", { class: "small", text: s.attention.said }) : null),
+        el("div", { class: "row" }, status(s), open(s))))) :
+        el("p", { class: "empty", text: `No assistant is running. Start one from a row under Company site needed (NUworks co-ops) or ${otherTabLabel()}.` }))];
+}
+
+// ---- The assistant's Start on a row (Apply's Company site needed, and the Other jobs tab's rows):
+// up to d.slots run side by side, each in its own terminal window and browser; a row with one running says so instead
+// of offering another; with every slot in use, Start waits. On the homelab's page (and the laptop linked to it): the
+// queue's place for the row, and Start on the homelab.
 function assistantStart(d, r, tab, testid, args) {
   // the homelab's browser was refused there (on the homelab's own page the queue's chip says so)
   if (r.on_laptop && !onHomelab() && !(d.homelab || []).find((s) => s.tab === tab && s.row === r.row)) {
@@ -1188,7 +1445,8 @@ function assistantStartButton(d, r, tab, testid, args) {
   }
   // the homelab's queue (its own page, or the laptop's app through the link): this row's place in it
   const q = S.queue && S.queue.rows ? S.queue.rows[`${tab}-${r.row}`] : null;
-  const chip = q && (q.group === "next" || !q.start) ? el("span", { class: "chip" + (q.group === "next" ? " accent" :
+  const said = q && q.group === "laptop" && r.on_laptop && !onHomelab();  // (the "do it on the laptop" chip says it already)
+  const chip = q && (q.group === "next" || !q.start) && !said ? el("span", { class: "chip" + (q.group === "next" ? " accent" :
     q.group === "check" || q.group === "laptop" ? " warn" : ""), testid: `${testid}-queue`, text: q.text }) : null;
   // Start on the homelab: there (its own Start now) or from the laptop's app (its link); the queue says when it can't
   const there = onHomelab() || d.linked && S.queue;
@@ -1216,7 +1474,7 @@ function assistantStartButton(d, r, tab, testid, args) {
   return there ? el("span", { class: "row" }, chip, startHere, startThere) : startHere;
 }
 
-// One line at the top of Company sites, the same on both machines: how many assistants run (here, and on the homelab),
+// One line at the top of Apply's Assistants tab, the same on both machines: how many assistants run (here, and on the homelab),
 // how many wait for you (Today lists them), and on the homelab's page what its queue starts by itself. Each session is
 // reached from its own row (its screen, or its terminal window); pairing and opening the homelab's page are in Settings.
 function assistantsBar(d) {
@@ -1240,179 +1498,6 @@ async function pairThisComputer() {
   const r = await action("review_pair");
   if (r && r.url) { openExternal(r.url); toast("Opened a pairing link in your browser: press Pair there."); }
 }
-
-function companyCards(d) {
-  return [
-    assistantsBar(d),
-    d.agent.length ? el("div", { class: "card", testid: "company-agent" }, el("h2", { text: "Company sites: ready for the assistant" }),
-      el("p", { class: "small muted", text: onHomelab() ?
-        "Jobs that send you to the company's own site. The assistant (Claude) fills the application in a browser here on the homelab, which you watch and use from its screen; it asks you there before anything is submitted. You solve captchas, open email codes and approve Submit. Several can run at once." :
-        "Jobs that send you to the company's own site. The assistant (Claude, in a terminal window) fills the application in a visible browser; it asks you before anything is submitted. You solve captchas, open email codes and approve Submit. Several can run at once, each in its own window." }),
-      el("ul", { class: "list" }, ...d.agent.map((r) => el("li", { testid: `company-${r.row}` },
-        el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title, jobFacts(r), el("div", { class: "small muted", text: r.host })),
-        el("div", { class: "row" }, dueChip(r), assistantStart(d, r, "jobs", `assist-${r.row}`, { body: { row: r.row } }),
-          linkOut(r.target, "Open site"),
-          el("button", { class: "btn small", text: "I applied myself", onclick: () => markRow("applied", r) }),
-          el("button", { class: "btn small", text: "Drop", testid: `company-drop-${r.row}`, onclick: () => dropRow(r) })))))) : null,
-    d.site.length ? el("div", { class: "card" }, el("h2", { text: "Submitted on NUworks; the company site still wants you" }),
-      el("ul", { class: "list" }, ...d.site.map((r) => el("li", { testid: `site-${r.row}` }, el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title,
-        jobFacts(r), el("div", { class: "small muted", text: r.notes.slice(0, 160) })), el("div", { class: "row" }, dueChip(r), linkOut(r.url, "Open job"),
-        el("button", { class: "btn small", text: "Mark done", onclick: () => markRow("site", r) })))))) : null,
-    d.retry.length ? el("div", { class: "card" }, el("h2", { text: "Company site done; the NUworks side did not go out" }),
-      el("p", { class: "small muted", text: "Submits the same job on NUworks too, with the usual NUworks checks (a visible browser; questions come up here)." }),
-      el("ul", { class: "list" }, ...d.retry.map((r) => el("li", { testid: `retry-${r.row}` }, el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title,
-        jobFacts(r), el("div", { class: "small muted", text: r.notes.slice(-160) })), el("div", { class: "row" }, linkOut(r.url, "Open job"),
-        el("button", { class: "btn small primary", text: "Submit on NUworks too", testid: `retry-btn-${r.row}`,
-          onclick: () => confirmBox("Submit on NUworks too?", `${r.company} · ${r.title} is Applied on the company site. This submits the same job on NUworks.`,
-            "Submit on NUworks", () => action("nuworks_side", runArgs({ row: r.row }))) }))))))  : null];
-}
-
-// ---- By hand on NUworks (a tab of the Apply screen): rows only you can finish there (a cover letter, a transcript...)
-function manualCards(d) {
-  return [d.other.length ? el("div", { class: "card", testid: "manual-nuworks" }, el("h2", { text: "Needs you on NUworks" }),
-    el("ul", { class: "list" }, ...d.other.map((r) => el("li", {}, el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title,
-      jobFacts(r), el("div", { class: "small muted", text: r.notes || r.why })), el("div", { class: "row" }, dueChip(r), linkOut(r.url, "Open job")))))) : null];
-}
-
-// ---- Other jobs (a card in Company sites): the Approved rows of the sheet's Other jobs tab, jobs that are not on
-// NUworks (the same assistant; nothing is sent to NUworks). Their Applied and other rows are on the Sheet screen.
-function otherCard(d) {
-  if (!d) return null;
-  const head = el("div", { class: "row between" }, el("h2", { text: "Other jobs (not on NUworks)" }),
-    el("button", { class: "btn small", text: "Add a job", testid: "other-add",
-      onclick: () => { sessionStorage.setItem("sheetAddTab", "other"); location.hash = "#/sheet"; } }));
-  if (d.error) return el("div", { class: "card", testid: "other-jobs" }, head, el("div", { class: "note fail", text: d.error }));
-  return el("div", { class: "card", testid: "other-jobs" }, head,
-    el("p", { class: "small muted", text: `Approved rows of your sheet's "${d.tab}" tab; no weekly or total limit. The assistant answers from your Other jobs answers first, then your NUworks ones (not the NUworks-only ones: co-op dates and term). When you tell it the application went through, the row becomes Applied; nothing is sent to NUworks. Applied and other rows: the Sheet screen.` }),
-    d.ready.length ? el("ul", { class: "list" }, ...d.ready.map((r) => el("li", { testid: `other-${r.row}` },
-      el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title,
-        r.match != null ? jobFacts(r) : null,  // an internship from Simplify's list: its match % and pay
-        r.posted_text ? el("div", { class: "small muted", text: r.posted_text }) : null,
-        el("div", { class: "small muted", text: r.host || r.why })),
-      el("div", { class: "row" },
-        assistantStart(d, r, "other", `other-assist-${r.row}`, { disabled: !r.target, body: { row: r.row, tab: "other" } }),
-        r.target ? linkOut(r.target, "Open site") : null,
-        el("button", { class: "btn small", text: "I applied myself", testid: `other-mark-${r.row}`, onclick: () => markRow("applied", r, "other") }),
-        el("button", { class: "btn small", text: "Drop", testid: `other-drop-${r.row}`, onclick: () => dropRow(r, "other") }))))) :
-      el("p", { class: "empty", text: d.exists ? `Nothing Approved in the ${d.tab} tab.` : "No jobs yet. Add one with Add a job." }));
-}
-
-// ---- Sheet: add a job to either tab by hand; then the two tabs (NUworks, Other jobs) as tabs, like Apply's: move rows
-// between them; remove them
-screens.sheet = async (view) => {
-  const asked = sessionStorage.getItem("sheetAddTab");  // Apply's "Add a job" (Other jobs)
-  const form = { tab: asked || "nuworks", url: "", company: "", title: "", status: "Approved" };
-  sessionStorage.removeItem("sheetAddTab");
-  let shown = asked || sessionStorage.getItem("sheetTab");  // the tab whose rows show
-  if (shown !== "nuworks" && shown !== "other") shown = "nuworks";
-  let d, info = null, seen = "";
-  async function reload() {
-    try { d = await api.get("/api/sheet"); } catch (e) { fill(view, el("div", { class: "note fail", text: e.message })); return; }
-    draw();
-  }
-  async function look() {  // what your job data knows about this link (NUworks links: company, title, match)
-    const url = form.url.trim();
-    if (!url || url === seen) return;
-    seen = url;
-    try { info = await api.get("/api/sheet/lookup?url=" + encodeURIComponent(url)); } catch (e) { info = null; }
-    if (info && info.tab) form.tab = info.tab;
-    if (info && info.known) { form.company = form.company || info.company; form.title = form.title || info.title; }
-    const focused = document.activeElement && document.activeElement.dataset.testid;  // keep the cursor where it went
-    draw();
-    if (focused) { const n = view.querySelector(`[data-testid="${focused}"]`); if (n) n.focus(); }
-  }
-  async function add(e) {
-    e.preventDefault();
-    try {
-      const r = await api.post("/api/sheet", { action: "add", ...form });
-      toast(`Added as row ${r.row} of the ${d.names[r.tab]} tab (${form.status}).`);
-      Object.assign(form, { url: "", company: "", title: "" });
-      shown = r.tab; sessionStorage.setItem("sheetTab", shown);
-      info = null; seen = "";
-      pollState();
-      reload();
-    } catch (err) { fail(err); }
-  }
-  function move(tab, r) {
-    const to = tab === "nuworks" ? "other" : "nuworks";
-    const isNu = (u) => /^https:\/\/northeastern-csm\.symplicity\.com\//.test(u || "");
-    let link = (to === "nuworks") === isNu(r.url) ? r.url : "";  // the old link only if it fits the new tab
-    modal((box, close) => box.append(
-      el("h2", { text: `Move to ${d.names[to]}?` }),
-      el("p", { class: "muted", text: `${r.company} · ${r.title} (${r.status || "no status"}). Its status, notes and date go with it; the row here is cleared.` +
-        (to === "nuworks" ? " The NUworks tab needs the job's NUworks link (copy it from the job's page on NUworks)." : " Other jobs needs the company's own posting (not NUworks).") }),
-      r.status === "Applied" ? el("div", { class: "note warn", text: "It is Applied: in the NUworks tab it counts toward your weekly and total limits." }) : null,
-      el("label", { class: "field" }, `Link in ${d.names[to]}`, el("input", { type: "url", value: link, testid: "move-url", required: true,
-        placeholder: to === "nuworks" ? "https://northeastern-csm.symplicity.com/students/app/jobs/detail/…" : "https://", oninput: (e) => { link = e.target.value; } })),
-      el("div", { class: "foot" }, el("span"), el("div", { class: "row" },
-        el("button", { class: "btn", text: "Cancel", onclick: close }),
-        el("button", { class: "btn primary", text: "Move", testid: "move-yes", onclick: async () => {
-          try {
-            const out = await api.post("/api/sheet", { action: "move", tab, row: r.row, url: r.url, new_url: link });
-            close(); toast(`Moved to row ${out.row} of the ${d.names[out.tab]} tab.`); pollState(); reload();
-          } catch (err) { fail(err); }
-        } })))), { label: "Move a job", testid: "move-dialog" });
-  }
-  function remove(tab, r) {
-    confirmBox("Remove this job?", `${r.company} · ${r.title} (${d.names[tab]} row ${r.row}). Its cells are cleared; the other rows keep their numbers.`,
-      "Remove", async () => {
-        try { await api.post("/api/sheet", { action: "remove", tab, row: r.row, url: r.url }); toast("Removed."); pollState(); reload(); }
-        catch (err) { fail(err); }
-      }, { danger: true });
-  }
-  function draw() {
-    const input = (k, props) => el("input", { ...props, value: form[k], oninput: (e) => { form[k] = e.target.value; } });
-    const seg = (k, opts, label) => el("div", { class: "seg", role: "group", "aria-label": label },
-      ...opts.map(([v, t]) => el("button", { type: "button", "aria-pressed": String(form[k] === v), testid: `add-${k}-${v}`, text: t,
-        onclick: () => { form[k] = v; draw(); } })));
-    const hint = !info ? (form.tab === "nuworks" ? "Paste a NUworks job link (…/students/app/jobs/detail/…): the company, title and match come from your job data when it has the job." :
-      "Paste the company's own posting (any https link that is not NUworks).") :
-      info.tab === null ? info.why :
-      info.tab === "other" ? "Not a NUworks job link: it goes in Other jobs." :
-      !info.known ? "A NUworks job your job data doesn't have yet: type the company and title." :
-      info.in_pool ? `In your pool: ${info.notes}.` : `In your job data: ${info.notes}.`;
-    const count = (tab) => d.tabs[tab].rows.length;
-    const tabs = el("div", { class: "tabs", role: "tablist", "aria-label": "Sheet tabs" },
-      ...["nuworks", "other"].map((k) => el("button", { role: "tab", testid: `sheet-tab-${k}`, "aria-selected": String(shown === k),
-        "aria-controls": "sheet-pane", onclick: () => { shown = k; sessionStorage.setItem("sheetTab", k); draw(); } },
-        d.names[k], el("span", { class: "count", text: String(count(k)) }))));
-    const tabCard = (tab) => {
-      const t = d.tabs[tab];
-      return el("div", { class: "card", testid: `sheet-${tab}` }, el("h2", { text: `${d.names[tab]} (${t.rows.length})` }),
-        !t.exists ? el("p", { class: "empty", text: "Not made yet: adding the first job makes it." }) :
-        !t.rows.length ? el("p", { class: "empty", text: "No jobs." }) :
-        el("ul", { class: "list" }, ...t.rows.map((r) => el("li", { testid: `sheet-${tab}-${r.row}` },
-          el("div", { class: "what" }, el("b", { text: r.company }), " · ", r.title,
-            el("div", { class: "small muted", text: `Row ${r.row}${r.date ? " · " + r.date : ""}${r.notes ? " · " + r.notes.slice(0, 140) : ""}` })),
-          el("div", { class: "row" }, el("span", { class: "chip", text: r.status || "no status" }), linkOut(r.url, "Open"),
-            el("button", { class: "btn small", text: `Move to ${tab === "nuworks" ? "Other jobs" : "NUworks"}`, testid: `move-${tab}-${r.row}`,
-              disabled: !!r.locked || d.busy, title: r.locked || (d.busy ? "A run is using the sheet" : null), onclick: () => move(tab, r) }),
-            el("button", { class: "btn small", text: "Remove", testid: `remove-${tab}-${r.row}`,
-              disabled: !!r.remove_locked || d.busy, title: r.remove_locked || (d.busy ? "A run is using the sheet" : null), onclick: () => remove(tab, r) }))))));
-    };
-    fill(view,
-      el("div", { class: "card", testid: "add-form" }, el("h2", { text: "Add a job" }),
-        el("form", { class: "stack", onsubmit: add },
-          el("div", { class: "row" }, seg("tab", [["nuworks", "NUworks co-op"], ["other", "Other job (not on NUworks)"]], "Which tab"),
-            seg("status", [["Approved", "Approved"], ["Proposed", "Proposed"]], "Status")),
-          el("label", { class: "field" }, "Link to the posting", input("url", { type: "url", placeholder: "https://", required: true, testid: "add-url",
-            onchange: look })),
-          el("p", { class: "small muted", testid: "add-hint", text: hint }),
-          el("div", { class: "grid2" },
-            el("label", { class: "field" }, "Company", input("company", { type: "text", testid: "add-company" })),
-            el("label", { class: "field" }, "Job title", input("title", { type: "text", testid: "add-title" }))),
-          el("p", { class: "small muted", text: form.status === "Approved" ?
-            (form.tab === "nuworks" ? "Approved NUworks jobs are submitted by Apply (your weekly limit applies)." : "Approved Other jobs are ready for the assistant (no limits there).") :
-            "Proposed: it waits in the sheet (NUworks ones show first in Review) until you approve it." }),
-          el("div", {}, el("button", { class: "btn primary", type: "submit", text: "Add", testid: "add-submit" })))),
-      tabs,
-      el("div", { role: "tabpanel", id: "sheet-pane", testid: "sheet-pane" },
-        el("p", { class: "small muted", text: "Applied rows can't be removed, and NUworks ones can't be moved (they count toward your limits); an Applied Other job can move to NUworks. Removing clears the row's cells, so no other row changes number." }),
-        tabCard(shown)));
-  }
-  await reload();
-  return { reload };
-};
 
 // ---- Insights: pay, places and kinds of work in the pool / what you applied to; where the sheet stands
 const SVGNS = "http://www.w3.org/2000/svg";
@@ -1476,23 +1561,35 @@ function tile(label, value, note, testid) {
     el("div", { class: "tile-value", text: value }), note ? el("div", { class: "tile-note", text: note }) : null);
 }
 
+// Two sets when Summer internships are on (state.internships): the NUworks co-ops and the internships, each with its own
+// pool, applications and sheet tab; the choice is remembered for the session.
 screens.insights = async (view) => {
   let d, which = "pool";
-  try { d = await api.get("/api/insights"); } catch (e) { fill(view, el("div", { class: "note fail", text: e.message })); return {}; }
-  if (d.statuses) d.statuses.sort((x, y) => RING.indexOf(x.label) - RING.indexOf(y.label));
+  let source = sessionStorage.getItem("insightsSource") === "intern" ? "intern" : "nuworks";
+  async function load() {
+    try { d = await api.get(`/api/insights?source=${source}`); } catch (e) { fill(view, el("div", { class: "note fail", text: e.message })); return false; }
+    if (d.statuses) d.statuses.sort((x, y) => RING.indexOf(x.label) - RING.indexOf(y.label));
+    return true;
+  }
+  if (!await load()) return {};
   function draw() {
-    const g = d[which], p = g.pay;
+    const g = d[which], p = g.pay, intern = d.source === "intern", ii = d.internships;  // ii: internships on (its term)
+    source = d.source;
+    const sources = ii ? el("div", { class: "seg", role: "group", "aria-label": "Which jobs", testid: "ins-source" },
+      ...[["nuworks", "NUworks co-ops"], ["intern", `${ii.term} internships`]].map(([k, t]) => el("button", { "aria-pressed": String(source === k),
+        testid: `ins-source-${k}`, text: t, onclick: async () => { source = k; sessionStorage.setItem("insightsSource", k); if (await load()) draw(); } }))) : null;
     const seg = el("div", { class: "seg", role: "group", "aria-label": "Which jobs" },
       ...[["pool", `Your pool (${d.pool.count})`], ["applied", `Applied (${d.applied.count})`]].map(([k, t]) =>
         el("button", { "aria-pressed": String(which === k), testid: `ins-${k}`, text: t, onclick: () => { which = k; draw(); } })));
     const status = d.statuses === null ? el("div", { class: "card" }, el("h2", { text: "Your sheet" }),
       el("p", { class: "empty", text: "Can't read the sheet right now; the pool numbers below still work." })) :
-      el("div", { class: "card", testid: "ins-status" }, el("h2", { text: "Where your applications stand" }),
+      el("div", { class: "card", testid: "ins-status" }, el("h2", { text: intern ? "Where your internship applications stand" : "Where your applications stand" }),
         d.rows ? el("div", { class: "donut-wrap" }, donut(d.statuses, d.rows),
           el("ul", { class: "legend" }, ...d.statuses.map((s) => el("li", {},
             el("span", { class: "swatch", "data-status": s.label }), el("span", { text: s.label }), el("b", { text: String(s.count) })))))
           : el("p", { class: "empty", text: "Nothing in your sheet yet." }));
-    const body = !g.count ? [el("p", { class: "empty", testid: "ins-empty", text: which === "applied" ? "Nothing applied yet. Applied rows show up here." : "Your pool is empty. Check for new jobs on Today." })] : [
+    const body = !g.count ? [el("p", { class: "empty", testid: "ins-empty", text: which === "applied" ? "Nothing applied yet. Applied rows show up here." :
+      intern ? "Your internship pool is empty: the next internship update fills it." : "Your pool is empty. Check for new jobs on Today." })] : [
       el("div", { class: "tiles" },
         tile("Median pay", p.median === null ? "—" : `${usd(p.median)}/h`, p.mid_low !== null ? `most ${usd(p.mid_low)}–${usd(p.mid_high)}` : null, "tile-pay"),
         tile("In Massachusetts", `${g.in_ma} of ${g.count}`, `${g.states} state${g.states === 1 ? "" : "s"} in all`, "tile-ma"),
@@ -1505,7 +1602,8 @@ screens.insights = async (view) => {
         el("div", { class: "card", testid: "ins-where" }, el("h2", { text: "Where" }), hbars(g.places, "where-bars"),
           g.cities.length ? el("p", { class: "small muted", text: "Top cities: " + g.cities.map((c) => `${c.label} (${c.count})`).join(", ") }) : null),
         g.categories.length ? el("div", { class: "card", testid: "ins-kind" }, el("h2", { text: "Kind of work" }), hbars(g.categories, "kind-bars")) : null)];
-    fill(view, status, el("div", { class: "row between ins-head" }, el("h2", { text: which === "pool" ? "Jobs in your pool" : "Jobs you applied to" }), seg), ...body);
+    fill(view, sources ? el("div", { class: "row toolbar" }, sources) : null, status,
+      el("div", { class: "row between ins-head" }, el("h2", { text: which === "pool" ? `${intern ? "Internships" : "Jobs"} in your pool` : `${intern ? "Internships" : "Jobs"} you applied to` }), seg), ...body);
     view.querySelectorAll(".swatch").forEach((s) => { s.style.background = STATUS_COLOR[s.dataset.status] || "var(--off)"; });
     sizeBars(view);
   }
@@ -1518,12 +1616,28 @@ screens.answers = async (view) => {
   let data, rows = [], filter = "", bank = sessionStorage.getItem("answersBank") || "nuworks";  // or "other": the Other jobs tab's
   async function reload() {
     try { data = await api.get(`/api/answers?bank=${bank}`); } catch (e) { fill(view, el("div", { class: "note fail", text: e.message })); return; }
-    rows = data.entries.map((e) => ({ ...e, aliases: (e.aliases || []).join(", ") }));
+    rows = data.entries.map((e) => ({ ...e, aliases: [...(e.aliases || [])] }));
     draw();
+  }
+  // Other wordings, one per line (a wording may hold commas: "…on CPT, OPT, or STEM OPT…")
+  function wordings(r) {
+    const box = el("textarea", { rows: "8", testid: "aliases-text", "aria-label": `Other wordings of ${r.question}`, value: null });
+    box.value = r.aliases.join("\n");
+    modal((m, close) => m.append(el("h2", { text: "Other wordings" }),
+      el("p", { class: "muted", text: `Questions that get the same answer as “${r.question}”. One per line; capital letters and spaces at the ends don't matter.` }),
+      el("label", { class: "field" }, box),
+      el("div", { class: "foot" }, el("span", { class: "small muted", text: "Saved with the rest when you press Save." }), el("div", { class: "row" },
+        el("button", { class: "btn", text: "Cancel", onclick: close }),
+        el("button", { class: "btn primary", text: "Done", testid: "aliases-done", onclick: () => {
+          r.aliases = box.value.split("\n").map((a) => a.trim()).filter(Boolean);
+          close();
+          draw();
+        } })))), { label: "Other wordings", testid: "aliases-dialog" });
+    setTimeout(() => box.focus(), 0);
   }
   function setBank(b) { bank = b; sessionStorage.setItem("answersBank", b); filter = ""; reload(); }
   function draw() {
-    const shown = rows.map((r, i) => [r, i]).filter(([r]) => !filter || (r.question + " " + r.answer + " " + r.aliases).toLowerCase().includes(filter));
+    const shown = rows.map((r, i) => [r, i]).filter(([r]) => !filter || [r.question, r.answer, ...r.aliases].join(" ").toLowerCase().includes(filter));
     const tbody = el("tbody", {}, ...shown.map(([r, i]) => el("tr", { testid: `answer-row-${i}` },
       el("td", {}, el("input", { type: "text", value: r.question, "aria-label": "Question", oninput: (e) => { r.question = e.target.value; } })),
       el("td", {}, el("input", { type: "text", value: r.answer, "aria-label": "Answer", disabled: r.always_ask,
@@ -1534,8 +1648,8 @@ screens.answers = async (view) => {
         onchange: (e) => { r.always_ask = e.target.checked; draw(); } }), "always ask")),
       bank === "nuworks" ? el("td", { class: "narrow" }, el("label", { class: "row small", title: "Never used for jobs in your Other jobs tab" },
         el("input", { type: "checkbox", checked: !!r.nuworks_only, onchange: (e) => { r.nuworks_only = e.target.checked; } }), "NUworks only")) : null,
-      el("td", {}, el("input", { type: "text", value: r.aliases, placeholder: "other wordings, comma-separated", "aria-label": "Aliases",
-        oninput: (e) => { r.aliases = e.target.value; } })),
+      el("td", { class: "narrow" }, el("button", { class: "btn small", testid: `aliases-${i}`, "aria-label": `Other wordings of ${r.question}`,
+        title: r.aliases.join("\n") || null, text: r.aliases.length ? plural(r.aliases.length, "other wording") : "Add a wording", onclick: () => wordings(r) })),
       el("td", { class: "narrow" }, el("button", { class: "btn small ghost", text: "Remove", "aria-label": `Remove ${r.question}`,
         onclick: () => { rows.splice(i, 1); draw(); } })))));
     const seg = el("div", { class: "seg", role: "group", "aria-label": "Which answers" },
@@ -1547,16 +1661,16 @@ screens.answers = async (view) => {
         "For jobs in your sheet's Other jobs tab (not on NUworks). The assistant looks here first, then in your NUworks answers, except the ones marked NUworks only (co-op dates and term). What it saves during an Other jobs application goes here, never into your NUworks answers." :
         "When a form asks a question, NUauto fills it only from here, and only on an exact match (capital letters and spaces at the ends don't matter). Always-ask entries (salary, work authorization…) are never filled: you're asked each time. NUworks only: never used for jobs in your Other jobs tab (they get their own answer, under Other jobs)." }),
       data.locked ? el("div", { class: "note warn", text: "A run is using the answer bank right now. You can edit when it is over." }) : null,
-      el("div", { class: "row between" }, el("input", { type: "text", placeholder: "Search", value: filter, "aria-label": "Search answers",
+      el("div", { class: "row between" }, el("input", { type: "search", placeholder: "Search (Ctrl+F)", value: filter, "aria-label": "Search answers", "data-find": true, testid: "answers-search",
         oninput: (e) => { filter = e.target.value.toLowerCase(); draw(); $("input[aria-label='Search answers']").focus(); } }),
-        el("div", { class: "row" }, el("button", { class: "btn", text: "Add a question", onclick: () => { rows.unshift({ question: "", answer: "", field_type: "", always_ask: false, nuworks_only: false, aliases: "" }); filter = ""; draw(); } }),
+        el("div", { class: "row" }, el("button", { class: "btn", text: "Add a question", onclick: () => { rows.unshift({ question: "", answer: "", field_type: "", always_ask: false, nuworks_only: false, aliases: [] }); filter = ""; draw(); } }),
           el("button", { class: "btn primary", text: "Save", testid: "answers-save", disabled: data.locked, onclick: save }))),
-      el("div", { class: "table-scroll" }, el("table", { class: "grid" }, el("thead", {}, el("tr", {}, ...["Question", "Answer", "Type", "Always ask", ...(bank === "nuworks" ? ["NUworks only"] : []), "Aliases"].map((h) => el("th", { text: h })),
+      el("div", { class: "table-scroll" }, el("table", { class: "grid" }, el("thead", {}, el("tr", {}, ...["Question", "Answer", "Type", "Always ask", ...(bank === "nuworks" ? ["NUworks only"] : []), "Other wordings"].map((h) => el("th", { text: h })),
         el("th", {}, el("span", { class: "sr-only", text: "Remove" })))), tbody))));
   }
   async function save() {
-    const entries = rows.map((r) => ({ ...r, aliases: r.aliases.split(",").map((a) => a.trim()).filter(Boolean) }));
-    try { data = await api.post("/api/answers", { bank, entries, version: data.version }); rows = data.entries.map((e) => ({ ...e, aliases: (e.aliases || []).join(", ") })); draw(); toast("Answer bank saved."); }
+    const entries = rows.map((r) => ({ ...r, aliases: [...r.aliases] }));
+    try { data = await api.post("/api/answers", { bank, entries, version: data.version }); rows = data.entries.map((e) => ({ ...e, aliases: [...(e.aliases || [])] })); draw(); toast("Answer bank saved."); }
     catch (e) { fail(e); }
   }
   await reload();
@@ -1610,7 +1724,7 @@ screens.assistant = async (view) => {
       const r = await api.post(api_, { slot: Number(slot), ...body });
       toast(r.message);
       if (body.do === "reply") reply.value = "";
-      if (r.closing) { location.hash = "#/company"; return; }
+      if (r.closing) { sessionStorage.setItem("applyTab", "assistants"); location.hash = "#/apply"; return; }
     } catch (e) { fail(e); }
     version = null;
     load();
@@ -1622,7 +1736,7 @@ screens.assistant = async (view) => {
     const a = d.approval;
     const word = d.status;
     const chat = !["finish", "prompt", "answered"].includes(word);
-    const parts = [el("div", { class: "row between" }, el("a", { href: "#/company", text: "← Company sites" }),
+    const parts = [el("div", { class: "row between" }, el("a", { href: "#/apply", text: "← Assistants", onclick: () => sessionStorage.setItem("applyTab", "assistants") }),
       el("span", { class: `chip ${word === "working" ? "ok" : word === "answered" ? "accent" : "warn"}`, testid: "as-status", text: d.text })),
     el("div", { class: "card" }, el("h2", { text: d.company || "Assistant" }),
       el("p", { class: "small muted", text: [d.title, d.where, d.host, `slot ${d.slot}`, there ? "on the homelab" : null].filter(Boolean).join(" · ") }))];
@@ -1691,7 +1805,7 @@ screens.assistant = async (view) => {
       if (!view.isConnected || S.gone) return;
       if (S.offline) { timer = setTimeout(load, 4000); return; }  // the homelab can't be reached a moment: ask again
       fill(view, el("div", { class: "card", testid: "as-gone" }, el("h2", { text: "No session there" }),
-        el("p", { class: "muted", text: "It has ended (or it never ran in that slot)." }), el("a", { class: "btn", href: "#/company", text: "Company sites" })));
+        el("p", { class: "muted", text: "It has ended (or it never ran in that slot)." }), el("a", { class: "btn", href: "#/apply", text: "Apply", onclick: () => sessionStorage.setItem("applyTab", "assistants") })));
       return;
     }
     if (!view.isConnected) return;
@@ -1915,7 +2029,7 @@ function homelabAssistantPanel(ha, done) {
       const on = (ha.auto_tabs || {})[tab];
       return el("div", { class: "row between" }, el("span", { class: "small", testid: `ha-auto-text-${tab}`, text: on ?
           `${name} (${what}): it starts sessions by itself, only between ${hour(ha.hours[0])} and ${hour(ha.hours[1])} New York time (up to "Assistants at once" at a time).` :
-          `${name} (${what}): you start each session yourself (Company sites, in NUauto on your homelab).` }),
+          `${name} (${what}): you start each session yourself (Apply, in NUauto on your homelab).` }),
         el("button", { class: "btn small", testid: `ha-auto-${tab}`, text: on ? "Stop starting by itself" : "Start by itself",
           onclick: () => saveSettings({ remote_auto: { [tab]: !on } }, on ? `${name} no longer start by themselves.` :
             `${name} start by themselves now, between ${hour(ha.hours[0])} and ${hour(ha.hours[1])} New York time.`, done) }));
@@ -1927,7 +2041,7 @@ function homelabAssistantPanel(ha, done) {
   ] : null;
   if (here) {
     return el("div", { class: "stack", testid: "ha-panel" }, ha.on ?
-      el("p", { class: "small muted", text: "Company-site applications run here in a virtual browser; you answer each session on its screen (Company sites). Turning the assistant on or off is done in NUauto on your laptop." }) :
+      el("p", { class: "small muted", text: "Company-site applications run here in a virtual browser; you answer each session on its screen (Apply > Assistants). Turning the assistant on or off is done in NUauto on your laptop." }) :
       el("p", { class: "small muted", text: "The assistant is off on this homelab: turn it on in NUauto on your laptop (Settings > NUauto on your homelab)." }), queue);
   }
   return el("div", { class: "stack", testid: "ha-panel" },
@@ -2084,8 +2198,8 @@ screens.setup = async (view) => {
 async function route() {
   if (S.gone) return;  // what gone() says stays on screen (an unpaired browser, a stopped NUauto)
   let name = (location.hash.replace(/^#\/?/, "").split("?")[0]) || "home";
-  if (name === "company" || name === "other") {  // Company sites (Other jobs is in it) is a part of Apply now
-    S.focus = "company";
+  if (name === "company" || name === "other" || name === "sheet") {  // old screens, all a part of Apply now
+    S.focus = name === "other" ? "other" : name === "company" ? "nuworks" : null;
     history.replaceState(null, "", "#/apply");
     name = "apply";
   }
@@ -2094,7 +2208,7 @@ async function route() {
   if (S.screen && S.screen.leave) S.screen.leave();
   S.screen = null;
   S.route = key;
-  const nav = key === "assistant" ? "apply" : key;  // an assistant's screen is part of Apply's Company sites
+  const nav = key === "assistant" ? "apply" : key;  // an assistant's screen is part of Apply (its Assistants tab)
   document.querySelectorAll(".side nav a").forEach((a) => a.classList.toggle("active", a.dataset.route === nav));
   $("#page-title").textContent = TITLES[key];
   document.title = `${TITLES[key]} · NUauto`;
@@ -2107,6 +2221,16 @@ async function route() {
 }
 
 window.addEventListener("hashchange", route);
+// Ctrl+F (Cmd+F on a Mac) goes to the screen's own search box (Apply, Review, Answers: [data-find]); on a screen without
+// one, or in a dialog, the browser's own find
+document.addEventListener("keydown", (e) => {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== "f") return;
+  const box = $("#modal-root").children.length ? null : $("#view [data-find]");
+  if (!box) return;
+  e.preventDefault();
+  box.focus();
+  box.select();
+});
 window.NUauto = { el, fill, api, action, toast, fail, modal, confirmBox, S, pollState, pollHealth, linkOut, plural, ago };
 
 (async function start() {

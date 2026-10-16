@@ -190,12 +190,21 @@ try:
         # one card for the homelab (its paired devices and its assistant), no Bitwarden card (the laptop's)
         assert page.locator("[data-testid=homelab-settings]").count() == 1 and page.locator("[data-testid=pm-settings]").count() == 0
         assert page.locator("[data-testid=homelab-settings] [data-testid=devices]").count() == 1
-        # Company sites: one line for the assistants and the queue; each session opened from its own row
-        page.goto(f"{ORIGIN}/#/company")
+        # Apply > Assistants: one line for the assistants and the queue; each session opened from its own row
+        page.goto(f"{ORIGIN}/#/apply")
+        page.click("[data-testid=tab-assistants]")
         page.wait_for_selector("[data-testid=assistants-bar]")
+        assert page.locator("[data-testid=assistants-list] li").count() == 3
         assert page.locator("[data-testid=assistants-bar]").count() == 1 and page.locator("[data-testid=queue-line]").count() == 1
         assert "3 of 3 running" in page.inner_text("[data-testid=assistants-running]")
-        assert page.locator("a[data-testid$=-running][href^='#/assistant/']").count() == 3
+        assert page.locator("[data-testid=assistants-list] a[href^='#/assistant/']").count() == 3
+        # ...and each from its own row, on the tab that row is in
+        rows_running = 0
+        for tab in ("nuworks", "other"):
+            page.click(f"[data-testid=tab-{tab}]")
+            page.wait_for_selector("[data-testid=apply-toolbar]")
+            rows_running += page.locator("a[data-testid$=-running][href^='#/assistant/']").count()
+        assert rows_running == 3, rows_running
         # every screen, as test_gui.py opens them on the laptop's app: the same menu, none empty or failing
         nav, bad = screens.visit_all(page, ORIGIN)
         assert nav == screens.NAV and not bad, (nav, bad)

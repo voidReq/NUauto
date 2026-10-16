@@ -160,7 +160,7 @@ src/nuauto/: cli.py (the nuauto command)   config.py (all paths, hosts; reads lo
   health.py (the checks behind doctor and the GUI)   onboard.py (setup wizard)   demo.py (demo mode fakes)
   window.py (which window) + window_gtk.py (the Linux window, run by the system python3)
   insights.py (pay, places, kinds of work, sheet statuses: the GUI's Insights screen and `nuauto insights`)
-  manage.py (add / move / remove sheet rows by hand: the GUI's Sheet screen and `nuauto sheet add|move|remove`)
+  manage.py (add / move / remove sheet rows by hand: the GUI's Apply (Add a job, a row's More) and `nuauto sheet add|move|remove`)
   intern.py (Summer internships from Simplify's and vanshb03's lists, a job on both kept once: the second pool, docs/PIPELINE.md)   postings.py (reads a posting
   from a company's own job site, no login: job-site JSON, page data, hidden browser; never a non-public address)
   Imports are always absolute: `from nuauto import sheet` (test_sync enforces it).

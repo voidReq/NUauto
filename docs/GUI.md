@@ -21,12 +21,12 @@ WHAT IT IS
   devices (your phone). Every screen is the same; the page knows where it runs (state.where) and shows what only the
   laptop can do (state.laptop_only: logins, terminal windows, the laptop's files, Bitwarden, setup's file steps, Quit) as
   "On your laptop" with the reason; the server refuses those there (the Bitwarden card is left out). What it adds there:
-  each assistant session's screen (#/assistant/<slot>), the queue in Company sites, Settings > This homelab (paired
+  each assistant session's screen (#/assistant/<slot>), the queue in Apply (each row's chip, the Assistants tab), Settings > This homelab (paired
   devices). Without a homelab none of it exists, and the laptop's app is unchanged.
 - Each thing in one place (2026-10-14), with or without a homelab: Today has one list of what only you can do (the
-  assistants waiting for you first, each item opening where you do it: no second Mark done or Open job there); Company
-  sites has one assistants line (here, on the homelab, waiting for you; the homelab's queue), each session reached from
-  its own row; Settings has one Homelab card (and setup one Homelab step); Pair this computer and Open NUauto on the
+  assistants waiting for you first, each item opening where you do it: no second Mark done or Open job there); Apply
+  has one tab per sheet tab and one Assistants tab (the assistants line: here, on the homelab, waiting for you; the
+  homelab's queue; every session, each also reached from its own row); Settings has one Homelab card (and setup one Homelab step); Pair this computer and Open NUauto on the
   homelab are there only.
 
 PACKAGED APP (packaging/; .github/workflows/release.yml builds and smoke-tests it on every pull request (all but the
@@ -57,7 +57,7 @@ SCREENS
   Today          health problems with fix buttons, this week's count, next steps (with "Review N internships" when
                  internships are on and some wait: it opens Review on that list), what only you can do: the assistants
                  that wait for you first (approve, answer, did it go through: its screen, or "in its terminal window"),
-                 then each item with its due date, soonest first; each item opens where you do it (Company sites,
+                 then each item with its due date, soonest first; each item opens where you do it (Apply,
                  Review), nothing done twice in two places
   Review         one pool job at a time. Approve mode: Approve (y) adds it to the sheet as Approved at once
                  (or, for one of your Proposed rows, which Review shows first, turns that row Approved);
@@ -71,71 +71,84 @@ SCREENS
                  co-ops" / "<term> internships" (Simplify's and vanshb03's lists; the postings are on the companies' own sites). Remembered
                  for the session (default co-ops; Today's "Review N internships" picks the internships, its co-op button the
                  co-ops); changing it reloads the list. Everything above works the same on the internships, except: Approve
-                 adds an Approved row to the sheet's Other jobs tab (apply there from Apply > Company sites; no weekly cap),
+                 adds an Approved row to the sheet's Other jobs tab (apply there from Apply > <term> internships; no weekly cap),
                  and Undo puts it back to Proposed there; a job whose Other jobs row is Proposed shows first, flagged
                  "already Proposed (Other jobs row N)", and Approve turns that row Approved; the button says "Open posting";
                  cards add Posted and, when the posting says so, Who can apply; a posting that could not be read comes last
                  with no match ("not scored", Why says what failed: judge it from its link). When the list is done it points
-                 to Apply > Company sites.
+                 to Apply > <term> internships.
                  Search box (words or "quoted phrases", all must appear, any case, in title, company, place, kind of
                  work, tag, skills, description, qualifications) and a kind-of-work menu narrow the list; the order
                  inside stays the same. Esc clears the search. A text search shows every match as its own card (8 at a
                  time, "Show more"; the posting cut short, "Show the whole posting"), each with its own Approve / Not for
                  me buttons (y / n keys are off there; a decided card turns into one line with Change). The job you were on
                  is left undecided; clearing the search comes back to it. A kind-of-work choice alone stays one job at a time.
-  Apply          the weekly count and Start, the live run (below), then three tabs, each with its row count: NUworks, Company
-                 sites, By hand on NUworks (the tab you picked is remembered; #/company, #/other and Today's buttons open
-                 Company sites). Every NUworks row in the three tabs shows its match % (or its score, "score 105 = 75% match + 10 Boston + 20
-                 security", when bonuses add to it: Start goes by score) and pay. NUworks tab: "Apply in this order" (remembered for the
-                 session) IS the order Start and At most go: closing within a week first, then score (default), score, match %,
-                 closing soonest, pay per hour (insights.hourly; unclear pay last). The server sorts (apply.apply_order, GET
-                 /api/apply?order=) and Start runs `nuauto apply --order <it>`. Company sites / By hand: "Sort the list by" (the view
-                 only): closing soonest (default), sheet order, score, match %, pay. And a "Show" kind-of-work
-                 menu (the categories, with counts; shared by the tabs; NUworks rows only, the Other jobs card is not
-                 filtered; the view only); filtered, NUworks says "Start still goes through all N". A NUworks row's number is
-                 where Start takes it, also while filtered. NUworks: Approved rows in apply order (numbered 1, 2, 3: the order Start goes), each with when it closes
-                 (due chip: amber within a week, red once past), its match % and pay, a "may also want the company's
-                 site" chip when the posting says so, and its own Apply button (after a confirm: just that row, `nuauto apply --row N`); Start (optionally
-                 "at most N"), the live run: current row, latest screenshot, log, next-job countdown, Stop / Force
-                 stop; question dialogs; recent runs. Start tries every row on its own; one that sends you to a
-                 company site or needs a cover letter / transcript becomes Needs Human (nothing submitted) and shows
-                 in the other tabs (since 2026-10-09 Company sites is a part of Apply; the menu count is Approved + the
-                 assistant's rows + retries). Company sites tab (assistants side by side, up to 3: a row with one
-                 running shows "assistant running (slot N)" instead of Start, or "assistant waiting for you" / "approve in its window"
-                 while it waits for you (assist.sessions attention; a desktop notification says so too); one the homelab runs
-                 (remote_assist) shows "assistant running on the homelab: open" / "...: waiting for you: open" (its screen
-                 in NUauto on the homelab, in your browser), from `nuauto assist sessions` over ssh every minute (never in
-                 view or demo mode); it follows /api/state assistants). First one line for the whole tab
-                 (assistants-bar): "Assistants: N of 3 running here · M on the homelab · K wait for you (Today lists
-                 them)". On the homelab's own page the same line (no "here") plus the queue's (what starts by itself, its
-                 hours, free slots, NUworks applications left); each row's place in the queue as a chip
-                 (review.queue_view: starts next by itself / ready / what it waits for), Start now (remote start in tmux;
-                 refused with the reason), a running session's Open (its screen) and "Sort the list by: the queue's
-                 order". Then: Needs Human rows for the assistant (opens
-                 `nuauto assist <row>` in a terminal window, or shows the command), "I applied myself", Drop (not applying: closed, a
-                 duplicate, a bad location; sheet.drop: Failed, "Dropped <date>: <reason>" in Notes; never while an
-                 assistant is on the row), company sites still
-                 owed (Mark done), the NUworks side to retry, then the Other jobs card: the sheet's Other jobs tab's
-                 Approved rows (read fresh; counted in the tab, not the menu), Start assistant (opens `nuauto assist other
-                 <row>`), Open site, I applied myself, Drop, Add a job (opens Sheet on the Other jobs tab). No caps there; their
-                 Applied and other rows are on the Sheet screen. (A screen of its own until 2026-10-09.) By hand on NUworks tab: rows only you can finish there.
+  Apply          (2026-10-16, my request: one place per sheet tab; the Sheet screen merged in) three tabs, each with its
+                 count, the one you picked remembered (#/company, Today's buttons: NUworks co-ops; #/other: the internships):
+                 NUworks co-ops (the sheet's NUworks tab: the weekly limit), "<term> internships" ("Other jobs" when
+                 internships are off: the sheet's Other jobs tab, no limits), Assistants. The live run above them.
+                 A sheet tab: (NUworks) the week's count, At most and Start (Run on: this computer / the homelab, linked),
+                 How Start works folded; then one toolbar: Search this tab (words, all must appear, any case, in company,
+                 title, notes, site, kind of work, status, pay; Ctrl+F; Esc clears), Show (kind of work, with counts), the
+                 order, Add a job. Then the tab's rows in sections (<details>: what is left to do open, the rest folded,
+                 each with its count; your opening and folding remembered for the session; a search opens every section
+                 with a match): NUworks: Ready to apply (Approved, numbered in the order Start goes: the order menu IS the
+                 order Start and At most go: closing within a week first, then score (default), score, match %, closing
+                 soonest, pay per hour (insights.hourly; unclear pay last); the server sorts (apply.apply_order, GET
+                 /api/jobs?tab=nuworks&order=) and Start runs `nuauto apply --order <it>`; filtered, "Start still goes
+                 through all N"), Company site needed (Needs Human rows stopped at an external application: the assistant),
+                 By hand on NUworks (Needs Human rows only you can finish there: a cover letter, a transcript), Still owed
+                 (submitted on NUworks, the company site still wants you: Mark the company site done; the NUworks side to
+                 send again: Submit on NUworks too), Applied, Proposed, Dropped or failed, Other rows; recent runs folded at
+                 the end. The other tab: Ready to apply (Approved: the assistant), Applied, Proposed, Dropped or failed,
+                 Other rows (sort: score, match %, pay, sheet order; on the homelab's page the queue's order first).
+                 Every row: who and what, its score / match % and pay ("score 105 = 75% match + 10 Boston + 20 security"
+                 when bonuses add to it: Start goes by score), a line about it (its site, its notes), its chips (when it
+                 closes: amber within a week, red once past; "may also want the company's site"; the queue's place), what to
+                 do next (Apply: after a confirm just that row, `nuauto apply --row N`; Start assistant; Mark done; Submit
+                 on NUworks too), Open, and More (⋯; on a phone in the row's top right corner): I applied myself, Drop (not
+                 applying: closed, a duplicate, a bad location; sheet.drop: Failed, "Dropped <date>: <reason>" in Notes;
+                 only Approved / Needs Human rows, never while an assistant is on the row), Move to the other tab (asks for
+                 the link there), Remove from the sheet (clears the row's cells: no row is renumbered). What a row can't do
+                 is greyed out with why: Applied rows are never removed and never leave the NUworks tab (an Applied Other
+                 job may move to NUworks: there it counts toward the limits); unresolved Submit clicks are locked; nothing
+                 moves while a run is on. Add a job (manage.py; a dialog): NUworks co-op or Other job, Approved or Proposed,
+                 link; a NUworks link switches the tab and fills company / title / match from your job data; the screen then
+                 shows the tab it went to. The assistant's Start on a row (up to 3 side by side: a row with one running
+                 shows "assistant running (slot N)" instead, or "assistant waiting for you" / "approve in its window" while
+                 it waits for you (assist.sessions attention; a desktop notification says so too); one the homelab runs
+                 (remote_assist): "assistant running on the homelab: open" / "...: waiting for you: open" (its screen), from
+                 `nuauto assist sessions` over ssh every minute (never in view or demo mode); on the homelab's own page and
+                 the laptop linked to it, each row's place in the queue as a chip (review.queue_view: starts next by itself /
+                 ready / what it waits for), Start now / Start on the homelab (refused with the reason)).
+                 Assistants: the one line (assistants-bar: "Assistants: N of 3 running here · M on the homelab · K wait for
+                 you (Today lists them)"; on the homelab's page also the queue's: what starts by itself, its hours, free
+                 slots, NUworks applications left), then every session running now, here and on the homelab: the job, its
+                 site, where (this computer / the homelab, slot), since when, working / waiting for you / wants to Submit,
+                 and where you answer it (its screen; a laptop session: its terminal window).
+                 GET /api/jobs?tab= is one tab's every row in its sections with what Move / Remove allow (gui.jobs_tab);
+                 /api/apply, /api/company, /api/other, /api/sheet stay (the laptop's link reads the homelab's /api/company).
                  The lists follow the sheet by themselves: /api/state carries rows_at (when the sheet was last read), the
                  server reads it again after every finished row and run and when it is 30 s old, and the open screen
-                 reloads its lists when rows_at changes (no closing and reopening). "At most" keeps what you typed.
-  Sheet          add a job by hand (manage.py): NUworks co-op or Other job, Approved or Proposed, link; a NUworks
-                 link switches the tab and fills company / title / match from your job data. Below it the sheet's two tabs as
-                 tabs (NUworks, Other jobs, each with its row count; remembered; adding a job shows the tab it went to; Apply's
-                 Add a job opens Other jobs). Each tab's rows with
-                 Move to the other tab (asks for the link there) and Remove (clears the row's cells: no row is
-                 renumbered). Applied rows are never removed and never leave the NUworks tab (an Applied Other job may move
-                 to NUworks: there it counts toward the limits); unresolved Submit clicks are locked; nothing moves while a run is on
-  Insights       where your sheet stands (a status ring: arcs in an order checked for color-blind separation, with a
-                 labeled legend), then for Your pool / Applied: median and usual pay, share in Massachusetts, closing this
-                 week; an hourly-pay histogram; by state (top 5 + Other, top cities); kind of work. insights.py, also
-                 `nuauto insights` in a terminal. Read-only; pay that doesn't read as $10-150/h counts as not listed
+                 reloads its lists when rows_at changes (no closing and reopening). "At most" keeps what you typed. The menu's
+                 count is Approved + the assistant's rows + retries. #/sheet (the old Sheet screen) opens Apply.
+  Insights       NUworks co-ops / "<term> internships" switch when internships are on (2026-10-16; remembered for the
+                 session): each its own pool, applications and sheet tab (insights.collect / collect_intern: the internship
+                 lists' postings, the Other jobs tab's rows matched by link). Where that sheet tab stands (a status ring:
+                 arcs in an order checked for color-blind separation, with a labeled legend), then for Your pool / Applied:
+                 median and usual pay, share in Massachusetts, closing this week; an hourly-pay histogram; by state (top 5 +
+                 Other, top cities); kind of work. insights.py, also `nuauto insights` in a terminal (the internships after
+                 the co-ops). Read-only; pay that doesn't read as $10-150/h counts as not listed
   Answers        the answer bank as a table (exact-match rules unchanged); locked while a run uses it. NUworks /
                  Other jobs switch: the Other jobs bank (answers_other.json) is its own table; the NUworks one has a
-                 "NUworks only" column (never used for Other jobs; default on for start/end date and co-op term)
+                 "NUworks only" column (never used for Other jobs; default on for start/end date and co-op term). Search
+                 (Ctrl+F) narrows it to questions, answers and aliases with that text. Other wordings (aliases): a dialog,
+                 one per line (a wording may hold commas; until 2026-10-16 they were one comma-separated box, which split
+                 such wordings on Save and then refused it as a duplicate). Save leaves out a wording that does nothing
+                 (its own question, a repeat, one an entry above already has: that one wins) and refuses only a question
+                 that is another entry's wording, naming both
+  Ctrl+F         (Cmd+F on a Mac) goes to the screen's own search box: Apply, Review, Answers ([data-find]); elsewhere, and in
+                 a dialog, the browser's own find
   Settings       every health check (run them now), logins (Google, NUworks, Claude Code, and Gmail: the read-only login
                  for the assistant's email codes, with a link to turn the Gmail API on), resume label, applications per
                  week (the weekly cap), week start;
@@ -241,7 +254,8 @@ SAFETY MODEL (details and tests: docs/SAFETY.md)
 - Runs: `nuauto apply --ui json` / `nuauto assist nuworks <row> --ui json` work only as a child of the running GUI
   (its pid in local/gui.lock); `nuauto apply` itself never runs from a Claude Code shell (CLAUDECODE). The real GUI
   may be opened from one (2026-10-16): its own window, for you to click Start; with --no-open it refuses there (it
-  would print the agent its secret). Agents test with --demo (fake) or --view (real data, read-only, below). Apply, logins and the NUworks side always get a visible browser (AUTO_HEADLESS
+  would print the agent its secret; with its window, the line it prints there has its address only, gui.printed_url).
+  Agents test with --demo (fake) or --view (real data, read-only, below). Apply, logins and the NUworks side always get a visible browser (AUTO_HEADLESS
   cleared). Approved in the sheet stays the only go-ahead; caps unchanged.
 - Questions (answers.JsonIO): one JSON line per question on the child's stdout ("::nuauto:: " + JSON), the
   answer as one JSON line on its stdin. The same rules as typing: an option must be one of the choices, blank
@@ -279,7 +293,7 @@ DEMO MODE (demo.py) AND TESTING WITH AGENTS
   homelab serves it (REMOTE), on 127.0.0.1, with demo state "homelab" (more company-site rows, the assistant on) and
   three made-up assistant sessions (review.demo_setup: waiting to submit, waiting for an answer, ended). Prints
   {"url": a pairing link, "port", "remote": true, ...}: open it, press Pair. --screenshots: homelab-<screen>-*.png
-  (Today, Apply, Company sites, the three assistants, Settings, Setup).
+  (Today, Apply and its tabs, the three assistants, Settings, Setup).
 - `nuauto gui --demo --linked [--no-open]`: the laptop's demo app linked to a demo homelab page of its own (a child
   `--demo --remote`; config.DEMO_LINK, gui.demo_link): Today's homelab items open their screens in the app, Company
   sites' Start on the homelab with each row's place in the homelab's queue, Apply's Run on: the homelab, Settings >
@@ -330,6 +344,11 @@ API (JSON; all need the cookie; POSTs need X-NUauto: 1)
                              "tab": "other" (its row is in the Other jobs tab)
   POST /api/undo             {"id", "row", "previous"} (an internship also needs "tab": "other": its row goes back to
                              Proposed in the Other jobs tab); POST /api/review/done (push ratings, homelab mode)
+  GET  /api/jobs?tab=&order= one Apply tab (nuworks | other): its rows in sections (nuworks: approved in apply order,
+                             agent, manual, owed (owed: site | retry), applied, proposed, closed, rest; other: ready,
+                             applied, proposed, closed, rest), each with locked / remove_locked (why Move / Remove can't,
+                             or null); sessions, slots, homelab, linked, queue; nuworks also week, why_not, history,
+                             order; other also exists
   GET  /api/apply            Approved rows in apply order, week, why_not, recent runs
   POST /api/action           {"kind": apply ({"n", "order"} or {"row"})|update|login_google|login_nuworks|check_nuworks|login_claude|
                              install_firefox|install_claude|nuworks_side|assist|fix_permissions|review_pair|bitwarden_add|
@@ -366,7 +385,8 @@ API (JSON; all need the cookie; POSTs need X-NUauto: 1)
   GET  /api/sheet/lookup?url=  the tab a link belongs in; for a NUworks job: known, company, title, match, in_pool, notes
   POST /api/sheet            {"action": add, "tab": nuworks|other, "url", "company", "title", "status"} -> {"tab", "row"};
                              {"action": move, "tab", "row", "url", "new_url"} -> {"tab", "row"}; {"action": remove, "tab", "row", "url"}
-  GET  /api/insights         pool / applied numbers (pay, places, categories) and the sheet's statuses
+  GET  /api/insights?source= pool / applied numbers (pay, places, categories) and the sheet tab's statuses; source=intern:
+                             the Summer internships and the Other jobs tab (when internships are on; the reply says source)
   GET  /api/answers?bank=    entries + version (bank other: answers_other.json); POST /api/answers {"bank", "entries",
                              "version"}. answers.json entries carry nuworks_only; leave_blank is kept while empty
   GET  /api/settings         settings (no secrets; logins: {sites, new}, never a password); POST /api/settings {"resume_label",

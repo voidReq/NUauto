@@ -25,7 +25,8 @@ APPLYING (apply.py, sheet.py)
   pid in local/gui.lock: on the homelab the nuauto-web process serving NUauto's page, started by a paired device's tap,
   its browser on a virtual screen you watch: gui.run_screen); never started from a Claude Code shell (CLAUDECODE), except
   as the GUI's child (a GUI window an agent opened for you, 2026-10-16: you click Start; from there the real GUI refuses
-  --no-open, which would print the agent its secret); the same for `assist nuworks <row>`; assist.run needs a terminal |
+  --no-open, which would print the agent its secret, and with a window prints its address without the secret:
+  gui.printed_url); the same for `assist nuworks <row>`; assist.run needs a terminal |
   apply.refuse_unattended (isatty / answers.json_ui_allowed / CLAUDECODE), apply.main, assist.main, gui.main |
   test_demo (CLAUDECODE and --ui json refusals), test_answers (json_ui_allowed), test_gui (--no-open refusal)
 - Row can never be sent twice | sheet.mark_submit_started (row becomes Needs Human BEFORE the Submit click); sheet.resolve_submit only accepts a marked row | test_sheet (submit-safety checks)
@@ -81,7 +82,7 @@ COMPANY-SITE AGENT (assist.py, prompts/ASSIST_PROMPT.md)
 - On the homelab (remote_assist only): the browser view listens on web_listen_host (the Tailscale IP; never every
   address), the shared screen itself on 127.0.0.1 only, behind a password made per run that is shown only in the
   session's terminal; the agent reads only the writeups copy and the resume; the NUworks side of a company-site
-  application done there is never sent by itself: it waits for your tap (Company sites, either machine's page) |
+  application done there is never sent by itself: it waits for your tap (Apply's Still owed, either machine's page) |
   screen.listen_host, commands; config (IS_SERVER read paths); assist.run, assist.main | test_screen, test_assist
 - On the homelab a Submit-type action is approved only on NUauto's page there (its Assistants screen), by a paired device: the guard writes the
   question (what, page, review_lines, a screenshot) and waits up to assist.WAIT for an answer with that question's id;

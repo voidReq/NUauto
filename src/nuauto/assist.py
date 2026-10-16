@@ -667,13 +667,13 @@ def lookup(entries, label, options, page):
     time). page: the step's name, for the log only."""
     entry = answers.find(entries, label_key(label))
     if entry is None:
-        return {"status": "unknown", "saved": saved_answers(entries)}
+        return {"status": "unknown", **saved_answers(entries, label, options)}
     if entry.get("always_ask"):
         return {"status": "ask_every_time", "why": "always_ask question"}
     if entry.get("leave_blank"):
         return {"status": "leave_blank"}
     if not entry["answer"]:
-        return {"status": "unknown", "saved": saved_answers(entries)}
+        return {"status": "unknown", **saved_answers(entries, label, options)}
     if options and entry["answer"] not in options:
         return {"status": "not_an_option", "saved": entry["answer"], "options": options}
     return {"status": "answer", "value": entry["answer"]}
@@ -712,11 +712,40 @@ class Bank:
         self.save()
 
 
-def saved_answers(entries):
-    """What the agent may work an unknown field out from: every saved answer, minus the always-ask and
-    leave-blank ones (those are never reused under another wording)."""
-    return [{"question": e["question"], "answer": e["answer"]} for e in entries
-            if e["answer"] and not e.get("always_ask") and not e.get("leave_blank")]
+SAVED_SHOWN = 25   # saved answers an "unknown" reply lists at most (the best fits first)
+SAVED_CHARS = 140  # each question and answer cut to this (a reply over ~30,000 characters never reaches the agent)
+
+
+def saved_answers(entries, label="", options=()):
+    """What the agent may work an unknown field out from: the saved answers (never the always-ask and leave-blank
+    ones: those are never reused under another wording) that fit this field best, at most SAVED_SHOWN: first those
+    whose answer is exactly one of the field's options, then by the words they share with the label and the options
+    (the question and its aliases); ties keep the bank's order. {"saved": [...], "more": how many were left out}."""
+    words = lambda text: {w for w in re.findall(r"[a-z0-9]+", str(text).lower()) if len(w) > 2}  # noqa: E731
+    want = words(label) | {w for o in options for w in words(o)}
+    usable = [e for e in entries if e["answer"] and not e.get("always_ask") and not e.get("leave_blank")]
+
+    def fit(e):
+        mine = words(e["question"]) | {w for a in e.get("aliases") or [] for w in words(a)}
+        return (e["answer"] in options, len(want & mine))
+    ranked = sorted(enumerate(usable), key=lambda x: (*(-v for v in fit(x[1])), x[0]))
+    cut = lambda s: s if len(s) <= SAVED_CHARS else s[:SAVED_CHARS - 1] + "…"  # noqa: E731
+    shown = [{"question": cut(e["question"]), "answer": cut(e["answer"])} for _, e in ranked[:SAVED_SHOWN]]
+    return {"saved": shown, "more": max(0, len(usable) - len(shown))}
+
+
+def todays_date(value, today=None):
+    """Is this answer a date within a week of today (a signature date, "today's date")? Those change every time: they
+    are filled in once, never saved. A graduation, start or birth date is further away and is saved as usual."""
+    from datetime import date as date_, datetime
+    v = str(value).strip()
+    for fmt in ("%m/%d/%Y", "%m-%d-%Y", "%Y-%m-%d", "%Y/%m/%d", "%m/%d/%y", "%d.%m.%Y", "%B %d, %Y", "%b %d, %Y"):
+        try:
+            day = datetime.strptime(v, fmt).date()
+        except ValueError:
+            continue
+        return abs((day - (today or date_.today())).days) <= 7
+    return False
 
 
 def valid_answer(value, options):
@@ -917,6 +946,8 @@ def _bank(argv):
                 out = {"error": why}
             elif a.cmd == "save" and (answers.find(entries, label_key(a.label)) or {}).get("always_ask"):
                 out = {"error": "This question is asked every time: use once, not save."}
+            elif a.cmd == "save" and todays_date(a.value):
+                out = {"error": "That is today's date: it changes every time, so it is never saved. Use once."}
             else:
                 if a.cmd == "save":
                     e = answers.find(entries, label_key(a.label))
@@ -943,7 +974,7 @@ def _bank(argv):
             if not target:
                 out = {"error": f"No saved question {a.value!r}."}
             else:
-                target.setdefault("aliases", []).append(label_key(a.label))
+                answers.add_alias(target, label_key(a.label))
                 b.save(target)
                 out = lookup(entries, a.label, a.option, a.page)
                 if out["status"] == "answer":
@@ -1637,39 +1668,48 @@ def run(number, url_override, other=False):
         where = f"row {number}"
     tab = "other" if other else "jobs"
     # side by side (up to slots() at once): this row in one session only, a free slot (its own browser profile), and
-    # this job site in one session only. The locks are held until this run ends (after the y/n question).
-    row_lock = _lock(os.path.join(config.LOCAL_DIR, "assist_rows", f"{tab}-{number}.lock"))
-    if row_lock is None:
-        sys.exit(f"An assistant is already working on {where}: finish it in its own window first.")
-    slot, slot_lock = take_slot({"row": number, "tab": tab, "company": row.company, "host": site_key(url),
-                                 "since": __import__("datetime").datetime.now().isoformat(timespec="minutes")})
-    if slot_lock is None:
-        sys.exit(f"{slots()} assistants are running already (the most at once). Finish one (/exit in its window), "
-                 "then start this one.")
-    site_lock = take_site(url)
-    if site_lock is None:
-        sys.exit(f"Another assistant is working on {site_key(url)} right now (two could make the same account there at "
-                 "once). Start this one when it is done.")
-    # the other machine (remote.py): the homelab never starts a row or site the laptop holds; the laptop asks first
-    claim_held = False
-    if config.IS_SERVER:
-        from nuauto import remote
-        why = remote.claimed(tab, number, site_key(url))
-        if why:
-            sys.exit(f"Not started: {why}. Finish it there first.")
-    elif config.REMOTE_ASSIST:
-        from nuauto import remote
-        ok, note = remote.claim_on_homelab(tab, number, site_key(url))
-        if not ok:
-            sys.exit(f"Not started: {note}. Finish it there first (the review page, or its tmux session).")
-        claim_held = True
-        if note:
-            print(f"(Note: {note}.)")
+    # this job site in one session only. The locks are held until this run ends (after the y/n question), and let go
+    # then however it ends (never left to the garbage collector: one process may run several, e.g. the tests).
+    held = []
     try:
-        return run_locked(number, other, row, url, where, tab, slot, slot_lock)
+        row_lock = _lock(os.path.join(config.LOCAL_DIR, "assist_rows", f"{tab}-{number}.lock"))
+        if row_lock is None:
+            sys.exit(f"An assistant is already working on {where}: finish it in its own window first.")
+        held.append(row_lock)
+        slot, slot_lock = take_slot({"row": number, "tab": tab, "company": row.company, "host": site_key(url),
+                                     "since": __import__("datetime").datetime.now().isoformat(timespec="minutes")})
+        if slot_lock is None:
+            sys.exit(f"{slots()} assistants are running already (the most at once). Finish one (/exit in its window), "
+                     "then start this one.")
+        held.append(slot_lock)
+        site_lock = take_site(url)
+        if site_lock is None:
+            sys.exit(f"Another assistant is working on {site_key(url)} right now (two could make the same account there "
+                     "at once). Start this one when it is done.")
+        held.append(site_lock)
+        # the other machine (remote.py): the homelab never starts a row or site the laptop holds; the laptop asks first
+        claim_held = False
+        if config.IS_SERVER:
+            from nuauto import remote
+            why = remote.claimed(tab, number, site_key(url))
+            if why:
+                sys.exit(f"Not started: {why}. Finish it there first.")
+        elif config.REMOTE_ASSIST:
+            from nuauto import remote
+            ok, note = remote.claim_on_homelab(tab, number, site_key(url))
+            if not ok:
+                sys.exit(f"Not started: {note}. Finish it there first (the review page, or its tmux session).")
+            claim_held = True
+            if note:
+                print(f"(Note: {note}.)")
+        try:
+            return run_locked(number, other, row, url, where, tab, slot, slot_lock)
+        finally:
+            if claim_held:
+                remote.unclaim_on_homelab(tab, number)
     finally:
-        if claim_held:
-            remote.unclaim_on_homelab(tab, number)
+        for lock in held:
+            lock.close()
 
 
 def run_locked(number, other, row, url, where, tab, slot, slot_lock):

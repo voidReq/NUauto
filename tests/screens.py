@@ -1,9 +1,10 @@
 """Every screen of NUauto's page, opened one after another: the same check for the laptop's app (test_gui.py) and the
 homelab's page (test_homelab_app.py), so a change to the page (gui_static/) is tried on both. Not a test by itself."""
 
-# every screen in app.js (screens.<name>), and #/company (Apply's Company sites); #/assistant/<slot> needs a session
-ROUTES = ("home", "review", "apply", "company", "sheet", "insights", "answers", "settings", "logs", "setup")
-NAV = ["home", "review", "apply", "sheet", "insights", "answers", "settings"]  # the menu: the same on both
+# every screen in app.js (screens.<name>), and the old #/company, #/other, #/sheet (they land on Apply); #/assistant/<slot>
+# needs a session
+ROUTES = ("home", "review", "apply", "company", "other", "sheet", "insights", "answers", "settings", "logs", "setup")
+NAV = ["home", "review", "apply", "insights", "answers", "settings"]  # the menu: the same on both
 
 
 def visit_all(page, origin):

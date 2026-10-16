@@ -271,15 +271,19 @@ try:
         assert "on the homelab" in page.inner_text("#view")
         page.click("[data-testid=as-approve]")                                  # approved from the laptop's window
         page.wait_for_selector("[data-testid=as-approval]:has-text('Approved: it is submitting now')", timeout=30000)
-        # Company sites: the homelab's queue on each row, Start on the homelab next to Start here (the Other jobs card too)
+        # Company site needed: the homelab's queue on each row, Start on the homelab next to Start here (the other tab's ready rows too)
         page.goto(base + "/#/company")
-        page.wait_for_selector("[data-testid=company-agent]")
+        page.wait_for_selector("[data-testid=section-nuworks-agent]")
         page.wait_for_selector("[data-testid$=-homelab-start]")
-        assert page.locator("[data-testid=company-agent] [data-testid$=-homelab-start]").count() >= 1
-        assert page.locator("[data-testid=other-jobs] [data-testid$=-homelab-start]").count() >= 1
-        assert page.locator("[data-testid=company-agent] [data-testid$=-queue]").count() >= 1   # why it waits there
+        assert page.locator("[data-testid=section-nuworks-agent] [data-testid$=-homelab-start]").count() >= 1
+        assert page.locator("[data-testid=section-nuworks-agent] [data-testid$=-queue]").count() >= 1   # why it waits there
+        page.goto(base + "/#/other")
+        page.wait_for_selector("[data-testid=section-other-ready]")
+        page.wait_for_selector("[data-testid=section-other-ready] [data-testid$=-homelab-start]")
+        assert page.locator("[data-testid=section-other-ready] [data-testid$=-homelab-start]").count() >= 1
         # Apply: Run on: the homelab, its log here
         page.goto(base + "/#/apply")
+        page.click("[data-testid=tab-nuworks]")                                                # (the tab Start is on)
         page.click("[data-testid=run-on-homelab]")
         assert page.inner_text("[data-testid=btn-start-apply]") == "Start on the homelab"
         page.fill("[data-testid=apply-n]", "1")
@@ -295,7 +299,7 @@ try:
         page.click("[data-testid=ha-link-toggle]")
         page.wait_for_selector("[data-testid=ha-link-status]:has-text('not linked')")
         page.goto(base + "/#/company")
-        page.wait_for_selector("[data-testid=company-agent]")
+        page.wait_for_selector("[data-testid=section-nuworks-agent]")
         assert page.locator("[data-testid$=-homelab-start]").count() == 0                     # not linked: no Start there
         page.goto(base + "/#/settings")
         page.click("[data-testid=ha-link-toggle]")
