@@ -45,11 +45,15 @@ GIT
 
 HARD LIMITS
 - Under 100 applications total.
-- Weekly cap, enforced in code (count "Applied" rows with a date in the current week; refuse to
+- Weekly cap, enforced in code (count sent rows (Applied, Accepted, Rejected) with a date in the current week; refuse to
   run past the limit). sheet.py: MAX_PER_WEEK = 11 is the default, changeable in the GUI (Settings > Applications per week, local_config.json "max_per_week", 1-30; sheet.max_per_week()), MAX_TOTAL = 99 (decided 2026-10-03). A week =
   fixed 7-day periods from local_config.json "week_start" (sheet.week_window); without it, the last
   7 days. Mine: week_start 2026-10-06 (reset because I started applying late), then every 7 days.
   Approved rows beyond the cap just wait for the next week.
+  The total (my request, 2026-10-16: NUworks showed 32, NUauto 40) counts what NUworks has: every update asks NUworks
+  about each sent row (jobs.check_applications -> data/applications.json); a row NUworks says it has no application
+  for (a company-site one whose NUworks side never went out) doesn't count, but only while the row is as it was when
+  NUworks was asked (sheet.not_on_nuworks: a row sent or changed since still counts). Never asked: it counts.
   Both caps count the main (NUworks) tab only: the Other jobs tab has no cap (my call, 2026-10-07). Summer
   internships (Simplify's and vanshb03's lists, intern.py) go in the Other jobs tab: no weekly or total cap either; Approved ones
   can be applied to as much as I want (my call, 2026-10-10).
@@ -122,10 +126,13 @@ ANSWER BANK (answers.json)
 SHEET
 Columns (row 1): URL, Company, Title, Status, Notes, Date. setup_sheet.py made them (one-time,
 never overwrites existing data), with the Status dropdown and row 1 frozen.
-Status values: Proposed, Approved, Applied, Failed, Needs Human
+Status values: Proposed, Approved, Applied, Failed, Needs Human, Accepted, Rejected
 - Proposed: job added by me (or suggested), not approved yet.
 - Approved: I approved it. The script only ever acts on these rows.
 - Applied: submitted. Fill in Date.
+- Accepted / Rejected (added 2026-10-16, my request): what I heard back on a sent row (a row's More menu in Apply, or the
+  sheet's dropdown; sheet.set_outcome keeps the date, notes when). They still count toward both limits (sheet.SENT).
+  The dropdown on an older sheet gets them from the update or the first mark (setup_sheet.ensure_dropdown).
 - Failed / Needs Human: script stopped. Put the reason in Notes.
 - Notes starting "Dropped <date>: <reason>" (sheet.drop, added 2026-10-12, my request): a Failed row I chose not to apply
   to (closed, a duplicate, a bad location): Drop in a row's More menu on the GUI's Apply screen (both machines' pages,

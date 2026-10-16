@@ -109,14 +109,15 @@ def add(tab, url, company="", title="", status="Approved", interactive=True, not
 
 def movable(row, tab="nuworks", action="move"):
     """None if this row of tab may be moved (action "move") or removed ("remove"), else why not.
-    An Applied row never leaves the NUworks tab (that would hide it from the limits) and is never removed; an Applied
-    Other job may move to the NUworks tab (it then counts toward the limits there: the safe direction)."""
-    if row.status == "Applied":
+    A sent row (Applied, Accepted, Rejected) never leaves the NUworks tab (that would hide it from the limits) and is
+    never removed; a sent Other job may move to the NUworks tab (it then counts toward the limits there: the safe
+    direction)."""
+    if row.status in sheet.SENT:
         if tab == "other" and action == "move":
             return None
         if tab == "other":
-            return "it is Applied (your record that you applied; you can move it to the NUworks tab)"
-        return "it is Applied (it counts toward your weekly and total limits)"
+            return f"it is {row.status} (your record that you applied; you can move it to the NUworks tab)"
+        return f"it is {row.status} (it counts toward your weekly and total limits)"
     if row.status == "Needs Human" and row.notes.startswith(sheet.SUBMIT_MARK):
         return "its Submit click is still unresolved: check NUworks first"
     return None
@@ -191,7 +192,7 @@ def main(argv):
             if why:
                 sys.exit(f"{what}\nCan't be changed: {why}.")
             verb = "Move it to the other tab" if cmd == "move" else "Remove it from the sheet"
-            if cmd == "move" and row.status == "Applied":
+            if cmd == "move" and row.status in sheet.SENT:
                 verb += " (in the NUworks tab it counts toward your weekly and total limits)"
             if input(f"{what}\n{verb}? [y/N]: ").strip().lower() != "y":
                 return print("Nothing changed.")

@@ -26,7 +26,7 @@ import os
 import re
 import subprocess
 import sys
-from datetime import date
+from datetime import date, datetime
 from urllib.parse import urlparse
 
 from nuauto import config
@@ -673,6 +673,45 @@ def check_applied(ids):
     return found
 
 
+def check_applications(rows):
+    """Ask NUworks about every sent row of the NUworks tab (Applied, Accepted, Rejected; its job's own data: applied,
+    application_status, expired, is_interviewing) and keep its answers in data/applications.json, each with the row's
+    fingerprint (sheet.not_on_nuworks: an answer counts only for the row as it was then). So the total limit counts what
+    NUworks has: a company-site application whose NUworks side never went out doesn't. Returns {job id: answer}.
+    Read-only on NUworks; rows it can't read keep their last answer."""
+    from playwright.sync_api import sync_playwright
+    from nuauto import sheet
+    sent = [r for r in rows if r.status in sheet.SENT and urlparse(r.url).hostname in config.ALLOWED_HOSTS]
+    seen = sheet.nuworks_seen()
+    if not sent:
+        return seen
+    now = datetime.now().isoformat(timespec="minutes")
+    with sync_playwright() as p:
+        browser, log, context, page, blocked = open_browser(p, "check_applications")
+        try:
+            if not browser.goto_logged_in(page, context, config.NUWORKS_START_URL, log):
+                sys.exit(NOT_LOGGED_IN)
+            for r in sent:
+                i = job_id(r.url)
+                resp = page.request.get(f"{HOST}/api/v3/jobs/{i}")
+                try:
+                    raw = resp.json() if resp.ok else None
+                except Exception:
+                    raw = None
+                if raw and raw.get("job_id") == i:
+                    seen[i] = {"applied": bool(raw.get("applied")), "status": raw.get("application_status") or None,
+                               "expired": bool(raw.get("expired")), "interviewing": str(raw.get("is_interviewing")) == "1",
+                               "checked": now, "row": r.number, "fingerprint": sheet.fingerprint(r)}
+                browser.pause(page, 1.5, 3)
+            log.write(f"asked NUworks about {len(sent)} sent rows: "
+                      f"{sum(1 for r in sent if (seen.get(job_id(r.url)) or {}).get('applied'))} it has")
+        finally:
+            context.close()
+    keep = {job_id(r.url) for r in rows}  # rows that left the sheet (cleared): their answers go too
+    save(sheet.APPLICATIONS, {i: s for i, s in seen.items() if i in keep})
+    return seen
+
+
 def rules_summary():
     kept, dropped, reasons = 0, 0, {}
     for d in load_details().values():
@@ -948,7 +987,7 @@ def train(details, labels_):
 
 def my_labels(details, ratings, rows):
     """Sheet rows you approved count as yes; your explicit ratings override."""
-    out = {job_id(r.url): 1 for r in rows if r.status in {"Approved", "Applied", "Needs Human", "Failed"} and job_id(r.url) in details}
+    out = {job_id(r.url): 1 for r in rows if r.status in {"Approved", "Applied", "Accepted", "Rejected", "Needs Human", "Failed"} and job_id(r.url) in details}
     out.update({i: v["label"] for i, v in ratings.items() if i in details})
     return out
 

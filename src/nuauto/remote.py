@@ -499,7 +499,7 @@ def jobs_left(main_rows, running, claims):
     on either machine (each may submit one)."""
     from nuauto import sheet
     dates = sheet.applied_dates(main_rows)
-    left = min(sheet.max_per_week() - sheet.week_count(dates), sheet.MAX_TOTAL - len(dates))
+    left = min(sheet.max_per_week() - sheet.week_count(dates), sheet.MAX_TOTAL - sheet.total_count(main_rows))
     return left - sum(1 for x in [*running, *claims] if x.get("tab") == "jobs")
 
 

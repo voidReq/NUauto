@@ -119,7 +119,7 @@ def summarize(pool, details, rows, categories=None, today=None, id_of=None):
         cat = (in_pool.get(job_id) or {}).get("category") or categories.get(job_id)
         return details.get(job_id) or {}, cat
 
-    applied = [entry((id_of or jobs.job_id)(r.url)) for r in rows or [] if r.status == "Applied"]
+    applied = [entry((id_of or jobs.job_id)(r.url)) for r in rows or [] if r.status in sheet.SENT]
     statuses = Counter(r.status for r in rows or [] if r.status)
     return {
         "pool": group([entry(r["id"]) for r in pool], today),

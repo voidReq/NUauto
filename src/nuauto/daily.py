@@ -175,9 +175,30 @@ def main():
         code = 1
     if datetime.now().hour < 12:  # reminders once a day, with the morning run
         reminders(before, ok=code == 0)
+    applications()
     code = internships() or code
     record_run(code)
     return code
+
+
+def applications():
+    """Every run: ask NUworks about each sent row (jobs.check_applications), so the total limit counts what NUworks has.
+    Never changes the run's result: a sheet or NUworks that can't be read now is asked again next run."""
+    from nuauto import setup_sheet
+    from nuauto import sheet
+    try:
+        ws = sheet.open_worksheet(interactive=False)
+        rows = sheet.read_rows(ws)
+        setup_sheet.ensure_dropdown(ws)  # Accepted / Rejected in the Status dropdown of a sheet made before them
+    except Exception as e:  # (the morning reminders say so when it is the Google login)
+        return log(f"applications check skipped: the sheet can't be read ({type(e).__name__})")
+    log("applications on NUworks")
+    ok, seen = step(jobs.check_applications, rows)
+    if not ok:
+        return log(f"applications check stopped: {seen}")
+    missing = sorted(sheet.not_on_nuworks(rows, seen))
+    log(f"applications: {sheet.total_count(rows, seen)} count toward the total"
+        + (f"; NUworks has none for row{'s' if len(missing) > 1 else ''} {', '.join(map(str, missing))}" if missing else ""))
 
 
 def internships():
@@ -295,8 +316,8 @@ def record_hand_applications(before, rows):
     from nuauto import sheet
     listed = set(jobs.load("list.json", {}))
     by_id = {jobs.job_id(r.url): r for r in rows}
-    applied = {i for i, r in by_id.items() if r.status == "Applied"}
-    candidates = (set(before) | {i for i, r in by_id.items() if r.status != "Applied"}) - listed - applied
+    applied = {i for i, r in by_id.items() if r.status in sheet.SENT}
+    candidates = (set(before) | {i for i, r in by_id.items() if r.status not in sheet.SENT}) - listed - applied
     ok, found = step(jobs.check_applied, sorted(candidates))
     if not ok or not found:
         log(f"hand applications: checked {len(candidates)}, found {len(found) if ok else 'error: ' + str(found)}")

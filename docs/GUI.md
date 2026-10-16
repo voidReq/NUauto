@@ -100,14 +100,17 @@ SCREENS
                  By hand on NUworks (Needs Human rows only you can finish there: a cover letter, a transcript; the assistant can work them
                  on NUworks with you: each row's Start, or why it can't), Still owed
                  (submitted on NUworks, the company site still wants you: Mark the company site done; the NUworks side to
-                 send again: Submit on NUworks too), Applied, Proposed, Dropped or failed, Other rows; recent runs folded at
+                 send again: Submit on NUworks too), Applied (a "not on NUworks" chip when NUworks has no application for it:
+                 it doesn't count toward the total; "interviewing (NUworks)"), Accepted, Rejected, Proposed, Dropped or
+                 failed, Other rows; recent runs folded at
                  the end. The other tab: Ready to apply (Approved: the assistant), Applied, Proposed, Dropped or failed,
                  Other rows (sort: score, match %, pay, sheet order; on the homelab's page the queue's order first).
                  Every row: who and what, its score / match % and pay ("score 105 = 75% match + 10 Boston + 20 security"
                  when bonuses add to it: Start goes by score), a line about it (its site, its notes), its chips (when it
                  closes: amber within a week, red once past; "may also want the company's site"; the queue's place), what to
                  do next (Apply: after a confirm just that row, `nuauto apply --row N`; Start assistant; Mark done; Submit
-                 on NUworks too), Open, and More (⋯; on a phone in the row's top right corner): I applied myself, Drop (not
+                 on NUworks too), Open, and More (⋯; on a phone in the row's top right corner): on a sent row Mark accepted /
+                 Mark rejected (or Back to Applied: what you heard back, sheet.set_outcome), I applied myself, Drop (not
                  applying: closed, a duplicate, a bad location; sheet.drop: Failed, "Dropped <date>: <reason>" in Notes;
                  only Approved / Needs Human rows, never while an assistant is on the row), Move to the other tab (asks for
                  the link there), Remove from the sheet (clears the row's cells: no row is renumbered). What a row can't do

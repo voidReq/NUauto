@@ -52,8 +52,9 @@ Unit files live in this repo (deploy/systemd/) and are installed in ~/.config/sy
 - nuauto-daily.timer -> nuauto-daily.service: `nuauto daily` at 08:00 and 18:00 New York time
   (+0-15 min random, Persistent=true so a missed run happens at boot). Steps: list -> Claude
   triage -> details -> Claude score -> Claude category -> pool -> notifications (see
-  docs/PIPELINE.md). Also: marks jobs applied to by hand as Applied, warns the day before
-  the Google login expires. Every run records its counts in data/scans.json. The morning run
+  docs/PIPELINE.md). Also: marks jobs applied to by hand as Applied, asks NUworks about every sent row (the total
+  limit counts what NUworks has: jobs.check_applications, data/applications.json; it also sets the sheet's Status
+  dropdown again, so Accepted / Rejected reach an older sheet), warns the day before the Google login expires. Every run records its counts in data/scans.json. The morning run
   adds deadline reminders and the "NUauto morning" message (always sent): new postings and
   new pool jobs in the last 24h, then the to-do list (company-site applications owed,
   external Needs Human rows) with signed Mark links.

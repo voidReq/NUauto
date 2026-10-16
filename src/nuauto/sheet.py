@@ -3,6 +3,8 @@
 Run `nuauto sheet status` to see the Approved rows and the weekly count.
 `nuauto sheet add|move|remove ...`: add, move or remove a job by hand (manage.py).
 """
+import hashlib
+import json
 import os
 import sys
 from dataclasses import dataclass
@@ -14,7 +16,10 @@ from google.auth.exceptions import RefreshError
 from nuauto import config
 
 HEADERS = ["URL", "Company", "Title", "Status", "Notes", "Date"]
-STATUSES = ["Proposed", "Approved", "Applied", "Failed", "Needs Human"]
+STATUSES = ["Proposed", "Approved", "Applied", "Failed", "Needs Human", "Accepted", "Rejected"]
+# An application went out: Applied, and what you heard back (my request, 2026-10-16). All count toward the limits.
+SENT = ("Applied", "Accepted", "Rejected")
+OUTCOMES = ("Accepted", "Rejected")
 MAX_PER_WEEK = 11  # the default weekly cap (raised from 8 on 2026-10-03); local_config "max_per_week" changes it
 MAX_PER_WEEK_CEILING = 30  # the most a setting may ask for
 MAX_TOTAL = 99     # CLAUDE.md says "under 100"
@@ -59,10 +64,10 @@ def parse_rows(values):
 
 
 def applied_dates(rows):
-    """Dates of all Applied rows. A missing or odd date is an error, not a guess."""
+    """Dates of all sent rows (Applied, Accepted, Rejected). A missing or odd date is an error, not a guess."""
     dates = []
     for r in rows:
-        if r.status != "Applied":
+        if r.status not in SENT:
             continue
         try:
             dates.append(datetime.strptime(r.date, DATE_FMT).date())
@@ -97,16 +102,57 @@ def week_count(dates, today=None):
     return sum(1 for d in dates if first <= d <= today)
 
 
-def check_limits(rows, today=None):
+APPLICATIONS = "applications.json"  # data/: what NUworks said about each sent row (jobs.check_applications)
+
+
+def fingerprint(row):
+    """A sent row as it is now (its link, notes, date): NUworks' answer about it holds only while these are the same."""
+    return hashlib.sha256(f"{row.url}\n{row.notes}\n{row.date}".encode()).hexdigest()[:16]
+
+
+def nuworks_seen():
+    """{job id: {"applied", "status", "expired", "interviewing", "checked", "row", "fingerprint"}}: NUworks' answers from
+    the last check (the twice-daily update); {} when there is none (or it can't be read)."""
+    try:
+        with open(os.path.join(config.DATA_DIR, APPLICATIONS)) as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def not_on_nuworks(rows, seen=None):
+    """Row numbers of the sent rows NUworks says it has no application for (a company-site application whose NUworks
+    side never went out, one marked by hand). Only an answer given about the row as it is now counts (fingerprint:
+    a row sent, changed or re-dated since is still counted until the next check). Every other sent row counts."""
+    from nuauto import jobs
+    seen = nuworks_seen() if seen is None else seen
+    out = set()
+    for r in rows:
+        s = seen.get(jobs.job_id(r.url)) if r.status in SENT and r.url else None
+        if s and s.get("applied") is False and s.get("fingerprint") == fingerprint(r):
+            out.add(r.number)
+    return out
+
+
+def total_count(rows, seen=None):
+    """What counts toward the total limit: the sent rows NUworks has (or hasn't been asked about yet). The NUworks tab's
+    rows only (the Other jobs tab has no limits). Until 2026-10-16 every Applied row counted, also those never sent
+    on NUworks."""
+    return sum(1 for r in rows if r.status in SENT) - len(not_on_nuworks(rows, seen))
+
+
+def check_limits(rows, today=None, seen=None):
     today = today or date.today()
     dates = applied_dates(rows)
     week = week_count(dates, today)
     cap = max_per_week()
+    total = total_count(rows, seen)
     if week >= cap:
         raise LimitReached(f"Weekly limit reached: {week} applied {week_window(today)[1]} (max {cap}).")
-    if len(dates) >= MAX_TOTAL:
-        raise LimitReached(f"Total limit reached: {len(dates)} applied (max {MAX_TOTAL}).")
-    return week, len(dates)
+    if total >= MAX_TOTAL:
+        raise LimitReached(f"Total limit reached: {total} applications on NUworks (max {MAX_TOTAL}).")
+    return week, total
 
 
 def approved(rows):
@@ -291,9 +337,9 @@ def _row_for(ws, row_number, url):
 
 
 def append_note(ws, row_number, url, text):
-    """Add text to an Applied row's Notes (e.g. the NUworks-side outcome after nuauto assist)."""
+    """Add text to a sent row's Notes (e.g. the NUworks-side outcome after nuauto assist)."""
     current = _row_for(ws, row_number, url)
-    if current.status != "Applied":
+    if current.status not in SENT:
         raise SheetError(f"Row {row_number} is not Applied. Refusing to change its notes.")
     ws.update(range_name=f"E{row_number}", values=[[f"{current.notes} {text}".strip()]], value_input_option="RAW")
 
@@ -326,11 +372,25 @@ def mark_applied_by_hand(ws, row_number, url, how="by hand"):
     """You applied yourself (e.g. an external job that went to Needs Human): Applied, dated today.
     No limit check: the application has already gone out."""
     current = _row_for(ws, row_number, url)
-    if current.status == "Applied":
-        raise SheetError(f"Row {row_number} is already Applied.")
+    if current.status in SENT:
+        raise SheetError(f"Row {row_number} is already {current.status}.")
     ws.update(range_name=f"D{row_number}:F{row_number}",
               values=[["Applied", f"Applied {how}. {current.notes}".strip(), date.today().strftime(DATE_FMT)]],
               value_input_option="RAW")
+
+
+def set_outcome(ws, row_number, url, outcome):
+    """What you heard back on a sent row: Accepted or Rejected (or back to Applied, a mark undone). Its date stays (the
+    day it went out: it still counts that week); a note says when you marked it. Only a sent row still holding this job."""
+    if outcome not in SENT:
+        raise SheetError(f"Unknown outcome {outcome!r}.")
+    current = _row_for(ws, row_number, url)
+    if current.status not in SENT:
+        raise SheetError(f"Row {row_number} is {current.status or 'empty'}: only a sent application is accepted or rejected.")
+    if current.status == outcome:
+        return
+    notes = current.notes if outcome == "Applied" else f"{outcome} (marked {date.today():%Y-%m-%d}). {current.notes}".strip()
+    ws.update(range_name=f"D{row_number}:F{row_number}", values=[[outcome, notes, current.date]], value_input_option="RAW")
 
 
 DROP_MARK = "Dropped"   # Notes prefix of a row you chose not to apply to (drop)
@@ -407,8 +467,7 @@ def main():
 
 def check_limits_safe(rows):
     """Counts for display only; does not raise when a limit is hit."""
-    dates = applied_dates(rows)
-    return week_count(dates), len(dates)
+    return week_count(applied_dates(rows)), total_count(rows)
 
 
 if __name__ == "__main__":

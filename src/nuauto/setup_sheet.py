@@ -2,7 +2,7 @@
 
   nuauto setup-sheet          one-time: headers, Status dropdown, frozen row 1, then the styling below.
                                  Refuses to touch the sheet if any cell already has a value.
-  nuauto setup-sheet format   (re)apply the styling only: header, column widths, Status colors,
+  nuauto setup-sheet format   (re)apply the styling only: header, column widths, Status colors and dropdown,
                                  alternating rows. Never changes a value; safe to re-run. Replaces this
                                  tab's conditional formats and alternating colors with ours. Styles the
                                  Other jobs tab too, if there is one.
@@ -16,7 +16,7 @@ import gspread
 from nuauto import config
 
 HEADERS = ["URL", "Company", "Title", "Status", "Notes", "Date"]
-STATUSES = ["Proposed", "Approved", "Applied", "Failed", "Needs Human"]
+STATUSES = ["Proposed", "Approved", "Applied", "Failed", "Needs Human", "Accepted", "Rejected"]  # = sheet.STATUSES
 LAST_ROW = 1000  # dropdown covers D2:D1000
 
 
@@ -33,8 +33,28 @@ STATUS_COLORS = {
     "Applied": ("#E8F0FE", "#1967D2"),
     "Failed": ("#FCE8E6", "#C5221F"),
     "Needs Human": ("#FEF7E0", "#B06000"),
+    "Accepted": ("#CEEAD6", "#0D652D"),
+    "Rejected": ("#F1F3F4", "#5F6368"),
 }
 WIDTHS = {"URL": 110, "Company": 215, "Title": 370, "Status": 115, "Notes": 380, "Date": 95}
+
+
+def status_dropdown(ws):
+    """The Status column's dropdown: one of STATUSES (format_sheet sets it again, so a new status reaches old sheets)."""
+    return {"setDataValidation": {
+        "range": {"sheetId": ws.id, "startRowIndex": 1, "endRowIndex": LAST_ROW,
+                  "startColumnIndex": HEADERS.index("Status"), "endColumnIndex": HEADERS.index("Status") + 1},
+        "rule": {"condition": {"type": "ONE_OF_LIST", "values": [{"userEnteredValue": s} for s in STATUSES]},
+                 "strict": True, "showCustomUi": True}}}
+
+
+def ensure_dropdown(ws):
+    """Set the Status dropdown on this tab again (every status, Accepted and Rejected too: a sheet made before them
+    still has the old list). Changes no value. A sheet that can't take it (demo mode's) is left as it is."""
+    try:
+        ws.spreadsheet.batch_update({"requests": [status_dropdown(ws)]})
+    except AttributeError:
+        pass
 
 
 def format_sheet(sh, ws, title="Jobs"):
@@ -86,6 +106,7 @@ def format_sheet(sh, ws, title="Jobs"):
         "ranges": [cells(col["Notes"], col["Notes"] + 1)],
         "booleanRule": {"condition": {"type": "TEXT_STARTS_WITH", "values": [{"userEnteredValue": sheet.SITE_MARK}]},
                         "format": {"textFormat": {"foregroundColor": rgb("#B06000"), "bold": True}}}}}})
+    reqs.append(status_dropdown(ws))
     sh.batch_update({"requests": reqs})
 
 
@@ -100,28 +121,7 @@ def setup(sh, ws, title="Jobs"):
         raise HasData("Sheet already has data. Nothing was changed. To restyle it: nuauto setup-sheet format")
     ws.update(range_name="A1:F1", values=[HEADERS])
     ws.freeze(rows=1)
-    sh.batch_update({
-        "requests": [{
-            "setDataValidation": {
-                "range": {
-                    "sheetId": ws.id,
-                    "startRowIndex": 1,
-                    "endRowIndex": LAST_ROW,
-                    "startColumnIndex": HEADERS.index("Status"),
-                    "endColumnIndex": HEADERS.index("Status") + 1,
-                },
-                "rule": {
-                    "condition": {
-                        "type": "ONE_OF_LIST",
-                        "values": [{"userEnteredValue": s} for s in STATUSES],
-                    },
-                    "strict": True,
-                    "showCustomUi": True,
-                },
-            }
-        }]
-    })
-    format_sheet(sh, ws, title)
+    format_sheet(sh, ws, title)  # (the Status dropdown with it)
 
 
 def main():

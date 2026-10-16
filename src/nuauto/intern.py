@@ -721,7 +721,7 @@ def ranked_pool(ratings, other_rows, nuworks_rows=()):
     by_url = {d.get("url"): i for i, d in details.items()}
     for r in other_rows or []:
         i = by_url.get(clean_url(r.url))
-        if i and r.status in ("Approved", "Applied", "Needs Human", "Failed") and i not in ratings:
+        if i and r.status in ("Approved", "Applied", "Accepted", "Rejected", "Needs Human", "Failed") and i not in ratings:
             labels[i] = 1
     key = (json.dumps(labels, sort_keys=True), len(every), tuple(r["id"] for r in pool))
     if key not in _TASTE:
