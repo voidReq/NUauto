@@ -58,7 +58,11 @@ Unit files live in this repo (deploy/systemd/) and are installed in ~/.config/sy
   new pool jobs in the last 24h, then the to-do list (company-site applications owed,
   external Needs Human rows) with signed Mark links.
   If the scan fails (e.g. NUworks too slow; a page load gets one retry after 60s), the morning
-  reminders still go out, from the sheet and the last saved pool.
+  reminders still go out, from the sheet and the last saved pool. No job list from NUworks: the list is read once more
+  2 minutes later (daily.RETRY_WAIT). Why a run stopped goes to data/last_run.json (daily.record_run: nuworks_login,
+  nuworks, claude or failed, in a few words); the laptop pulls it with data/, and the GUI's New jobs check shows it
+  on Today with the fix (Log in to NUworks, Run it again, Log in to Claude there). Discord says the same: a login only
+  when NUworks really asks for one.
   Claude runs as `claude -p --model sonnet`, one call per batch file, shut in work/ (it runs there and may read and
   write only there: no shell, web or MCP tools; the batches hold web text, job postings, so nothing in one can reach
   local/, the code or your home).

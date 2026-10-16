@@ -118,7 +118,7 @@ MAIN FLOWS
 STATE ON DISK (repo root; all gitignored except as noted)
   data/   job pool, owned by the homelab; laptop pulls a copy. list.json, triage.json, scores.json,
           categories.json, pool.json, scans.json, details/ (one file per job): written by jobs.py
-          (scans.json by daily.py). ratings.json: written by jobs.cmd_rate on the laptop, pushed.
+          (scans.json and last_run.json, why the last update stopped, by daily.py). ratings.json: written by jobs.cmd_rate on the laptop, pushed.
   work/   batch files for Claude: <kind>_in_NNN.json, <kind>_out_NNN.json, resume.txt. jobs.py
           writes the inputs and resume.txt; the claude subprocess (daily.run_claude) writes the outputs.
   logs/   browser.RunLog: <stamp>_<label>/ per application (actions log + screenshots; assist adds

@@ -104,6 +104,7 @@ def slow(before):
     raise TimeoutError("Page.goto: Timeout 30000ms exceeded.")
 def never(*a):
     raise AssertionError("hand-application check needs a fresh list; must not run after a failed scan")
+real_scan = daily.scan
 daily.scan, daily.record_hand_applications = slow, never
 daily.sheet_rows = lambda: [row(4, "Needs Human", "External application ...")]
 daily.google_notice = lambda: 1 / 0  # one broken reminder must not stop the others
@@ -123,5 +124,35 @@ class Evening(Morning):
 daily.datetime = Evening
 sent.clear()
 assert daily.main() == 1 and [t for t, _ in sent] == ["NUauto: daily update failed"], sent
+
+# why a run stopped is kept for the GUI (last_run.json), and a slow NUworks gets a second try
+daily.scan = real_scan
+daily.RETRY_WAIT = 0
+tries = []
+def no_list():
+    tries.append(1)
+    raise SystemExit("No job list response for page 1; stopping.")
+daily.jobs.cmd_list = no_list
+daily.STOPPED.clear(); sent.clear()
+assert daily.scan(set()) == 1 and len(tries) == 2, tries  # tried again
+assert sent[-1][0] == "NUauto: NUworks did not answer" and "nuauto login" not in sent[-1][1], sent
+daily.record_run(1)
+run = daily.jobs.load(daily.LAST_RUN, {})
+assert run["ok"] is False and run["reason"] == "nuworks" and run["said"] == "NUworks did not send the job list", run
+def logged_out():
+    tries.append(1)
+    raise SystemExit(daily.jobs.NOT_LOGGED_IN)
+daily.jobs.cmd_list = logged_out
+tries.clear(); daily.STOPPED.clear()
+assert daily.scan(set()) == 1 and len(tries) == 1  # a login is not retried
+assert sent[-1][0] == "NUauto: NUworks needs you to log in" and "Log in to NUworks" in sent[-1][1], sent
+daily.record_run(1)
+assert daily.jobs.load(daily.LAST_RUN, {})["reason"] == "nuworks_login"
+daily.scan = slow  # main(): Playwright's TimeoutError reads as NUworks not loading
+assert daily.main() == 1
+run = daily.jobs.load(daily.LAST_RUN, {})
+assert run["reason"] == "nuworks" and run["said"] == "NUworks did not load in time" and run["time"] == "2026-10-05T18:06", run
+daily.scan = lambda before: 0
+assert daily.main() == 0 and daily.jobs.load(daily.LAST_RUN, {})["ok"] is True  # a good run clears it
 
 print("All morning-summary checks passed.")

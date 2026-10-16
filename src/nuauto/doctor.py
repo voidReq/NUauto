@@ -34,8 +34,8 @@ def section(name):
         print(name)
 
 
-def say(level, msg):
-    results.append({"where": where[0], "level": level, "msg": msg})
+def say(level, msg, kind=None):
+    results.append({"where": where[0], "level": level, "msg": msg, **({"kind": kind} if kind else {})})
     if not JSON:
         print(f"  {level:4}  {msg}")
     if level == "FAIL":
@@ -200,7 +200,13 @@ def server():
             say("FAIL", f"{unit} is {enabled}/{active}: systemctl --user enable --now {unit}")
     result = sh(["systemctl", "--user", "show", "nuauto-daily.service", "-p", "Result", "--value"]).stdout.strip()
     if result != "success":
-        say("FAIL", f"last update run ended with {result!r}: journalctl --user -u nuauto-daily -n 50")
+        try:  # daily.py's record of why it stopped (an older homelab has none)
+            with open(os.path.join(config.DATA_DIR, "last_run.json")) as f:
+                run = json.load(f)
+            why = f": {run['said']}" if run.get("ok") is False and run.get("said") else ""
+        except (OSError, ValueError, AttributeError):
+            why = ""
+        say("FAIL", f"last update run stopped{why} ({result}): journalctl --user -u nuauto-daily -n 50", kind="last_run")
     runs = sorted(os.path.join(config.LOGS_DIR, n) for n in os.listdir(config.LOGS_DIR) if n.startswith("daily-")) \
         if os.path.isdir(config.LOGS_DIR) else []
     hours = (time.time() - os.path.getmtime(runs[-1])) / 3600 if runs else None

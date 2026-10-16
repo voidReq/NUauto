@@ -277,6 +277,7 @@ const FIXES = {
   login_google: () => action("login_google"),
   login_nuworks: () => action("login_nuworks"),
   login_claude: () => action("login_claude"),
+  homelab_claude: async () => { const r = await api.post("/api/homelab", { action: "claude" }).catch(fail); if (r) terminalResult(r); },
   install_claude: () => confirmBox("Install Claude Code?", "This runs Claude Code's official installer (claude.ai/install.sh) for your user.",
     "Install", () => action("install_claude")),
   install_firefox: () => action("install_firefox"),
