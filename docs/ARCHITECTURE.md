@@ -95,7 +95,7 @@ MAIN FLOWS
     on exit. Then sync.push (ratings).
   nuauto apply
     apply.main: sheet.check_limits -> pick_row/apply_order (closing soon first) -> apply_one:
-    browser.launch + install_domain_lock -> fill_popup (check_popup, resume dropdown,
+    browser.launch + install_domain_lock -> fill_popup (apply_button waits up to 15 s for the Apply button, check_popup, resume dropdown,
     fill_extra_fields via answers.resolve_answer) -> submit_flow: sheet.mark_submit_started, click,
     confirm text -> sheet.resolve_submit (Applied or Failed). Any stop -> sheet.set_status("Needs Human").
   nuauto gui

@@ -33,6 +33,17 @@ from nuauto import sheet
 from nuauto.inspect_form import FIELDS_JS
 
 APPLY_NAME = re.compile(r"^\s*apply\s*$", re.IGNORECASE)
+APPLY_WAIT_MS = 15000  # NUworks draws the job page with JavaScript after it loads; a slow one showed no button yet
+
+
+def apply_button(page):
+    """The job page's Apply button(s), once the page has drawn one (up to APPLY_WAIT_MS); count() alone does not wait."""
+    btn = page.get_by_role("button", name=APPLY_NAME)
+    try:
+        btn.first.wait_for(state="visible", timeout=APPLY_WAIT_MS)
+    except PlaywrightTimeout:
+        pass  # none showed up: the caller's count check says so
+    return btn
 
 
 class NeedsHuman(Exception):
@@ -248,8 +259,9 @@ def fill_popup(page, context, row, resume_label, entries, io, log, blocked, comp
         if not browser.goto_logged_in(page, context, row.url, log):
             raise SessionExpired("NUworks is showing the sign-in page. Run `nuauto login` again.")
 
-    btn = page.get_by_role("button", name=APPLY_NAME)
+    btn = apply_button(page)
     if btn.count() != 1:
+        log.screenshot(page, "no_apply_button")
         raise NeedsHuman(f"Expected one Apply button, found {btn.count()}.")
     if btn.is_disabled():
         raise NeedsHuman("Apply button is disabled.")
