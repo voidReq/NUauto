@@ -113,11 +113,11 @@ def main():
             sys.exit(sync.deploy_now())
         if cmd == "update":
             sync.push()
-            print("Running the update on the homelab (a few minutes; Ctrl+C stops watching, not the run)...")
-            sync.ssh("systemctl --user start nuauto-daily.service; "
-                     f"tail -n 4 \"$(ls -t {config.SERVER_DIR}/logs/daily-*.txt | head -1)\"")
+            print("Running the update on the homelab (about 10 minutes; Ctrl+C stops watching, not the run)...",
+                  flush=True)
+            code = sync.ssh(sync.watch_unit())
             sync.pull()
-            return
+            sys.exit(code)
         if cmd != "login":
             sync.pull()
 

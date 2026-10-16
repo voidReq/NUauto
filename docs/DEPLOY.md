@@ -153,7 +153,8 @@ SYNC (sync.py; runs automatically inside `nuauto` on the laptop, homelab mode on
   and push first merges both machines' answer banks, local_config.json, profile.json and data/ratings.json, per
   question / setting / job (sync.share; docs/REMOTE.md, WHAT LIVES WHERE); push then copies only what that could not
   carry (an older homelab).
-- `nuauto update`: push, start nuauto-daily.service on the homelab, show its log tail, pull.
+- `nuauto update`: push, start nuauto-daily.service on the homelab and show its lines as they come (journalctl -f;
+  sync.watch_unit, also the homelab page's update and `nuauto intern update`), pull. Exit code = the run's result.
 - `nuauto login`: copy browser_profile/ + session_cookies.json to the homelab (refuses while
   the homelab update is running, because that uses the profile).
 - `nuauto test` and `nuauto doctor` don't sync.

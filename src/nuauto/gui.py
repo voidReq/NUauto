@@ -914,11 +914,6 @@ def demo_cmd(*args):
 VISIBLE = {"AUTO_HEADLESS": ""}  # runs you watch get a visible browser, whatever this process's environment says
 
 
-# The homelab's update is its own service (its timer runs it too): started there, never a second copy beside it.
-HOMELAB_UPDATE = ("systemctl --user start nuauto-daily.service; "
-                  'tail -n 8 "$(ls -t logs/daily-*.txt 2>/dev/null | head -1)" 2>/dev/null')
-
-
 def act(body):
     kind = body.get("kind")
     args = body.get("args") or {}
@@ -947,7 +942,10 @@ def act(body):
             cmd += ["-n", str(int(n))]
         task = APP.start("apply", "Applying", cmd, env=VISIBLE, on_done=lambda t: APP.run_now(["quick"]), watch=True)
     elif kind == "update":
-        cmd = (demo_cmd("update") if config.DEMO else ["bash", "-c", HOMELAB_UPDATE] if config.IS_SERVER
+        from nuauto import sync
+        # the homelab's update is its own service (its timer runs it too): started there, never a second copy beside
+        # it, its lines in the log as they come (the laptop's `nuauto update` runs the same over ssh)
+        cmd = (demo_cmd("update") if config.DEMO else ["bash", "-c", sync.watch_unit()] if config.IS_SERVER
                else config.self_cmd("update"))
         task = APP.start("update", "Checking for new jobs", cmd, browser=not config.HAS_SERVER,
                          on_done=lambda t: APP.run_now(["quick"]))

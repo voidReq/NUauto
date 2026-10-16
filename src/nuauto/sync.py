@@ -28,6 +28,17 @@ from nuauto import config
 SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8"]
 RSYNC = ["rsync", "-a", "-e", " ".join(SSH)]
 REMOTE = f"{config.SERVER}:{config.SERVER_DIR}"
+
+
+def watch_unit(unit="nuauto-daily.service"):
+    """A shell command, run on the homelab, that starts one of its update services (never a second copy beside the
+    timer's) and shows its lines as they come: systemctl start waits for the run, journalctl follows it meanwhile.
+    Stopping it stops the watching, not the run. Exits with the run's result. (`nuauto update` / `nuauto intern
+    update` on the laptop, over ssh; the homelab page's update, with bash -c.)"""
+    return (f"journalctl --user -u {unit} -f -n 0 -o cat & j=$!; sleep 1; "
+            f"systemctl --user start {unit}; rc=$?; sleep 2; kill $j 2>/dev/null; "
+            'if [ $rc = 0 ]; then echo "The update finished."; else echo "The update stopped (see above)."; fi; '
+            "exit $rc")
 # Pushed with rsync -R, so paths keep their folders (src/nuauto/, prompts/, docs/...). The docs go too, so agents
 # there read current ones. The homelab installs the package once (uv pip install -e .); code changes need no reinstall.
 PACKAGE = ["__init__.py", "__main__.py", "cli.py", "config.py", "sheet.py", "jobs.py", "fields.py", "daily.py", "browser.py",
