@@ -23,9 +23,11 @@ APPLYING (apply.py, sheet.py)
   assist.main (nuworks), assist.run_locked | test_remote
 - apply submits only with you there: a real terminal, or the GUI (`--ui json` only as a child of the running GUI, its
   pid in local/gui.lock: on the homelab the nuauto-web process serving NUauto's page, started by a paired device's tap,
-  its browser on a virtual screen you watch: gui.run_screen); never inside a Claude Code shell (CLAUDECODE); the same for
-  `assist nuworks <row>`; assist.run needs a terminal | apply.refuse_unattended (isatty / answers.json_ui_allowed /
-  CLAUDECODE), apply.main, assist.main | test_demo (CLAUDECODE and --ui json refusals), test_answers (json_ui_allowed)
+  its browser on a virtual screen you watch: gui.run_screen); never started from a Claude Code shell (CLAUDECODE), except
+  as the GUI's child (a GUI window an agent opened for you, 2026-10-16: you click Start; from there the real GUI refuses
+  --no-open, which would print the agent its secret); the same for `assist nuworks <row>`; assist.run needs a terminal |
+  apply.refuse_unattended (isatty / answers.json_ui_allowed / CLAUDECODE), apply.main, assist.main, gui.main |
+  test_demo (CLAUDECODE and --ui json refusals), test_answers (json_ui_allowed), test_gui (--no-open refusal)
 - Row can never be sent twice | sheet.mark_submit_started (row becomes Needs Human BEFORE the Submit click); sheet.resolve_submit only accepts a marked row | test_sheet (submit-safety checks)
 - Screenshot before Submit, and after | browser.RunLog.screenshot ("filled_popup", "after_submit") in apply.fill_popup / submit_flow | no test
 - Every action logged per application under logs/ | browser.RunLog | no test

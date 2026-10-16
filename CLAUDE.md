@@ -81,8 +81,11 @@ SAFETY RULES (most important)
    in a real terminal, or from the GUI (`nuauto gui`: I click Start, the browser is visible, Stop =
    Ctrl+C). (Added 2026-10-14, my call: "Allow it on the homelab".) Or from NUauto's page on the homelab: I tap Start
    on a paired device, the browser runs on a virtual screen I watch there (its link and password on the run's card),
-   Stop = Ctrl+C. Never from an agent: code refuses real submits inside a Claude Code shell (CLAUDECODE),
-   and `--ui json` works only as a child of the running GUI (on the homelab: nuauto-web). A dry run (fill, screenshot,
+   Stop = Ctrl+C. Never from an agent: code refuses real submits an agent's shell starts (CLAUDECODE: `nuauto apply`,
+   `assist nuworks`), and `--ui json` works only as a child of the running GUI (on the homelab: nuauto-web).
+   (Changed 2026-10-16, my call: "i don't really care if claude launches it".) An agent may open the real GUI for me
+   (`nuauto gui`: its own window; --no-open from Claude Code is refused: it would print the agent the secret);
+   I click Start there, never the agent. A dry run (fill, screenshot,
    stop) exists only as the hidden --dry-run dev flag.
 8. (Changed 2026-10-03.) No y/n before submit. Every filled form is still screenshotted to
    logs/ before Submit, and after-submit confirmation is checked.
@@ -164,9 +167,9 @@ BROWSER (Playwright, Firefox)
   The homelab has its own copy and uses it during its update runs (08:00/18:00 New York).
 
 GUI (`nuauto gui`; details: docs/GUI.md)
-- Agents: only `nuauto gui --demo` (everything fake: sheet, NUworks pages, Claude, temp folder) or `nuauto gui --view`
-  (my real data, READ-ONLY, enforced by the server; --no-open --port 0, open the printed URL in Playwright). Never start
-  the real GUI (no --view) or click Start in one; it refuses inside a Claude Code shell anyway. The homelab's page:
+- Agents test with `nuauto gui --demo` (everything fake: sheet, NUworks pages, Claude, temp folder) or `nuauto gui
+  --view` (my real data, READ-ONLY, enforced by the server; --no-open --port 0, open the printed URL in Playwright). The
+  real GUI: an agent may open its window for me (SAFETY RULES 7), never click Start or Apply in one. The homelab's page:
   `nuauto gui --demo --remote` (= `nuauto review demo`); the linked laptop: `nuauto gui --demo --linked`. Never use the
   real homelab page. Screens for review: `--screenshots DIR`.
 - ONE APP, TWO PLACES (my request, 2026-10-15: "as 1:1 as possible; a change to one adds to the other"): the laptop's
