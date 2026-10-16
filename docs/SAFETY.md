@@ -25,7 +25,8 @@ APPLYING (apply.py, sheet.py)
   pid in local/gui.lock: on the homelab the nuauto-web process serving NUauto's page, started by a paired device's tap,
   its browser on a virtual screen you watch: gui.run_screen); never started from a Claude Code shell (CLAUDECODE), except
   as the GUI's child (a GUI window an agent opened for you, 2026-10-16: you click Start; from there the real GUI refuses
-  --no-open, which would print the agent its secret); the same for `assist nuworks <row>`; assist.run needs a terminal |
+  --no-open, which would print the agent its secret, and with a window prints its address without the secret:
+  gui.printed_url); the same for `assist nuworks <row>`; assist.run needs a terminal |
   apply.refuse_unattended (isatty / answers.json_ui_allowed / CLAUDECODE), apply.main, assist.main, gui.main |
   test_demo (CLAUDECODE and --ui json refusals), test_answers (json_ui_allowed), test_gui (--no-open refusal)
 - Row can never be sent twice | sheet.mark_submit_started (row becomes Needs Human BEFORE the Submit click); sheet.resolve_submit only accepts a marked row | test_sheet (submit-safety checks)

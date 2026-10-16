@@ -1158,7 +1158,7 @@ screens.apply = async (view) => {
       el("div", { class: "what" }, key === "approved" ? el("span", { class: "muted", text: `${r.place}. `, title: `Start applies to this one ${ordinal(r.place)}` }) : null,
         el("b", { text: r.company || "(no company)" }), r.title ? ` · ${r.title}` : "", facts,
         about ? el("div", { class: "small muted", text: about }) : null),
-      el("div", { class: "row" }, ...chips, el("span", { class: "acts" }, next, open, rowMenu(d, key, r, other))));
+      el("div", { class: "row" }, ...chips, el("span", { class: "acts" }, next, el("span", { class: "tail" }, open, rowMenu(d, key, r, other)))));
   }
 
   // More: the same four for every row (each greyed out with the reason when it can't be done to this one)
@@ -1445,7 +1445,8 @@ function assistantStartButton(d, r, tab, testid, args) {
   }
   // the homelab's queue (its own page, or the laptop's app through the link): this row's place in it
   const q = S.queue && S.queue.rows ? S.queue.rows[`${tab}-${r.row}`] : null;
-  const chip = q && (q.group === "next" || !q.start) ? el("span", { class: "chip" + (q.group === "next" ? " accent" :
+  const said = q && q.group === "laptop" && r.on_laptop && !onHomelab();  // (the "do it on the laptop" chip says it already)
+  const chip = q && (q.group === "next" || !q.start) && !said ? el("span", { class: "chip" + (q.group === "next" ? " accent" :
     q.group === "check" || q.group === "laptop" ? " warn" : ""), testid: `${testid}-queue`, text: q.text }) : null;
   // Start on the homelab: there (its own Start now) or from the laptop's app (its link); the queue says when it can't
   const there = onHomelab() || d.linked && S.queue;

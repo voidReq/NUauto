@@ -2623,6 +2623,12 @@ def start_demo(argv):
     os.execve(sys.executable, config.self_cmd("gui", *[a for a in argv if a != "--demo"]), env)
 
 
+def printed_url(url):
+    """The address the ready line prints. From a Claude Code shell (CLAUDECODE) the real app opens its own window for
+    you, so the line never hands the agent this start's secret: the address alone (demo and view mode: all of it)."""
+    return url.split("?")[0] if os.environ.get("CLAUDECODE") and not config.DEMO and not VIEW else url
+
+
 def main(argv):
     global VIEW
     argv = list(argv)
@@ -2674,7 +2680,8 @@ def main(argv):
     if config.HAS_SERVER and not VIEW:  # a view copies and changes no files
         threading.Thread(target=pull_loop, daemon=True).start()
     url = start_url()
-    print(json.dumps({"url": url, "port": APP.port, "demo": config.DEMO, "view": VIEW, "state_dir": config.STATE_DIR}), flush=True)
+    print(json.dumps({"url": printed_url(url), "port": APP.port, "demo": config.DEMO, "view": VIEW, "state_dir": config.STATE_DIR}),
+          flush=True)
     served = threading.Thread(target=SERVER.serve_forever, kwargs={"poll_interval": 0.5}, daemon=True)
     served.start()  # the main thread is for the window (macOS needs it there)
     if shots:

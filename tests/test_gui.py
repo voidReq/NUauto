@@ -519,6 +519,24 @@ try:
     real = {k: v for k, v in ENV.items() if k != "NUAUTO_DEMO"} | {"NUAUTO_STATE_DIR": tempfile.mkdtemp(), "CLAUDECODE": "1"}
     r = subprocess.run([PY, "-m", "nuauto", "gui", "--no-open"], env=real, cwd=ROOT, capture_output=True, text=True, timeout=60)
     assert r.returncode != 0 and "opens its own window only" in r.stderr, r.stderr
+    # ...and the line it prints there names its address, never the start's secret (demo and view mode: all of it)
+    from nuauto import gui as gui_mod
+    secret_url = "http://127.0.0.1:5/?t=SECRET"
+    was = (os.environ.get("CLAUDECODE"), gui_mod.config.DEMO, gui_mod.VIEW)
+    try:
+        os.environ["CLAUDECODE"] = "1"
+        gui_mod.config.DEMO, gui_mod.VIEW = False, False
+        assert gui_mod.printed_url(secret_url) == "http://127.0.0.1:5/"
+        gui_mod.config.DEMO = True
+        assert gui_mod.printed_url(secret_url) == secret_url
+        gui_mod.config.DEMO = False
+        os.environ.pop("CLAUDECODE")
+        assert gui_mod.printed_url(secret_url) == secret_url  # your own terminal: the whole address, as before
+    finally:
+        os.environ.pop("CLAUDECODE", None)
+        if was[0] is not None:
+            os.environ["CLAUDECODE"] = was[0]
+        gui_mod.config.DEMO, gui_mod.VIEW = was[1], was[2]
 
     # ---------------------------------------------------------------- the page, in headless Firefox
     errors = []

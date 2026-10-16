@@ -250,7 +250,8 @@ SAFETY MODEL (details and tests: docs/SAFETY.md)
 - Runs: `nuauto apply --ui json` / `nuauto assist nuworks <row> --ui json` work only as a child of the running GUI
   (its pid in local/gui.lock); `nuauto apply` itself never runs from a Claude Code shell (CLAUDECODE). The real GUI
   may be opened from one (2026-10-16): its own window, for you to click Start; with --no-open it refuses there (it
-  would print the agent its secret). Agents test with --demo (fake) or --view (real data, read-only, below). Apply, logins and the NUworks side always get a visible browser (AUTO_HEADLESS
+  would print the agent its secret; with its window, the line it prints there has its address only, gui.printed_url).
+  Agents test with --demo (fake) or --view (real data, read-only, below). Apply, logins and the NUworks side always get a visible browser (AUTO_HEADLESS
   cleared). Approved in the sheet stays the only go-ahead; caps unchanged.
 - Questions (answers.JsonIO): one JSON line per question on the child's stdout ("::nuauto:: " + JSON), the
   answer as one JSON line on its stdin. The same rules as typing: an option must be one of the choices, blank
