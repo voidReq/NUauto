@@ -12,7 +12,7 @@ WHAT IT IS
   laptop). "remote_assist" (its assistant) turns it on too: you answer the assistant there.
 - `nuauto assist [other] <row>` runs on the homelab too, inside a tmux session, so an application can go on with the
   laptop closed. Its browser draws on a virtual screen there; you see and use that browser in a web page (noVNC) on
-  your phone or laptop, over Tailscale only. Its screen in the app (its row in Apply > Company sites, or its item in Today's "Only you can do
+  your phone or laptop, over Tailscale only. Its screen in the app (its row in Apply, Apply > Assistants, or its item in Today's "Only you can do
   these"): approve or decline its Submit, reply, watch its browser and terminal, end it.
 - Sessions start by themselves from your approved rows (the queue), and a claim keeps the laptop and the homelab off
   each other's rows and job sites.
@@ -38,8 +38,8 @@ APPLY ON THE HOMELAB (2026-10-14, my call: "Allow it on the homelab")
   ends); a run on the laptop asks the homelab for it over ssh first (homelab unreachable: it goes ahead and says so).
   The other one is refused: "Not now: the homelab is applying on NUworks now".
 - The NUworks side of a company-site application the homelab's assistant did is still never sent by itself (nobody
-  watches the session's end there): the row gets "NUworks side NOT submitted yet" and Company sites (either machine's
-  page) offers Submit on NUworks too.
+  watches the session's end there): the row gets "NUworks side NOT submitted yet" and Apply's Still owed (either
+  machine's page) offers Submit on NUworks too.
 - The homelab needs the virtual-screen tools for this too (TURN IT ON, step 1); without them Start says what to install.
   The NUworks session is the one `nuauto login` on the laptop copies there (the one-click re-login renews it); one that
   needs your password stops the run (Needs Human), as on the laptop: log in on the laptop.
@@ -84,7 +84,7 @@ PAIR YOUR PHONE (once per device)
 THE QUEUE (remote.py; nuauto-assist.timer every 10 minutes runs `nuauto assist auto`)
 - On with "remote_auto" (and remote_assist), per sheet tab: true = both; {"nuworks": true, "other": false} = each on
   its own (2026-10-13, my request; Settings > Homelab has a switch for each). A tab that is off starts
-  nothing by itself; its rows still show in Company sites with Start now. Hours: "remote_hours": [9, 22] (the default:
+  nothing by itself; its rows still show in Apply with Start now. Hours: "remote_hours": [9, 22] (the default:
   09:00-22:00 New York time, whatever clock the homelab runs on), so no pings at night: the only hours it starts
   sessions by itself (one already running goes on; you can start one yourself any time). It takes effect at the timer's
   next run (every 10 minutes).
@@ -92,13 +92,13 @@ THE QUEUE (remote.py; nuauto-assist.timer every 10 minutes runs `nuauto assist a
   closing within a week, then match % (the "match NN%" in Notes), then sheet order. Into free slots (assist_slots),
   one session per job site, never a row or site the laptop holds (claims). NUworks rows only while the weekly cap and
   the total leave room, counting the NUworks sessions already running on either machine (each may submit one).
-- On the homelab's page, Apply > Company sites shows each row's place in it (review.queue_view, read again every 20 s
+- On the homelab's page, Apply shows each company-site row's place in it (review.queue_view, read again every 20 s
   at most): "starts next by itself", "ready to start" (Start now), or what it waits for (a slot, its job site, the
-  weekly cap; check first: a Submit approved, outcome not given; marked: do it on the laptop); "Sort the list by: the
-  queue's order" (the default there); and a line with what starts by itself, its hours, the free slots and the NUworks
-  applications left.
+  weekly cap; check first: a Submit approved, outcome not given; marked: do it on the laptop); the internships tab's
+  "Sort: the queue's order" (the default there); and Apply > Assistants' line with what starts by itself, its hours,
+  the free slots and the NUworks applications left.
 - A row that has had a session (started by the queue or by you) never starts again by itself (local/assist_auto.json):
-  if it ended without "Applied", it waits for you: Start now in Company sites, or `nuauto assist start other 12`.
+  if it ended without "Applied", it waits for you: Start now on its row in Apply, or `nuauto assist start other 12`.
 - Not applying (closed, a duplicate, a bad location): Drop (pick the reason). The row becomes Failed with "Dropped
   <date>: <reason>" in Notes (sheet.drop), so it leaves the queue; never while a session or a laptop claim is on it.
 - One session per job site (assist.site_key): the host, but each company on a board companies share by path is its own
@@ -156,7 +156,7 @@ AN ASSISTANT'S SCREEN (#/assistant/<slot> in the homelab's app; review.view / ac
                     the session started in, and never when that pane shows a shell (the assistant ended). End session
                     (/exit) and End: do it on the laptop.
   Ended             Did it go through? Yes / No / No: do it on the laptop (typed into the launcher's question). One tap:
-                    back to Company sites, and the screen says your answer until the run closes.
+                    back to Apply > Assistants, and the screen says your answer until the run closes.
 - Each answer goes in the run's actions.log with the paired device's name.
 - The agent on the homelab never opens your own network: localhost, the LAN, Tailscale addresses (so not this page,
   not the browser view) are refused in its browser and WebFetch (assist.own_network).
@@ -218,11 +218,12 @@ FROM THE LAPTOP'S GUI (each thing in one place, 2026-10-14)
   and opens it in your browser: press Pair); Open it; its queue's settings. Setup's one optional Homelab step is the
   same.
 - Today's "Only you can do these": a homelab session that waits for you is an item there (Open its screen).
-- Apply > Company sites: one line, how many assistants run here and on the homelab and how many wait for you; a row
-  the homelab works on has "assistant running on the homelab: open" (its screen). Linked (below), that screen opens in
+- Apply > Assistants: one line, how many assistants run here and on the homelab and how many wait for you, then every
+  session with where you answer it; a row the homelab works on has "assistant running on the homelab: open" (its screen). Linked (below), that screen opens in
   this window; else in your browser (the page refuses frames, and its cookie belongs to the browser that paired).
-- The homelab's own page has the same three places: Today (its sessions that wait for you), Company sites (the same
-  line, plus what its queue starts by itself; each row's queue chip, Start now, a running session's Open), Settings >
+- The homelab's own page has the same three places: Today (its sessions that wait for you), Apply (each row's queue
+  chip, Start now, a running session's Open; the Assistants tab: the same line, plus what its queue starts by itself),
+  Settings >
   This homelab (its paired devices, its assistant's queue settings).
 
 THE LAPTOP'S LINK (link.py, 2026-10-15, my request: "as much support and smooth interaction between the two as possible")

@@ -54,7 +54,7 @@ HARD LIMITS
   internships (Simplify's and vanshb03's lists, intern.py) go in the Other jobs tab: no weekly or total cap either; Approved ones
   can be applied to as much as I want (my call, 2026-10-10).
 - One application at a time on NUworks (apply.py: one browser, one row after another; and one machine at a time,
-  since both can run Apply: remote.nuworks_turn, 2026-10-14). Company sites: up to 3 assistant
+  since both can run Apply: remote.nuworks_turn, 2026-10-14). Company sites (the assistant): up to 3 assistant
   sessions side by side (my call, 2026-10-10; local_config.json "assist_slots" 1-3), each in its own terminal window and
   browser profile, one per row and one per job site at a time (COMPANY-SITE AGENT).
 - I should check NUworks' terms of use before running against the real site.
@@ -128,17 +128,18 @@ Status values: Proposed, Approved, Applied, Failed, Needs Human
 - Applied: submitted. Fill in Date.
 - Failed / Needs Human: script stopped. Put the reason in Notes.
 - Notes starting "Dropped <date>: <reason>" (sheet.drop, added 2026-10-12, my request): a Failed row I chose not to apply
-  to (closed, a duplicate, a bad location): the Drop button in the GUI's Company sites / Other jobs card and on the
-  homelab page's Company sites. Only Approved / Needs Human rows; the row stays as a record, so Review never re-offers it.
+  to (closed, a duplicate, a bad location): Drop in a row's More menu on the GUI's Apply screen (both machines' pages,
+  every tab). Only Approved / Needs Human rows; the row stays as a record, so Review never re-offers it.
 - Notes starting "ALSO APPLY ON COMPANY SITE" (SITE_MARK): submitted on NUworks, but the
   company also wants its own site; I do that part.
 - The first tab is NUworks only (sheet.open_worksheet refuses if "Other jobs" is first). A second tab,
   "Other jobs" (sheet.OTHER_TAB, added 2026-10-07), holds jobs that are not on NUworks: same columns and
-  statuses, made by sheet.open_other(create=True) the first time I add one (GUI Sheet screen, or
+  statuses, made by sheet.open_other(create=True) the first time I add one (GUI Apply > Add a job, or
   `nuauto sheet add other` / `nuauto assist other add`; added rows are Approved), styled by `nuauto setup-sheet format` / `other`.
   Only `nuauto assist other` acts on it (Approved rows only); no weekly or total cap. Approving a Summer internship
   in Review (or `nuauto intern approve`) adds an Approved row there (intern.approve; Undo = back to Proposed).
-- By hand (manage.py, added 2026-10-09; GUI Sheet screen, `nuauto sheet add|move|remove`): add a job to either tab
+- By hand (manage.py, added 2026-10-09; GUI Apply: Add a job and each row's More menu, since 2026-10-16 (the Sheet screen
+  merged into Apply, my call); `nuauto sheet add|move|remove`): add a job to either tab
   (Approved, or Proposed; the NUworks tab takes NUworks job links only and fills company, title, match from data/),
   move a row to the other tab (status, notes, date go with it; a new link if needed), remove one. Rows are never
   deleted, only cleared, so no row number shifts under a run or a Mark link. Applied rows are never removed and never

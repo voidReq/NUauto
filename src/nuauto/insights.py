@@ -1,5 +1,6 @@
 """Insights: what the jobs in your pool and the ones you applied to pay, where they are, what kind of work they
-are, and where your applications stand. Read-only: from data/ (pool, job details) and the sheet's rows.
+are, and where your applications stand: the NUworks co-ops (data/, the sheet's NUworks tab) and, when they are on, the
+Summer internships apart (data/intern/, the sheet's Other jobs tab). Read-only.
 
   nuauto insights        the same numbers as the GUI's Insights screen, in the terminal
 
@@ -105,10 +106,10 @@ def group(entries, today):
     }
 
 
-def summarize(pool, details, rows, categories=None, today=None):
+def summarize(pool, details, rows, categories=None, today=None, id_of=None):
     """Everything the Insights screen and `nuauto insights` show. pool: data/pool.json entries; details: {id: job
     data}; rows: sheet.Row list (or None when the sheet can't be read); categories: {id: category} for jobs the pool
-    no longer lists."""
+    no longer lists; id_of: a row's link -> its job id (default: NUworks' own, jobs.job_id)."""
     from nuauto import sheet
     today = today or date.today()
     categories = categories or {}
@@ -118,7 +119,7 @@ def summarize(pool, details, rows, categories=None, today=None):
         cat = (in_pool.get(job_id) or {}).get("category") or categories.get(job_id)
         return details.get(job_id) or {}, cat
 
-    applied = [entry(jobs.job_id(r.url)) for r in rows or [] if r.status == "Applied"]
+    applied = [entry((id_of or jobs.job_id)(r.url)) for r in rows or [] if r.status == "Applied"]
     statuses = Counter(r.status for r in rows or [] if r.status)
     return {
         "pool": group([entry(r["id"]) for r in pool], today),
@@ -129,8 +130,17 @@ def summarize(pool, details, rows, categories=None, today=None):
 
 
 def collect(rows):
-    """summarize() on this machine's data/."""
+    """summarize() on this machine's data/ (the NUworks co-ops; rows: the sheet's NUworks tab)."""
     return summarize(jobs.load("pool.json", []), jobs.load_details(), rows, jobs.load("categories.json", {}))
+
+
+def collect_intern(rows):
+    """summarize() on the Summer internships (data/intern/; rows: the sheet's Other jobs tab, matched to the lists'
+    postings by link: an Other job that is on no list counts, with nothing known about it)."""
+    from nuauto import intern
+    by_url = {x["url"]: i for i, x in intern.load("listings.json", {}).items()}
+    return summarize(intern.load("pool.json", []), intern.load_details(), rows, intern.load("categories.json", {}),
+                     id_of=lambda url: by_url.get(intern.clean_url(url)))
 
 
 def money(x):
@@ -179,13 +189,19 @@ def text(s):
 
 
 def main(argv=None):
+    from nuauto import intern
     from nuauto import sheet
-    try:
-        rows = sheet.read_rows(sheet.open_worksheet())
-    except Exception as e:  # the pool numbers still work without the sheet
-        print(f"(sheet not read: {type(e).__name__}; pool numbers only)", file=sys.stderr)
-        rows = None
-    print(text(collect(rows)))
+
+    def read(tab):
+        try:
+            return sheet.read_rows(sheet.open_other() if tab == "other" else sheet.open_worksheet())
+        except Exception as e:  # the pool numbers still work without the sheet
+            print(f"(sheet's {tab} tab not read: {type(e).__name__}; pool numbers only)", file=sys.stderr)
+            return None
+    print(text(collect(read("nuworks"))))
+    if intern.ENABLED:
+        print(f"\n{intern.TERM} internships (the Other jobs tab)\n")
+        print(text(collect_intern(read("other"))))
 
 
 if __name__ == "__main__":

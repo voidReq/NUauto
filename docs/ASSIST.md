@@ -12,12 +12,12 @@ COMPANY-SITE AGENT (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`;
   in NUauto's page on the homelab (#/assistant/<slot>; the old review page until 2026-10-14; Tailscale only, paired
   devices only): I answer it, approve or decline each Submit (the guard waits
   for my tap; a late Approve = a 10-minute pass for that one action) and get captchas there. With "remote_auto" (each tab
-  its own switch since 2026-10-13: {"nuworks": .., "other": ..}; the queue shows in that page's Company sites) the
+  its own switch since 2026-10-13: {"nuworks": .., "other": ..}; the queue shows in that page's Apply) the
   homelab starts sessions by itself from my approved rows (remote.py: 09:00-22:00, free slots, never a row that had a
   session before, never a row or site the laptop holds: claims over ssh). A site that refuses the homelab's browser
   (a fake sign-in page): "End: do it on the laptop" marks the row's Notes (assist.LAPTOP_MARK); the homelab skips it
-  and the GUI shows "do it on the laptop" (my request, 2026-10-11; no disguising the browser). The GUI's Company sites shows them (each row
-  opens its session's screen; one line counts them; Today lists the ones waiting for me). Everything optional and set in
+  and the GUI shows "do it on the laptop" (my request, 2026-10-11; no disguising the browser). The GUI's Apply shows them (each row
+  opens its session's screen; its Assistants tab lists them all and counts them; Today lists the ones waiting for me). Everything optional and set in
   the GUI too (my request, for other users: setup's optional steps and Settings: one Homelab card (which homelab, NUauto
   on it, pairing), Password manager (Bitwarden) with its status chip). Each thing in one place, with or without a
   homelab (my request, 2026-10-14: "not redundancy between any of the pages"). Proven with a
@@ -97,7 +97,7 @@ COMPANY-SITE AGENT (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`;
   Applied (dated today, counts toward the weekly limit), then the same job is submitted on NUworks too by
   apply.submit_nuworks_side (the tested NUworks code; every popup check except the off-site-link stop;
   outcome appended to Notes; retry: `nuauto assist nuworks <row>`). On the homelab never by itself: the row's Notes say
-  "NUworks side NOT submitted yet" and Company sites (the laptop's page or the homelab's, since 2026-10-14) offers
+  "NUworks side NOT submitted yet" and Apply's Still owed (the laptop's page or the homelab's, since 2026-10-14) offers
   Submit on NUworks too. The agent never touches the sheet.
   Log per run: logs/<stamp>_assist_row<N>/ (actions.log = every guard decision).
 - Side by side (added 2026-10-10, my call): up to 3 sessions at once (assist.slots). Each takes a slot (lock
@@ -105,7 +105,7 @@ COMPANY-SITE AGENT (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`;
   and a job-site lock (one session per site: two could make the same account at once; the site is assist.site_key:
   each company on a shared board, Greenhouse / Lever / Ashby / Workable / myworkdaysite.com, is its own site, 2026-10-12); all held until its run ends.
   Answer-bank commands and the Answers screen's save hold local/answers.lock (no answer lost between sessions). The
-  GUI's Company sites shows which rows have one running (assist.sessions).
+  GUI's Apply shows which rows have one running (assist.sessions), and its Assistants tab every session.
 - Needs you (added 2026-10-11, my request): when a session waits for me (its turn ended: a question, the end list) or
   shows a permission question (a Submit to approve), a desktop notification says so, with the agent's first line;
   the GUI's chip says "waiting for you" / "approve in its window". Claude Code's own Stop / Notification /
@@ -115,7 +115,7 @@ COMPANY-SITE AGENT (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`;
 - Other jobs (added 2026-10-07): `nuauto assist other <row>` runs the same agent, rules and hooks on an Approved
   row of the Other jobs tab (its URL column; https, never NUworks: assist.other_target), with the layered answer
   bank (ANSWER BANK). After /exit, y = Applied (dated today, no cap), and nothing is sent to NUworks; n = stays
-  Approved. Log: logs/<stamp>_assist_other_row<N>/. GUI: the Other jobs card in Apply > Company sites (Start
-  assistant, I applied myself; Add a job opens the Sheet screen; since 2026-10-09 no screen of its own). Not yet run for real.
+  Approved. Log: logs/<stamp>_assist_other_row<N>/. GUI: Apply's internships tab (the sheet's Other jobs tab, since
+  2026-10-16; Start assistant, Open site, More: I applied myself, Drop, Move, Remove; Add a job). Not yet run for real.
 - Proven: a first application end to end (2026-10-05, stricter version). The "ask before Submit" hook
   prompt is proven in an interactive session; a full run with the relaxed rules is not yet.

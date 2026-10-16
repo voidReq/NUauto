@@ -81,7 +81,7 @@ COMPANY-SITE AGENT (assist.py, prompts/ASSIST_PROMPT.md)
 - On the homelab (remote_assist only): the browser view listens on web_listen_host (the Tailscale IP; never every
   address), the shared screen itself on 127.0.0.1 only, behind a password made per run that is shown only in the
   session's terminal; the agent reads only the writeups copy and the resume; the NUworks side of a company-site
-  application done there is never sent by itself: it waits for your tap (Company sites, either machine's page) |
+  application done there is never sent by itself: it waits for your tap (Apply's Still owed, either machine's page) |
   screen.listen_host, commands; config (IS_SERVER read paths); assist.run, assist.main | test_screen, test_assist
 - On the homelab a Submit-type action is approved only on NUauto's page there (its Assistants screen), by a paired device: the guard writes the
   question (what, page, review_lines, a screenshot) and waits up to assist.WAIT for an answer with that question's id;

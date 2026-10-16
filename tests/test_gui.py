@@ -581,11 +581,36 @@ try:
 
         page.evaluate("location.hash = '#/company'")  # Company sites is a part of Apply now: old links land there
         page.wait_for_function("() => location.hash === '#/apply'")
-        page.wait_for_selector("[data-testid=company-agent] li:has-text('Iron Valley Medical')")  # lands on the Company sites tab
-        assert page.get_attribute("[data-testid=tab-company]", "aria-selected") == "true"
-        assert page.locator("[data-testid=nav-company]").count() == 0 and page.locator("[data-testid=nav-other]").count() == 0
-        assert "match" in page.inner_text("[data-testid=company-agent] [data-testid=job-facts] >> nth=0")  # match / pay there too
-        page.wait_for_selector("[data-testid=other-jobs]")  # Other jobs is a card in Company sites
+        page.wait_for_selector("[data-testid=section-nuworks-agent] li:has-text('Iron Valley Medical')")  # the NUworks tab's Company site needed
+        assert page.get_attribute("[data-testid=tab-nuworks]", "aria-selected") == "true"
+        assert all(page.locator(f"[data-testid=nav-{n}]").count() == 0 for n in ("company", "other", "sheet"))  # no screens of their own
+        # (a row with no match and no pay known shows no facts line; Quarry Hardware, after the run below, has both)
+        assert page.locator("[data-testid=section-nuworks-agent] li:has-text('Iron Valley Medical') [data-testid=job-facts]").count() == 0
+        # three tabs: the NUworks co-ops, the Other jobs tab (the internships' name), the assistants
+        assert [page.inner_text(f"[data-testid=tab-{t}]").rsplit("\n", 1)[0] for t in ("nuworks", "other", "assistants")] == \
+            ["NUworks co-ops", "Summer 2027 internships", "Assistants"]
+        assert page.locator("[data-testid=tab-company]").count() == 0 and page.locator("[data-testid=tab-manual]").count() == 0
+        # to-do sections are open, the finished ones folded until clicked (their rows are counted, not shown)
+        assert page.get_attribute("[data-testid=section-nuworks-agent]", "open") is not None
+        applied = page.locator("[data-testid=section-nuworks-applied]")
+        assert applied.count() == 1 and applied.get_attribute("open") is None
+        applied.locator("summary").click()
+        assert applied.get_attribute("open") is not None and applied.locator("li").first.is_visible()
+        # More: the same four for every row; Escape closes it; an Applied NUworks row can be neither moved nor removed
+        applied_li = applied.locator("li").first
+        applied_row = applied_li.get_attribute("data-testid").split("-")[-1]
+        page.click(f"[data-testid=more-nuworks-{applied_row}]")
+        page.wait_for_selector("div.menu")
+        assert [b.inner_text() for b in page.locator("div.menu button").all()] == \
+            ["I applied myself", "Drop (not applying)…", "Move to Summer 2027 internships…", "Remove from the sheet…"]
+        for key in ("mark", "drop", "move", "remove"):
+            assert page.locator(f"[data-testid=more-nuworks-{applied_row}-{key}]").is_disabled(), key  # (with a reason in its title)
+        assert page.get_attribute(f"[data-testid=more-nuworks-{applied_row}-remove]", "title")
+        page.keyboard.press("Escape")
+        page.wait_for_selector("div.menu", state="detached")
+        applied.locator("summary").click()
+        page.click("[data-testid=tab-other]")
+        page.wait_for_selector("[data-testid=section-other-ready]")  # the Other jobs tab is the second tab of Apply
         # a row marked "do it on the laptop" shows a chip next to its Start assistant button (the others do not)
         ready_now = get("/api/other")["ready"]
         assert ready_now, "the demo's Other jobs tab has an Approved row here"
@@ -596,37 +621,49 @@ try:
         json.dump(other_data, open(other_file, "w"))
         try:
             page.reload()
-            page.click("[data-testid=tab-company]")
+            page.click("[data-testid=tab-other]")
             page.wait_for_selector(f"[data-testid=other-assist-{target}-laptop]")
             chip = page.locator(f"[data-testid=other-assist-{target}-laptop]")
             assert chip.inner_text() == "do it on the laptop" and "warn" in chip.get_attribute("class")
-            assert page.locator(f"[data-testid=other-{target}] [data-testid=other-assist-{target}]").count() == 1  # Start is still there
+            assert page.locator(f"[data-testid=job-other-{target}] [data-testid=other-assist-{target}]").count() == 1  # Start is still there
             assert page.locator("[data-testid^=other-assist-][data-testid$=-laptop]").count() == 1                # only the marked row
         finally:
             other_data["rows"][target - 1][4] = old_notes
             json.dump(other_data, open(other_file, "w"))
         page.reload()
-        page.click("[data-testid=tab-company]")
-        page.wait_for_selector("[data-testid=other-jobs]")
+        page.click("[data-testid=tab-other]")
+        page.wait_for_selector("[data-testid=section-other-ready]")
         assert page.locator("[data-testid$=-laptop]").count() == 0
-        page.click("[data-testid=tab-manual]")  # rows only you can finish on NUworks
-        if get("/api/company")["other"]:
-            page.wait_for_selector("[data-testid=manual-nuworks]")
-        else:
-            page.wait_for_selector("[data-testid=apply-pane] .empty")
-        assert page.locator("[data-testid=approved-list]").count() == 0 and page.locator("[data-testid=company-agent]").count() == 0
         page.click("[data-testid=tab-nuworks]")
+        manual = get("/api/jobs?tab=nuworks")["sections"]["manual"]  # rows only you can finish on NUworks: a section of the same tab
+        assert page.locator("[data-testid=section-nuworks-manual] li").count() == len(manual)
+        assert page.locator("[data-testid=section-nuworks-manual]").count() == (1 if manual else 0)  # none: no section
         page.wait_for_selector("[data-testid=btn-start-apply]:not([disabled])")
         assert page.locator("[data-testid=approved-list] li").count() == 4
         assert page.locator("[data-testid=approved-list] [data-testid=due]").count() == 4  # each row shows its due date
         assert page.locator("[data-testid=approved-list] button[data-testid^=btn-apply-row-]").count() == 4  # one Apply each
         assert "% match" in page.inner_text("[data-testid=approved-list] [data-testid=job-facts] >> nth=0")
+        # /api/jobs: the same Approved rows, in Start's order, as /api/apply; every section is there for both tabs
+        jobs = get("/api/jobs?tab=nuworks")
+        assert [r["row"] for r in jobs["sections"]["approved"]] == [r["row"] for r in get("/api/apply")["rows"]]
+        every = {"approved", "agent", "manual", "owed", "ready", "applied", "proposed", "closed", "rest"}  # (both tabs: the other tab's stay empty)
+        assert set(jobs["sections"]) == every and jobs["sections"]["ready"] == [], list(jobs["sections"])
+        assert jobs["tab"] == "nuworks" and jobs["order"] == "default" and jobs["week"] == get("/api/apply")["week"] and "history" in jobs
+        assert [r["company"] for r in jobs["sections"]["agent"]] == ["Iron Valley Medical"], jobs["sections"]["agent"]
+        assert get("/api/jobs?tab=nuworks&order=match")["order"] == "match"
+        oj = get("/api/jobs?tab=other")
+        assert oj["tab"] == "other" and oj["exists"] and set(oj["sections"]) == every, list(oj["sections"])
+        assert not any(oj["sections"][k] for k in ("approved", "agent", "manual", "owed"))
+        assert [(x["row"], x["company"]) for x in oj["sections"]["ready"]] == [(x["row"], x["company"]) for x in get("/api/other")["ready"]]
+        assert get("/api/jobs?tab=elsewhere")["tab"] == "nuworks"  # anything but "other" is the NUworks tab
         # the order menu IS the order Start goes: the server sorts (apply.apply_order), the numbers follow it
         start_order = page.locator("[data-testid=approved-list] li").evaluate_all("ls => ls.map(l => l.dataset.testid)")
-        assert page.locator("[data-testid=apply-sort] option[value=default]").inner_text().startswith("closing within a week")
-        assert "Apply in this order" in page.inner_text("[data-testid=apply-pane] .row.end")
+        assert start_order == [f"job-nuworks-{r['row']}" for r in jobs["sections"]["approved"]], start_order
+        assert page.locator("[data-testid=apply-sort] option[value=default]").inner_text().startswith("Order: closing within a week")
+        assert page.get_attribute("[data-testid=apply-sort]", "aria-label") == "Apply in this order"
+        assert page.get_attribute("[data-testid=apply-search]", "placeholder") == "Search this tab (Ctrl+F)"
         page.select_option("[data-testid=apply-sort]", "match")
-        by_match = ["approved-%d" % r["row"] for r in get("/api/apply?order=match")["rows"]]
+        by_match = ["job-nuworks-%d" % r["row"] for r in get("/api/apply?order=match")["rows"]]
         page.wait_for_function("ids => [...document.querySelectorAll('[data-testid=approved-list] li')].map(l => l.dataset.testid).join() === ids.join()", arg=by_match)
         facts = page.locator("[data-testid=approved-list] [data-testid=job-facts]").all_inner_texts()
         found = [int(re.search(r"(\d+)% match", t).group(1)) for t in facts]
@@ -639,14 +676,14 @@ try:
         page.wait_for_function("ids => [...document.querySelectorAll('[data-testid=approved-list] li')].map(l => l.dataset.testid).join() === ids.join()", arg=start_order)
         # one kind of work: only those rows show (Start still goes through all of them); "All" brings the rest back
         kinds = page.locator("[data-testid=apply-kind] option").evaluate_all("os => os.map(o => [o.value, o.textContent])")
-        assert kinds[0][0] == "" and kinds[0][1].endswith(f"({len(start_order)})"), kinds
+        assert kinds[0] == ["", "All kinds of work"] and all(re.search(r"\(\d+\)$", k[1]) for k in kinds[1:]), kinds  # (counts: every row of the tab)
         first = kinds[1][0]
-        want = int(re.search(r"\((\d+)\)$", kinds[1][1]).group(1))
+        want = sum(1 for r in jobs["sections"]["approved"] if (r["category"] or "-") == first)  # Approved rows of that kind
         page.select_option("[data-testid=apply-kind]", first)
         page.wait_for_timeout(200)
         assert page.locator("[data-testid=approved-list] li").count() == want
-        if want < len(start_order):
-            assert "Start still goes through all" in page.inner_text("[data-testid=apply-filter-note]")
+        if 0 < want < len(start_order):
+            assert f"Start still goes through all {len(start_order)}" in page.inner_text("[data-testid=apply-filter-note]")
         page.select_option("[data-testid=apply-kind]", "")
         page.wait_for_timeout(200)
         assert page.locator("[data-testid=approved-list] li").count() == len(start_order)
@@ -677,9 +714,11 @@ try:
         assert sum(r[1] == "Cobalt Systems" for r in all_rows) == 1, all_rows
         assert rows["Quarry Hardware"] == "Needs Human", rows
         # the external job stopped (nothing submitted) and now waits on the same page, ready for the assistant
-        page.click("[data-testid=tab-company]")
-        page.wait_for_selector("[data-testid=company-agent] li:has-text('Quarry Hardware') button:has-text('Start assistant')")
-        assert page.locator("[data-testid=approved-list]").count() == 0  # not on this tab
+        page.click("[data-testid=tab-nuworks]")
+        page.wait_for_selector("[data-testid=section-nuworks-agent] li:has-text('Quarry Hardware') button:has-text('Start assistant')")
+        assert page.locator("[data-testid=approved-list]").count() == 0  # nothing approved is left
+        quarry = page.inner_text("[data-testid=section-nuworks-agent] li:has-text('Quarry Hardware') [data-testid=job-facts]")
+        assert "68% match" in quarry and "pay " in quarry, quarry  # match / pay on the company-site rows too
 
         # another site on this machine (another port: same site to the browser, so the cookie IS sent) tries to change
         # the sheet three ways. All must fail: no X-NUauto header / no JSON / a CORS preflight the server never allows.
@@ -727,9 +766,9 @@ fetch("{target}", {{method: "POST", credentials: "include", body: {json.dumps(bo
         evil.shutdown()
 
         page.click("[data-testid=nav-apply]")
-        page.click("[data-testid=tab-company]")
-        page.wait_for_selector("[data-testid=company-10]")
-        assert page.locator("[data-testid=company-10] [data-testid=due]").count() == 1  # due date on the company-site row
+        page.click("[data-testid=tab-nuworks]")
+        page.wait_for_selector("[data-testid=job-nuworks-10]")
+        assert page.locator("[data-testid=job-nuworks-10] [data-testid=due]").count() == 1  # due date on the company-site row
         page.click("[data-testid=nav-home]")
         page.wait_for_selector("[data-testid=todo-company-10]")
         assert page.locator("[data-testid=todo] [data-testid=due]").count() == len(get("/api/state")["todo"])
@@ -749,6 +788,19 @@ fetch("{target}", {{method: "POST", credentials: "include", body: {json.dumps(bo
         page.wait_for_selector("[data-testid=ins-applied][aria-pressed=true]")
         assert f"Applied ({ins['applied']['count']})" in page.inner_text("[data-testid=ins-applied]")
         assert page.locator("[data-testid=tile-listed]").count() == 1  # applied: "pay listed" instead of "closing"
+        # internships are on in the demo: a switch to the internships' numbers (their pool, the Other jobs tab's statuses)
+        assert ins["source"] == "nuworks" and page.locator("[data-testid=ins-source]").count() == 1
+        assert page.get_attribute("[data-testid=ins-source-nuworks]", "aria-pressed") == "true"
+        iins = get("/api/insights?source=intern")
+        assert iins["source"] == "intern" and iins["internships"] == {"on": True, "term": "Summer 2027"} and iins["pool"]["count"] != ins["pool"]["count"], iins["pool"]
+        page.click("[data-testid=ins-source-intern]")
+        page.wait_for_selector("[data-testid=ins-source-intern][aria-pressed=true]")
+        page.wait_for_function(f"() => document.querySelector('[data-testid=ins-pool]').innerText.includes('Your pool ({iins['pool']['count']})')")
+        assert "internship applications" in page.inner_text("[data-testid=ins-status] h2")
+        assert page.locator("[data-testid=ins-status] svg circle").count() == len(iins["statuses"])
+        page.click("[data-testid=ins-source-nuworks]")
+        page.wait_for_function(f"() => document.querySelector('[data-testid=ins-pool]').innerText.includes('Your pool ({ins['pool']['count']})')")
+        assert "internship" not in page.inner_text("[data-testid=ins-status] h2")
         page.set_viewport_size({"width": 420, "height": 900})  # phone width: nothing sticks out sideways
         page.wait_for_timeout(200)
         assert page.evaluate("document.documentElement.scrollWidth") <= 420
@@ -764,26 +816,24 @@ fetch("{target}", {{method: "POST", credentials: "include", body: {json.dumps(bo
         assert page.locator("thead th", has_text="NUworks only").count() == 0
         page.click("[data-testid=bank-nuworks]")
         page.wait_for_selector("[data-testid=bank-nuworks][aria-pressed=true]")
-        # Other jobs (in Apply > Company sites; old #/other links land there): Add a job opens the Sheet screen on the
-        # Other jobs tab; the job shows up ready for the assistant
+        # Add a job (Apply's toolbar; old #/other links land on the internships tab): the job goes in the Other jobs tab
         page.evaluate("location.hash = '#/other'")
         page.wait_for_function("() => location.hash === '#/apply'")
-        page.wait_for_selector("[data-testid=other-2]")
-        page.click("[data-testid=other-add]")
-        page.wait_for_selector("[data-testid=add-tab-other][aria-pressed=true]")
+        page.wait_for_selector("[data-testid=tab-other][aria-selected=true]")
+        page.wait_for_selector("[data-testid=job-other-2]")
+        page.click("[data-testid=add-job]")
+        page.wait_for_selector("[data-testid=add-dialog] [data-testid=add-tab-other][aria-pressed=true]")  # it opens on this tab's kind
         page.fill("[data-testid=add-url]", "https://jobs.example.net/3")
         page.fill("[data-testid=add-company]", "Dune Optics")
         page.fill("[data-testid=add-title]", "Optics Intern")
         page.click("[data-testid=add-submit]")
-        page.wait_for_selector("[data-testid=sheet-other] li:has-text('Dune Optics')")
-        assert page.input_value("[data-testid=add-url]") == ""
-        assert page.locator("[data-testid=sheet-nuworks]").count() == 0  # one tab at a time, like Apply
-        page.click("[data-testid=sheet-tab-nuworks]")
-        page.wait_for_selector("[data-testid=sheet-nuworks]")
-        assert page.locator("[data-testid=sheet-other]").count() == 0
-        page.click("[data-testid=sheet-tab-other]")
-        page.wait_for_selector("[data-testid=sheet-other] li:has-text('Dune Optics')")
-        # a NUworks link: the tab switches and company / title come from the job data; then remove it again
+        page.wait_for_selector("[data-testid=add-dialog]", state="detached")
+        page.wait_for_selector(".toast:has-text('Added as row'):has-text('(Approved)')")
+        page.wait_for_selector("[data-testid=section-other-ready] li:has-text('Dune Optics')")  # ready for the assistant
+        assert page.locator("[data-testid=section-nuworks-agent]").count() == 0  # one tab at a time
+        # a NUworks link: the dialog's kind switches and company / title come from the job data; the Proposed row goes to
+        # the NUworks tab (folded: Proposed is not to do), and the page switches to that tab; remove it again from More
+        page.click("[data-testid=add-job]")
         page.click("[data-testid=add-tab-other]")
         page.fill("[data-testid=add-url]", "https://northeastern-csm.symplicity.com/students/app/jobs/detail/900106")
         page.press("[data-testid=add-url]", "Tab")
@@ -791,15 +841,77 @@ fetch("{target}", {{method: "POST", credentials: "include", body: {json.dumps(bo
         assert page.input_value("[data-testid=add-company]") == "Fern Data Co"
         page.click("[data-testid=add-status-Proposed]")
         page.click("[data-testid=add-submit]")
-        item = page.locator("[data-testid=sheet-nuworks] li:has-text('Fern Data Co')")
+        page.wait_for_selector("[data-testid=add-dialog]", state="detached")
+        page.wait_for_selector("[data-testid=tab-nuworks][aria-selected=true]")
+        item = page.locator("[data-testid=section-nuworks-proposed] li:has-text('Fern Data Co')")
+        item.wait_for(state="attached")
+        assert page.get_attribute("[data-testid=section-nuworks-proposed]", "open") is None  # folded until clicked
+        page.click("[data-testid=section-nuworks-proposed] summary")
         item.wait_for()
-        assert "Proposed" in item.inner_text()
-        item.locator("button:has-text('Remove')").click()
+        fern = item.get_attribute("data-testid").split("-")[-1]
+        page.click(f"[data-testid=more-nuworks-{fern}]")
+        assert page.locator(f"[data-testid=more-nuworks-{fern}-remove]").is_enabled()
+        assert page.locator(f"[data-testid=more-nuworks-{fern}-mark]").is_disabled()  # Proposed: not "I applied myself"
+        page.click(f"[data-testid=more-nuworks-{fern}-remove]")
         page.click("[data-testid=confirm-yes]")
         item.wait_for(state="detached")
+        # Move (from the More menu): Ember Labs goes from the Other jobs tab to the NUworks one, with a NUworks link
+        page.click("[data-testid=tab-other]")
+        page.click("[data-testid=add-job]")
+        page.fill("[data-testid=add-url]", "https://jobs.example.net/4")
+        page.fill("[data-testid=add-company]", "Ember Labs")
+        page.fill("[data-testid=add-title]", "Thermal Intern")
+        page.click("[data-testid=add-submit]")
+        page.wait_for_selector("[data-testid=section-other-ready] li:has-text('Ember Labs')")
+        ember = page.locator("[data-testid=section-other-ready] li:has-text('Ember Labs')").get_attribute("data-testid").split("-")[-1]
+        page.click(f"[data-testid=more-other-{ember}]")
+        page.click(f"[data-testid=more-other-{ember}-move]")
+        page.wait_for_selector("[data-testid=move-dialog]")
+        page.fill("[data-testid=move-url]", "https://northeastern-csm.symplicity.com/students/app/jobs/detail/999997")
+        page.click("[data-testid=move-yes]")
+        page.wait_for_selector("[data-testid=move-dialog]", state="detached")
+        page.wait_for_selector("[data-testid=section-other-ready] li:has-text('Ember Labs')", state="detached")
+        page.click("[data-testid=tab-nuworks]")
+        moved_li = page.locator("[data-testid=approved-list] li:has-text('Ember Labs')")
+        moved_li.wait_for()
+        moved_row = moved_li.get_attribute("data-testid").split("-")[-1]
+        page.click(f"[data-testid=more-nuworks-{moved_row}]")  # ...and removed again (its cells cleared)
+        page.click(f"[data-testid=more-nuworks-{moved_row}-remove]")
+        page.click("[data-testid=confirm-yes]")
+        moved_li.wait_for(state="detached")
+        # Drop (More > Drop): the same reasons as before; the row leaves the list and sits in Dropped or failed
+        page.click("[data-testid=tab-other]")
+        dune_row = page.locator("[data-testid=section-other-ready] li:has-text('Dune Optics')").get_attribute("data-testid").split("-")[-1]
+        page.click(f"[data-testid=more-other-{dune_row}]")
+        page.click(f"[data-testid=more-other-{dune_row}-drop]")
+        page.wait_for_selector("[data-testid=drop-duplicate]")
+        assert all(page.locator(f"[data-testid=drop-{w}]").count() == 1 for w in ("closed", "duplicate", "location", "other"))
+        page.keyboard.press("Escape")
+        page.wait_for_selector("[data-testid=drop-duplicate]", state="detached")
+        assert page.locator("[data-testid=section-other-ready] li:has-text('Dune Optics')").count() == 1  # Escape dropped nothing
+        # Ctrl+F: the screen's own search box (Apply: apply-search; Escape clears it), not the browser's find bar
+        page.click("h1, #page-title")
+        page.keyboard.press("Control+f")
+        assert page.evaluate("document.activeElement && document.activeElement.dataset.testid") == "apply-search"
+        page.keyboard.type("Dune")
+        page.wait_for_function("() => document.querySelectorAll('[data-testid=section-other-ready] li').length === 1")
+        page.keyboard.press("Escape")
+        page.wait_for_function("() => document.querySelector('[data-testid=apply-search]').value === ''")
+        page.click("[data-testid=nav-answers]")
+        page.wait_for_selector("[data-testid=answers-search]")
+        page.click("h1, #page-title")
+        page.keyboard.press("Control+f")
+        assert page.evaluate("document.activeElement && document.activeElement.dataset.testid") == "answers-search"
         page.click("[data-testid=nav-apply]")
-        page.click("[data-testid=tab-company]")
-        dune = page.locator("li:has-text('Dune Optics')")
+        page.click("[data-testid=tab-other]")
+        # the Assistants tab: the list of what runs now (nothing here yet)
+        page.click("[data-testid=tab-assistants]")
+        page.wait_for_selector("[data-testid=assistants-list]")
+        assert page.locator("[data-testid=assistants-bar]").count() == 0  # (the line only shows once one runs, here or on the homelab)
+        assert "No assistant is running" in page.inner_text("[data-testid=assistants-list] .empty")
+        assert page.locator("[data-testid=apply-toolbar]").count() == 0 and page.locator("[data-testid=apply-week]").count() == 0
+        page.click("[data-testid=tab-other]")
+        dune = page.locator("[data-testid=section-other-ready] li:has-text('Dune Optics')")
         dune.wait_for()
         dune.locator("button:has-text('Start assistant')").click()
         page.wait_for_selector("[data-testid=terminal-command]")
@@ -962,20 +1074,25 @@ fetch("{target}", {{method: "POST", credentials: "include", body: {json.dumps(bo
             page.keyboard.press("s")
             page.wait_for_timeout(150)
         page.wait_for_selector("[data-testid=review-empty]")
-        assert page.inner_text("[data-testid=review-empty] p") == "Approved internships are in the Other jobs tab. Apply to them in Apply > Company sites."
-        assert page.get_attribute("[data-testid=review-empty] a", "href") == "#/company"
-        page.click("[data-testid=review-empty] a")  # the Company sites tab of Apply: the Other jobs card is there
+        assert page.inner_text("[data-testid=review-empty] p") == "Approved internships wait in Apply > Summer 2027 internships."
+        assert page.get_attribute("[data-testid=review-empty] a", "href") == "#/other"
+        page.click("[data-testid=review-empty] a")  # Apply's internships tab (the Other jobs tab): they are in its Ready to apply
         page.wait_for_function("() => location.hash === '#/apply'")
-        page.wait_for_selector("[data-testid=tab-company][aria-selected=true]")
-        page.wait_for_selector(f"[data-testid=other-{harbor_row}]")
+        page.wait_for_selector("[data-testid=tab-other][aria-selected=true]")
+        page.wait_for_selector(f"[data-testid=job-other-{harbor_row}]")
         # the internship's row shows its match % and pay; with an assistant on it (another window), the row says so
         # instead of offering a second one, and offers Start again once that one ends
-        assert "82% match" in page.inner_text(f"[data-testid=other-{harbor_row}] [data-testid=job-facts]")
+        assert "82% match" in page.inner_text(f"[data-testid=job-other-{harbor_row}] [data-testid=job-facts]")
         with hold_slot(2, {"row": harbor_row, "tab": "other", "company": "Harbor Embedded", "host": "jobs.example-ats.com"}):
             page.wait_for_selector(f"[data-testid=other-assist-{harbor_row}-running]", timeout=20000)
             assert page.inner_text(f"[data-testid=other-assist-{harbor_row}-running]") == "assistant running (slot 2)"
+            page.click("[data-testid=tab-assistants]")   # the one line and the list are on the Assistants tab
             assert "Assistants: 1 of 3 running here" in page.inner_text("[data-testid=assistants-running]")
             assert page.locator("[data-testid=assistants-bar]").count() == 1      # one line for the whole tab
+            assert page.locator("[data-testid=assistants-list] li").count() == 1 and page.locator("[data-testid=assistant-here-2]").count() == 1
+            assert page.inner_text("[data-testid=tab-assistants] .count") == "1"
+            assert "in its terminal window" in page.inner_text("[data-testid=assistant-here-2]")  # a laptop session: no screen to open
+            page.click("[data-testid=tab-other]")
         page.wait_for_selector(f"[data-testid=other-assist-{harbor_row}]", timeout=20000)
         # Start: greyed out for a few seconds (a second click would start the same job twice), then back
         start = page.locator(f"[data-testid=other-assist-{harbor_row}]")
@@ -1033,6 +1150,14 @@ fetch("{target}", {{method: "POST", credentials: "include", body: {json.dumps(bo
             assert "source=nuworks" in asked.value.url and "source=intern" not in asked.value.url, asked.value.url
             off_page.wait_for_selector("[data-testid=mode-approve]")
             assert off_page.locator("[data-testid=source-intern]").count() == 0 and off_page.locator("[data-testid=source-nuworks]").count() == 0
+            # ...Insights has no switch (and asking for the internships' numbers gives the co-ops'), Apply names its tab "Other jobs"
+            assert off_page.evaluate("fetch('/api/insights?source=intern').then((r) => r.json()).then((d) => d.source)") == "nuworks"
+            off_page.click("[data-testid=nav-insights]")
+            off_page.wait_for_selector("[data-testid=ins-pool]")
+            assert off_page.locator("[data-testid=ins-source]").count() == 0
+            off_page.click("[data-testid=nav-apply]")
+            off_page.wait_for_selector("[data-testid=tab-other]")
+            assert off_page.inner_text("[data-testid=tab-other]").rsplit("\n", 1)[0] == "Other jobs"
             off_page.close()
         finally:
             off.terminate()

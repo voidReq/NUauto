@@ -14,8 +14,9 @@ It stops and asks you when a form has a question with no saved answer, and never
 cover letters). Jobs that send you to the company's own site are left to you; `nuauto assist <row>` can fill
 those with a Claude agent in a visible browser. It drafts longer answers for your approval and always asks you
 before it submits anything. The same agent works on jobs that aren't on NUworks: add them to the sheet's
-Other jobs tab (the Sheet screen, or `nuauto sheet add other <url> <company> <title>`), then `nuauto assist other <row>`.
-The Sheet screen (or `nuauto sheet add|move|remove`) also adds NUworks co-ops by hand and moves or removes rows.
+Other jobs tab (Apply > Add a job, or `nuauto sheet add other <url> <company> <title>`), then `nuauto assist other <row>`.
+Apply's Add a job and each row's More menu (or `nuauto sheet add|move|remove`) also add NUworks co-ops by hand and move
+or remove rows.
 
 Summer internships too, if you want them: with `"internships": {}` in your settings file (`local/local_config.json`),
 NUauto follows [SimplifyJobs'](https://github.com/SimplifyJobs/Summer2027-Internships) and
