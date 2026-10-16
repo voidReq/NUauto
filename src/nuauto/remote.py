@@ -96,7 +96,8 @@ def match_of(notes):
 
 def candidates(main_rows, other_rows, closes=None, today=None):
     """The rows the queue may start, best first: [{"tab", "row", "url", "row_url", "host", "company", "title", "closes",
-    "match"}] (host: its job site, assist.site_key; row_url: the sheet row's own link).
+    "match", "laptop", "hand"}] (host: its job site, assist.site_key; row_url: the sheet row's own link; hand: a row
+    worked on NUworks itself (assist.by_hand_target), which only you start: it needs you there).
     closes(row) -> its closing date or None (NUworks rows; apply.row_closes). Pure apart from closes."""
     from nuauto import assist
     from nuauto import jobs
@@ -106,12 +107,17 @@ def candidates(main_rows, other_rows, closes=None, today=None):
         if r.status != "Needs Human":
             continue
         url, _ = assist.assist_target(r.notes)
+        hand = False
+        if not url:
+            url, _ = assist.by_hand_target(r)
+            hand = bool(url)
         if url:
             day = closes(r) if closes else None
             if day and day < today:
                 continue  # past its deadline
             out.append({"tab": "jobs", "row": r.number, "url": url, "row_url": r.url, "host": assist.site_key(url), "company": r.company,
-                        "title": r.title, "closes": day, "match": match_of(r.notes), "laptop": assist.LAPTOP_MARK in r.notes})
+                        "title": r.title, "closes": day, "match": match_of(r.notes), "laptop": assist.LAPTOP_MARK in r.notes,
+                        "hand": hand})
     for r in other_rows or []:
         url, _ = assist.other_target(r)
         if url:
@@ -127,6 +133,7 @@ OUTCOME_UNKNOWN = ("a Submit was approved in its last session and nobody said wh
 
 
 LAPTOP_WHY = "marked: do it on the laptop (the homelab's browser was refused there)"
+HAND_WHY = "by hand on NUworks: yours to start (it needs you there: the NUworks login, your cover letter)"
 AUTO_OFF = {"jobs": "NUworks rows don't start by itself (off in Settings): yours to start",
             "other": "Other jobs rows don't start by itself (off in Settings): yours to start"}
 
@@ -150,6 +157,8 @@ when manual). Pure (tests/test_remote.py)."""
             why = LAPTOP_WHY
         elif same and rec.get("approved") and rec.get("answer") not in ("y", "n", "laptop"):
             why = OUTCOME_UNKNOWN
+        elif c.get("hand") and not manual:  # never by itself: it needs you there
+            why = HAND_WHY
         elif same and not manual:  # any earlier session (yours or the queue's): never again by itself
             why = "had a session already: yours to start now"
         elif not manual and tabs is not None and c["tab"] not in tabs:

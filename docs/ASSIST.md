@@ -4,9 +4,21 @@ current when you change assist.py, accounts.py, mail.py or prompts/ASSIST_PROMPT
 tested: docs/SAFETY.md. The homelab side: docs/REMOTE.md.)
 
 COMPANY-SITE AGENT (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`; added 2026-10-05)
-- Only for Needs Human rows stopped at an external application (Notes start "External application";
-  Workday, Oracle, iCIMS, SuccessFactors...). Never NUworks itself (refused even with --url), never rows
-  stopped for something on NUworks (cover letter, transcript...): those are mine (assist.assist_target).
+- For Needs Human rows stopped at an external application (Notes start "External application"; Workday, Oracle,
+  iCIMS, SuccessFactors...: assist.assist_target, never a NUworks link there, refused even with --url), and (2026-10-16,
+  my call: "by hand can still have an assistant, since users can do their stuff through the remote desktop") Needs
+  Human rows stopped on NUworks for something only I can give (a cover letter, a transcript, a free-text question):
+  assist.by_hand_target, the row's own NUworks job page (never another link, no --url), never one whose Submit click is
+  unresolved or past its deadline. Such a "by-hand" session is told what stopped NUauto and the exact resume label
+  (assist.hand_note; the rules' NUWORKS ROWS): it clicks the job's Apply, fills the popup, uploads the transcript or the
+  cover letter, and its Submit asks me like any other. NUworks' sign-in: the one click on "Current Students And
+  Alumni", else it asks me to sign in in its browser (never typed by it: accounts.never). One application at a time on
+  NUworks: it holds NUworks' site lock (one session per site: one by-hand session per machine), takes the NUworks turn
+  (remote.nuworks_turn, so not beside the other machine's Apply), won't start while an Apply run holds the NUworks
+  browser, and `nuauto apply` / the NUworks side refuse while it runs (assist.nuworks_session). The weekly cap is
+  checked at its start and the Submit question says it counts. After y: Applied ("on NUworks"), no NUworks side after
+  (it was NUworks). The homelab's queue lists these rows but never starts them by itself (remote.HAND_WHY: they need me
+  there); Start now does. GUI: Apply > NUworks co-ops > By hand on NUworks, each row's Start (or why not).
 - Laptop, real terminal, me watching; or (Phase 3, my call 2026-10-11) the homelab, in a tmux session I attach to, with
   "remote_assist" on: its browser on a virtual screen I open over Tailscale (screen.py), Discord links me to its screen
   in NUauto's page on the homelab (#/assistant/<slot>; the old review page until 2026-10-14; Tailscale only, paired
@@ -33,8 +45,9 @@ COMPANY-SITE AGENT (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`;
   "Apply"), Enter and type(submit) make the terminal ask me first ("ask"); element names come from the
   latest full snapshot only (refs cleared by anything that changes the page), never from the agent's
   description. Never: page scripts (could submit behind the review), uploads other than
-  the resume and the transcript (the launcher copies them into the run's log folder, logs/<run>/browser/upload/, because
-  the browser tool only uploads from there; only those copies are allowed), non-web links; Bash only the answer-bank command (answer|guess|guesses|save|once|confirm|alias|blank|wait);
+  the resume, the transcript and this application's approved cover letter (the launcher copies the first two into the run's
+  log folder, logs/<run>/browser/upload/, because the browser tool only uploads from there, and the letter's PDF is made
+  there; only those files are allowed), non-web links; Bash only the answer-bank command (answer|guess|guesses|save|once|confirm|alias|blank|letter|email|wait|link-login);
   Read/Glob/Grep only inside my resume, local_config.json "assist_read_paths" (my projects and writeups: mine is
   ~/projects, 2026-10-10) and "assist_writeups" (the first place it looks for essay material: mine is my site's
   project and security writeups, 2026-10-11), and never NUauto's local/ folders or logs, keys, tokens, .env or .git files in them
@@ -51,6 +64,12 @@ COMPANY-SITE AGENT (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`;
   typed with no saved answer or guess behind them (the guard's own record, assist.record_typed). Proven with a real
   Sonnet session on a local practice form (guesses, one end list, a correction saved and fixed, the Submit question's
   list); not yet on a real application.
+- Cover letters (2026-10-16, my call: "approved letters shouldn't be saved, there's a new cover letter per
+  application"): `letter --para "<paragraph>" ...` records the agent's letter for THIS application (at most 600 words;
+  a new one replaces it) as an essay guess, shown in full in the end list; after I approve it (or its new version),
+  `confirm "cover letter"` makes the PDF (letter.py: plain text, Helvetica, letter size) in the run's upload folder,
+  the one cover letter the guard lets be uploaded; the Submit question names it. The session's end removes the PDF and
+  its text from the run folder (after_session). Never in the answer bank. Works on company sites too.
 - An unknown field's reply (2026-10-16): the saved answers that fit it best, at most 25 (assist.SAVED_SHOWN), each
   cut to 140 characters, and how many more there are: first those that are exactly one of its options, then by the
   words they share with the label and options. (Until then it listed every saved answer: about 32,000 characters for an

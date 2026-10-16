@@ -971,7 +971,7 @@ function sortRows(rows, how) {
 const NU_SECTIONS = [
   ["approved", "Ready to apply", "Start goes down this list in this order, and stops at your weekly limit."],
   ["agent", "Company site needed", "These send you to the company's own site. The assistant (Claude) applies there with you, and asks you before anything is submitted."],
-  ["manual", "By hand on NUworks", "NUworks wants something only you can give (a cover letter, a transcript): finish these on NUworks."],
+  ["manual", "By hand on NUworks", "NUworks wants something only you can give (a cover letter, a transcript, an answer in your words). The assistant can do these with you on NUworks: it drafts the cover letter for you to approve, uploads it and your transcript, and asks you before it submits."],
   ["owed", "Still owed", "Submitted on one side; the other side still needs doing."],
   ["applied", "Applied", null],
   ["proposed", "Proposed", "Waiting for your OK: Review shows them first."],
@@ -1134,9 +1134,11 @@ screens.apply = async (view) => {
       about = r.host;
       next = assistantStart(d, r, "jobs", `assist-${r.row}`, { body: { row: r.row } });
       open = linkOut(r.target, "Open site");
-    } else if (key === "manual") {
+    } else if (key === "manual") {  // the assistant works it on NUworks itself (your cover letter, the transcript...)
       chips = [dueChip(r)];
       about = r.notes || r.why;
+      next = r.hand ? assistantStart(d, r, "jobs", `assist-${r.row}`, { body: { row: r.row } }) :
+        el("span", { class: "chip", testid: `assist-${r.row}-why`, text: `no assistant: ${r.hand_why}` });
     } else if (key === "owed" && r.owed === "site") {
       chips = [dueChip(r)];
       about = (r.notes || "").slice(0, 160);

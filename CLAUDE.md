@@ -181,7 +181,11 @@ GUI (`nuauto gui`; details: docs/GUI.md)
   `python -m` or file paths.
 
 COMPANY-SITE AGENT (`nuauto assist`; every rule: docs/ASSIST.md, read it before changing the agent)
-- Only Needs Human rows stopped at an external application, and Approved Other jobs rows; never NUworks itself.
+- Only Needs Human rows stopped at an external application, Approved Other jobs rows, and (2026-10-16, my call) Needs
+  Human rows stopped on NUworks for something only I can give (cover letter, transcript, an answer in my words): on
+  those it works NUworks itself (their own job page only), one at a time on NUworks (not beside an Apply run).
+- Cover letters: written for one application only (my call: never saved or reused); I approve the text in its end
+  list, NUauto makes the PDF it uploads (letter.py), and the session's end deletes it.
 - The one hard rule: NOTHING is submitted without my review, enforced in code (Claude Code hooks -> assist.decide,
   tests/test_assist.py); a guard that fails or times out blocks. Captchas are mine (the guard refuses them). Passwords:
   only NUauto's {{NEW_PASSWORD}} / {{PASSWORD}} placeholders, never on Google / Microsoft / Apple / LinkedIn / GitHub /

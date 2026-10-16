@@ -95,7 +95,7 @@ assert order == [("jobs", 3), ("jobs", 2), ("jobs", 11), ("other", 2), ("jobs", 
 c3 = dict(cands[0])
 assert c3.pop("row_url") == next(r.url for r in main_rows if r.number == 3)  # the sheet row's own link (Drop checks it)
 assert c3 == {"tab": "jobs", "row": 3, "url": "https://beta.icims.com/job/1", "host": "beta.icims.com", "company": "Co3",
-              "title": "Intern", "closes": TODAY + timedelta(days=2), "match": 50, "laptop": False}
+              "title": "Intern", "closes": TODAY + timedelta(days=2), "match": 50, "laptop": False, "hand": False}
 # the laptop mark in a row's Notes (assist.LAPTOP_MARK) shows as "laptop" on that candidate, on either tab
 laptop_notes = ext("acme.wd5.myworkdayjobs.com") + " | match 80% | " + assist.LAPTOP_MARK + " (why)"
 lc = remote.candidates([row(2, "Needs Human", notes=laptop_notes), row(3, "Needs Human", notes=ext("b.example") + " | match 70%")],
@@ -107,6 +107,18 @@ nothing_urgent = [(c["tab"], c["row"]) for c in remote.candidates(main_rows, oth
 assert nothing_urgent[:5] == [("other", 2), ("jobs", 4), ("jobs", 9), ("other", 3), ("jobs", 2)], nothing_urgent   # best match, NUworks first, sheet order
 assert ("jobs", 5) in nothing_urgent                                    # (no date known: not past its deadline)
 assert remote.candidates(None, None) == [] and remote.candidates([], []) == []
+# a row that stopped on NUworks for something only you can give (its NUworks job page): a candidate marked hand, which
+# never starts by itself (it needs you there: the login, your cover letter) but you can start it
+nu = "https://northeastern-csm.symplicity.com/students/app/jobs/detail/abc"
+hc = remote.candidates([row(6, "Needs Human", nu, "Popup requires Cover Letter: attach by hand on NUworks. | match 75%"),
+                        row(7, "Needs Human", nu + "2", sheet.SUBMIT_MARK + " ...")], [], None, TODAY)
+assert [(c["row"], c["hand"], c["url"], c["host"]) for c in hc] == [(6, True, nu, "northeastern-csm.symplicity.com")], hc
+go, rest = remote.plan(hc, [], [], {}, 3)
+assert go == [] and rest == [(hc[0], remote.HAND_WHY)]
+go, rest = remote.plan(hc, [], [], {}, 3, manual=True)
+assert go == [(hc[0], None)] and rest == []
+go, rest = remote.plan(hc, [], [], {}, 3, jobs_left=0, manual=True)                       # it counts toward the limit
+assert go == [] and "used up" in rest[0][1]
 assert remote.tab_word("other") == "other" and remote.tab_word("jobs") == "nuworks"
 assert jobs.URGENT_DAYS == 7   # the order test above assumes it
 

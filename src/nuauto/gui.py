@@ -543,7 +543,8 @@ def company_rows(rows, facts=False):
             if url:
                 agent.append(view(r, target=url, host=urlparse(url).hostname or url))
             else:
-                other.append(view(r, why=why))
+                hand, hand_why = assist.by_hand_target(r)  # the assistant may work it on NUworks itself
+                other.append(view(r, why=why, hand=bool(hand), hand_why=hand_why))
         elif r.status == "Applied" and r.notes.startswith(sheet.SITE_MARK):
             site.append(view(r))
         elif r.status == "Applied" and any(m in r.notes for m in NUWORKS_SIDE_NOT_SENT) \
