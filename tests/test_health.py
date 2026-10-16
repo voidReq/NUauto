@@ -93,6 +93,28 @@ assert c.status == "ok" and "3 new on NUworks, 1 made your pool" in c.detail, c
 jobs.save("scans.json", [{"time": (datetime.now() - timedelta(hours=20)).isoformat(timespec="minutes"), "listed": 0, "pool": 0}])
 assert one(health.updates).status == "warn"
 
+# updates: the last update stopped (daily.py's last_run.json): why, and the fix for it
+def stopped(reason, said, local=True):
+    config.HAS_SERVER, config.IS_SERVER = not local, False
+    jobs.save("last_run.json", {"time": datetime.now().isoformat(timespec="minutes"), "ok": False, "reason": reason,
+                                "said": said})
+    return one(health.updates)
+c = stopped("nuworks_login", "NUworks needs you to log in", local=False)
+assert c.status == "fail" and c.fix == "login_nuworks" and "on the homelab stopped" in c.detail, c
+assert "copies the session to the homelab" in c.detail, c
+c = stopped("nuworks", "NUworks did not send the job list")
+assert c.status == "warn" and c.fix == "update" and "slow or down" in c.detail and "homelab" not in c.detail, c
+assert stopped("claude", "Claude Code is logged out").fix == "login_claude"
+assert stopped("claude", "Claude Code is logged out", local=False).fix == "homelab_claude"  # its own Claude, over ssh
+c = stopped("failed", "ProfileBusy: the browser profile is in use")
+assert c.status == "warn" and c.fix == "update" and "ProfileBusy" in c.detail, c
+jobs.save("last_run.json", {"time": datetime.now().isoformat(timespec="minutes"), "ok": True, "reason": None, "said": ""})
+assert one(health.updates).detail.startswith("Last check"), one(health.updates)  # went fine: the scan counts again
+jobs.save("last_run.json", {"ok": False})  # unreadable record: ignored, never a crash
+assert one(health.updates).detail.startswith("Last check")
+os.remove(os.path.join(config.DATA_DIR, "last_run.json"))
+config.HAS_SERVER = False
+
 # claude: through a fake `claude` script (auth status / -p), and missing altogether
 FAKE = """#!{py}
 import json, sys

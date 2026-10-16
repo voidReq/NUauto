@@ -146,8 +146,38 @@ def nuworks_saved():
     return [check("nuworks", "NUworks", UNKNOWN, f"Session saved {when}; not checked yet.")]
 
 
+def last_run():
+    """Why the last update stopped (daily.py's data/last_run.json; on the laptop the copy pulled from the homelab), as
+    the New jobs check with its fix. None when it went fine, or no update has recorded one yet."""
+    from nuauto import jobs
+    run = jobs.load("last_run.json", {})
+    if run.get("ok") is not False:
+        return None
+    try:
+        at = datetime.fromisoformat(run["time"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    there = config.HAS_SERVER and not config.IS_SERVER  # the laptop, with the update on the homelab
+    when = f"{at:%H:%M}" if at.date() == date.today() else f"{at:%b} {at.day} {at:%H:%M}"
+    head = f"The update at {when}{' on the homelab' if there else ''} stopped: {run.get('said') or 'see its log'}."
+    reason = run.get("reason")
+    if reason == "nuworks_login":
+        return check("updates", "New jobs", FAIL, head + " NUworks needs you to log in"
+                     + (" here: NUauto copies the session to the homelab." if there else "."), LOGIN_NUWORKS)
+    if reason == "claude":
+        return check("updates", "New jobs", FAIL, head,
+                     ("homelab_claude", "Log in to Claude there") if there else ("login_claude", "Log in to Claude Code"))
+    if reason == "nuworks":
+        return check("updates", "New jobs", WARN, head + " NUworks was slow or down for a while; the next update runs "
+                     "by itself.", ("update", "Run it again"))
+    return check("updates", "New jobs", WARN, head, ("update", "Run it again"))
+
+
 def updates():
     from nuauto import jobs
+    stopped = last_run()
+    if stopped:
+        return [stopped]
     scans = jobs.load("scans.json", [])
     if not scans:
         return [check("updates", "New jobs", WARN, "No check for new jobs has run yet.", ("update", "Check now"))]
@@ -351,6 +381,8 @@ def homelab():
     results = doctor.server_results()
     if results is None:
         return [check("homelab", "Homelab", FAIL, "Can't reach the homelab over ssh (Tailscale up?).")]
+    if last_run():  # the New jobs check says why the update stopped, with its fix: not twice
+        results = [r for r in results if r.get("kind") != "last_run"]
     if config.DEPLOY_FROM_GIT:  # (without it this computer pushes its own code there: the same by construction)
         skew = same_code(code_here(), code_there())
         if skew:

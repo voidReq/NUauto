@@ -317,6 +317,11 @@ def labels(value):
 
 # ---------------------------------------------------------------- browser helpers
 
+# A step stops with this when NUworks wants a password (the one-click re-login did not do it): daily.py tells it
+# apart from NUworks being slow, which needs nothing from you
+NOT_LOGGED_IN = "Not logged in. Run: nuauto login"
+
+
 def open_browser(p, label):
     from nuauto import browser
     log = browser.RunLog(label)
@@ -345,7 +350,7 @@ def search_pages(browser, page, context, log, query):
         got.clear()
         url = f"{HOST}/students/app/jobs/search?{query}&perPage=100&page={n}"
         if not browser.goto_logged_in(page, context, url, log):
-            raise SystemExit("Not logged in. Run: nuauto login")
+            raise SystemExit(NOT_LOGGED_IN)
         for _ in range(30):
             hit = [v for u, v in got.items() if f"page={n}&" in u and "perPage=100" in u]
             if hit:
@@ -609,7 +614,7 @@ def cmd_details():
             browser, log, context, page, blocked = open_browser(p, "jobs_details")
             try:
                 if not browser.goto_logged_in(page, context, config.NUWORKS_START_URL, log):
-                    sys.exit("Not logged in. Run: nuauto login")
+                    sys.exit(NOT_LOGGED_IN)
                 for n, i in enumerate(todo, 1):
                     raw = None
                     for attempt in (1, 2):
@@ -649,7 +654,7 @@ def check_applied(ids):
         browser, log, context, page, blocked = open_browser(p, "check_applied")
         try:
             if not browser.goto_logged_in(page, context, config.NUWORKS_START_URL, log):
-                sys.exit("Not logged in. Run: nuauto login")
+                sys.exit(NOT_LOGGED_IN)
             for i in ids:
                 r = page.request.get(f"{HOST}/api/v3/jobs/{i}")
                 try:

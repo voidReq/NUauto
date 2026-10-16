@@ -975,11 +975,10 @@ def main(argv):
     if laptop:
         from nuauto import sync
         if cmd == "update":
-            print("Running the internship update on the homelab (Ctrl+C stops watching, not the run)...")
-            sync.ssh("systemctl --user start nuauto-intern.service; "
-                     f"tail -n 6 \"$(ls -t {config.SERVER_DIR}/logs/daily-*.txt | head -1)\"")
+            print("Running the internship update on the homelab (Ctrl+C stops watching, not the run)...", flush=True)
+            code = sync.ssh(sync.watch_unit("nuauto-intern.service"))
             sync.pull()
-            return
+            sys.exit(code)
         sync.pull()
     try:
         if cmd == "update":

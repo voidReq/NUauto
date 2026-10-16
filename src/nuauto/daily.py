@@ -12,6 +12,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import traceback
 import urllib.request
 from datetime import datetime, timedelta
@@ -26,6 +27,9 @@ CLAUDE = config.tool_path("claude") or "claude"
 # Claude's error when its login is gone (e.g. "Failed to authenticate: OAuth session expired", "Please run /login")
 AUTH_RE = re.compile(r"authenticat|logged out|/login|log in|oauth|401", re.I)
 SCANS = "scans.json"  # per-run counts for the morning summary (data/)
+LAST_RUN = "last_run.json"  # data/: how the last update went and why it stopped (the GUI's New jobs check, with a fix)
+RETRY_WAIT = 120  # seconds before the job list is read once more: NUworks is sometimes slow for a while
+STOPPED = []  # this run's stops, in order: (reason, what stopped); main() keeps the first in LAST_RUN
 LOG_PATH = os.path.join(config.LOGS_DIR, f"daily-{datetime.now():%Y%m%d-%H%M}.txt")
 
 
@@ -57,6 +61,21 @@ def discord(text):
         urllib.request.urlopen(req, timeout=20).close()
     except Exception as e:
         log(f"discord post failed: {type(e).__name__}")
+
+
+def stop(reason, title, body, said=None):
+    """A step stopped the run: tell you, and keep why for the GUI (LAST_RUN; health.updates turns it into a fix).
+    reason: nuworks_login (NUworks wants you to log in), nuworks (NUworks did not answer: the next run usually works),
+    claude (Claude Code logged out or missing), failed (anything else). said: what stopped, in a few words."""
+    STOPPED.append((reason, said or title.removeprefix("NUauto: ")))
+    notify(title, body)
+
+
+def record_run(code):
+    """How this run went, for the GUI: when, ok, and the first stop's reason and words."""
+    reason, said = (STOPPED[0] if STOPPED else ("failed", "the update stopped (its log says why)")) if code else (None, "")
+    jobs.save(LAST_RUN, {"time": datetime.now().isoformat(timespec="minutes"), "ok": not code, "reason": reason,
+                         "said": said})
 
 
 def run_claude(prompt_file, batch_file, extra=None):
@@ -99,10 +118,10 @@ def claude_ready():
     from nuauto import health
     status = health.claude_status()
     if status is None:
-        notify("NUauto: Claude Code not found", f"Scoring can't run. Install Claude Code on {where()} (README.md, Setup).")
+        stop("claude", "NUauto: Claude Code not found", f"Scoring can't run. Install Claude Code on {where()} (README.md, Setup).")
         return False
     if status and not status.get("loggedIn"):
-        notify("NUauto: Claude Code is logged out", f"Scoring can't run. On {where()} run: claude auth login")
+        stop("claude", "NUauto: Claude Code is logged out", f"Scoring can't run. On {where()} run: claude auth login")
         return False
     return True
 
@@ -119,15 +138,15 @@ def claude_step(ready, prompt_file, batches, import_fn, title, extra=None):
     for b in batches:
         err = run_claude(prompt_file, b, extra)
         if err and AUTH_RE.search(err):
-            notify("NUauto: Claude Code is logged out",
-                   f"Scoring can't run. On {where()} run: claude auth login\nClaude said: {err}")
+            stop("claude", "NUauto: Claude Code is logged out",
+                 f"Scoring can't run. On {where()} run: claude auth login\nClaude said: {err}")
             return False
         if err:
             errors.append(f"{os.path.basename(b)}: {err}")
     ok, msg = step(import_fn)
     if not ok:
         said = "Claude failed on " + "; ".join(errors) + "\n" if errors else ""
-        notify(title, (said + msg)[:600])
+        stop("failed", title, (said + msg)[:600])
         return False
     return True
 
@@ -144,15 +163,21 @@ def main():
     """The scan, then (morning run) the reminders. A failed scan still sends the reminders, from the sheet
     and the last saved pool."""
     before = {r["id"] for r in jobs.load("pool.json", [])}
+    STOPPED.clear()
     try:
         code = scan(before)
     except Exception as e:  # e.g. NUworks too slow, or the browser profile is busy because apply.py is running
         traceback.print_exc()
-        notify("NUauto: daily update failed", f"{type(e).__name__}: {str(e)[:150]}")
+        what = f"{type(e).__name__}: {str(e)[:150]}"
+        # Playwright's TimeoutError: a NUworks page did not load (Claude's calls time out as TimeoutExpired)
+        stop("nuworks" if type(e).__name__ == "TimeoutError" else "failed", "NUauto: daily update failed", what,
+             said="NUworks did not load in time" if type(e).__name__ == "TimeoutError" else what[:120])
         code = 1
     if datetime.now().hour < 12:  # reminders once a day, with the morning run
         reminders(before, ok=code == 0)
-    return internships() or code
+    code = internships() or code
+    record_run(code)
+    return code
 
 
 def internships():
@@ -165,8 +190,23 @@ def internships():
         return intern.update()
     except Exception as e:  # never hides the NUworks run's own result
         traceback.print_exc()
-        notify("NUauto: internship update failed", f"{type(e).__name__}: {str(e)[:150]}")
+        stop("failed", "NUauto: internship update failed", f"{type(e).__name__}: {str(e)[:150]}")
         return 1
+
+
+def nuworks_stopped(msg):
+    """The list or details step stopped: NUworks wants you to log in, or it did not answer (nothing to do: the next
+    run usually works). Returns 1, the scan's result."""
+    if msg == jobs.NOT_LOGGED_IN:
+        copies = " on the laptop; it copies the session to the homelab" if config.IS_SERVER else ""
+        stop("nuworks_login", "NUauto: NUworks needs you to log in",
+             f"The one-click re-login did not do it, so the update stopped. In NUauto: Today > Log in to NUworks "
+             f"(or run `nuauto login`{copies}).")
+    else:
+        stop("nuworks", "NUauto: NUworks did not answer",
+             f"{msg} Tried twice, {RETRY_WAIT // 60} min apart: NUworks was slow or down for a while. Nothing to do: the "
+             "next update runs by itself (or in NUauto: Today > Run it again).", said="NUworks did not send the job list")
+    return 1
 
 
 def scan(before):
@@ -174,9 +214,12 @@ def scan(before):
     listed_before = set(jobs.load("list.json", {}))
     log("list")
     ok, msg = step(jobs.cmd_list)
+    if not ok and msg != jobs.NOT_LOGGED_IN:  # NUworks slow (no job list came): once more, a little later
+        log(f"list: {msg} Trying again in {RETRY_WAIT} s.")
+        time.sleep(RETRY_WAIT)
+        ok, msg = step(jobs.cmd_list)
     if not ok:
-        notify("NUauto: update stopped", f"{msg}. Run `nuauto login` on your laptop (it copies the session to the homelab).")
-        return 1
+        return nuworks_stopped(msg)
 
     checked = []
 
@@ -192,8 +235,7 @@ def scan(before):
     log("details")
     ok, msg = step(jobs.cmd_details)
     if not ok:
-        notify("NUauto: update stopped", f"{msg}. Run `nuauto login` on your laptop (it copies the session to the homelab).")
-        return 1
+        return nuworks_stopped(msg)
 
     if not claude_step(ready, "SCORE_PROMPT.md", jobs.cmd_score_export(), jobs.cmd_score_import,
                        "NUauto: scoring incomplete"):

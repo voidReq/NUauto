@@ -220,7 +220,10 @@ HEALTH (health.py; the same checks `nuauto doctor` prints, `nuauto doctor --json
   bitwarden only with password_manager bitwarden: bw there and logged in (`bw  15 min
             status`; locked is fine), the logins NUauto made not in the vault yet
             (Add N to Bitwarden); no chip while off; demo mode never uses a real bw
-  updates   age of the last scan (data/scans.json)                             every minute
+  updates   age of the last scan (data/scans.json); if the last update stopped    every minute
+            (data/last_run.json), why, with its fix: Log in to NUworks, Run it again,
+            Log in to Claude (Code / there). The homelab check then leaves out doctor's
+            own "last update run stopped" line (one place)
 - The status chips at the top (Google, Sheet, NUworks, Claude Code, Homelab): click one for its detail, its fix button
   and Check now (runs that check's groups again, gui.App.GROUPS: google quick + sheet, nuworks quick + nuworks, the
   others their own; "Checking…" until done, the result shows in place). Not in view mode.
