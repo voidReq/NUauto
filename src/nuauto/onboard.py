@@ -967,7 +967,7 @@ def read_resume_labels():
                 if not browser.goto_logged_in(page, context, url, log):
                     error = "Not logged in to NUworks: log in first (the button above)."
                     break
-                btn = page.get_by_role("button", name=apply.APPLY_NAME)
+                btn = apply.apply_button(page)
                 if btn.count() != 1:
                     error = "That job has no Apply button; try again after the next update."
                     continue

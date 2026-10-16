@@ -105,6 +105,26 @@ def run_form(extra, entries, io):
             b.close()
 
 
+# --- the job page draws its Apply button with JavaScript after loading: wait for it (2026-10-16: found 0 too early)
+def apply_buttons(script):
+    with sync_playwright() as p:
+        b = p.firefox.launch(headless=True)
+        page = b.new_page()
+        page.set_content(f"<div id='j'></div><script>{script}</script>")
+        try:
+            return apply.apply_button(page).count()
+        finally:
+            b.close()
+
+
+late = "setTimeout(() => document.getElementById('j').innerHTML = '<button>apply</button>', 2000)"
+assert apply_buttons(late) == 1
+saved_wait, apply.APPLY_WAIT_MS = apply.APPLY_WAIT_MS, 500
+try:
+    assert apply_buttons("") == 0  # none ever: gives up after the wait, the caller stops the row
+finally:
+    apply.APPLY_WAIT_MS = saved_wait
+
 entries = [answers.new_entry("linkedin *", "https://linkedin.com/in/me"), answers.new_entry("co-op term *", "Fall 2027", "select")]
 li, term, pre = run_form("", entries, ScriptedIO())
 assert (li, term, pre) == ("https://linkedin.com/in/me", "Fall 2027", "from site"), (li, term, pre)
