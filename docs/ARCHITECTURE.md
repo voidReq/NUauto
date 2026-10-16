@@ -145,3 +145,51 @@ SHEET (columns in sheet.HEADERS, created by setup_sheet.py)
   set_status only changes rows still Approved. Notes starting sheet.SITE_MARK are written by
   apply.submit_flow and cleared by sheet.mark_site_done. The weekly cap counts Applied rows with a
   Date in the current week (sheet.week_window, check_limits).
+
+FILES (moved from CLAUDE.md 2026-10-16; layout since 2026-10-05: an installable package, `pip install -e .`)
+pyproject.toml (package + dependencies; defines the `nuauto` command: .venv/bin/nuauto, ~/.local/bin/nuauto links there)
+src/nuauto/: cli.py (the nuauto command)   config.py (all paths, hosts; reads local/local_config.json)
+  sheet.py (rows, limits, status updates, Google login)   apply.py (the NUworks runner)
+  browser.py (login/open, domain lock, cookies)   answers.py (answer bank)   jobs.py (pool + viewers)   fields.py (what you study: per-field starting preferences, kinds of work)
+  daily.py (homelab update + Discord)   web.py (Mark-done page, homelab)   sync.py (laptop<->homelab)   deploy.py (homelab: deploys main)
+  doctor.py (health check)   inspect_form.py (read-only form lister)   assist.py (company-site agent)   accounts.py (its job-site logins)
+  mail.py (the agent's email codes and links: read-only Gmail)   screen.py (the homelab assistant's virtual screen + browser view)
+  review.py (pairing devices with the homelab's page; its assistant sessions' screens and queue, served by gui.py)   remote.py (its queue, and claims between the machines)
+  link.py (the laptop app's link to the homelab's page: a paired device; gui.homelab and /api/homelab/ use it)
+  setup_sheet.py (sheet setup / `format` restyle)   gui.py (the window's server)   gui_static/ (its page)
+  health.py (the checks behind doctor and the GUI)   onboard.py (setup wizard)   demo.py (demo mode fakes)
+  window.py (which window) + window_gtk.py (the Linux window, run by the system python3)
+  insights.py (pay, places, kinds of work, sheet statuses: the GUI's Insights screen and `nuauto insights`)
+  manage.py (add / move / remove sheet rows by hand: the GUI's Sheet screen and `nuauto sheet add|move|remove`)
+  intern.py (Summer internships from Simplify's and vanshb03's lists, a job on both kept once: the second pool, docs/PIPELINE.md)   postings.py (reads a posting
+  from a company's own job site, no login: job-site JSON, page data, hidden browser; never a non-public address)
+  Imports are always absolute: `from nuauto import sheet` (test_sync enforces it).
+prompts/ (TRIAGE_, SCORE_, CATEGORY_PROMPT.md: Claude batch prompts; INTERN_TRIAGE_, INTERN_SCORE_PROMPT.md: the
+  internships'; ASSIST_PROMPT.md: agent rules)
+tests/ (test_*.py offline checks)   docs/ (DEPLOY, PIPELINE, GUI, REMOTE, ASSIST, ARCHITECTURE, SAFETY, STATUS)
+deploy/systemd/ (homelab units)   install.sh (installer from source)   packaging/ (the packaged app: spec, build.sh, smoke.py)
+.github/workflows/ (tests.yml: tests on Ubuntu + macOS, on PRs and main; release.yml: AppImages + DMGs, built on PRs (Intel Mac: tags only), released on v* tags)
+README.md (public, new-user setup; keep it short)   LICENSE   local_config.example.json (template)
+local/ (gitignored, mode 700): everything personal or secret, on both machines:
+  local_config.json (sheet ID, resume path, homelab hostname/dir, Mark-done URL, Tailscale IP),
+  profile.json (resume_label), answers.json, answers_other.json (Other jobs tab), google_login.txt, browser_profile/, assist_profile/,
+  resume.pdf (homelab copy), gui.lock, browser_profile.lock, onboard.json, and the SECRETS below.
+  Keep personal values (names, emails, hosts, IPs, IDs, companies) out of every committed file: the
+  repo is public.
+Generated (gitignored, repo root): data/, logs/, work/
+
+TESTS (moved from CLAUDE.md 2026-10-16)
+`nuauto test` runs every tests/test_*.py (4 at a time): offline, no sheet, no real NUworks, no network
+(browser tests use headless Firefox on local pages or demo mode). Run it before pushing; CI runs it on
+Ubuntu and macOS. tests/test_sync.py fails if a new module or prompt isn't in sync.CODE (so it would never
+reach the homelab). test_web.py covers the public Mark-done links (signatures; GET never
+changes the sheet). test_browser.py covers the domain lock and the profile lock. test_assist.py covers the
+company-site agent's guard. test_mail.py covers the email codes and links (Gmail's message format, which mail counts, the
+agent's `email` command). test_insights.py covers the Insights numbers (pay parsing, folding, no guessing). test_intern.py covers the
+internship pool and postings.py (job-site links, parsing, the network guard on a local server, fetch tries, rules,
+Review queue, a whole update with Claude stood in for). test_deploy.py runs deploy.py on a throwaway git repo (copy, web restart only when needed, undo on failure). test_demo.py runs the real apply.py on demo mode's fake pages (stops, cap, re-login).
+test_gui.py covers the GUI server's security and flows; test_homelab_app.py the same app as the homelab serves it (demo
+`--remote`: pairing, refusals, sessions, queue, devices, a phone-width browser); test_link.py the laptop's link to it (pairing,
+calls, the /api/homelab/ routes, an Apply run there, unpairing; then `--demo --linked` in a browser); tests/screens.py (not a test:
+every screen, used by test_gui, test_homelab_app and test_link); test_review.py its handler's rules and the sessions' backend; test_view.py the read-only `--view` mode; test_setup.py the wizard; test_health.py the checks;
+test_window.py the packaged-app plumbing (self_cmd, the assistant's command, the window choice, clean env).
