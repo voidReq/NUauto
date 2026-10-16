@@ -1616,12 +1616,28 @@ screens.answers = async (view) => {
   let data, rows = [], filter = "", bank = sessionStorage.getItem("answersBank") || "nuworks";  // or "other": the Other jobs tab's
   async function reload() {
     try { data = await api.get(`/api/answers?bank=${bank}`); } catch (e) { fill(view, el("div", { class: "note fail", text: e.message })); return; }
-    rows = data.entries.map((e) => ({ ...e, aliases: (e.aliases || []).join(", ") }));
+    rows = data.entries.map((e) => ({ ...e, aliases: [...(e.aliases || [])] }));
     draw();
+  }
+  // Other wordings, one per line (a wording may hold commas: "…on CPT, OPT, or STEM OPT…")
+  function wordings(r) {
+    const box = el("textarea", { rows: "8", testid: "aliases-text", "aria-label": `Other wordings of ${r.question}`, value: null });
+    box.value = r.aliases.join("\n");
+    modal((m, close) => m.append(el("h2", { text: "Other wordings" }),
+      el("p", { class: "muted", text: `Questions that get the same answer as “${r.question}”. One per line; capital letters and spaces at the ends don't matter.` }),
+      el("label", { class: "field" }, box),
+      el("div", { class: "foot" }, el("span", { class: "small muted", text: "Saved with the rest when you press Save." }), el("div", { class: "row" },
+        el("button", { class: "btn", text: "Cancel", onclick: close }),
+        el("button", { class: "btn primary", text: "Done", testid: "aliases-done", onclick: () => {
+          r.aliases = box.value.split("\n").map((a) => a.trim()).filter(Boolean);
+          close();
+          draw();
+        } })))), { label: "Other wordings", testid: "aliases-dialog" });
+    setTimeout(() => box.focus(), 0);
   }
   function setBank(b) { bank = b; sessionStorage.setItem("answersBank", b); filter = ""; reload(); }
   function draw() {
-    const shown = rows.map((r, i) => [r, i]).filter(([r]) => !filter || (r.question + " " + r.answer + " " + r.aliases).toLowerCase().includes(filter));
+    const shown = rows.map((r, i) => [r, i]).filter(([r]) => !filter || [r.question, r.answer, ...r.aliases].join(" ").toLowerCase().includes(filter));
     const tbody = el("tbody", {}, ...shown.map(([r, i]) => el("tr", { testid: `answer-row-${i}` },
       el("td", {}, el("input", { type: "text", value: r.question, "aria-label": "Question", oninput: (e) => { r.question = e.target.value; } })),
       el("td", {}, el("input", { type: "text", value: r.answer, "aria-label": "Answer", disabled: r.always_ask,
@@ -1632,8 +1648,8 @@ screens.answers = async (view) => {
         onchange: (e) => { r.always_ask = e.target.checked; draw(); } }), "always ask")),
       bank === "nuworks" ? el("td", { class: "narrow" }, el("label", { class: "row small", title: "Never used for jobs in your Other jobs tab" },
         el("input", { type: "checkbox", checked: !!r.nuworks_only, onchange: (e) => { r.nuworks_only = e.target.checked; } }), "NUworks only")) : null,
-      el("td", {}, el("input", { type: "text", value: r.aliases, placeholder: "other wordings, comma-separated", "aria-label": "Aliases",
-        oninput: (e) => { r.aliases = e.target.value; } })),
+      el("td", { class: "narrow" }, el("button", { class: "btn small", testid: `aliases-${i}`, "aria-label": `Other wordings of ${r.question}`,
+        title: r.aliases.join("\n") || null, text: r.aliases.length ? plural(r.aliases.length, "other wording") : "Add a wording", onclick: () => wordings(r) })),
       el("td", { class: "narrow" }, el("button", { class: "btn small ghost", text: "Remove", "aria-label": `Remove ${r.question}`,
         onclick: () => { rows.splice(i, 1); draw(); } })))));
     const seg = el("div", { class: "seg", role: "group", "aria-label": "Which answers" },
@@ -1647,14 +1663,14 @@ screens.answers = async (view) => {
       data.locked ? el("div", { class: "note warn", text: "A run is using the answer bank right now. You can edit when it is over." }) : null,
       el("div", { class: "row between" }, el("input", { type: "search", placeholder: "Search (Ctrl+F)", value: filter, "aria-label": "Search answers", "data-find": true, testid: "answers-search",
         oninput: (e) => { filter = e.target.value.toLowerCase(); draw(); $("input[aria-label='Search answers']").focus(); } }),
-        el("div", { class: "row" }, el("button", { class: "btn", text: "Add a question", onclick: () => { rows.unshift({ question: "", answer: "", field_type: "", always_ask: false, nuworks_only: false, aliases: "" }); filter = ""; draw(); } }),
+        el("div", { class: "row" }, el("button", { class: "btn", text: "Add a question", onclick: () => { rows.unshift({ question: "", answer: "", field_type: "", always_ask: false, nuworks_only: false, aliases: [] }); filter = ""; draw(); } }),
           el("button", { class: "btn primary", text: "Save", testid: "answers-save", disabled: data.locked, onclick: save }))),
-      el("div", { class: "table-scroll" }, el("table", { class: "grid" }, el("thead", {}, el("tr", {}, ...["Question", "Answer", "Type", "Always ask", ...(bank === "nuworks" ? ["NUworks only"] : []), "Aliases"].map((h) => el("th", { text: h })),
+      el("div", { class: "table-scroll" }, el("table", { class: "grid" }, el("thead", {}, el("tr", {}, ...["Question", "Answer", "Type", "Always ask", ...(bank === "nuworks" ? ["NUworks only"] : []), "Other wordings"].map((h) => el("th", { text: h })),
         el("th", {}, el("span", { class: "sr-only", text: "Remove" })))), tbody))));
   }
   async function save() {
-    const entries = rows.map((r) => ({ ...r, aliases: r.aliases.split(",").map((a) => a.trim()).filter(Boolean) }));
-    try { data = await api.post("/api/answers", { bank, entries, version: data.version }); rows = data.entries.map((e) => ({ ...e, aliases: (e.aliases || []).join(", ") })); draw(); toast("Answer bank saved."); }
+    const entries = rows.map((r) => ({ ...r, aliases: [...r.aliases] }));
+    try { data = await api.post("/api/answers", { bank, entries, version: data.version }); rows = data.entries.map((e) => ({ ...e, aliases: [...(e.aliases || [])] })); draw(); toast("Answer bank saved."); }
     catch (e) { fail(e); }
   }
   await reload();

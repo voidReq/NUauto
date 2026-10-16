@@ -336,11 +336,35 @@ assert assist.link_from_notes("Popup requires Cover Letter") is None
 answers.save([answers.new_entry("email", "me@example.com", "text"), answers.new_entry("work authorization", "", "select", always_ask=True)])
 E = answers.load()
 assert assist.lookup(E, "Email*", [], "My Information") == {"status": "answer", "value": "me@example.com"}
-assert assist.lookup(E, "City*", [], "My Information") == {"status": "unknown", "saved": [{"question": "email", "answer": "me@example.com"}]}
+assert assist.lookup(E, "City*", [], "My Information") == {"status": "unknown", "saved": [{"question": "email", "answer": "me@example.com"}], "more": 0}
 assert assist.lookup(E, "Work Authorization*", ["Yes", "No"], "")["status"] == "ask_every_time"
 assert assist.lookup(E, "Email*", [], "Voluntary Disclosures") == {"status": "answer", "value": "me@example.com"}  # saved demographics are reused
 assert assist.lookup(E, "Email*", ["a@b.c"], "")["status"] == "not_an_option"
 assert assist.valid_answer("x" * 301, []) and assist.valid_answer("two\nlines", []) and assist.valid_answer(" ", [])
+# an unknown field's reply lists the saved answers that fit it best, never so many that the agent can't read them (a
+# reply over ~30,000 characters is cut off before it): those that are exactly one of its options first, then the
+# ones sharing words with the label and options; each one cut short
+many = [answers.new_entry(f"question number {n} about something else entirely", f"answer {n}", "text") for n in range(200)]
+many += [answers.new_entry("race/ethnicity", "White", "select"), answers.new_entry("veteran status", "I am not a veteran", "select"),
+         answers.new_entry("cover letter text " + "x" * 500, "y" * 500, "text")]
+reply = assist.lookup(many, "Race/Ethnicity (required)", ["Asian", "White", "Two or More Races"], "")
+assert reply["status"] == "unknown" and reply["saved"][0] == {"question": "race/ethnicity", "answer": "White"}, reply["saved"][:2]
+assert len(reply["saved"]) == assist.SAVED_SHOWN and reply["more"] == len(many) - assist.SAVED_SHOWN
+assert len(json.dumps(reply)) < 10000, len(json.dumps(reply))
+long_one = assist.lookup(many, "Cover letter text", [], "")["saved"][0]
+assert long_one["question"].startswith("cover letter text") and len(long_one["question"]) == assist.SAVED_CHARS and long_one["answer"].endswith("…")
+assert assist.lookup(many, "Veteran Status?", [], "")["saved"][0]["question"] == "veteran status"  # shared words next
+# today's date (a signature date) changes every time: filled in once, never saved; other dates are saved as usual
+from datetime import date as date_, timedelta as td_
+for v in (date_.today().strftime("%m/%d/%Y"), date_.today().isoformat(), (date_.today() - td_(days=3)).strftime("%B %d, %Y")):
+    assert assist.todays_date(v), v
+for v in ("05/2028", "2028-05-01", "01/15/2005", "Boston", "May 2028"):
+    assert not assist.todays_date(v), v
+# another wording goes on its entry once: never its own question, never twice
+e1 = answers.new_entry("email", "me@example.com", "text")
+for a in ("E-mail", " e-mail ", "Email", "email"):
+    answers.add_alias(e1, a)
+assert e1["aliases"] == ["e-mail"], e1["aliases"]
 assert assist.valid_answer("No", ["Yes", "No"]) is None and assist.valid_answer("Nope", ["Yes", "No"])
 
 # answer-bank commands through a run folder (what the agent runs)
@@ -376,6 +400,10 @@ assert "Decline" in state()["issued_values"]
 assert bank("blank", "Phone Extension")["status"] == "leave_blank"
 assert bank("answer", "Phone Extension")["status"] == "leave_blank"
 assert bank("alias", "E-mail Address*", "email")["value"] == "me@example.com"
+assert bank("alias", "E-mail Address*", "email")["value"] == "me@example.com"  # (asked twice: one alias still)
+assert answers.find(answers.load(), "email")["aliases"].count("e-mail address") == 1
+assert "never saved" in bank("save", "Date*", date_.today().strftime("%m/%d/%Y"))["error"]  # today's date: once, never saved
+assert answers.find(answers.load(), "date") is None
 # unknown: the agent gets the saved answers to work it out from; never always-ask or leave-blank ones
 saved = bank("answer", "Your e-mail*")["saved"]
 assert {"question": "email", "answer": "me@example.com"} in saved and {"question": "city", "answer": "Boston"} in saved

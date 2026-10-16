@@ -511,6 +511,20 @@ try:
     on_disk = {e["question"]: e for e in json.load(open(os.path.join(STATE, "local", "answers.json")))}
     assert on_disk["email"]["nuworks_only"] is True and "nuworks_only" not in on_disk["available start date"]  # stored only when not the default
 
+    # other wordings: a wording with commas stays whole; one that does nothing (its own question, a repeat, another
+    # entry's above, which wins) is left out without a word; a question that is another entry's wording is refused
+    other_bank = get("/api/answers?bank=other")
+    worded = {"question": "visa", "answer": "No", "field_type": "", "always_ask": False,
+              "aliases": ["Do you need sponsorship (e.g. OPT, CPT, or STEM OPT)?", "visa", "VISA ", "graduation month",
+                          "do you need sponsorship (e.g. opt, cpt, or stem opt)?"]}
+    saved = post("/api/answers", {"bank": "other", "entries": other_bank["entries"] + [worded], "version": other_bank["version"]})
+    assert saved["entries"][-1]["aliases"] == ["do you need sponsorship (e.g. opt, cpt, or stem opt)?"], saved["entries"][-1]
+    clash = {"question": "Do you need sponsorship (e.g. OPT, CPT, or STEM OPT)?", "answer": "Yes", "field_type": "",
+             "always_ask": False, "aliases": []}
+    body = post("/api/answers", {"bank": "other", "entries": saved["entries"] + [clash], "version": saved["version"]}, expect=409)
+    assert "another wording of 'visa'" in body["error"], body
+    post("/api/answers", {"bank": "other", "entries": saved["entries"][:-1], "version": saved["version"]})  # (as it was)
+
     # a second start opens a window on this one instead (here: --no-open, so it just says so and exits)
     second = subprocess.run([PY, "-m", "nuauto", "gui", "--no-open"], env=ENV, cwd=ROOT, capture_output=True, text=True,
                             timeout=60)

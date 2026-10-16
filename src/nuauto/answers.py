@@ -140,6 +140,13 @@ def find(entries, label):
     return None
 
 
+def add_alias(entry, label):
+    """Another wording of entry's question, once (never its own question, never twice)."""
+    key = norm(label)
+    if key and key != norm(entry["question"]) and key not in [norm(a) for a in entry.get("aliases") or []]:
+        entry.setdefault("aliases", []).append(key)
+
+
 class TerminalIO:
     """Questions at the terminal. say/ask show and read one line; the question methods below keep the exact
     wording the terminal has always used. JsonIO (the GUI) replaces them with dialogs; the rules that decide
@@ -352,7 +359,7 @@ def resolve_answer(entries, label, field_type, options, io):
         save(entries)
         return answer
     if how == "alias" and isinstance(i, int) and 0 <= i < len(entries):
-        entries[i].setdefault("aliases", []).append(norm(label))
+        add_alias(entries[i], norm(label))
         save(entries)
         return resolve_answer(entries, label, field_type, options, io)
     raise Stop(f"stopped at {label!r}")

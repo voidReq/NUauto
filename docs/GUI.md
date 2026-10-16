@@ -142,7 +142,11 @@ SCREENS
   Answers        the answer bank as a table (exact-match rules unchanged); locked while a run uses it. NUworks /
                  Other jobs switch: the Other jobs bank (answers_other.json) is its own table; the NUworks one has a
                  "NUworks only" column (never used for Other jobs; default on for start/end date and co-op term). Search
-                 (Ctrl+F) narrows it to questions, answers and aliases with that text
+                 (Ctrl+F) narrows it to questions, answers and aliases with that text. Other wordings (aliases): a dialog,
+                 one per line (a wording may hold commas; until 2026-10-16 they were one comma-separated box, which split
+                 such wordings on Save and then refused it as a duplicate). Save leaves out a wording that does nothing
+                 (its own question, a repeat, one an entry above already has: that one wins) and refuses only a question
+                 that is another entry's wording, naming both
   Ctrl+F         (Cmd+F on a Mac) goes to the screen's own search box: Apply, Review, Answers ([data-find]); elsewhere, and in
                  a dialog, the browser's own find
   Settings       every health check (run them now), logins (Google, NUworks, Claude Code, and Gmail: the read-only login

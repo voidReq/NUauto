@@ -1533,20 +1533,27 @@ def answers_put(body):
     entries = body.get("entries")
     if not isinstance(entries, list):
         raise Refused("Expected a list of entries.")
-    clean, seen = [], set()
+    clean, owner = [], {}  # each question and other wording -> the question of the entry that has it
     for e in entries:
         q = answers.norm(str((e or {}).get("question", "")))
         if not q:
             raise Refused("Every entry needs a question.")
-        keys = [q] + [answers.norm(str(a)) for a in e.get("aliases") or [] if str(a).strip()]
-        dup = [k for k in keys if k in seen]
-        if dup:
-            raise Refused(f"{dup[0]!r} appears twice. Each question (and alias) once.")
-        seen.update(keys)
+        if q in owner:
+            raise Refused(f"{q!r} is a question and also " + ("a second entry's question" if owner[q] == q else
+                          f"another wording of {owner[q]!r}") + ": keep it in one of them (search for it).")
+        owner[q] = q
+        aliases = []
+        for a in e.get("aliases") or []:
+            k = answers.norm(str(a))
+            # a wording matched already (its own question, a repeat, or an entry above, which wins: answers.find) does
+            # nothing here: left out
+            if k and k not in owner:
+                owner[k] = q
+                aliases.append(k)
         ft = e.get("field_type", "")
         if ft not in ("", "text", "select"):
             raise Refused(f"{q!r}: field type must be text or select.")
-        entry = {"question": q, "aliases": keys[1:], "answer": str(e.get("answer", "")).strip(),
+        entry = {"question": q, "aliases": aliases, "answer": str(e.get("answer", "")).strip(),
                  "field_type": ft, "date_added": str(e.get("date_added") or date.today().isoformat())[:10],
                  "always_ask": bool(e.get("always_ask"))}
         if e.get("leave_blank") and not entry["answer"]:  # "always leave blank" (the assistant's), until you answer it

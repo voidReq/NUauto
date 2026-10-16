@@ -70,6 +70,7 @@ THE END LIST (when you reach the last page before Submit: a review page, or a on
    ("2: No; 5: leave blank; 7: <their text>").
 3. Record every answer:
    - ANSWER save "<label>" "<answer>" --option ... (same options as the guess): reused on later applications.
+     Never today's date (a signature date, a self-identify date): that one changes, so ANSWER once.
    - ANSWER once "<label>" "<answer>": an ask-every-time question (never save these).
    - ANSWER confirm "<label>": an essay they approved (nothing saved).
    - ANSWER blank "<label>": one they say to always leave blank.

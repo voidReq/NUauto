@@ -51,6 +51,12 @@ COMPANY-SITE AGENT (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`;
   typed with no saved answer or guess behind them (the guard's own record, assist.record_typed). Proven with a real
   Sonnet session on a local practice form (guesses, one end list, a correction saved and fixed, the Submit question's
   list); not yet on a real application.
+- An unknown field's reply (2026-10-16): the saved answers that fit it best, at most 25 (assist.SAVED_SHOWN), each
+  cut to 140 characters, and how many more there are: first those that are exactly one of its options, then by the
+  words they share with the label and options. (Until then it listed every saved answer: about 32,000 characters for an
+  Other jobs run, more than Claude Code shows the agent, so it could not read it and asked me.) `save` refuses today's
+  date (within a week: a signature or self-identify date, assist.todays_date): it changes, so it is filled in with
+  `once`. `alias` adds a wording once (answers.add_alias: never its own question, never twice).
 - Accounts (added 2026-10-10, my call): the agent makes the accounts job sites ask for (Workday...), with
   local_config.json "accounts_email" (mine: my Gmail, in local_config only) and a random password per site that NUauto
   makes (accounts.py; local/accounts.json, 600, under a lock, never synced; with
