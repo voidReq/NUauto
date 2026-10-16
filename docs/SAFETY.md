@@ -1,5 +1,5 @@
 SAFETY: every guardrail, where the code enforces it, which test covers it
-(Keep this current when you change a rule. Rules in prose: CLAUDE.md. Tests: `nuauto test`, tests/.)
+(Keep this current when you change a rule. Rules in prose: CLAUDE.md, docs/ASSIST.md (the company-site agent). Tests: `nuauto test`, tests/.)
 Format: rule | enforced in (src/nuauto/) | test. "no test" = nothing in tests/ exercises it.
 Paths below are in src/nuauto/ unless a folder is given.
 

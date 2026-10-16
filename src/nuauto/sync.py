@@ -36,7 +36,7 @@ PACKAGE = ["__init__.py", "__main__.py", "cli.py", "config.py", "sheet.py", "job
            "manage.py", "intern.py", "postings.py", "accounts.py", "mail.py", "screen.py", "review.py", "remote.py", "link.py"]
 CODE = (["pyproject.toml", "README.md", "local_config.example.json", "CLAUDE.md", "CONTRIBUTING.md",
          "docs/DEPLOY.md", "docs/PIPELINE.md", "docs/ARCHITECTURE.md", "docs/SAFETY.md", "docs/GUI.md",
-         "docs/REMOTE.md"]
+         "docs/REMOTE.md", "docs/ASSIST.md"]
         + [f"src/nuauto/{f}" for f in PACKAGE]
         + [f"prompts/{f}" for f in ("TRIAGE_PROMPT.md", "SCORE_PROMPT.md", "CATEGORY_PROMPT.md", "ASSIST_PROMPT.md",
                                               "INTERN_TRIAGE_PROMPT.md", "INTERN_SCORE_PROMPT.md")])
