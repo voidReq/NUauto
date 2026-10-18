@@ -7,7 +7,9 @@ import os
 import subprocess
 import tempfile
 
-from nuauto import config, deploy, doctor, sync
+os.environ["NUAUTO_STATE_DIR"] = tempfile.mkdtemp(prefix="nuauto-test-deploy-")  # never the real local/ (its limits, its accounts)
+
+from nuauto import config, deploy, doctor, sync  # noqa: E402
 
 TMP = tempfile.mkdtemp()
 REMOTE_DIR = os.path.join(TMP, "github")

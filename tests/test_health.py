@@ -10,9 +10,11 @@ import tempfile
 import time
 from datetime import date, datetime, timedelta
 
-from nuauto import config
-from nuauto import health
-from nuauto import sheet
+os.environ["NUAUTO_STATE_DIR"] = tempfile.mkdtemp(prefix="nuauto-test-health-")  # never the real local/ (its limits, its accounts)
+
+from nuauto import config  # noqa: E402
+from nuauto import health  # noqa: E402
+from nuauto import sheet  # noqa: E402
 
 tmp = tempfile.mkdtemp()
 local = os.path.join(tmp, "local")

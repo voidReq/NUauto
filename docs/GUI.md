@@ -88,7 +88,8 @@ SCREENS
                  NUworks co-ops (the sheet's NUworks tab: the weekly limit), "<term> internships" ("Other jobs" when
                  internships are off: the sheet's Other jobs tab, no limits), Assistants. The live run above them.
                  A sheet tab: (NUworks) the week's count, At most and Start (Run on: this computer / the homelab, linked),
-                 How Start works folded; then one toolbar: Search this tab (words, all must appear, any case, in company,
+                 How Start works folded; (the other tab, laid out the same, 2026-10-18, my request: "same buttons, same
+                 subtext") no limit here, how many are ready and applied, Run on, How Apply works folded; then one toolbar: Search this tab (words, all must appear, any case, in company,
                  title, notes, site, kind of work, status, pay; Ctrl+F; Esc clears), Show (kind of work, with counts), the
                  order, Add a job. Then the tab's rows in sections (<details>: what is left to do open, the rest folded,
                  each with its count; your opening and folding remembered for the session; a search opens every section
@@ -105,10 +106,12 @@ SCREENS
                  failed, Other rows; recent runs folded at
                  the end. The other tab: Ready to apply (Approved: the assistant), Applied, Proposed, Dropped or failed,
                  Other rows (sort: score, match %, pay, sheet order; on the homelab's page the queue's order first).
-                 Every row: who and what, its score / match % and pay ("score 105 = 75% match + 10 Boston + 20 security"
+                 Both tabs' rows look alike: Sort: in the toolbar, the same Apply, Open and More on each row, a date chip
+                 (NUworks: when it closes; the other tab: when it was posted). Every row: who and what, its score / match % and pay ("score 105 = 75% match + 10 Boston + 20 security"
                  when bonuses add to it: Start goes by score), a line about it (its site, its notes), its chips (when it
                  closes: amber within a week, red once past; "may also want the company's site"; the queue's place), what to
-                 do next (Apply: after a confirm just that row, `nuauto apply --row N`; Start assistant; Mark done; Submit
+                 do next (Apply: after a confirm just that row, `nuauto apply --row N`; on an assistant's row Apply starts the
+                 assistant, where Run on says; Mark done; Submit
                  on NUworks too), Open, and More (⋯; on a phone in the row's top right corner): on a sent row Mark accepted /
                  Mark rejected (or Back to Applied: what you heard back, sheet.set_outcome), I applied myself, Drop (not
                  applying: closed, a duplicate, a bad location; sheet.drop: Failed, "Dropped <date>: <reason>" in Notes;
@@ -124,7 +127,7 @@ SCREENS
                  (remote_assist): "assistant running on the homelab: open" / "...: waiting for you: open" (its screen), from
                  `nuauto assist sessions` over ssh every minute (never in view or demo mode); on the homelab's own page and
                  the laptop linked to it, each row's place in the queue as a chip (review.queue_view: starts next by itself /
-                 ready / what it waits for), Start now / Start on the homelab (refused with the reason)).
+                 ready / what it waits for), Apply there (on its page, or Run on: the homelab; refused with the reason)).
                  Assistants: the one line (assistants-bar: "Assistants: N of 3 running here · M on the homelab · K wait for
                  you (Today lists them)"; on the homelab's page also the queue's: what starts by itself, its hours, free
                  slots, NUworks applications left), then every session running now, here and on the homelab: the job, its

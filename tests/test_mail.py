@@ -11,7 +11,9 @@ import sys
 import tempfile
 import time
 
-from nuauto import config
+os.environ["NUAUTO_STATE_DIR"] = tempfile.mkdtemp(prefix="nuauto-test-mail-")  # never the real local/ (its limits, its accounts)
+
+from nuauto import config  # noqa: E402
 
 tmp = tempfile.mkdtemp()
 config.LOCAL_DIR = os.path.join(tmp, "local")  # never the real local/ (the Gmail login lives there)

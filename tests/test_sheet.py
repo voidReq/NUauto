@@ -1,8 +1,12 @@
 """Offline checks for sheet.py. Run: python test_sheet.py"""
 from datetime import date
+import os
+import tempfile
 
-from nuauto import sheet
-from nuauto.sheet import HEADERS, LimitReached, SheetError, parse_rows, check_limits
+os.environ["NUAUTO_STATE_DIR"] = tempfile.mkdtemp(prefix="nuauto-test-sheet-")  # never the real local/ (its limits, its accounts)
+
+from nuauto import sheet  # noqa: E402
+from nuauto.sheet import HEADERS, LimitReached, SheetError, parse_rows, check_limits  # noqa: E402
 
 TODAY = date(2026, 10, 1)
 

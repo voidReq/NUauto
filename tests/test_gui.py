@@ -689,7 +689,7 @@ try:
         applied.locator("summary").click()
         page.click("[data-testid=tab-other]")
         page.wait_for_selector("[data-testid=section-other-ready]")  # the Other jobs tab is the second tab of Apply
-        # a row marked "do it on the laptop" shows a chip next to its Start assistant button (the others do not)
+        # a row marked "do it on the laptop" shows a chip next to its Apply button (the others do not)
         ready_now = get("/api/other")["ready"]
         assert ready_now, "the demo's Other jobs tab has an Approved row here"
         target = ready_now[0]["row"]
@@ -737,7 +737,7 @@ try:
         # the order menu IS the order Start goes: the server sorts (apply.apply_order), the numbers follow it
         start_order = page.locator("[data-testid=approved-list] li").evaluate_all("ls => ls.map(l => l.dataset.testid)")
         assert start_order == [f"job-nuworks-{r['row']}" for r in jobs["sections"]["approved"]], start_order
-        assert page.locator("[data-testid=apply-sort] option[value=default]").inner_text().startswith("Order: closing within a week")
+        assert page.locator("[data-testid=apply-sort] option[value=default]").inner_text().startswith("Sort: closing within a week")
         assert page.get_attribute("[data-testid=apply-sort]", "aria-label") == "Apply in this order"
         assert page.get_attribute("[data-testid=apply-search]", "placeholder") == "Search this tab (Ctrl+F)"
         page.select_option("[data-testid=apply-sort]", "match")
@@ -793,7 +793,7 @@ try:
         assert rows["Quarry Hardware"] == "Needs Human", rows
         # the external job stopped (nothing submitted) and now waits on the same page, ready for the assistant
         page.click("[data-testid=tab-nuworks]")
-        page.wait_for_selector("[data-testid=section-nuworks-agent] li:has-text('Quarry Hardware') button:has-text('Start assistant')")
+        page.wait_for_selector("[data-testid=section-nuworks-agent] li:has-text('Quarry Hardware') button:text-is('Apply')")
         assert page.locator("[data-testid=approved-list]").count() == 0  # nothing approved is left
         quarry = page.inner_text("[data-testid=section-nuworks-agent] li:has-text('Quarry Hardware') [data-testid=job-facts]")
         assert "68% match" in quarry and "pay " in quarry, quarry  # match / pay on the company-site rows too
@@ -991,7 +991,7 @@ fetch("{target}", {{method: "POST", credentials: "include", body: {json.dumps(bo
         page.click("[data-testid=tab-other]")
         dune = page.locator("[data-testid=section-other-ready] li:has-text('Dune Optics')")
         dune.wait_for()
-        dune.locator("button:has-text('Start assistant')").click()
+        dune.locator("button:text-is('Apply')").click()
         page.wait_for_selector("[data-testid=terminal-command]")
         assert page.inner_text("[data-testid=terminal-command]").endswith("assist other 3")
         page.keyboard.press("Escape")

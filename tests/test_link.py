@@ -271,7 +271,11 @@ try:
         assert "on the homelab" in page.inner_text("#view")
         page.click("[data-testid=as-approve]")                                  # approved from the laptop's window
         page.wait_for_selector("[data-testid=as-approval]:has-text('Approved: it is submitting now')", timeout=30000)
-        # Company site needed: the homelab's queue on each row, Start on the homelab next to Start here (the other tab's ready rows too)
+        # Company site needed: the homelab's queue on each row; with Run on: the homelab, each row's Apply starts it there
+        # (the other tab's ready rows too)
+        page.goto(base + "/#/apply")
+        page.click("[data-testid=tab-other]")
+        page.click("[data-testid=apply-other-head] [data-testid=run-on-homelab]")         # (the same switch as Start's)
         page.goto(base + "/#/company")
         page.wait_for_selector("[data-testid=section-nuworks-agent]")
         page.wait_for_selector("[data-testid$=-homelab-start]")
