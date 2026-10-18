@@ -1,9 +1,13 @@
 """Offline checks for jobs.py (hard rules, pool, model) and sheet.add_proposed. Run: python test_jobs.py"""
 from datetime import date
+import os
+import tempfile
 
-from nuauto import jobs
-from nuauto import sheet
-from nuauto.sheet import HEADERS
+os.environ["NUAUTO_STATE_DIR"] = tempfile.mkdtemp(prefix="nuauto-test-jobs-")  # never the real local/ (its limits, its accounts)
+
+from nuauto import jobs  # noqa: E402
+from nuauto import sheet  # noqa: E402
+from nuauto.sheet import HEADERS  # noqa: E402
 
 TODAY = date(2026, 10, 2)
 

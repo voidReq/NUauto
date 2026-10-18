@@ -1036,8 +1036,11 @@ screens.apply = async (view) => {
     pane = el("div", { role: "tabpanel", id: "apply-pane", testid: "apply-pane" }, headBox, bar, listBox);
   fill(view, runBox, tabs, pane);
 
+  let reloads = 0;  // the newest reload wins: an older one answered last (read before a change) would undo it
   async function reload() {
+    const mine = ++reloads;
     const [n, o] = await Promise.allSettled([api.get(`/api/jobs?tab=nuworks&order=${sortOf("nuworks")}`), api.get("/api/jobs?tab=other")]);
+    if (mine !== reloads) return;
     data.nuworks = n.status === "fulfilled" ? n.value : { error: n.reason.message };
     data.other = o.status === "fulfilled" ? o.value : { error: o.reason.message };
     for (const [t, d] of Object.entries(data)) {  // each row's key in the homelab's queue (Sort: the queue's order)
