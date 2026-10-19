@@ -246,7 +246,7 @@ class App:
                            f"pid {holder.get('pid')}). Try again when it is done.")
             scr = run_screen(kind) if watch and REMOTE and not config.DEMO else None
             task = Task(kind, label, cmd, browser, background, env, on_done=self._done(on_done),
-                        on_row=None if background else self.refresh_soon, screen=scr)
+                        on_row=None if background else self.refresh_after_row, screen=scr)
             if background:
                 self.background = task
             else:
@@ -281,6 +281,11 @@ class App:
             return
         if force or self.rows is None or now() - self.rows_at >= 60:
             self.run_group("sheet")
+
+    def refresh_after_row(self):
+        """A row just finished in a run: read the sheet again for sure (refresh_soon skips while another read is under
+        way, which would leave the finished row's buttons on the Apply screen until the next read)."""
+        threading.Thread(target=self.refresh_rows, kwargs={"force": True}, daemon=True).start()
 
     def refresh_soon(self, max_age=0):
         """Read the sheet again in the background when the rows are older than max_age seconds, so the lists and counts

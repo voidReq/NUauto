@@ -202,7 +202,9 @@ async function pollTask() {
   if (t) {
     S.taskLog.push(...t.log);
     S.taskAfter = t.log_total;
+    const doneBefore = S.task && S.task.id === t.id ? S.task.done_rows.length : 0;
     S.task = t;
+    if (t.done_rows.length > doneBefore) setTimeout(pollState, 1500);  // a row finished: the lists read the sheet again now
     const was = S.lastTaskState[t.id];
     S.lastTaskState[t.id] = t.state;
     if (was === "running" && t.state !== "running") taskFinished(t);
