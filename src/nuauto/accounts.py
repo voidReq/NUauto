@@ -44,7 +44,7 @@ NEW = "{{NEW_PASSWORD}}"      # create an account here: a new password for this 
 SIGN_IN = "{{PASSWORD}}"      # sign in here: this site's saved password
 PLACEHOLDERS = (NEW, SIGN_IN)
 SYMBOLS = "!@#$%*-_+="        # symbols the sites' password rules accept (no quotes, spaces or backslashes)
-LENGTH = 20
+LENGTH = 16                   # fits the common caps (8-16, 8-18); 20 was refused by some sites
 # Sign-ins that are never NUauto's: identity providers (your Google / Microsoft / Apple / LinkedIn / GitHub account)
 # and Northeastern's own. A site can still offer "Sign in with Google": that button is yours.
 NEVER = ("google.com", "gmail.com", "microsoftonline.com", "live.com", "microsoft.com", "apple.com", "icloud.com",
