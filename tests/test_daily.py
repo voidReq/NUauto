@@ -38,6 +38,7 @@ daily.applications()
 assert asked == ["dropdown", 2], asked
 log_text = open(daily.LOG_PATH).read()
 assert "applications: 1 count toward the total; NUworks has none for row 2" in log_text, log_text[-300:]
+assert "rejected, not withdrawn on NUworks: row 3" in log_text, log_text[-300:]   # NUworks still has the Rejected row's application
 def no_nuworks(rows):
     raise SystemExit(daily.jobs.NOT_LOGGED_IN)
 daily.jobs.check_applications = no_nuworks

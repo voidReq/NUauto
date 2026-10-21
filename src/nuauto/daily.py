@@ -199,6 +199,13 @@ def applications():
     missing = sorted(sheet.not_on_nuworks(rows, seen))
     log(f"applications: {sheet.total_count(rows, seen)} count toward the total"
         + (f"; NUworks has none for row{'s' if len(missing) > 1 else ''} {', '.join(map(str, missing))}" if missing else ""))
+    waiting = sheet.rejected_not_withdrawn(rows, seen)
+    if waiting:
+        log(f"rejected, not withdrawn on NUworks: row{'s' if len(waiting) > 1 else ''} {', '.join(str(r.number) for r in waiting)}")
+        if datetime.now().hour < 12:  # the message once a day, with the morning run
+            notify(f"{len(waiting)} rejected application{'s' if len(waiting) > 1 else ''} still on NUworks",
+                   "\n".join(f"{r.title[:40]} | {r.company[:22]}" for r in waiting)
+                   + "\nWithdraw on NUworks: until you do they count toward the total.")
 
 
 def internships():
