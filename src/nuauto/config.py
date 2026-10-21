@@ -64,14 +64,24 @@ NUWORKS_START_URL = "https://northeastern-csm.symplicity.com/students/app/jobs/d
 # host is deliberately NOT here; log in by hand with `nuauto login`.
 ALLOWED_HOSTS = {"northeastern-csm.symplicity.com"}
 # Job pool (jobs.py)
-# Laptop: the resume at local_config resume_path. Homelab: a copy the laptop pushes to local/resume.pdf.
-LAPTOP_RESUME = os.path.expanduser(LOCAL["resume_path"])
-RESUME_PATH = LAPTOP_RESUME if os.path.exists(LAPTOP_RESUME) else os.path.join(LOCAL_DIR, "resume.pdf")
-# The unofficial transcript (optional), for the company-site assistant to upload where an application asks for one.
-# Laptop: local_config "transcript_path". Homelab (remote_assist): a copy the laptop pushes to local/transcript.pdf.
-LAPTOP_TRANSCRIPT = os.path.expanduser(LOCAL.get("transcript_path") or "")
-TRANSCRIPT_PATH = (LAPTOP_TRANSCRIPT if LAPTOP_TRANSCRIPT and os.path.exists(LAPTOP_TRANSCRIPT)
-                   else os.path.join(LOCAL_DIR, "transcript.pdf"))
+
+
+def set_files(cfg):
+    """The resume and the transcript this process uses (at import, and again after a settings change).
+    Laptop: the resume at local_config resume_path (since 2026-10-20 the GUI keeps what you give it as local/resume.pdf
+    and points resume_path there). Homelab: a copy the laptop pushes to local/resume.pdf.
+    The unofficial transcript (optional), for the company-site assistant to upload where an application asks for one:
+    laptop local_config "transcript_path" (the GUI's: local/transcript.pdf); homelab (remote_assist): a copy the laptop
+    pushes to local/transcript.pdf."""
+    global LAPTOP_RESUME, RESUME_PATH, LAPTOP_TRANSCRIPT, TRANSCRIPT_PATH
+    LAPTOP_RESUME = os.path.expanduser(cfg.get("resume_path") or "")
+    RESUME_PATH = LAPTOP_RESUME if os.path.exists(LAPTOP_RESUME) else os.path.join(LOCAL_DIR, "resume.pdf")
+    LAPTOP_TRANSCRIPT = os.path.expanduser(cfg.get("transcript_path") or "")
+    TRANSCRIPT_PATH = (LAPTOP_TRANSCRIPT if LAPTOP_TRANSCRIPT and os.path.exists(LAPTOP_TRANSCRIPT)
+                       else os.path.join(LOCAL_DIR, "transcript.pdf"))
+
+
+set_files(LOCAL)
 DATA_DIR = os.path.join(STATE_DIR, "data")   # list, triage, details, scores, ratings, pool
 WORK_DIR = os.path.join(STATE_DIR, "work")   # batch files exchanged with the Claude subagents
 ANSWERS_PATH = os.path.join(LOCAL_DIR, "answers.json")

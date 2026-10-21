@@ -122,11 +122,7 @@ def push(code=None):
         ok &= _run(RSYNC + ["data/ratings.json", f"{REMOTE}/data/ratings.json"], "push ratings")
     if os.path.exists(config.DISCORD_WEBHOOK_PATH):  # the homelab sends the Discord messages (newer there: kept)
         ok &= _run(RSYNC + ["-u", "local/discord_webhook.txt", f"{REMOTE}/local/discord_webhook.txt"], "push Discord webhook")
-    if os.path.exists(config.LAPTOP_RESUME):
-        ok &= _run(RSYNC + ["-c", config.LAPTOP_RESUME, f"{REMOTE}/local/resume.pdf"], "push resume")
-    if config.REMOTE_ASSIST and config.LAPTOP_TRANSCRIPT and os.path.exists(config.LAPTOP_TRANSCRIPT):
-        ok &= _run(RSYNC + ["-c", stage_private(config.LAPTOP_TRANSCRIPT, "transcript.pdf"),
-                            f"{REMOTE}/local/transcript.pdf"], "push transcript")  # only the assistant there uses it
+    ok &= _documents()
     if os.path.exists(config.TOKEN_PATH):
         ok &= _run(RSYNC + ["-u", "local/token.json", f"{REMOTE}/local/token.json"], "push Google token")
     if os.path.exists(config.GOOGLE_LOGIN_PATH):
@@ -149,6 +145,25 @@ def deploy_now():
 def server_busy():
     """True if the homelab is running its update (the browser profile is in use there)."""
     return subprocess.run(SSH + [config.SERVER, "pgrep -f 'nuauto daily'"], capture_output=True).returncode == 0
+
+
+def _documents(removed=False):
+    """The resume and (with its assistant there) the transcript: the copies the homelab uses. removed: the transcript
+    was taken out here, so the homelab's copy goes too."""
+    ok = True
+    if os.path.exists(config.LAPTOP_RESUME):
+        ok &= _run(RSYNC + ["-c", config.LAPTOP_RESUME, f"{REMOTE}/local/resume.pdf"], "push resume")
+    if config.REMOTE_ASSIST and config.LAPTOP_TRANSCRIPT and os.path.exists(config.LAPTOP_TRANSCRIPT):
+        ok &= _run(RSYNC + ["-c", stage_private(config.LAPTOP_TRANSCRIPT, "transcript.pdf"),
+                            f"{REMOTE}/local/transcript.pdf"], "push transcript")  # only the assistant there uses it
+    elif removed:
+        ok &= remote(f"rm -f {shlex.quote(config.SERVER_DIR + '/local/transcript.pdf')}", "remove the homelab's transcript")
+    return ok
+
+
+def push_documents(removed=False):
+    """Right after you give NUauto a new resume or transcript (the GUI), so the homelab never uses the old one."""
+    return remote_dirs("local") and _documents(removed)
 
 
 def push_session():

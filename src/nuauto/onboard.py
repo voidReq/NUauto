@@ -27,7 +27,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from datetime import date
+from datetime import date, datetime
 from urllib.parse import urlparse
 
 from nuauto import config
@@ -88,9 +88,7 @@ def save_config(updates):
     config.LOCAL = cfg
     config.SHEET_ID = cfg.get("sheet_id", "")
     config.WEEK_START = date.fromisoformat(cfg["week_start"]) if cfg.get("week_start") else None
-    config.LAPTOP_RESUME = os.path.expanduser(cfg.get("resume_path") or "")
-    config.RESUME_PATH = config.LAPTOP_RESUME if os.path.exists(config.LAPTOP_RESUME) else \
-        os.path.join(config.LOCAL_DIR, "resume.pdf")
+    config.set_files(cfg)
     if "preferences" in updates:
         jobs.set_prefs(cfg["preferences"])
     return cfg
@@ -225,33 +223,6 @@ def sheet_status():
 
 # ---------------------------------------------------------------- step: resume
 
-def pick_file():
-    """A native file dialog for the resume (osascript on macOS, zenity or kdialog on Linux). Path or None."""
-    if config.DEMO:  # no dialog an agent would have to click: the demo resume
-        path = os.path.join(config.STATE_DIR, "Demo_Student_Resume.pdf")
-        return path if os.path.exists(path) else None
-    try:
-        if sys.platform == "darwin":
-            r = subprocess.run(["osascript", "-e", 'POSIX path of (choose file with prompt "Choose your resume (PDF)" '
-                                'of type {"com.adobe.pdf"})'], capture_output=True, text=True, timeout=600)
-        elif shutil.which("zenity"):
-            r = subprocess.run(["zenity", "--file-selection", "--title=Choose your resume (PDF)",
-                                "--file-filter=PDF files | *.pdf *.PDF"], capture_output=True, text=True, timeout=600)
-        elif shutil.which("kdialog"):
-            r = subprocess.run(["kdialog", "--getopenfilename", os.path.expanduser("~"), "*.pdf *.PDF|PDF files"],
-                               capture_output=True, text=True, timeout=600)
-        else:
-            return None
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    path = r.stdout.strip()
-    return path if r.returncode == 0 and path else None
-
-
-def has_file_dialog():
-    return config.DEMO or sys.platform == "darwin" or bool(shutil.which("zenity") or shutil.which("kdialog"))
-
-
 def resume_suggestions():
     """PDFs called resume / CV in the usual folders, newest first."""
     found = []
@@ -280,6 +251,71 @@ def resume_preview(path):
     if len(text) < 40:
         return False, "This PDF has (almost) no text to read: a scanned image? Export it from your editor as PDF."
     return True, text[:500]
+
+
+# ---------------------------------------------------------------- your files: the resume and the transcript
+# What you give NUauto (Setup's resume step, Settings > Your files) is kept as its own copy in local/, mode 600, and
+# local_config points at it: replacing the PDF you had elsewhere changes nothing until you give NUauto the new one.
+# The laptop then pushes the copies to the homelab at once (gui.files_post -> sync.push_documents).
+
+DOCUMENTS = {"resume": ("resume.pdf", "resume_path"), "transcript": ("transcript.pdf", "transcript_path")}
+MAX_DOCUMENT = 10_000_000  # bytes (the GUI reads at most this, base64, from a request: gui.Handler.MAX_UPLOAD)
+
+
+def save_document(kind, data):
+    """Keep this PDF (bytes) as local/resume.pdf or local/transcript.pdf and use it from now on. The resume must have
+    text Claude can read (resume_preview); the transcript only has to open as a PDF. Refused: nothing changes."""
+    name, key = DOCUMENTS[kind]
+    if not data:
+        raise Refused("That file is empty.")
+    if len(data) > MAX_DOCUMENT:
+        raise Refused(f"That file is over {MAX_DOCUMENT // 1_000_000} MB.")
+    if data[:5] != b"%PDF-":
+        raise Refused("That is not a PDF.")
+    os.makedirs(config.LOCAL_DIR, mode=0o700, exist_ok=True)
+    dest = os.path.join(config.LOCAL_DIR, name)
+    tmp = dest + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "wb") as f:
+        f.write(data)
+    try:
+        if kind == "resume":
+            ok, text = resume_preview(tmp)
+            if not ok:
+                raise Refused(text)
+        else:
+            try:
+                import pypdf
+                pypdf.PdfReader(tmp).pages[0]
+            except Exception as e:
+                raise Refused(f"Could not read the PDF ({type(e).__name__}).")
+    except Refused:
+        os.remove(tmp)
+        raise
+    os.replace(tmp, dest)
+    save_config({key: dest})
+    return dest
+
+
+def remove_document(kind):
+    """No transcript any more: NUauto's copy is deleted (the resume can only be replaced)."""
+    if kind != "transcript":
+        raise Refused("NUauto needs a resume: give it a new one instead.")
+    name, key = DOCUMENTS[kind]
+    dest = os.path.join(config.LOCAL_DIR, name)
+    if os.path.exists(dest):
+        os.remove(dest)
+    save_config({key: ""})
+
+
+def document_info(kind):
+    """The PDF this machine uses ({name, size, modified}) or None. On the homelab: the copy the laptop pushed."""
+    path = config.RESUME_PATH if kind == "resume" else config.TRANSCRIPT_PATH
+    if not os.path.isfile(path):
+        return None
+    st = os.stat(path)
+    return {"name": os.path.basename(path), "size": st.st_size,
+            "modified": datetime.fromtimestamp(st.st_mtime).isoformat(timespec="minutes")}
 
 
 # ---------------------------------------------------------------- step: preferences
@@ -665,8 +701,8 @@ def steps(checks):
     rok, rtext = resume_preview(path) if path else (False, "")
     add("resume", "Your resume", rok, f"{os.path.basename(path)}: Claude can read its text." if rok else
         (rtext or "Choose the PDF you use on NUworks."),
-        path=path, preview=rtext if rok else None, suggestions=resume_suggestions() if not rok else [],
-        dialog=has_file_dialog())
+        file=document_info("resume") if rok else None, preview=rtext if rok else None,
+        suggestions=resume_suggestions() if not rok else [])
     nw = checks.get("nuworks")
     label = health.resume_label()
     nok = bool(nw and nw.status == health.OK)

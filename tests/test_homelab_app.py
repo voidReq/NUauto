@@ -108,6 +108,8 @@ try:
         assert "laptop" in post("/api/action", {"kind": kind}, expect=409)["error"], kind
     assert "stays on" in post("/api/quit", {}, expect=409)["error"]
     assert "laptop" in post("/api/logins/export", {}, expect=409)["error"]
+    assert "laptop" in post("/api/files", {"kind": "resume", "data": ""}, expect=409)["error"]  # the laptop keeps them
+    assert get("/api/settings")["files"]["resume"]["size"] > 0  # what it has: (the homelab) the copy the laptop pushed
     assert "laptop" in post("/api/homelab", {"action": "check", "ssh": "homelab"}, expect=409)["error"]
     for setting in ({"resume_path": "/x.pdf"}, {"transcript_path": ""}, {"assist_read_paths": []},
                     {"password_manager": "bitwarden"}, {"remote_assist": False}, {"remote_app": False}):

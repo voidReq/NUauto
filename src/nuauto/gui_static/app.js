@@ -142,6 +142,29 @@ function linkOut(url, text) {
 }
 
 function plural(n, word) { return `${n} ${word}${n === 1 ? "" : "s"}`; }
+
+// Your resume and transcript: a PDF you drop or choose goes to NUauto (/api/files), which keeps its own copy in local/
+// and pushes it to the homelab. Setup's resume step and Settings > Your files.
+const MAX_PDF = 10000000;  // onboard.MAX_DOCUMENT
+async function sendPdf(kind, file) {
+  if (file.size > MAX_PDF) throw new Error(`${file.name} is over 10 MB.`);
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return api.post("/api/files", { kind, data: btoa(bin) });
+}
+function pdfDrop(testid, text, onfile) {  // a box to drop the PDF on, with a button that opens the file chooser
+  const input = el("input", { type: "file", accept: ".pdf,application/pdf", hidden: true, testid: `${testid}-file` });
+  const drop = el("div", { class: "drop", testid }, text, " ", el("button", { class: "btn small", text: "choose it", onclick: () => input.click() }), input);
+  input.addEventListener("change", () => { if (input.files[0]) onfile(input.files[0]); input.value = ""; });
+  drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
+  drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+  drop.addEventListener("drop", (e) => { e.preventDefault(); drop.classList.remove("over"); if (e.dataTransfer.files[0]) onfile(e.dataTransfer.files[0]); });
+  return drop;
+}
+function pdfLine(f) {  // what NUauto uses now: name, size, when it changed
+  return f ? `${f.name} · ${Math.max(1, Math.round(f.size / 1024))} KB · updated ${ago(f.modified)}` : "None yet.";
+}
 function ordinal(n) { const t = n % 100, s = ["th", "st", "nd", "rd"][(t - 20) % 10] || ["th", "st", "nd", "rd"][t] || "th"; return n + s; }
 
 function gone(msg, title) {
@@ -1911,6 +1934,7 @@ screens.settings = async (view) => {
           el("label", { class: "field" }, "Weekly limit counts from", el("span", { class: "muted small", text: "Fixed 7-day weeks from this day. Empty: any rolling 7 days." }), week),
           el("div", {}, el("button", { class: "btn primary", text: "Save", testid: "settings-save", onclick: async () => {
             try { d = await api.post("/api/settings", { resume_label: label.value, week_start: week.value, max_per_week: cap.value }); toast("Saved."); pollState(); draw(); } catch (e) { fail(e); } } })))),
+      filesCard(),
       assistantCard(),
       el("div", { class: "card stack", testid: "intern-settings" }, el("h2", { text: "Summer internships" }),
         internshipsPanel(d.internships, (r) => { if (r) { d = r; draw(); } else reload(); })),
@@ -1974,6 +1998,25 @@ screens.settings = async (view) => {
   }
   // The company-site assistant (nuauto assist): the email for the accounts it makes, how hard it thinks, the folders it
   // may read, and its logins (one per job site; the passwords never reach this page) as Bitwarden's import file.
+  function filesCard() {  // the resume and the transcript NUauto keeps (on the homelab's page: the copies it has)
+    const here = onHomelab();
+    const give = (kind, done) => async (file) => {
+      try { d = await sendPdf(kind, file); toast(done); pollHealth(); draw(); } catch (e) { fail(e); }
+    };
+    const part = (kind, title, help, done) => el("div", { class: "stack", testid: `file-${kind}` },
+      el("div", { class: "row between" }, el("div", {}, el("b", { text: title }), el("div", { class: "small muted", testid: `file-${kind}-now`, text: pdfLine(d.files[kind]) })),
+        !here && kind === "transcript" && d.files.transcript ? el("button", { class: "btn small ghost", text: "Remove", testid: "file-transcript-remove",
+          onclick: () => confirmBox("Remove your transcript?", "The assistant then has none to upload (on your homelab too).", "Remove", async () => {
+            try { d = await api.post("/api/files", { kind, remove: true }); toast("Transcript removed."); draw(); } catch (e) { fail(e); } }) }) : null),
+      el("span", { class: "muted small", text: help }),
+      here ? null : pdfDrop(`file-${kind}-drop`, d.files[kind] ? "Drop a new PDF here, or" : "Drop the PDF here, or", give(kind, done)));
+    return el("div", { class: "card stack", testid: "files-settings" }, el("h2", { text: "Your files" }),
+      el("p", { class: "small muted", text: here ? "Copies from your laptop. Give NUauto there a new one (Settings > Your files): it copies it here at once." :
+        "NUauto keeps its own copy of each (in its private folder, readable only by you; your homelab, if you use one, gets a copy at once). To change one, drop the new PDF here." }),
+      part("resume", "Resume", "The PDF you use on NUworks: Claude compares each posting with it, and the assistant uploads it on company sites.", "Resume saved."),
+      part("transcript", "Transcript (optional)", "Your unofficial transcript: the assistant uploads it only where an application asks for one.", "Transcript saved."));
+  }
+
   function assistantCard() {
     const s = d.settings;
     const email = el("input", { type: "email", value: s.accounts_email || "", placeholder: "you@example.com",
@@ -1988,8 +2031,6 @@ screens.settings = async (view) => {
     const slots = el("select", { "aria-label": "Assistants at once", testid: "set-assist-slots" }, ...[1, 2, 3].map((n) => el("option", { value: String(n), text: String(n) })));
     slots.value = String(d.assist_slots);
     const lines = (t) => t.value.split("\n").map((x) => x.trim()).filter(Boolean);
-    const transcript = el("input", { type: "text", value: s.transcript_path || "", placeholder: "~/Documents/unofficial_transcript.pdf",
-      "aria-label": "Transcript", testid: "set-transcript" });
     const L = d.logins;
     const exportBtn = el("button", { class: "btn small", testid: "btn-export-logins", disabled: !L.new,
       text: L.new ? `Export ${plural(L.new, "new login")} for Bitwarden` : "No new logins to export", onclick: async () => {
@@ -2004,12 +2045,11 @@ screens.settings = async (view) => {
           draw();
         } catch (e) { fail(e); }
       } });
-    const here = onHomelab();  // the homelab's page: the transcript, the folders and the export file are the laptop's
+    const here = onHomelab();  // the homelab's page: the folders and the export file are the laptop's
     return el("div", { class: "card stack", testid: "assistant-settings" }, el("h2", { text: "Company-site assistant" }),
       el("label", { class: "field" }, "Account email", el("span", { class: "muted small", text: "For the accounts it makes on job sites (Workday and others). Each site gets its own random password; the assistant never sees it." }), email),
       el("label", { class: "field" }, "Effort", el("span", { class: "muted small", text: "How hard it thinks (Claude Code's effort). Nothing is submitted without your review either way." }), effort),
-      here ? el("p", { class: "small muted", text: "Your transcript and the folders it may read are files on your laptop: set them in NUauto there (the homelab gets copies)." }) : [
-        el("label", { class: "field" }, "Transcript (optional)", el("span", { class: "muted small", text: "A PDF of your unofficial transcript. The assistant uploads it only where an application asks for a transcript (and copies it to your homelab if its assistant is on). Empty = none." }), transcript),
+      here ? el("p", { class: "small muted", text: "The folders it may read are on your laptop: set them in NUauto there (the homelab gets copies)." }) : [
         el("label", { class: "field" }, "Folders it may read", el("span", { class: "muted small", text: "Your projects and writeups, one per line: for longer answers. Keys, tokens, .env files and NUauto's own logins are never read." }), folders),
         el("label", { class: "field" }, "Your writeups (optional)", el("span", { class: "muted small", text: "Folders of your own project or security writeups, one per line: the first place it looks for essay material (and, with its assistant on the homelab, copied there)." }), writeups)],
       el("label", { class: "field" }, "Assistants at once", el("span", { class: "muted small", text: "How many company-site applications may run side by side, each with its own browser: on each machine, 1 to 3." }), slots),
@@ -2019,7 +2059,7 @@ screens.settings = async (view) => {
         try {
           const both = { accounts_email: email.value, assist_effort: effort.value, assist_slots: Number(slots.value) };
           d = await api.post("/api/settings", here ? both :
-            { ...both, transcript_path: transcript.value, assist_read_paths: lines(folders), assist_writeups: lines(writeups) });
+            { ...both, assist_read_paths: lines(folders), assist_writeups: lines(writeups) });
           toast("Saved."); draw();
         } catch (e) { fail(e); }
       } })));
@@ -2284,7 +2324,7 @@ document.addEventListener("keydown", (e) => {
   box.focus();
   box.select();
 });
-window.NUauto = { el, fill, api, action, toast, fail, modal, confirmBox, S, pollState, pollHealth, linkOut, plural, ago };
+window.NUauto = { el, fill, api, action, toast, fail, modal, confirmBox, S, pollState, pollHealth, linkOut, plural, ago, sendPdf, pdfDrop, pdfLine };
 
 (async function start() {
   await pollState();
