@@ -135,6 +135,19 @@ def not_on_nuworks(rows, seen=None):
     return out
 
 
+def rejected_not_withdrawn(rows, seen=None):
+    """The Rejected rows of the NUworks tab whose application NUworks still has (the last check, about the row as it is
+    now): you haven't withdrawn it there, so it still counts toward the total. Never asked = not listed."""
+    from nuauto import jobs
+    seen = nuworks_seen() if seen is None else seen
+    out = []
+    for r in rows:
+        s = seen.get(jobs.job_id(r.url)) if r.status == "Rejected" and r.url else None
+        if s and s.get("applied") and s.get("fingerprint") == fingerprint(r):
+            out.append(r)
+    return out
+
+
 def total_count(rows, seen=None):
     """What counts toward the total limit: the sent rows NUworks has (or hasn't been asked about yet). The NUworks tab's
     rows only (the Other jobs tab has no limits). Until 2026-10-16 every Applied row counted, also those never sent

@@ -89,6 +89,11 @@ seen = {"a": {"applied": False, "fingerprint": fp["a"]}, "b": {"applied": True, 
         "c": {"applied": False, "fingerprint": "an earlier version of the row"}}
 assert sheet.not_on_nuworks(R3, seen) == {2} and sheet.total_count(R3, seen) == 2
 assert check_limits(R3, TODAY, seen=seen) == (3, 2)                       # the week still counts all three
+# a Rejected row NUworks still has an application for is one you haven't withdrawn there: listed until it is
+on = {"c": {"applied": True, "fingerprint": fp["c"]}}
+assert [r.number for r in sheet.rejected_not_withdrawn(R3, on)] == [4]
+on["c"]["applied"] = False
+assert sheet.rejected_not_withdrawn(R3, on) == [] and sheet.rejected_not_withdrawn(R3, {}) == []   # withdrawn / never asked
 R3[0].notes += " NUworks side submitted."                                 # it changed since NUworks was asked: it counts
 assert sheet.total_count(R3, seen) == 3 and sheet.total_count(R3, {}) == 3  # (never asked: counts)
 many = rows_with([("Applied", "2026-09-01")] * sheet.MAX_TOTAL)
