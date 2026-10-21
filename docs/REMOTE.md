@@ -194,6 +194,7 @@ WHAT LIVES WHERE (with NUauto on the homelab)
        kept with it ("other_passwords"); the merge names the site. Sent as JSON over ssh, never printed or logged.
   discord_webhook.txt                pushed by push() when the laptop's is newer (the homelab sends the messages).
   transcript (transcript_path)       pushed by push() to local/transcript.pdf (mode 600); the agent there uploads it.
+  resume, transcript, given in the GUI    pushed at once (sync.push_documents; docs/GUI.md, YOUR FILES).
   gmail_token.json                   pushed by push() when the laptop's is newer (`nuauto login google` / `login gmail`).
   your writeups (assist_writeups)    copied by push() to ~/nuauto-notes/<folder name> on the homelab: only the files the
        agent may read anyway (sync.notes_files = assist.secret_path: no keys, tokens, .env, .git, NUauto's local/),

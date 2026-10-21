@@ -361,7 +361,7 @@ try:
         done(page, "google_login")
         page.click("[data-testid=setup-sheet-create]")
         done(page, "sheet")
-        page.click("[data-testid=setup-resume-pick]")
+        page.locator("[data-testid=setup-resume-found]").first.click()  # one the demo has: NUauto keeps a copy
         done(page, "resume")
         page.click("[data-testid=setup-nuworks-login]")
         # Read my resumes the moment the login ends: the NUworks check the login starts is still running, gives the
@@ -419,7 +419,7 @@ try:
         b.close()
     assert not errors, errors
     cfg = json.load(open(config.LOCAL_CONFIG_PATH))
-    assert cfg["tos_ack"] and cfg["sheet_id"].startswith("DEMO-") and cfg["resume_path"].endswith("Demo_Student_Resume.pdf")
+    assert cfg["tos_ack"] and cfg["sheet_id"].startswith("DEMO-") and cfg["resume_path"] == os.path.join(config.LOCAL_DIR, "resume.pdf")
     assert cfg["preferences"]["term"] == "2027 - Fall" and cfg["preferences"]["class_year"] == "junior"
     assert cfg["preferences"]["term_id"] == "demo00000000000000000000fall2027"
     assert [t["name"] for t in cfg["preferences"]["tags"]] == ["AR/XR", "cars"]

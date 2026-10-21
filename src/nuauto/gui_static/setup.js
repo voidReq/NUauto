@@ -3,7 +3,7 @@
 "use strict";
 
 (function () {
-  const { el, fill, api, action, toast, fail, confirmBox, S, pollState, pollHealth, linkOut } = window.NUauto;
+  const { el, fill, api, action, toast, fail, confirmBox, S, pollState, pollHealth, linkOut, sendPdf, pdfDrop, pdfLine } = window.NUauto;
   let open = null;  // the step shown open (default: the first one not done)
 
   function chip(status) {
@@ -111,20 +111,17 @@
     },
 
     resume(s, redraw) {
-      const path = el("input", { type: "text", value: s.data.path || "", placeholder: "/home/you/Documents/resume.pdf", "aria-label": "Resume file", testid: "setup-resume-path" });
-      const use = async () => { if (await post({ action: "resume_set", path: path.value }, "Resume saved.")) redraw(); };
+      const give = async (file) => {
+        try { await sendPdf("resume", file); toast("Resume saved."); pollHealth(); redraw(); } catch (e) { fail(e); }
+      };
       return [
         s.data.preview ? el("div", { class: "note small", testid: "setup-resume-preview" }, el("b", { text: "What Claude reads: " }), s.data.preview + "…") : null,
-        el("p", { text: "The PDF you use on NUworks. Claude compares each posting with it; keep it at this path and NUauto picks up changes." }),
-        el("div", { class: "row" }, path,
-          s.data.dialog ? el("button", { class: "btn", text: "Choose file…", testid: "setup-resume-pick", onclick: async () => {
-            const r = await post({ action: "resume_pick" });
-            if (r && r.path) { path.value = r.path; use(); }
-          } }) : null,
-          el("button", { class: "btn primary", text: "Use this file", testid: "setup-resume-use", onclick: use })),
-        s.data.suggestions.length ? el("div", { class: "small" }, el("span", { class: "muted", text: "Found: " }),
-          ...s.data.suggestions.map((p) => el("button", { class: "btn small ghost", text: p.split("/").pop(), title: p,
-            onclick: () => { path.value = p; } }))) : null,
+        s.data.file ? el("p", { class: "small", testid: "setup-resume-now" }, el("b", { text: "Using: " }), pdfLine(s.data.file)) : null,
+        el("p", { text: "The PDF you use on NUworks. Claude compares each posting with it. NUauto keeps its own copy (and gives your homelab one): when you change your resume, drop the new one here or in Settings > Your files." }),
+        pdfDrop("setup-resume-drop", s.data.file ? "Drop a new PDF here, or" : "Drop your resume PDF here, or", give),
+        s.data.suggestions.length ? el("div", { class: "small" }, el("span", { class: "muted", text: "Found on this computer: " }),
+          ...s.data.suggestions.map((p) => el("button", { class: "btn small ghost", text: p.split("/").pop(), title: p, testid: "setup-resume-found",
+            onclick: async () => { if (await post({ action: "resume_set", path: p }, "Resume saved.")) redraw(); } }))) : null,
       ];
     },
 

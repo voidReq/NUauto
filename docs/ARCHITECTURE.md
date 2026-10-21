@@ -35,7 +35,7 @@ MODULES (src/nuauto/)
                   update_after() is the guard; bank() is the answer-bank command; assist_target(),
                   nuworks_side().
   inspect_form.py read-only lister of an Apply form. main(); FIELDS_JS is reused by apply.py.
-  sync.py         laptop<->homelab rsync. pull(), push(), push_session(), server_busy(), deploy_now(); PACKAGE/CODE
+  sync.py         laptop<->homelab rsync. pull(), push(), push_documents(), push_session(), server_busy(), deploy_now(); PACKAGE/CODE
                   list the files that reach the homelab (not sent when deploy_from_git is on).
   insights.py     summarize(pool, details, rows) -> pay (hourly(), buckets, median, middle half), places (place(),
                   by state), categories, sheet statuses; text() for `nuauto insights`; gui.py's /api/insights.
@@ -49,7 +49,9 @@ MODULES (src/nuauto/)
                   Task (one child process + its JSON-lines questions), the pages' data (state, review, apply,
                   company, answers, settings, setup), open_terminal(), screenshots(). Static files: gui_static/.
   onboard.py      the setup wizard's steps (steps(), check_client, open_and_prepare, resume_preview, check_prefs,
-                  save_webhook, scheduler_*, launcher_create) and the read-only NUworks reads (resume labels, terms).
+                  save_webhook, scheduler_*, launcher_create), your files (save_document / remove_document /
+                  document_info: the resume and transcript copies in local/) and the read-only NUworks reads (resume
+                  labels, terms).
   demo.py         demo mode: FakeClient/FakeWorksheet (sheet), serve_nuworks (fake NUworks pages in Playwright), the
                   fake claude (fake_claude, run through a two-line script), sample data, forced states; setup() / update().
   window.py       which window (kind(): mac / gtk / app / tab), run_mac() (pywebview, main thread), open_gtk() (the GTK
@@ -128,7 +130,7 @@ STATE ON DISK (repo root; all gitignored except as noted)
           profile.json), answers.json (answers.py), Google files (token.json, google_login.txt;
           sheet.py), NUworks session (session_cookies.json, browser_profile/, browser_profile.lock; browser.py),
           assist_profile/ (assist.py), web_secret.txt (web.py), discord_webhook.txt (daily.py),
-          gui.lock (gui.py), onboard.json (onboard.py). Demo mode: all of these under a temp NUAUTO_STATE_DIR.
+          gui.lock (gui.py), onboard.json, resume.pdf, transcript.pdf (onboard.py). Demo mode: all of these under a temp NUAUTO_STATE_DIR.
           Which of these sync to the homelab: docs/DEPLOY.md.
   Also in the repo, tracked: prompts/ (Claude prompts), tests/ (offline checks), deploy/systemd/.
 

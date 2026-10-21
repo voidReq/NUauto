@@ -158,7 +158,7 @@ SCREENS
                  a dialog, the browser's own find
   Settings       every health check (run them now), logins (Google, NUworks, Claude Code, and Gmail: the read-only login
                  for the assistant's email codes, with a link to turn the Gmail API on), resume label, applications per
-                 week (the weekly cap), week start;
+                 week (the weekly cap), week start; Your files (the resume and the transcript: YOUR FILES);
                  the company-site assistant: account email, effort (low / medium / high), assistants at once (1-3, on each
                  machine; no homelab needed), the folders it may read, your writeups (assist_writeups: the first place it
                  looks for essays), its job-site logins (how many; Export for Bitwarden: the import file in ~/Downloads,
@@ -184,7 +184,7 @@ SCREENS
                  (remote_auto {"nuworks", "other"}), its hours (remote_hours), assistants at once (assist_slots), Pair this
                  computer, Open it; setup, logs, quit. On the homelab's page one This homelab card: Paired devices (each
                  one, "this one", Unpair, Make a pairing link for another device) and its assistant's queue settings (no
-                 on / off: the laptop's); the email and effort only (the transcript, folders, export: on your laptop); no
+                 on / off: the laptop's); the email and effort only (folders, export: on your laptop); Your files read-only; no
                  Password manager card (Bitwarden unlocks on the laptop), no Quit
   Setup          the wizard (below); opens by itself until setup is done (never on the homelab's page: setup is the
                  laptop's; there it says so, and the steps it can do are preferences, Discord and the resume label)
@@ -202,7 +202,8 @@ SETUP WIZARD (onboard.py + gui_static/setup.js; each step checks itself)
                accepted; saved local/client_secret.json, mode 600); then the Google login
   sheet        create one (Sheets API spreadsheets.create; gspread's create needs the Drive API) or paste the
                address (ID extracted, access tested). Empty = set up; other data = refused, never overwritten.
-  resume       native file dialog (osascript / zenity / kdialog) or a path; the PDF must have text
+  resume       drop the PDF or choose it (the page's own file chooser), or one it found (PDFs called resume / CV in
+               Documents, Downloads, Desktop); the PDF must have text. NUauto keeps its own copy (YOUR FILES)
   nuworks      login (Firefox window; you type nothing into NUauto), then the resume label read from one job's
                real Apply popup (read-only: opens it, reads the Resume dropdown, Cancel)
   preferences  what you study first (fields.py: Engineering or CS, Business, Health sciences or nursing, Natural
@@ -405,13 +406,24 @@ API (JSON; all need the cookie; POSTs need X-NUauto: 1)
                              {on, check, waiting, own, only, bw}, homelab_assistant {available, on, app, auto (any tab),
                              auto_tabs {nuworks, other}, hours, slots, review_url}, where, homelab (the laptop:
                              onboard.homelab_link) and (the homelab) devices, this
+  POST /api/files            {"kind": "resume" | "transcript", "data": the PDF in base64} or {"kind", "remove": true}
+                             (transcript only) -> settings; up to 10 MB (the only request over 2 MB); the homelab: 409
   POST /api/logins/export    Bitwarden's import file of the logins not exported yet ({"every": true}: all) -> {"path", "count"}
   GET  /api/setup            wizard steps; POST /api/setup {"action": ack|client_upload|client_downloads|
-                             sheet_create|sheet_link|resume_pick|resume_set|labels_read|label_set|terms_read|
+                             sheet_create|sheet_link|resume_set (a path it found: copied in)|labels_read|label_set|terms_read|
                              prefs_save|discord_save|discord_test|discord_remove|schedule_on|schedule_off|launcher}
   GET  /api/logs, /api/file?path=   past runs (the assistant's own screenshots are in a run's browser/); a screenshot or
                              log under logs/ only
   POST /api/quit
+
+YOUR FILES (2026-10-20, my request: "a way to upload a resume and a transcript into the gui")
+- The resume (Setup's resume step, or Settings > Your files) and the transcript (Settings > Your files; optional, Remove
+  takes it out) are given to NUauto by dropping or choosing the PDF in the page. NUauto keeps its own copy,
+  local/resume.pdf / local/transcript.pdf (mode 600; onboard.save_document: a PDF, up to 10 MB, the resume with text
+  Claude can read), and points resume_path / transcript_path at it. So changing the PDF you had elsewhere changes
+  nothing: give NUauto the new one. An older resume_path / transcript_path anywhere on the laptop still works.
+- With a homelab the laptop pushes the copies there at once (sync.push_documents; a removed transcript is deleted
+  there too), not at the next push. The homelab's page shows the copies it has (name, size, when) and can't change them.
 
 FILES IT WRITES (all under local/, mode 700, except as noted)
   gui.lock          pid, port and a secret that only lets a second start ask for a window (removed on exit); on the
@@ -420,6 +432,7 @@ FILES IT WRITES (all under local/, mode 700, except as noted)
   review_devices.json, review_pair.json   (homelab) the paired devices' key hashes, the open pairing links' hashes
   browser_profile.lock   who uses the NUworks browser (pid, what, since)
   onboard.json      what the read-only NUworks reads found (resume labels, terms)
+  resume.pdf, transcript.pdf   YOUR FILES (mode 600)
   local_config.json gains tos_ack, preferences, tools (saved tool paths) through the wizard (mode 644, as before)
   scheduler: ~/.config/systemd/user/nuauto-daily.{timer,service} or ~/Library/LaunchAgents/com.nuauto.daily.plist
   launcher: ~/.local/share/applications/nuauto.desktop (+ icon) or ~/Applications/NUauto.app

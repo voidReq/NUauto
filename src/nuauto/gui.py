@@ -26,6 +26,7 @@ How it is safe to run:
   its window opens for you, and you click Start there. Never with --no-open there (CLAUDECODE): that would print the
   agent the URL with this start's secret. Agents test with --demo (fake data) or --view (real data, read-only).
 """
+import base64
 import fcntl
 import hmac
 import html
@@ -1664,6 +1665,7 @@ def settings_get():
             "tools": {name: config.tool_path(name) for name in ("claude", "npx")},
             "paths": {"state": config.STATE_DIR, "logs": config.LOGS_DIR}, "demo": config.DEMO,
             "efforts": list(EFFORTS), "logins": logins_summary(),
+            "files": {kind: onboard.document_info(kind) for kind in onboard.DOCUMENTS},
             "password_manager": onboard.password_manager({c.id: c for c in APP.checks()}),
             "homelab_assistant": onboard.homelab_assistant(here=REMOTE),
             "where": "homelab" if REMOTE else "laptop", "homelab": onboard.homelab_link() if not REMOTE else None,
@@ -1682,6 +1684,8 @@ def write_local(updates):
     restart_needed = {"sheet_id", "resume_path", "week_start", "max_per_week", "server_hostname", "server_ssh", "server_dir"} & set(updates)
     if restart_needed:  # config.py reads local_config.json once, at import
         apply_config(cfg)
+    elif "transcript_path" in updates:  # (sync.push sends this process's transcript)
+        config.set_files(cfg)
     return cfg
 
 
@@ -1690,9 +1694,7 @@ def apply_config(cfg):
     config.LOCAL = cfg
     config.SHEET_ID = cfg.get("sheet_id", "")
     config.WEEK_START = date.fromisoformat(cfg["week_start"]) if cfg.get("week_start") else None
-    config.LAPTOP_RESUME = os.path.expanduser(cfg.get("resume_path") or "")
-    config.RESUME_PATH = config.LAPTOP_RESUME if os.path.exists(config.LAPTOP_RESUME) else \
-        os.path.join(config.LOCAL_DIR, "resume.pdf")
+    config.set_files(cfg)
     if not (REMOTE and config.DEMO):  # the homelab demo has its made-up assistant on, whatever the file says
         config.REMOTE_ASSIST = bool(cfg.get("remote_assist")) and config.HAS_SERVER
         config.REMOTE_APP = config.HAS_SERVER and (config.REMOTE_ASSIST or bool(cfg.get("remote_app")))
@@ -1705,6 +1707,31 @@ IMPORT_TEXT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{1,59}$")  # Bitwarden's se
 def app_on(cfg):
     """Whether these settings give the homelab its NUauto page (config.REMOTE_APP's rule)."""
     return bool(cfg.get("remote_assist") or cfg.get("remote_app"))
+
+
+def files_post(body):
+    """Your resume or transcript, given to NUauto ({"kind", "data": the PDF in base64}, or {"kind", "remove": true}):
+    kept in local/ (onboard.save_document) and pushed to the homelab at once, so it never uses the old one."""
+    from nuauto import onboard
+    kind = body.get("kind")
+    if kind not in onboard.DOCUMENTS:
+        raise Refused("Which file: resume or transcript?")
+    try:
+        if body.get("remove"):
+            onboard.remove_document(kind)
+        else:
+            try:
+                data = base64.b64decode(str(body.get("data") or ""), validate=True)
+            except ValueError:
+                raise Refused("That upload did not arrive whole: try again.")
+            onboard.save_document(kind, data)
+    except onboard.Refused as e:
+        raise Refused(str(e))
+    APP.run_now(["quick"])
+    if config.HAS_SERVER and not config.IS_SERVER and not config.DEMO:
+        from nuauto import sync
+        threading.Thread(target=sync.push_documents, args=(bool(body.get("remove")),), daemon=True).start()
+    return settings_get()
 
 
 def remote_changed(old, restart=False):
@@ -1939,15 +1966,12 @@ def setup_post(body):
             onboard.open_and_prepare(sid)
             onboard.save_config({"sheet_id": sid})
             APP.refresh_rows(force=True)
-        elif a == "resume_pick":
-            return {"path": onboard.pick_file()}
-        elif a == "resume_set":
+        elif a == "resume_set":  # one of the PDFs the step found on this computer: NUauto keeps its own copy
             path = os.path.abspath(os.path.expanduser(str(body.get("path", "")).strip()))
-            ok, text = onboard.resume_preview(path)
-            if not ok:
-                raise Refused(text)
-            onboard.save_config({"resume_path": path})
-            APP.run_now(["quick"])
+            if not os.path.isfile(path):
+                raise Refused("No file there.")
+            with open(path, "rb") as f:
+                files_post({"kind": "resume", "data": base64.b64encode(f.read(onboard.MAX_DOCUMENT + 1)).decode()})
         elif a == "labels_read":
             task = APP.start("onboard_labels", "Reading your resumes on NUworks", config.self_cmd("onboard", "resume-labels"))
             return {"task": task.view()}
@@ -2009,7 +2033,9 @@ VIEW_MESSAGE = "View-only mode: nothing can be changed or started here."
 REMOTE = False
 REMOTE_GROUPS_OFF = ("homelab", "bitwarden", "app")  # the laptop's checks: ssh to the homelab, Bitwarden, the app's update
 REMOTE_POSTS_OFF = {"/api/quit": "NUauto on your homelab stays on (it is part of nuauto-web).",
-                    "/api/logins/export": "The logins file for Bitwarden is written on your laptop (Settings there)."}
+                    "/api/logins/export": "The logins file for Bitwarden is written on your laptop (Settings there).",
+                    "/api/files": "Your resume and transcript are kept on your laptop: give NUauto there the new one "
+                                  "(Settings > Your files). It copies them here at once."}
 REQUEST = threading.local()  # the paired device a request comes from (its name goes in the run logs)
 APP_SCREEN_SLOT = 0          # the virtual screen of a run you watch here (Apply, the NUworks side); 1-3: the assistant's
 _TERMINAL = "It runs in a terminal window on your laptop (you type there, never into this page)."
@@ -2244,6 +2270,7 @@ POST_ROUTES = {
     "/api/answers": answers_put,
     "/api/settings": settings_put,
     "/api/logins/export": logins_export,
+    "/api/files": files_post,
     "/api/setup": setup_post,
     "/api/assistant": assistant_post,
     # (laptop) the homelab's page through the link: a tap on one of its sessions' screens, its run's question and Stop
@@ -2392,6 +2419,7 @@ class Handler(BaseHTTPRequestHandler):
         self._call(lambda: route(q))
 
     MAX_BODY = 2_000_000
+    MAX_UPLOAD = 14_000_000  # /api/files: a PDF of up to onboard.MAX_DOCUMENT, in base64
 
     def _read_body(self):
         """The request body, read before anything else: a rejected request must not leave it on a kept-alive
@@ -2400,7 +2428,8 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
             length = -1
-        if not 0 <= length <= self.MAX_BODY:
+        upload = urlparse(self.path).path == "/api/files" and not REMOTE  # the homelab refuses it anyway
+        if not 0 <= length <= (self.MAX_UPLOAD if upload else self.MAX_BODY):
             self.close_connection = True
             return None
         return self.rfile.read(length)

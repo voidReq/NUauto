@@ -5,6 +5,7 @@ security rules, its API, the single-instance lock, and the main flows in headles
 Apply -> a question -> submitted, Answers, Settings, Quit, Review's internship list -> the Other jobs tab; the last
 also starts a second server with internships off). No network: everything runs on demo.py's fakes.
 """
+import base64
 import http.client
 import json
 import os
@@ -202,6 +203,25 @@ try:
     post("/api/settings", {"transcript_path": tpdf.replace(".pdf", ".txt")}, expect=409)
     assert post("/api/settings", {"transcript_path": f" {tpdf} "})["settings"]["transcript_path"] == tpdf
     assert post("/api/settings", {"transcript_path": ""})["settings"]["transcript_path"] == ""
+    # your files: a PDF given to NUauto is kept as its own copy in local/ (mode 600) and used from then on
+    b64 = lambda data: base64.b64encode(data).decode()
+    with open(os.path.join(STATE, "Demo_Student_Resume.pdf"), "rb") as f:
+        demo_resume = f.read()
+    post("/api/files", {"kind": "cover_letter", "data": b64(demo_resume)}, expect=409)
+    for bad in (b64(b"not a pdf"), "%%%", b64(b"%PDF-1.4"), b64(b"%PDF-" + b"0" * 10_000_000)):  # no text / over 10 MB
+        post("/api/files", {"kind": "resume", "data": bad}, expect=409)
+    kept = os.path.join(STATE, "local", "resume.pdf")
+    assert not os.path.exists(kept) and not os.path.exists(kept + ".tmp")  # a refused one leaves nothing
+    given = post("/api/files", {"kind": "resume", "data": b64(demo_resume)})
+    assert given["settings"]["resume_path"] == kept and given["files"]["resume"]["size"] == len(demo_resume), given["files"]
+    with open(kept, "rb") as f:
+        assert f.read() == demo_resume and os.stat(kept).st_mode & 0o777 == 0o600
+    post("/api/files", {"kind": "resume", "remove": True}, expect=409)  # a resume is only ever replaced
+    tkept = os.path.join(STATE, "local", "transcript.pdf")
+    given = post("/api/files", {"kind": "transcript", "data": b64(demo_resume)})
+    assert given["settings"]["transcript_path"] == tkept and given["files"]["transcript"]["name"] == "transcript.pdf"
+    given = post("/api/files", {"kind": "transcript", "remove": True})
+    assert given["settings"]["transcript_path"] == "" and given["files"]["transcript"] is None and not os.path.exists(tkept)
     post("/api/logins/export", {}, expect=409)  # nothing to export yet
     FAKE_PW = "Xy9!demo-not-real"
     with open(os.path.join(STATE, "local", "accounts.json"), "w") as f:

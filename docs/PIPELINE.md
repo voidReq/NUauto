@@ -137,6 +137,6 @@ year's lists are new repos: changing the term moves the addresses with it); off 
   Discord: new pool internships after a run; the morning message adds the last day's internship counts.
 
 RESUME
-- The PDF at local_config.json resume_path (the only file in its folder). The homelab
-  gets a copy as resume.pdf. Updated 2026-10-02 16:44 (minor: past job title/description).
+- The PDF at local_config.json resume_path: since 2026-10-20 the GUI keeps the one you give it as local/resume.pdf
+  (docs/GUI.md, YOUR FILES). The homelab gets a copy as resume.pdf. Updated 2026-10-02 16:44 (minor: past job title/description).
   Jobs scored before that used the 10:03 version; not re-scored since the change is minor.
