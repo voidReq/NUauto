@@ -155,8 +155,9 @@ Status values: Proposed, Approved, Applied, Failed, Needs Human, Accepted, Rejec
   leave the NUworks tab (they count toward the caps); an Applied Other job may move to NUworks (then it counts
   there; my call 2026-10-09). Unresolved Submit clicks are never moved or removed.
 Google access is OAuth only, never service accounts (docs/DEPLOY.md, GOOGLE SHEETS LOGIN). Google allows about 60 reads a
-minute: every client waits and retries on "too many requests" (gspread.BackOffHTTPClient), and the internship Review reuses
-the Other jobs rows for 30 s (each change NUauto makes forgets them).
+minute: every client waits and retries on "too many requests" (sheet.HTTPClient, gspread's BackOffHTTPClient); the opened
+sheet is kept 5 minutes (sheet.OPEN; rows are always read fresh), and Apply and the internship Review reuse the Other jobs
+rows for 30 s (each change NUauto makes forgets them; docs/GUI.md, SPEED).
 
 BROWSER (Playwright, Firefox)
 - Deterministic script, not an AI clicking around freely. Slow, human-like pacing.

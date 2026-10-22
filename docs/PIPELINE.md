@@ -80,7 +80,8 @@ RANKING (my settings: the engineering field)
 MY RATINGS (taste model)
 - `nuauto rate` (y/n, nothing goes in the sheet) -> data/ratings.json, which the laptop owns
   and pushes to the homelab. They train a TF-IDF model that reorders the pool (half rank,
-  half my taste) once there are 5 yes + 5 no.
+  half my taste) once there are 5 yes + 5 no. Trained again only when my ratings or a job's text change
+  (jobs.taste_for keeps the last few; training takes about a second).
 - Rating order rotates categories (security, embedded, hardware, systems, robotics/test,
   web/full-stack, software, data/ML, IT, other, front-end) so every category gets rated; once the model
   trains, it also mixes in the jobs it is least sure about.

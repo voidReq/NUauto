@@ -143,6 +143,7 @@ main.narrow h1 { font-size: 20px; }
 .btn.small { padding: 5px 10px; font-size: 12.5px; }
 .btn.big { padding: 11px 18px; font-size: 14.5px; }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn[aria-busy=true] { cursor: progress; opacity: .7; }  /* its click is being done (busyWhile) */
 .btn kbd { font: 11px var(--mono); border: 1px solid currentColor; border-radius: 4px; padding: 0 4px; opacity: .6; }
 input[type=text], input[type=search], input[type=number], input[type=date], input[type=url], input[type=email], select, textarea {
   font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border-strong);
@@ -257,6 +258,7 @@ table.grid label.row { flex-wrap: nowrap; white-space: nowrap; gap: 6px; padding
 .toast { background: var(--text); color: var(--bg); border-radius: 10px; padding: 10px 14px; box-shadow: var(--shadow);
   display: flex; align-items: center; gap: 12px; max-width: 420px; }
 .toast.error { background: var(--fail); color: #fff; }
+.toast .spinner { border-color: color-mix(in srgb, var(--bg) 35%, transparent); border-top-color: var(--bg); }
 .toast .btn { background: transparent; color: inherit; border-color: currentColor; padding: 3px 9px; }
 
 /* setup wizard */

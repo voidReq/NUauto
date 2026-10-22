@@ -150,9 +150,12 @@ try:
     rows = json.load(open(os.path.join(STATE, "local", "demo_sheet_DEMO-SHEET.json")))["rows"]
     assert rows[r["row"] - 1][3] == "Approved"
     assert json.load(open(os.path.join(STATE, "data", "ratings.json")))[first]["label"] == 1
+    # Review's list is kept between loads and made again when what it comes from changes (here: the sheet, a rating)
+    assert first not in [j["id"] for j in get("/api/review?mode=approve")["jobs"]]
     post("/api/undo", {"id": first, "row": r["row"], "previous": None})
     rows = json.load(open(os.path.join(STATE, "local", "demo_sheet_DEMO-SHEET.json")))["rows"]
     assert rows[r["row"] - 1][3] == "Proposed" and first not in json.load(open(os.path.join(STATE, "data", "ratings.json")))
+    assert first in [j["id"] for j in get("/api/review?mode=approve")["jobs"]]  # your Proposed row again
     post("/api/decide", {"id": "nope", "decision": "approve", "mode": "approve"}, expect=409)
     post("/api/decide", {"id": rev["jobs"][1]["id"], "decision": "approve", "mode": "rate"}, expect=409)
 
@@ -415,8 +418,22 @@ try:
     LAPTOP = "DO ON THE LAPTOP: the homelab's browser was refused"
     data = json.load(open(other_file))
     assert all(x["on_laptop"] is False for x in other["ready"] + other["applied"])
+    # the Apply screen is answered from the rows read last; opening it (recheck) reads both tabs again behind it, and
+    # sheet_version moves only when a read finds a change (then the open screen reloads its lists)
+    get("/api/jobs?tab=other&recheck=1")
+    time.sleep(1.5)  # (whatever changed before this is read now)
+    version = get("/api/state")["sheet_version"]
+    get("/api/jobs?tab=other&recheck=1")
+    time.sleep(1.5)
+    assert get("/api/state")["sheet_version"] == version  # read again, nothing changed
     data["rows"][1][4] = f"match 90% | {LAPTOP} (the site showed it a sign-in page with no way in)"
     json.dump(data, open(other_file, "w"))
+    get("/api/jobs?tab=other&recheck=1")
+    for _ in range(50):
+        if get("/api/state")["sheet_version"] != version:
+            break
+        time.sleep(0.1)
+    assert [x["on_laptop"] for x in get("/api/jobs?tab=other")["sections"]["ready"] if x["row"] == 2] == [True]
     marked = get("/api/other")
     assert [(x["row"], x["on_laptop"]) for x in marked["ready"]] == [(2, True)] and marked["applied"][0]["on_laptop"] is False, marked
     assert marked["ready"][0]["notes"].startswith("match 90% | DO ON THE LAPTOP")
@@ -731,7 +748,8 @@ try:
         page.reload()
         page.click("[data-testid=tab-other]")
         page.wait_for_selector("[data-testid=section-other-ready]")
-        assert page.locator("[data-testid$=-laptop]").count() == 0
+        # (the first answer may be the rows read a moment ago; the sheet is read again behind it and the list follows)
+        page.wait_for_selector("[data-testid$=-laptop]", state="detached")
         page.click("[data-testid=tab-nuworks]")
         manual = get("/api/jobs?tab=nuworks")["sections"]["manual"]  # rows only you can finish on NUworks: a section of the same tab
         assert page.locator("[data-testid=section-nuworks-manual] li").count() == len(manual)

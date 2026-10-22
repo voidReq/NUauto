@@ -13,7 +13,7 @@ MODULES (src/nuauto/)
                   app: bundle paths, app-data STATE_DIR, local mode, Playwright's browser cache), self_cmd() / self_exe()
                   (how NUauto runs itself). No logic beyond that.
   sheet.py        the Google Sheet. client() / open_worksheet(interactive) (interactive=False never opens a
-                  login page: NotLoggedIn), read_rows(), check_limits() (MAX_PER_WEEK/MAX_TOTAL), set_status(),
+                  login page: NotLoggedIn; the opened sheet and tabs kept OPEN_FOR s: OPEN, forget(), HTTPClient), read_rows(), check_limits() (MAX_PER_WEEK/MAX_TOTAL), set_status(),
                   mark_submit_started()/resolve_submit(), mark_applied_by_hand(), mark_site_done(), append_note(),
                   add_proposed(), unapprove() (GUI Undo), create_sheet() (Sheets API), google_login().
   jobs.py         the job pool + viewers. PREFS (local_config "preferences" over DEFAULTS), RULES, set_prefs(),
@@ -190,7 +190,9 @@ changes the sheet). test_browser.py covers the domain lock and the profile lock.
 company-site agent's guard. test_mail.py covers the email codes and links (Gmail's message format, which mail counts, the
 agent's `email` command). test_insights.py covers the Insights numbers (pay parsing, folding, no guessing). test_intern.py covers the
 internship pool and postings.py (job-site links, parsing, the network guard on a local server, fetch tries, rules,
-Review queue, a whole update with Claude stood in for). test_deploy.py runs deploy.py on a throwaway git repo (copy, web restart only when needed, undo on failure). test_demo.py runs the real apply.py on demo mode's fake pages (stops, cap, re-login).
+Review queue (the taste model trains again only when ratings or a job's text change), a whole update with Claude
+stood in for). test_sheet.py also covers the kept sheet (sheet.OPEN: opened once, opened again on a new login, an
+expiring token, a refused request, a renamed tab). test_deploy.py runs deploy.py on a throwaway git repo (copy, web restart only when needed, undo on failure). test_demo.py runs the real apply.py on demo mode's fake pages (stops, cap, re-login).
 test_gui.py covers the GUI server's security and flows; test_homelab_app.py the same app as the homelab serves it (demo
 `--remote`: pairing, refusals, sessions, queue, devices, a phone-width browser); test_link.py the laptop's link to it (pairing,
 calls, the /api/homelab/ routes, an Apply run there, unpairing; then `--demo --linked` in a browser); tests/screens.py (not a test:
