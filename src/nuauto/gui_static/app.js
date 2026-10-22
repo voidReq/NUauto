@@ -144,7 +144,7 @@ function linkOut(url, text) {
 function plural(n, word) { return `${n} ${word}${n === 1 ? "" : "s"}`; }
 
 // Your resume and transcript: a PDF you drop or choose goes to NUauto (/api/files), which keeps its own copy in local/
-// and pushes it to the homelab. Setup's resume step and Settings > Your files.
+// and pushes it to the homelab. Setup's resume step and Settings > Applying > Your files.
 const MAX_PDF = 10000000;  // onboard.MAX_DOCUMENT
 async function sendPdf(kind, file) {
   if (file.size > MAX_PDF) throw new Error(`${file.name} is over 10 MB.`);
@@ -373,7 +373,7 @@ function healthPopover(c) {
       el("div", { class: "row" }, fixButton(now, "btn small primary"),
         groups.length && !(S.state && S.state.view) ? el("button", { class: "btn small", testid: `recheck-${c.id}`, disabled: checking,
           text: checking ? "Checking…" : "Check now", onclick: recheck }) : null,
-        el("a", { href: "#/settings", class: "btn small ghost", text: "All checks", onclick: () => pop.remove() })));
+        el("a", { href: "#/settings/status", class: "btn small ghost", text: "All checks", onclick: () => pop.remove() })));
   }
   async function recheck(e) {
     e.stopPropagation();
@@ -1234,7 +1234,7 @@ screens.apply = async (view) => {
     return el("div", { class: "card", testid: "apply-week" },
       el("div", { class: "row between" }, el("div", {},
         el("h2", { text: w.room ? `You can apply to ${plural(w.room, "more job")} this week` : "Weekly limit reached" }),
-        el("p", { class: "small muted" }, `${w.applied} of ${w.max} ${w.label} · ${w.total} of ${w.max_total} in total` + (w.next ? ` · new week ${w.next}` : "") + " · ", el("a", { href: "#/settings", text: "change the limit" }))),
+        el("p", { class: "small muted" }, `${w.applied} of ${w.max} ${w.label} · ${w.total} of ${w.max_total} in total` + (w.next ? ` · new week ${w.next}` : "") + " · ", el("a", { href: "#/settings/applying", text: "change the limit" }))),
       drawnRunning ? null : el("div", { class: "row" },
         runOnSwitch(),
         el("label", { class: "small muted" }, "At most ", atMost),
@@ -1894,57 +1894,89 @@ screens.assistant = async (view) => {
 };
 
 // ---- Settings
+// Settings, in tabs (#/settings/<tab>), the same on the homelab's page: Status (the health checks, your logins), Jobs
+// (what you're looking for, Summer internships), Applying (the weekly limit, the resume NUworks gets, your sheet and
+// files), Assistant (the company-site assistant, your password manager), Homelab, App (notifications, setup, about).
+const SETTINGS_TABS = [["status", "Status"], ["jobs", "Jobs"], ["applying", "Applying"], ["assistant", "Assistant"],
+  ["homelab", "Homelab"], ["app", "App"]];
+
 screens.settings = async (view) => {
   let d;
+  let setup = null;  // /api/setup's steps: the Jobs and App tabs show some of their bodies (the same forms as Setup)
+  let tab = S.param || S.settingsTab || "status";
+  let healthList = null;  // the Status tab's list of checks: a health poll redraws only it, never a form you're typing in
+  const tabs = el("div", { class: "tabs", role: "tablist", "aria-label": "Settings" });
+  const pane = el("div", { role: "tabpanel", id: "settings-pane", testid: "settings-pane" });
+  fill(view, tabs, pane);
   async function reload() {
-    try { d = await api.get("/api/settings"); S.logsDir = d.paths.logs; } catch (e) { fill(view, el("div", { class: "note fail", text: e.message })); return; }
+    try { d = await api.get("/api/settings"); S.logsDir = d.paths.logs; } catch (e) { fill(pane, el("div", { class: "note fail", text: e.message })); return; }
     draw();
   }
-  function draw() {
-    const s = d.settings;
-    const label = el("input", { type: "text", value: d.resume_label, "aria-label": "Resume label", testid: "set-resume-label" });
-    const week = el("input", { type: "date", value: s.week_start || "", "aria-label": "Week start", testid: "set-week-start" });
-    const cap = el("input", { type: "number", min: "1", max: String(d.max_per_week_ceiling), step: "1", value: String(d.max_per_week),
-      "aria-label": "Applications per week", testid: "set-max-per-week" });
-    fill(view, 
-      el("div", { class: "card", testid: "all-checks" }, el("div", { class: "row between" }, el("h2", { text: "Health" }),
-        el("button", { class: "btn small", text: "Run all checks now", testid: "btn-run-checks", onclick: async () => {
-          await api.post("/api/health/run", { groups: ["quick", "sheet", "claude", "firefox", "discord", "homelab", "bitwarden", "nuworks"] }).catch(fail);
-          toast("Checking…"); setTimeout(pollHealth, 1500); setTimeout(pollHealth, 6000); } })),
-        el("ul", { class: "list" }, ...S.checks.map((c) => el("li", { testid: `check-${c.id}` }, el("div", { class: "what" },
-          el("span", { class: `chip ${c.status}`, text: SHORT[c.status] || c.status }), " ", el("b", { text: c.title }), " ",
-          el("span", { class: "muted", text: c.detail }), el("div", { class: "small muted", text: `checked ${ago(c.at)}` })), fixButton(c))))),
-      el("div", { class: "grid2" },
-        el("div", { class: "card stack" }, el("h2", { text: "Logins" }),
-          el("div", { class: "row between" }, el("span", { text: "Google" }), el("button", { class: "btn small", text: d.google_login ? "Log in again" : "Log in", onclick: () => action("login_google") })),
-          el("div", { class: "row between" }, el("span", { text: "NUworks" }), el("div", { class: "row" },
-            el("button", { class: "btn small", text: "Check now", onclick: () => { action("check_nuworks"); toast("Checking NUworks in the background…"); } }),
-            el("button", { class: "btn small", text: "Log in", onclick: () => action("login_nuworks") }))),
-          el("div", { class: "row between" }, el("span", { text: "Claude Code" }), el("button", { class: "btn small", text: "Log in", onclick: () => action("login_claude") })),
-          el("div", { class: "row between", testid: "gmail-login" }, el("div", {}, el("span", { text: "Gmail (optional)" }),
-            el("div", { class: "small muted", text: d.gmail.ready ? (d.gmail.days_left != null ? `read-only; ${Math.max(0, d.gmail.days_left)} days left` : "read-only") :
-              "read-only, for the assistant's email codes and links" })),
-            el("button", { class: "btn small", text: d.gmail.ready ? "Log in again" : "Log in", testid: "btn-login-gmail", onclick: () => action("login_gmail") })),
-          d.gmail.ready ? null : el("p", { class: "small muted" }, "Gmail first needs its API turned on in your Google Cloud project: ",
-            linkOut("https://console.cloud.google.com/apis/library/gmail.googleapis.com", "Gmail API"), ". Use the account email's inbox (below)."),
-          el("p", { class: "small muted", text: "Google logins last 7 days (Testing-mode apps); NUauto warns you a day before. Log in to Google again renews Gmail's too." })),
-        el("div", { class: "card stack" }, el("h2", { text: "Applying" }),
-          el("label", { class: "field" }, "NUworks resume label", el("span", { class: "muted small", text: "Exactly as in the Apply popup's Resume dropdown." }), label),
-          el("label", { class: "field" }, "Applications per week", el("span", { class: "muted small", text: `The most NUauto will submit in one week (1 to ${d.max_per_week_ceiling}). It stops at this number; Approved jobs wait for the next week.` }), cap),
-          el("label", { class: "field" }, "Weekly limit counts from", el("span", { class: "muted small", text: "Fixed 7-day weeks from this day. Empty: any rolling 7 days." }), week),
-          el("div", {}, el("button", { class: "btn primary", text: "Save", testid: "settings-save", onclick: async () => {
-            try { d = await api.post("/api/settings", { resume_label: label.value, week_start: week.value, max_per_week: cap.value }); toast("Saved."); pollState(); draw(); } catch (e) { fail(e); } } })))),
-      filesCard(),
-      assistantCard(),
-      el("div", { class: "card stack", testid: "intern-settings" }, el("h2", { text: "Summer internships" }),
-        internshipsPanel(d.internships, (r) => { if (r) { d = r; draw(); } else reload(); })),
+  let setupLoading = null;  // one /api/setup at a time (it reads your sheet: seconds), shared by every draw waiting on it
+  function loadSetup() {
+    return setupLoading || (setupLoading = api.get("/api/setup").then((r) => { setup = r; }, (e) => { setup = { error: e.message }; })
+      .finally(() => { setupLoading = null; }));
+  }
+  // one Setup step's body ("as": another body with that step's data, like Discord alone from the extras step)
+  function stepBody(id, as = id) {
+    if (setup.error) return el("div", { class: "note fail", text: setup.error });
+    const s = (setup.steps || []).find((x) => x.id === id);
+    return s ? el("div", { class: "stack" }, ...window.NUautoSetupBody(as, s, () => { setup = null; draw(); })) : null;
+  }
+  const shown = () => SETTINGS_TABS.filter(([k]) => k !== "homelab" || onHomelab() || (d.homelab && d.homelab.available));
+  function pick(k) {
+    tab = k;
+    S.settingsTab = k;
+    history.replaceState(null, "", `#/settings/${k}`);
+    draw();
+  }
+  let drawn = 0;  // the newest draw wins: one still waiting for /api/setup must not replace a tab drawn since
+  async function draw() {
+    const mine = ++drawn;
+    const list = shown();
+    if (!list.some(([k]) => k === tab)) tab = "status";
+    fill(tabs, ...list.map(([k, label]) => el("button", { role: "tab", testid: `settings-tab-${k}`, "aria-selected": String(tab === k),
+      "aria-controls": "settings-pane", text: label, onclick: () => pick(k) })));
+    healthList = null;
+    if ((tab === "jobs" || tab === "app") && (!setup || setup.error)) {  // (an error: tried again on the next draw)
+      fill(pane, el("p", { class: "row muted" }, el("span", { class: "spinner" }), "Loading…"));
+      await loadSetup();
+      if (mine !== drawn) return;
+    }
+    fill(pane, ...PANES[tab]());
+  }
+  function drawHealth() {
+    if (healthList) fill(healthList, ...S.checks.map((c) => el("li", { testid: `check-${c.id}` }, el("div", { class: "what" },
+      el("span", { class: `chip ${c.status}`, text: SHORT[c.status] || c.status }), " ", el("b", { text: c.title }), " ",
+      el("span", { class: "muted", text: c.detail }), el("div", { class: "small muted", text: `checked ${ago(c.at)}` })), fixButton(c))));
+  }
+  const PANES = {
+    status: () => {
+      healthList = el("ul", { class: "list" });
+      drawHealth();
+      return [
+        el("div", { class: "card", testid: "all-checks" }, el("div", { class: "row between" }, el("h2", { text: "Health" }),
+          el("button", { class: "btn small", text: "Run all checks now", testid: "btn-run-checks", onclick: async () => {
+            await api.post("/api/health/run", { groups: ["quick", "sheet", "claude", "firefox", "discord", "homelab", "bitwarden", "nuworks"] }).catch(fail);
+            toast("Checking…"); setTimeout(pollHealth, 1500); setTimeout(pollHealth, 6000); } })), healthList),
+        loginsCard()];
+    },
+    jobs: () => [
+      el("div", { class: "card stack", testid: "prefs-settings" }, el("h2", { text: "What you're looking for" }),
+        el("p", { class: "small muted", text: "Your term and year, the match a job needs to enter your pool, and the kinds of work with their ranking bonuses. Saving rebuilds your pool at once." }),
+        stepBody("preferences")),
+      internCard()],
+    applying: () => [applyingCard(), filesCard()],
+    assistant: () => [assistantCard(),
       // Bitwarden unlocks in a terminal window on the laptop: its card is the laptop's only
       onHomelab() ? null : el("div", { class: "card stack", testid: "pm-settings" }, el("h2", { text: "Password manager" }),
-        passwordManagerPanel(d.password_manager, (r) => { if (r) { d = r; draw(); } else reload(); })),
-      homelabCard(),
+        passwordManagerPanel(d.password_manager, (r) => { if (r) { d = r; draw(); } else reload(); }))],
+    homelab: () => homelabCards(),
+    app: () => [
+      el("div", { class: "card stack", testid: "extras-settings" }, stepBody("extras", onHomelab() ? "discord" : "extras")),
       el("div", { class: "card stack" }, el("h2", { text: "Setup" }),
-        el("p", { class: "small muted", text: onHomelab() ? "Setup is done in NUauto on your laptop (the homelab gets its settings from there). Your preferences can be changed here too." :
-          "Google client, sheet, resume, NUworks, preferences, notifications: each step checked." }),
+        el("p", { class: "small muted", text: onHomelab() ? "Setup is done in NUauto on your laptop (the homelab gets its settings from there)." :
+          "Every step again, each checked: Google, your sheet, resume, NUworks, preferences, notifications." }),
         el("div", { class: "row" }, el("a", { class: "btn", href: "#/setup", text: "Open setup" }),
           el("button", { class: "btn", text: "Run a self-test", testid: "btn-selftest", title: "Demo mode end to end in a hidden browser: nothing real is touched",
             onclick: () => action("selftest") }),
@@ -1954,24 +1986,63 @@ screens.settings = async (view) => {
           d.tools.claude ? [" · claude: ", el("code", { text: d.tools.claude })] : " · claude not found"),
         onHomelab() ? el("p", { class: "small muted", text: "NUauto on your homelab is always on (it is part of nuauto-web there)." }) :
           el("div", {}, el("button", { class: "btn danger", text: "Quit NUauto", testid: "btn-quit", onclick: () => confirmBox("Quit NUauto?",
-            "Closes this window's server. A running job is stopped first (like Ctrl+C).", "Quit", async () => { await api.post("/api/quit", {}).catch(() => {}); gone("NUauto has quit. Start it again from your apps menu, or run nuauto gui."); }, { danger: true }) }))));
+            "Closes this window's server. A running job is stopped first (like Ctrl+C).", "Quit", async () => { await api.post("/api/quit", {}).catch(() => {}); gone("NUauto has quit. Start it again from your apps menu, or run nuauto gui."); }, { danger: true }) })))],
+  };
+  // redrawn by itself after a change, so the preferences form above keeps what you typed
+  function internCard() {
+    const card = el("div", { class: "card stack", testid: "intern-settings" }, el("h2", { text: "Summer internships" }),
+      internshipsPanel(d.internships, async (r) => {
+        if (r) d = r;
+        else try { d = await api.get("/api/settings"); } catch (e) { fail(e); return; }
+        card.replaceWith(internCard());
+      }));
+    return card;
   }
-  // (the homelab's page) the devices paired with it: each one's cookie is its key (the homelab keeps only its hash)
-  // Everything about the homelab in one card. The laptop: which homelab (connection, setup), then NUauto there (its
-  // page, its assistant). The homelab's own page: the devices paired with it, and its assistant's queue.
-  function homelabCard() {
+  function loginsCard() {
+    return el("div", { class: "card stack" }, el("h2", { text: "Logins" }),
+      el("div", { class: "row between" }, el("span", { text: "Google" }), el("button", { class: "btn small", text: d.google_login ? "Log in again" : "Log in", onclick: () => action("login_google") })),
+      el("div", { class: "row between" }, el("span", { text: "NUworks" }), el("div", { class: "row" },
+        el("button", { class: "btn small", text: "Check now", onclick: () => { action("check_nuworks"); toast("Checking NUworks in the background…"); } }),
+        el("button", { class: "btn small", text: "Log in", onclick: () => action("login_nuworks") }))),
+      el("div", { class: "row between" }, el("span", { text: "Claude Code" }), el("button", { class: "btn small", text: "Log in", onclick: () => action("login_claude") })),
+      el("div", { class: "row between", testid: "gmail-login" }, el("div", {}, el("span", { text: "Gmail (optional)" }),
+        el("div", { class: "small muted", text: d.gmail.ready ? (d.gmail.days_left != null ? `read-only; ${Math.max(0, d.gmail.days_left)} days left` : "read-only") :
+          "read-only, for the assistant's email codes and links" })),
+        el("button", { class: "btn small", text: d.gmail.ready ? "Log in again" : "Log in", testid: "btn-login-gmail", onclick: () => action("login_gmail") })),
+      d.gmail.ready ? null : el("p", { class: "small muted" }, "Gmail first needs its API turned on in your Google Cloud project: ",
+        linkOut("https://console.cloud.google.com/apis/library/gmail.googleapis.com", "Gmail API"), ". Use the inbox of the assistant's account email (Assistant tab)."),
+      el("p", { class: "small muted", text: "Google logins last 7 days (Testing-mode apps); NUauto warns you a day before. Log in to Google again renews Gmail's too." }));
+  }
+  // the weekly limit, the resume NUworks' Apply popup picks, and your sheet
+  function applyingCard() {
+    const s = d.settings;
+    const label = el("input", { type: "text", value: d.resume_label, "aria-label": "Resume label", testid: "set-resume-label" });
+    const week = el("input", { type: "date", value: s.week_start || "", "aria-label": "Week start", testid: "set-week-start" });
+    const cap = el("input", { type: "number", min: "1", max: String(d.max_per_week_ceiling), step: "1", value: String(d.max_per_week),
+      "aria-label": "Applications per week", testid: "set-max-per-week" });
+    return el("div", { class: "card stack", testid: "applying-settings" }, el("h2", { text: "Applying on NUworks" }),
+      el("label", { class: "field" }, "Applications per week", el("span", { class: "muted small", text: `The most NUauto will submit in one week (1 to ${d.max_per_week_ceiling}). It stops at this number; Approved jobs wait for the next week.` }), cap),
+      el("label", { class: "field" }, "Week starts on", el("span", { class: "muted small", text: "Your weekly count starts over every 7 days from this date. Empty: it counts the last 7 days." }), week),
+      el("label", { class: "field" }, "Resume NUauto picks", el("span", { class: "muted small", text: "Its name exactly as in the Resume dropdown of NUworks' Apply popup (Setup > NUworks can read the list for you)." }), label),
+      s.sheet_id ? el("p", { class: "small", testid: "set-sheet" }, el("b", { text: "Your sheet: " }),
+        linkOut(`https://docs.google.com/spreadsheets/d/${encodeURIComponent(s.sheet_id)}`, "open it in Google Sheets"),
+        el("span", { class: "muted", text: " · to use another one: Setup > Your Google Sheet." })) : null,
+      el("div", {}, el("button", { class: "btn primary", text: "Save", testid: "settings-save", onclick: async () => {
+        try { d = await api.post("/api/settings", { resume_label: label.value, week_start: week.value, max_per_week: cap.value }); toast("Saved."); pollState(); draw(); } catch (e) { fail(e); } } })));
+  }
+  // The laptop: which homelab (connection, setup), then NUauto there (its page, its assistant), each its own card. The
+  // homelab's own page: the devices paired with it, and its assistant's queue.
+  function homelabCards() {
     const ha = d.homelab_assistant;
     const done = (r) => { if (r) { d = r; draw(); } else reload(); };
     if (onHomelab()) {
-      return el("div", { class: "card stack", testid: "homelab-settings" }, el("h2", { text: "This homelab" }),
-        devicesPanel(), el("hr", { class: "sep" }), el("h3", { text: "Its assistant" }), homelabAssistantPanel(ha, done));
+      return [el("div", { class: "card stack", testid: "homelab-settings" }, el("h2", { text: "This homelab" }), devicesPanel()),
+        el("div", { class: "card stack" }, el("h2", { text: "Its assistant" }), homelabAssistantPanel(ha, done))];
     }
-    if (!(d.homelab && d.homelab.available)) return null;  // the packaged app: always on its own
-    return el("div", { class: "card stack", testid: "homelab-settings" }, el("h2", { text: "Homelab" }),
-      homelabLinkPanel(d.homelab, () => reload()),
-      ha.available ? [el("hr", { class: "sep" }), el("h3", { text: "NUauto on your homelab" }),
-        el("div", { testid: "ha-settings" }, homelabAssistantPanel(ha, done))] : null);
+    return [el("div", { class: "card stack", testid: "homelab-settings" }, el("h2", { text: "Homelab" }), homelabLinkPanel(d.homelab, () => reload())),
+      ha.available ? el("div", { class: "card stack", testid: "ha-settings" }, el("h2", { text: "NUauto on your homelab" }), homelabAssistantPanel(ha, done)) : null];
   }
+  // (the homelab's page) the devices paired with it: each one's cookie is its key (the homelab keeps only its hash)
   function devicesPanel() {
     const name = el("input", { type: "text", placeholder: "e.g. phone", maxlength: "40", "aria-label": "Name of the device", testid: "pair-name" });
     return el("div", { class: "stack", testid: "devices" }, el("h3", { text: "Paired devices" }),
@@ -2011,7 +2082,7 @@ screens.settings = async (view) => {
       el("span", { class: "muted small", text: help }),
       here ? null : pdfDrop(`file-${kind}-drop`, d.files[kind] ? "Drop a new PDF here, or" : "Drop the PDF here, or", give(kind, done)));
     return el("div", { class: "card stack", testid: "files-settings" }, el("h2", { text: "Your files" }),
-      el("p", { class: "small muted", text: here ? "Copies from your laptop. Give NUauto there a new one (Settings > Your files): it copies it here at once." :
+      el("p", { class: "small muted", text: here ? "Copies from your laptop. Give NUauto there a new one (Settings > Applying > Your files): it copies it here at once." :
         "NUauto keeps its own copy of each (in its private folder, readable only by you; your homelab, if you use one, gets a copy at once). To change one, drop the new PDF here." }),
       part("resume", "Resume", "The PDF you use on NUworks: Claude compares each posting with it, and the assistant uploads it on company sites.", "Resume saved."),
       part("transcript", "Transcript (optional)", "Your unofficial transcript: the assistant uploads it only where an application asks for one.", "Transcript saved."));
@@ -2046,15 +2117,17 @@ screens.settings = async (view) => {
         } catch (e) { fail(e); }
       } });
     const here = onHomelab();  // the homelab's page: the folders and the export file are the laptop's
+    const pmOn = !here && d.password_manager && d.password_manager.on;  // with Bitwarden on, its Add button is the way in
     return el("div", { class: "card stack", testid: "assistant-settings" }, el("h2", { text: "Company-site assistant" }),
-      el("label", { class: "field" }, "Account email", el("span", { class: "muted small", text: "For the accounts it makes on job sites (Workday and others). Each site gets its own random password; the assistant never sees it." }), email),
+      el("label", { class: "field" }, "Email for job-site accounts", el("span", { class: "muted small", text: "When a company's site needs an account (Workday and others), the assistant makes one with this email. Each site gets its own random password; the assistant never sees it." }), email),
       el("label", { class: "field" }, "Effort", el("span", { class: "muted small", text: "How hard it thinks (Claude Code's effort). Nothing is submitted without your review either way." }), effort),
       here ? el("p", { class: "small muted", text: "The folders it may read are on your laptop: set them in NUauto there (the homelab gets copies)." }) : [
-        el("label", { class: "field" }, "Folders it may read", el("span", { class: "muted small", text: "Your projects and writeups, one per line: for longer answers. Keys, tokens, .env files and NUauto's own logins are never read." }), folders),
-        el("label", { class: "field" }, "Your writeups (optional)", el("span", { class: "muted small", text: "Folders of your own project or security writeups, one per line: the first place it looks for essay material (and, with its assistant on the homelab, copied there)." }), writeups)],
-      el("label", { class: "field" }, "Assistants at once", el("span", { class: "muted small", text: "How many company-site applications may run side by side, each with its own browser: on each machine, 1 to 3." }), slots),
+        el("label", { class: "field" }, "Folders it may read", el("span", { class: "muted small", text: "Your projects, one per line: it reads them for longer answers. Keys, tokens, .env files and NUauto's own logins are never read." }), folders),
+        el("label", { class: "field" }, "Writeups (optional)", el("span", { class: "muted small", text: "Folders of your own project or security writeups, one per line: where it looks first for material for longer answers (copied to your homelab if its assistant runs there)." }), writeups)],
+      el("label", { class: "field" }, "Assistants at once", el("span", { class: "muted small", text: "How many company-site applications may run side by side, each in its own browser (1 to 3, on each computer)." }), slots),
       el("div", { class: "row between" }, el("span", { class: "small muted", testid: "logins-count",
-        text: L.sites ? `Logins it made: ${plural(L.sites, "site")}${L.new ? `, ${L.new} not exported yet` : ", all exported"}` : "No logins made yet." }), here ? null : exportBtn),
+        text: !L.sites ? "No logins made yet." : pmOn ? `Logins it made: ${plural(L.sites, "site")}. Bitwarden is on: they go into your vault from Password manager, below.` :
+          `Logins it made: ${plural(L.sites, "site")}${L.new ? `, ${L.new} not exported yet` : ", all exported"}` }), here || pmOn ? null : exportBtn),
       el("div", {}, el("button", { class: "btn primary", text: "Save", testid: "assistant-save", onclick: async () => {
         try {
           const both = { accounts_email: email.value, assist_effort: effort.value, assist_slots: Number(slots.value) };
@@ -2065,7 +2138,17 @@ screens.settings = async (view) => {
       } })));
   }
   await reload();
-  return { health: draw };
+  let seenTask = null;
+  return {
+    health: () => drawHealth(),
+    // Jobs > Read the list from NUworks is a task: once it ends, the term list (or why not) comes with fresh steps
+    task: (t) => {
+      if (!t || t.kind !== "onboard_terms" || t.state === "running" || t.id === seenTask) return;
+      seenTask = t.id;
+      setup = null;
+      if (tab === "jobs") draw();
+    },
+  };
 };
 
 // ---- Optional parts, the same in Settings and in setup: your password manager, and the assistant on a homelab.
@@ -2135,7 +2218,7 @@ function homelabAssistantPanel(ha, done) {
   if (here) {
     return el("div", { class: "stack", testid: "ha-panel" }, ha.on ?
       el("p", { class: "small muted", text: "Company-site applications run here in a virtual browser; you answer each session on its screen (Apply > Assistants). Turning the assistant on or off is done in NUauto on your laptop." }) :
-      el("p", { class: "small muted", text: "The assistant is off on this homelab: turn it on in NUauto on your laptop (Settings > NUauto on your homelab)." }), queue);
+      el("p", { class: "small muted", text: "The assistant is off on this homelab: turn it on in NUauto on your laptop (Settings > Homelab > NUauto on your homelab)." }), queue);
   }
   return el("div", { class: "stack", testid: "ha-panel" },
     el("p", { class: "small muted", text: "Optional, with a homelab. Its page is this same NUauto, on the homelab: open it from your phone or another computer (over Tailscale; each browser is paired once) to review, apply and answer the assistant while this computer is off. NUauto here works the same either way." }),
@@ -2147,7 +2230,7 @@ function homelabAssistantPanel(ha, done) {
     ha.app ? el("div", { class: "row" },
       el("button", { class: "btn small", text: "Pair this computer", testid: "ha-pair", onclick: pairThisComputer }),
       ha.review_url ? el("button", { class: "btn small ghost", text: "Open it", testid: "ha-open", onclick: () => openExternal(`${ha.review_url}/`) }) : null,
-      el("span", { class: "small muted", text: "A phone: on the homelab, nuauto review pair --discord (or Settings > Paired devices on its page)." })) : null,
+      el("span", { class: "small muted", text: "A phone: on the homelab, nuauto review pair --discord (or Settings > Homelab > Paired devices on its page)." })) : null,
     ha.app ? linkRow(done) : null,
     el("hr", { class: "sep" }),
     el("div", { class: "row between" }, el("div", { class: "row" }, el("b", { text: "Its assistant" }),
@@ -2183,6 +2266,7 @@ function homelabLinkPanel(h, done) {
     "aria-label": "Its ssh name", testid: "hl-ssh" });
   const folder = el("input", { type: "text", value: h.dir || h.default_dir, "aria-label": "Folder there", testid: "hl-folder" });
   const out = el("div", { testid: "hl-result" });
+  const note = el("div");  // the restart note: outside the folded parts, so it shows wherever you pressed
   const restartNote = () => el("div", { class: "note warn", testid: "hl-restart" }, el("b", { text: "Saved. " }),
     "Quit NUauto and open it again to switch. ",
     el("button", { class: "btn small", text: "Quit NUauto", onclick: async () => { await api.post("/api/quit", {}).catch(() => {});
@@ -2205,9 +2289,14 @@ function homelabLinkPanel(h, done) {
       el("div", { class: "row" }, el("button", { class: "btn primary", testid: "hl-use", disabled: !f.tailscale || !f.hostname,
         text: h.on && h.hostname === f.hostname ? "Save again" : "Use this homelab", onclick: async () => {
           const r = await post({ action: "save", ssh: ssh.value, folder: folder.value, hostname: f.hostname, listen: f.tailscale });
-          if (r) fill(out, restartNote());
+          if (r) { fill(out); fill(note, restartNote()); }
         } }), el("span", { class: "small muted", text: "Then open NUauto again, and Set it up (each step asks first)." })));
   }
+  const connect = [
+    el("div", { class: "row" }, el("label", { class: "field grow" }, "Its ssh name", el("span", { class: "muted small", text: "What you type after ssh (a key, no password)." }), ssh),
+      el("label", { class: "field grow" }, "NUauto's folder there", el("span", { class: "muted small", text: "Under its home folder." }), folder)),
+    el("div", {}, el("button", { class: "btn", text: "Check", testid: "hl-check", onclick: check })),
+    out];
   return el("div", { class: "stack", testid: "hl-panel" },
     el("p", { class: "small muted", text: "Optional. An always-on Linux computer you reach with ssh over Tailscale: it checks for new jobs twice a day and sends your Discord messages, so this computer can be off, and NUauto's page can run there for your phone. Without one, everything runs on this computer, the same way." }),
     h.on ? el("div", { class: "row between" }, el("div", { class: "row" }, el("b", { text: "Using" }),
@@ -2218,13 +2307,12 @@ function homelabLinkPanel(h, done) {
         el("button", { class: "btn small", text: "Log in to Claude there", testid: "hl-claude", onclick: async () => { const r = await post({ action: "claude" }); if (r) terminalResult(r); } }),
         el("button", { class: "btn small danger", text: "Stop using it", testid: "hl-off", onclick: () => confirmBox("Stop using the homelab?",
           "Everything runs on this computer again (after a restart of NUauto): its updates, Discord messages and NUauto's page there stop being used from here. Nothing on the homelab is deleted.",
-          "Stop using it", async () => { const r = await post({ action: "off" }); if (r) fill(out, restartNote()); }, { danger: true }) }))) :
+          "Stop using it", async () => { const r = await post({ action: "off" }); if (r) fill(note, restartNote()); }, { danger: true }) }))) :
       h.saved ? restartNote() : null,
-      h.on ? deploysPanel(h, post) : null,
-    el("div", { class: "row" }, el("label", { class: "field grow" }, "Its ssh name", el("span", { class: "muted small", text: "What you type after ssh (a key, no password)." }), ssh),
-      el("label", { class: "field grow" }, "NUauto's folder there", el("span", { class: "muted small", text: "Under its home folder." }), folder)),
-    el("div", {}, el("button", { class: "btn", text: "Check", testid: "hl-check", onclick: check })),
-    out);
+    note,
+    // in use: which one (its ssh name, folder) and the advanced parts fold away; not yet: the fields come first
+    h.on ? el("details", { testid: "hl-change" }, el("summary", { text: "Use another homelab: its ssh name and folder" }), el("div", { class: "stack" }, ...connect)) : connect,
+    h.on ? el("details", { testid: "hl-advanced" }, el("summary", { text: "Advanced: where its code comes from, Mark-done links" }), deploysPanel(h, post)) : null);
 }
 
 // The homelab in use: where its code comes from (GitHub's main by itself, or this computer at each push:

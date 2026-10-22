@@ -645,7 +645,7 @@ def main(argv):
         sys.exit(sync.ssh(f"cd {shlex.quote(config.SERVER_DIR)} && .venv/bin/nuauto review "
                           + " ".join(shlex.quote(a) for a in argv)))
     if not config.REMOTE_APP:
-        sys.exit("Turn on NUauto on your homelab first: the laptop's Settings > NUauto on your homelab (\"remote_app\" in "
+        sys.exit("Turn on NUauto on your homelab first: the laptop's Settings > Homelab > NUauto on your homelab (\"remote_app\" in "
                  "local_config.json; docs/REMOTE.md).")
     if argv[:1] == ["pair"]:
         rest = [a for a in argv[1:] if a != "--discord"]

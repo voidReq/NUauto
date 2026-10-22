@@ -319,7 +319,7 @@ def bitwarden():
     line there and logged in, and how many logins NUauto made still wait to go into your vault. Never unlocks it (its
     "unlocked" belongs to the terminal you unlocked it in, so locked is fine here)."""
     if (config.LOCAL.get("password_manager") or "") != "bitwarden":
-        return [check("bitwarden", "Bitwarden", OFF, "Not used (optional: Settings, Password manager).")]
+        return [check("bitwarden", "Bitwarden", OFF, "Not used (optional: Settings > Assistant > Password manager).")]
     from nuauto import accounts
     waiting = accounts.waiting()
     exe = None if config.DEMO else (shutil.which("bw") or config.tool_path("bw"))  # demo: never your real Bitwarden

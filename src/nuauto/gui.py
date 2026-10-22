@@ -1050,7 +1050,7 @@ def act(body):
             "only your logins whose address has: " + ", ".join(texts))
     elif kind == "review_pair":  # Pair this computer: a one-time link from the homelab, opened here (you press Pair)
         if not homelab_review():
-            raise Refused("NUauto on your homelab is off (Settings > NUauto on your homelab).")
+            raise Refused("NUauto on your homelab is off (Settings > Homelab > NUauto on your homelab).")
         from nuauto import review
         link = review.pair_link_from_homelab("this computer")
         if not link:
@@ -1079,7 +1079,7 @@ def act(body):
         return {"message": f"Linked as {name}: the homelab's sessions and runs open in this app."}
     elif kind == "pair_device":  # (homelab) a one-time link for another of your devices: you open it there, press Pair
         if not REMOTE:
-            raise Refused("Pairing is for NUauto on your homelab (Settings > NUauto on your homelab).")
+            raise Refused("Pairing is for NUauto on your homelab (Settings > Homelab > NUauto on your homelab).")
         from nuauto import review
         name = " ".join(str(args.get("name") or "").split())[:40] or "device"
         return {"link": review.make_pairing(name), "minutes": review.PAIR_TTL // 60}
@@ -1149,7 +1149,7 @@ def remote_assist_start(args):
     """(homelab) Start now: one row's assistant session in tmux (review.start_now: a free slot, its job site free, the
     caps, its records). Its screen here is #/assistant/<slot> once it runs."""
     if not config.REMOTE_ASSIST:
-        raise Refused("The assistant on the homelab is off (the laptop's Settings > NUauto on your homelab).")
+        raise Refused("The assistant on the homelab is off (the laptop's Settings > Homelab > NUauto on your homelab).")
     from nuauto import review
     started, message = review.start_now({"tab": "other" if args.get("tab") == "other" else "jobs",
                                          "row": str(args.get("row"))}, device_name())
@@ -1817,7 +1817,7 @@ def settings_put(body):
         updates["bitwarden_import"] = [t.strip() for t in texts if t.strip()]
     remote_keys = {"remote_assist", "remote_app", "remote_auto", "remote_hours"} & set(body)
     if remote_keys and REMOTE and not config.REMOTE_ASSIST:
-        raise Refused("The assistant on this homelab is off (the laptop's Settings > NUauto on your homelab).")
+        raise Refused("The assistant on this homelab is off (the laptop's Settings > Homelab > NUauto on your homelab).")
     if remote_keys and not REMOTE and not onboard.homelab_assistant()["available"]:
         raise Refused("NUauto on a homelab needs a homelab (Settings > Homelab, or server_hostname in local_config.json; "
                       "docs/DEPLOY.md).")
@@ -1942,7 +1942,7 @@ def setup_post(body):
     a = body.get("action")
     if REMOTE and a not in REMOTE_SETUP:
         raise Refused("This setup step is done on your laptop (it picks a file, logs in or makes something there). "
-                      "Open NUauto on your laptop: Settings > Open setup.")
+                      "Open NUauto on your laptop: Settings > App > Open setup.")
     try:
         if a == "ack":
             onboard.save_config({"tos_ack": date.today().isoformat()})
@@ -2035,7 +2035,7 @@ REMOTE_GROUPS_OFF = ("homelab", "bitwarden", "app")  # the laptop's checks: ssh 
 REMOTE_POSTS_OFF = {"/api/quit": "NUauto on your homelab stays on (it is part of nuauto-web).",
                     "/api/logins/export": "The logins file for Bitwarden is written on your laptop (Settings there).",
                     "/api/files": "Your resume and transcript are kept on your laptop: give NUauto there the new one "
-                                  "(Settings > Your files). It copies them here at once."}
+                                  "(Settings > Applying > Your files). It copies them here at once."}
 REQUEST = threading.local()  # the paired device a request comes from (its name goes in the run logs)
 APP_SCREEN_SLOT = 0          # the virtual screen of a run you watch here (Apply, the NUworks side); 1-3: the assistant's
 _TERMINAL = "It runs in a terminal window on your laptop (you type there, never into this page)."
@@ -2048,7 +2048,7 @@ LAPTOP_ONLY = {  # action -> why it is the laptop's (the homelab's page shows th
                      "It copies the session here.",
     "login_claude": "Claude Code logs in in a terminal. For the homelab's: in NUauto on your laptop, Settings > Homelab > "
                     "Log in to Claude there.",
-    "review_pair": "Pair this computer is the laptop's button. Here: Settings > Paired devices > Pair another device.",
+    "review_pair": "Pair this computer is the laptop's button. Here: Settings > Homelab > Paired devices > Pair another device.",
     **{k: "Bitwarden asks for your master password in a terminal window on your laptop: do this from NUauto there."
        for k in ("bitwarden_add", "bitwarden_import", "bitwarden_login", "bitwarden_install")},
 }
@@ -2198,7 +2198,7 @@ def page(title, body):
 
 
 NOT_PAIRED = ("This browser is not paired with NUauto on your homelab. Make a pairing link (on your laptop: Settings > "
-              "NUauto on your homelab > Pair this computer; for a phone, `nuauto review pair --discord`) and open it in "
+              "Homelab > NUauto on your homelab > Pair this computer; for a phone, `nuauto review pair --discord`) and open it in "
               "this browser. Paired a moment ago? A link opened from Discord may have opened in Discord's own browser, "
               "which keeps its own cookies: copy the link into your phone's browser (Safari, Chrome) and pair there.")
 
@@ -2218,7 +2218,7 @@ def paired_page(ok):
                     "for once: to come back, open this address again (bookmark it, or Add to Home Screen). Discord's "
                     "messages link here too.</p><p><a class='btn primary' href='/'>Open NUauto</a></p>")
     return page("Not paired", "<h1>Not paired</h1><p>That link is used up or expired (they work once, for "
-                "10 minutes). Make a new one: on your laptop, Settings > NUauto on your homelab > Pair this computer; "
+                "10 minutes). Make a new one: on your laptop, Settings > Homelab > NUauto on your homelab > Pair this computer; "
                 "or <code>nuauto review pair</code>.</p>")
 
 
@@ -2579,7 +2579,8 @@ def ask_instance_to_open(lock):
         return False
 
 
-SCREENS = ["home", "review", "apply", "sheet", "insights", "answers", "settings", "setup", "logs"]
+SETTINGS_SCREENS = ["settings/status", "settings/jobs", "settings/applying", "settings/assistant", "settings/homelab", "settings/app"]  # each Settings tab its own picture
+SCREENS = ["home", "review", "apply", "sheet", "insights", "answers", *SETTINGS_SCREENS, "setup", "logs"]
 
 # Review's internship list (when internships are on), as extra pictures: the first card, the one whose posting could not
 # be read (a kind-of-work choice that holds only it), and a search (every match as its own card). Each is made by
@@ -2611,7 +2612,7 @@ def review_intern_shots(page, base, folder, scheme, label):
     return made
 
 
-REMOTE_SCREENS = ["home", "apply", "company", "assistant/1", "assistant/2", "assistant/3", "settings", "setup"]
+REMOTE_SCREENS = ["home", "apply", "company", "assistant/1", "assistant/2", "assistant/3", *SETTINGS_SCREENS, "setup"]
 
 
 def screenshots(folder, url, remote=False):
@@ -2697,7 +2698,7 @@ def main(argv):
         return main_remote_demo(argv)
     if config.IS_SERVER:
         sys.exit("nuauto gui runs on your laptop. On the homelab, NUauto's page for your phone runs inside nuauto web "
-                 "(Settings > NUauto on your homelab, on the laptop).")
+                 "(Settings > Homelab > NUauto on your homelab, on the laptop).")
     VIEW = "--view" in argv
     if VIEW and config.DEMO:
         sys.exit("--view is for your real data; --demo is already fake. Use one of them.")

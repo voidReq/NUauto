@@ -297,7 +297,7 @@ try:
         page.wait_for_selector("text=Last run on the homelab: done", timeout=120000)
         assert "marked Applied" in page.inner_text("#view")
         # Settings: linked; Unlink, then Link again
-        page.goto(base + "/#/settings")
+        page.goto(base + "/#/settings/homelab")
         page.wait_for_selector("[data-testid=ha-link-status]:has-text('linked')")
         assert page.inner_text("[data-testid=ha-link-status]") == "linked"
         page.click("[data-testid=ha-link-toggle]")
@@ -305,7 +305,7 @@ try:
         page.goto(base + "/#/company")
         page.wait_for_selector("[data-testid=section-nuworks-agent]")
         assert page.locator("[data-testid$=-homelab-start]").count() == 0                     # not linked: no Start there
-        page.goto(base + "/#/settings")
+        page.goto(base + "/#/settings/homelab")
         page.click("[data-testid=ha-link-toggle]")
         page.wait_for_selector("[data-testid=ha-link-status]:text-is('linked')")
         # every screen, as on the other two pages

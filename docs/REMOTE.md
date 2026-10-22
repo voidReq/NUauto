@@ -74,12 +74,12 @@ Off again: Turn off in the same place (the homelab's page stops; its copies stay
 
 PAIR YOUR PHONE (once per device)
   nuauto review pair phone          (laptop or homelab; --discord also posts the link to your Discord)
-  or, from a device already paired: the homelab page's Settings > Paired devices > Make a pairing link.
+  or, from a device already paired: the homelab page's Settings > Homelab > Paired devices > Make a pairing link.
   Open the link on the phone, Tailscale on, and press Pair (within 10 minutes; the link works once). Pair the browser
   you will use: a link tapped in Discord opens in Discord's own browser, which keeps its own cookies (copy it into
   Safari / Chrome instead). Each browser is paired once; then bookmark http://<web_listen_host>:8766/ there (or Add to
   Home Screen). The laptop's browser: Settings > Homelab > Pair this computer.
-  nuauto review devices / nuauto review unpair <name>|--all     (or Settings > Paired devices > Unpair)
+  nuauto review devices / nuauto review unpair <name>|--all     (or Settings > Homelab > Paired devices > Unpair)
 
 THE QUEUE (remote.py; nuauto-assist.timer every 10 minutes runs `nuauto assist auto`)
 - On with "remote_auto" (and remote_assist), per sheet tab: true = both; {"nuworks": true, "other": false} = each on
@@ -233,7 +233,7 @@ THE LAPTOP'S LINK (link.py, 2026-10-15, my request: "as much support and smooth 
 - Settings > Homelab > This app: Link this app makes the laptop's NUauto one of the page's paired devices: a one-time
   pairing code from the homelab over ssh (`nuauto review pair` there), used up at once by the laptop's server. Its key:
   local/homelab_link.json (600), never shown, never synced; the device is named "NUauto on <this computer>" in the
-  page's Paired devices. Unlink forgets it here and unpairs it there; unpaired there (Settings > This homelab), the app
+  page's Paired devices. Unlink forgets it here and unpairs it there; unpaired there (Settings > Homelab > This homelab), the app
   forgets it at its next request and shows "not linked" until you press Link again.
 - The laptop's server makes every request itself, to the page's own address (Tailscale), as that device; the laptop's
   page only ever talks to the laptop's server (/api/homelab/...). What the homelab's page refuses, it refuses here too,

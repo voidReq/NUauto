@@ -21,7 +21,7 @@ WHAT IT IS
   devices (your phone). Every screen is the same; the page knows where it runs (state.where) and shows what only the
   laptop can do (state.laptop_only: logins, terminal windows, the laptop's files, Bitwarden, setup's file steps, Quit) as
   "On your laptop" with the reason; the server refuses those there (the Bitwarden card is left out). What it adds there:
-  each assistant session's screen (#/assistant/<slot>), the queue in Apply (each row's chip, the Assistants tab), Settings > This homelab (paired
+  each assistant session's screen (#/assistant/<slot>), the queue in Apply (each row's chip, the Assistants tab), Settings > Homelab > This homelab (paired
   devices). Without a homelab none of it exists, and the laptop's app is unchanged.
 - Each thing in one place (2026-10-14), with or without a homelab: Today has one list of what only you can do (the
   assistants waiting for you first, each item opening where you do it: no second Mark done or Open job there); Apply
@@ -156,36 +156,48 @@ SCREENS
                  that is another entry's wording, naming both
   Ctrl+F         (Cmd+F on a Mac) goes to the screen's own search box: Apply, Review, Answers ([data-find]); elsewhere, and in
                  a dialog, the browser's own find
-  Settings       every health check (run them now), logins (Google, NUworks, Claude Code, and Gmail: the read-only login
-                 for the assistant's email codes, with a link to turn the Gmail API on), resume label, applications per
-                 week (the weekly cap), week start; Your files (the resume and the transcript: YOUR FILES);
-                 the company-site assistant: account email, effort (low / medium / high), assistants at once (1-3, on each
-                 machine; no homelab needed), the folders it may read, your writeups (assist_writeups: the first place it
-                 looks for essays), its job-site logins (how many; Export for Bitwarden: the import file in ~/Downloads,
-                 mode 600, and how to import it); Summer internships (optional; local_config "internships",
-                 docs/PIPELINE.md): on / off, the term as the lists name it (a new year's term moves the lists' addresses
-                 with it), the match % to enter the pool (empty: the co-ops' bar), each list's address (empty: not read);
-                 Password manager (optional, for anyone; local_config "password_manager": "bitwarden"): Use Bitwarden / Stop
-                 using it, Install it (npm @bitwarden/cli, then bw login, in a terminal window), Add N to Bitwarden (a terminal
-                 window: bw unlock asks your master password itself, then `nuauto accounts export --bitwarden`), Your own logins
-                 (words their addresses contain, "bitwarden_import") + Import my logins (a terminal: unlock, then `bw list items
-                 --search <word> | nuauto accounts import - --only <word>` per word), Check now; Homelab (a source install,
-                 never the packaged app; onboard.homelab_link): its ssh name and folder, Check (over ssh, read-only:
-                 onboard.homelab_probe: its hostname, Tailscale address, NUauto / Claude / timers / lingering / the
-                 assistant's tools there), Use this homelab (local_config's server fields; NUauto then needs a restart: the
-                 card offers Quit), Set it up (a terminal window: `nuauto onboard homelab-setup`, docs/DEPLOY.md's steps,
-                 each asked first; sudo asks for the homelab's password there), Log in to Claude there (ssh -t ... claude),
-                 Stop using it (local mode again); with one in use, its code (From GitHub's main / From this computer
-                 instead: deploy_from_git, a run of `nuauto onboard homelab-deploy on|off`: the code pushed once, the
-                 deploy timer turned on or off; your fork's address, deploy_repo) and the Mark-done links' public address
-                 (web_base_url; the homelab's web page restarts with it); in the same card, NUauto on your homelab (homelab mode only, docs/REMOTE.md): its page on /
-                 off (remote_app), its assistant on / off (remote_assist, which needs the page: both pushed to the homelab,
-                 nuauto-web restarted), Start sessions by itself, one switch for NUworks rows and one for Other jobs rows
-                 (remote_auto {"nuworks", "other"}), its hours (remote_hours), assistants at once (assist_slots), Pair this
-                 computer, Open it; setup, logs, quit. On the homelab's page one This homelab card: Paired devices (each
-                 one, "this one", Unpair, Make a pairing link for another device) and its assistant's queue settings (no
-                 on / off: the laptop's); the email and effort only (folders, export: on your laptop); Your files read-only; no
-                 Password manager card (Bitwarden unlocks on the laptop), no Quit
+  Settings       in tabs (#/settings/<tab>; plain #/settings: the last tab this session, else Status), the same on the
+                 homelab's page (2026-10-22, my request: it was one long page). A health poll redraws only Status's list
+                 of checks, never a form being typed in.
+                 Status: every health check (run them now); logins (Google, NUworks, Claude Code, and Gmail: the read-only
+                 login for the assistant's email codes, with a link to turn the Gmail API on).
+                 Jobs: What you're looking for (Setup's preferences step, the same form and save: term, year, match bars,
+                 kinds of work with their bonuses and lower bars, tags; saving rebuilds the pool); Summer internships
+                 (optional; local_config "internships", docs/PIPELINE.md): on / off, the term as the lists name it (a new
+                 year's term moves the lists' addresses with it), the match % to enter the pool (empty: the co-ops' bar),
+                 each list's address (empty: not read).
+                 Applying: applications per week (the weekly cap), week start, the resume NUauto picks (resume label), a
+                 link to your sheet (another sheet: Setup); Your files (the resume and the transcript: YOUR FILES).
+                 Assistant: the company-site assistant: email for job-site accounts, effort (low / medium / high),
+                 assistants at once (1-3, on each computer; no homelab needed), the folders it may read, writeups
+                 (assist_writeups: the first place it looks for essays), its job-site logins (how many; with Bitwarden off,
+                 Export for Bitwarden: the import file in ~/Downloads, mode 600, and how to import it; with it on, the
+                 Password manager card's Add is the way in). Password manager (optional, for anyone; local_config
+                 "password_manager": "bitwarden"): Use Bitwarden / Stop using it, Install it (npm @bitwarden/cli, then bw
+                 login, in a terminal window), Add N to Bitwarden (a terminal window: bw unlock asks your master password
+                 itself, then `nuauto accounts export --bitwarden`), Your own logins (words their addresses contain,
+                 "bitwarden_import") + Import my logins (a terminal: unlock, then `bw list items --search <word> | nuauto
+                 accounts import - --only <word>` per word), Check now.
+                 Homelab (a source install, never the packaged app; onboard.homelab_link): not in use: its ssh name and
+                 folder, Check (over ssh, read-only: onboard.homelab_probe: its hostname, Tailscale address, NUauto /
+                 Claude / timers / lingering / the assistant's tools there), Use this homelab (local_config's server
+                 fields; NUauto then needs a restart: the card offers Quit). In use: Set it up (a terminal window:
+                 `nuauto onboard homelab-setup`, docs/DEPLOY.md's steps, each asked first; sudo asks for the homelab's
+                 password there), Log in to Claude there (ssh -t ... claude), Stop using it (local mode again); folded
+                 away: another homelab's ssh name and folder, and Advanced: its code (From GitHub's main / From this
+                 computer instead: deploy_from_git, a run of `nuauto onboard homelab-deploy on|off`: the code pushed once,
+                 the deploy timer turned on or off; your fork's address, deploy_repo) and the Mark-done links' public
+                 address (web_base_url; the homelab's web page restarts with it). Its own card, NUauto on your homelab
+                 (homelab mode only, docs/REMOTE.md): its page on / off (remote_app), its assistant on / off
+                 (remote_assist, which needs the page: both pushed to the homelab, nuauto-web restarted), Start sessions
+                 by itself, one switch for NUworks rows and one for Other jobs rows (remote_auto {"nuworks", "other"}),
+                 its hours (remote_hours), Pair this computer, Open it, This app (link.py).
+                 App: Discord, automatic updates, app icon (Setup's extras step, the same body); Setup (open it, Run a
+                 self-test, logs); About (version, folders, Quit).
+                 On the homelab's page: Homelab is This homelab (Paired devices: each one, "this one", Unpair, Make a
+                 pairing link for another device) and Its assistant (its queue settings; no on / off: the laptop's);
+                 Assistant: the email, effort and assistants at once only (folders, export: on your laptop), no Password
+                 manager card (Bitwarden unlocks on the laptop); Applying: Your files read-only; App: Discord only, no Quit
   Setup          the wizard (below); opens by itself until setup is done (never on the homelab's page: setup is the
                  laptop's; there it says so, and the steps it can do are preferences, Discord and the resume label)
   Past runs      logs/ folders: actions.log and the screenshots before and after Submit
@@ -417,7 +429,7 @@ API (JSON; all need the cookie; POSTs need X-NUauto: 1)
   POST /api/quit
 
 YOUR FILES (2026-10-20, my request: "a way to upload a resume and a transcript into the gui")
-- The resume (Setup's resume step, or Settings > Your files) and the transcript (Settings > Your files; optional, Remove
+- The resume (Setup's resume step, or Settings > Applying > Your files) and the transcript (Settings > Applying > Your files; optional, Remove
   takes it out) are given to NUauto by dropping or choosing the PDF in the page. NUauto keeps its own copy,
   local/resume.pdf / local/transcript.pdf (mode 600; onboard.save_document: a PDF, up to 10 MB, the resume with text
   Claude can read), and points resume_path / transcript_path at it. So changing the PDF you had elsewhere changes

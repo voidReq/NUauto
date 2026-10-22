@@ -150,7 +150,7 @@ def main(argv):
         print("linked" if key() else "not linked")
     elif argv == ["forget"]:
         forget()
-        print("Forgotten here (unpair it on the homelab's page too: Settings > This homelab).")
+        print("Forgotten here (unpair it on the homelab's page too: Settings > Homelab > This homelab).")
     else:
         sys.exit(__doc__)
 
