@@ -7,6 +7,8 @@ import hashlib
 import json
 import os
 import sys
+import threading
+import time
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
@@ -193,14 +195,13 @@ def client(interactive=True):
     if not interactive:
         from google.oauth2.credentials import Credentials
         config.lock_token()
-        return gspread.Client(auth=Credentials.from_authorized_user_file(config.TOKEN_PATH),
-                              http_client=gspread.BackOffHTTPClient)
+        return gspread.Client(auth=Credentials.from_authorized_user_file(config.TOKEN_PATH), http_client=HTTPClient)
     fresh = not os.path.exists(config.TOKEN_PATH)  # gspread will open the browser for a Google login
     gc = gspread.oauth(
         scopes=config.WRITE_SCOPES,
         credentials_filename=config.find_client_json(),
         authorized_user_filename=config.TOKEN_PATH,
-        http_client=gspread.BackOffHTTPClient,
+        http_client=HTTPClient,
     )
     config.lock_token()
     if fresh:
@@ -209,9 +210,78 @@ def client(interactive=True):
     return gc
 
 
+class HTTPClient(gspread.BackOffHTTPClient):
+    """gspread's waiting client; a request Google refuses as unknown (a tab renamed or deleted, the sheet gone) or a login
+    that can't be renewed also forgets the opened sheet (OPEN), so the next call opens it again."""
+
+    def request(self, *args, **kwargs):
+        try:
+            return super().request(*args, **kwargs)
+        except gspread.exceptions.APIError as e:
+            if e.code in (400, 404):
+                forget()
+            raise
+        except RefreshError:
+            forget()
+            raise
+
+
+# The opened spreadsheet and its tabs, kept for OPEN_FOR seconds: opening costs two trips to Google before the rows
+# (about 0.5 s), every screen of the GUI reads the sheet, and one client keeps its connection open. Rows are always read
+# fresh. Opened again when the sheet ID or the Google login (its files) changes, when the login's access token is
+# about to expire (renewing it happens only in spreadsheet(), where an expired login is NotLoggedIn), or after a refused
+# request (HTTPClient). A tab keeps the one it was opened as: dragging tabs around never makes it another tab.
+OPEN_FOR = 300
+OPEN = {}
+_open_lock = threading.Lock()
+
+
+def forget():
+    """Open the sheet again on the next call (NUauto renamed, added or removed a tab; a request was refused)."""
+    with _open_lock:
+        OPEN.clear()
+
+
+def _login_key():
+    out = [config.SHEET_ID]
+    for p in (config.TOKEN_PATH, config.GOOGLE_LOGIN_PATH):
+        try:
+            st = os.stat(p)
+            out.append((st.st_mtime_ns, st.st_size))
+        except OSError:
+            out.append(None)
+    return tuple(out)
+
+
+def _opened(name):
+    """The kept spreadsheet (name "book") or tab ("main", "other"), or None."""
+    with _open_lock:
+        if not OPEN or OPEN["key"] != _login_key() or time.monotonic() - OPEN["at"] > OPEN_FOR:
+            OPEN.clear()
+            return None
+        creds = getattr(getattr(OPEN["book"], "client", None), "auth", None)  # (demo mode's fake sheet has none)
+        if creds is not None and not creds.valid:
+            OPEN.clear()
+            return None
+        return OPEN.get(name)
+
+
+def _keep(name, value):
+    with _open_lock:
+        if name == "book":
+            OPEN.clear()
+            OPEN.update(key=_login_key(), at=time.monotonic(), book=value)
+        elif OPEN.get("book") is not None:
+            OPEN[name] = value
+    return value
+
+
 def spreadsheet(interactive=True):
+    sh = _opened("book")
+    if sh is not None:
+        return sh
     try:
-        return client(interactive and not config.IS_SERVER).open_by_key(config.SHEET_ID)
+        sh = client(interactive and not config.IS_SERVER).open_by_key(config.SHEET_ID)
     except RefreshError:
         if config.IS_SERVER:
             raise NotLoggedIn("Google login expired. On the laptop run: nuauto login google")
@@ -220,14 +290,18 @@ def spreadsheet(interactive=True):
         print(f"Google login expired (it lasts {config.GOOGLE_LOGIN_DAYS} days). Opening the browser to log in again...")
         os.remove(config.TOKEN_PATH)
         return spreadsheet()
+    return _keep("book", sh)
 
 
 def open_worksheet(interactive=True):
     """The main tab (the first one): NUworks jobs only."""
+    ws = _opened("main")
+    if ws is not None:
+        return ws
     ws = spreadsheet(interactive).sheet1
     if ws.title == OTHER_TAB:
         raise SheetError(f"The first tab is {OTHER_TAB!r}. Drag your NUworks tab back to the first place.")
-    return ws
+    return _keep("main", ws)
 
 
 OTHER_TAB = "Other jobs"  # jobs that are not on NUworks (nuauto assist other): same columns, no weekly or total cap
@@ -240,9 +314,12 @@ class NoOtherTab(SheetError):
 def open_other(interactive=True, create=False):
     """The Other jobs tab. create=True makes it (headers, Status dropdown, styling) if the sheet has none yet;
     else a missing tab is a SheetError."""
+    ws = _opened("other")
+    if ws is not None:
+        return ws
     sh = spreadsheet(interactive)
     try:
-        return sh.worksheet(OTHER_TAB)
+        return _keep("other", sh.worksheet(OTHER_TAB))
     except gspread.exceptions.WorksheetNotFound:
         if not create:
             raise NoOtherTab(f"No {OTHER_TAB!r} tab yet: add a job to it (NUauto's Sheet screen, or "
@@ -250,7 +327,7 @@ def open_other(interactive=True, create=False):
     from nuauto import setup_sheet
     ws = sh.add_worksheet(title=OTHER_TAB, rows=setup_sheet.LAST_ROW, cols=len(HEADERS))
     setup_sheet.setup(sh, ws, title=OTHER_TAB)
-    return ws
+    return _keep("other", ws)
 
 
 SHEETS_API = "https://sheets.googleapis.com/v4/spreadsheets"
@@ -285,7 +362,14 @@ def google_login():
 
 
 def read_rows(ws):
-    return parse_rows(ws.get_all_values())
+    try:
+        return parse_rows(ws.get_all_values())
+    except gspread.exceptions.APIError as e:
+        # a kept tab renamed or deleted since it was opened: open it again, once
+        if e.code != 400:
+            raise
+        forget()
+        return parse_rows((open_other if ws.title == OTHER_TAB else open_worksheet)(interactive=False).get_all_values())
 
 
 def set_status(ws, row_number, status, notes=None, applied_date=None):

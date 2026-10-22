@@ -199,8 +199,11 @@ class FakeWorksheet:
         return fd
 
     def _load(self):
-        with open(self.path) as f:
-            return json.load(f)
+        try:
+            with open(self.path) as f:
+                return json.load(f)
+        except FileNotFoundError:  # the tab is gone (a reset, a test): what Google answers for a deleted tab
+            raise gspread.exceptions.APIError(FakeResponse({"error": {"code": 400, "message": f"demo: no tab {self.title!r}"}}))
 
     def get_all_values(self):
         rows = [list(r) for r in self._load()["rows"]]

@@ -19,6 +19,7 @@ Rules live in RULES below. Nothing here clicks Apply or changes NUworks.
 """
 import contextlib
 import glob
+import hashlib
 import html
 import json
 import math
@@ -992,16 +993,35 @@ def my_labels(details, ratings, rows):
     return out
 
 
+_TASTE = {}  # what the model learned from and the jobs it scored -> their taste (Review asks on every load and search)
+
+
+def taste_for(details, labels, ids):
+    """The taste model's score for each of ids ({id: 0..1}), or None until it can train (train). Trained again only
+    when the labels, a job's text or ids change: training takes about a second."""
+    texts = hashlib.sha256()
+    for i in sorted(details):
+        texts.update(f"{i}\0{doc(details[i])}\0".encode())
+    key = (texts.hexdigest(), json.dumps(labels, sort_keys=True), tuple(ids))
+    if key in _TASTE:
+        return _TASTE.get(key)
+    model = train(details, labels) if ids else None
+    taste = {i: float(v) for i, v in model[0](list(ids)).items()} if model else None
+    while len(_TASTE) >= 4:  # (the co-ops' and the internships' Review, each in both modes)
+        _TASTE.pop(next(iter(_TASTE)), None)
+    _TASTE[key] = taste
+    return taste
+
+
 def ranked_pool(details, ratings, rows):
-    """Pool order: match % until the model can train, then half match %, half your taste."""
+    """Pool order: match % until the model can train, then half match %, half your taste. Returns (pool, trained)."""
     pool = build_pool()
-    model = train(details, my_labels(details, ratings, rows))
-    if model:
-        taste = model[0]([r["id"] for r in pool]) if pool else {}
+    taste = taste_for(details, my_labels(details, ratings, rows), [r["id"] for r in pool])
+    if taste:
         for r in pool:
-            r["taste"] = float(taste[r["id"]])
+            r["taste"] = taste[r["id"]]
         pool.sort(key=pool_sort_key)
-    return pool, model
+    return pool, taste is not None
 
 
 def show(r, d):

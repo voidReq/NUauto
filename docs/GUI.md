@@ -135,9 +135,12 @@ SCREENS
                  and where you answer it (its screen; a laptop session: its terminal window).
                  GET /api/jobs?tab= is one tab's every row in its sections with what Move / Remove allow (gui.jobs_tab);
                  /api/apply, /api/company, /api/other, /api/sheet stay (the laptop's link reads the homelab's /api/company).
-                 The lists follow the sheet by themselves: /api/state carries rows_at (when the sheet was last read), the
-                 server reads it again after every finished row and run and when it is 30 s old, and the open screen
-                 reloads its lists when rows_at changes (no closing and reopening). "At most" keeps what you typed. The menu's
+                 The lists follow the sheet by themselves: /api/state carries sheet_version (+1 each time a read finds
+                 either tab changed), the server reads both tabs again after every finished row and run, when an
+                 assistant session starts or ends, and when they are 30 s old, and the open screen reloads its lists when
+                 sheet_version changes (no closing and reopening; each /api/jobs answer carries the version its rows are as
+                 new as, so the screen's own reload is not followed by a second one that would close an open menu). Opening the screen is answered from the rows read last
+                 and reads both tabs again behind it (SPEED). Each tab is drawn as soon as its own answer comes. "At most" keeps what you typed. The menu's
                  count is Approved + the assistant's rows + retries. #/sheet (the old Sheet screen) opens Apply.
   Insights       NUworks co-ops / "<term> internships" switch when internships are on (2026-10-16; remembered for the
                  session): each its own pool, applications and sheet tab (insights.collect / collect_intern: the internship
@@ -223,6 +226,20 @@ SETUP WIZARD (onboard.py + gui_static/setup.js; each step checks itself)
   password_manager   optional: the same Password manager part as Settings (done when Bitwarden is on and its check is OK)
   homelab            optional, a source install only: the same Homelab card as Settings (done when NUauto runs with one;
                      then its NUauto on your homelab part shows there too: one step for all of it)
+
+SPEED (2026-10-22, my request: "the apply page takes quite a while to load")
+- Google Sheets: the opened spreadsheet and its tabs are kept 5 minutes (sheet.OPEN; a read is one trip to Google,
+  about 0.25 s, not three); rows are always read fresh. Opened again on a new Google login, an access token about to
+  expire, or a refused request (a tab renamed or deleted: read_rows opens it again once). docs/DEPLOY.md.
+- Apply: answered from the rows read last (the NUworks tab's: up to 60 s; the Other jobs tab's: up to 30 s,
+  gui.other_rows); opening the screen (recheck=1) reads both again in the background, and a change reloads the lists.
+- Review: the list (pool, taste model, order) is kept until data/, your settings or the sheet's rows change
+  (gui.review_lists, keyed by every data/ file's size and time: a few ms); searches and filters only narrow it. The
+  taste model trains again only when your ratings or a job's text change (jobs.taste_for). The lists are made ahead at
+  start and a few seconds after your last decision (warm_review), so the first open and the next search are instant.
+- Buttons: one whose click starts something slower shows it at once (aria-busy) and takes no second click until it
+  is done (busyWhile); sheet changes from a row's menu show "Updating the sheet…" until the answer comes. Switching
+  screens shows Loading… at once; a screen you already left never takes over.
 
 HEALTH (health.py; the same checks `nuauto doctor` prints, `nuauto doctor --json`)
   check     how                                                               GUI runs it
@@ -335,7 +352,7 @@ VIEW MODE (`nuauto gui --view`; gui.VIEW; added 2026-10-09 so an agent can look 
   (a newer push to a pull request stops its older run).
 
 API (JSON; all need the cookie; POSTs need X-NUauto: 1)
-  GET  /api/state            counts, week, to-do, last scan, setup_needed, the current task; internships {on, term,
+  GET  /api/state            counts, week, to-do, last scan, setup_needed, the current task, sheet_version; internships {on, term,
                              review: how many wait for Review}; where (laptop | homelab), laptop_only {action: why} (the
                              homelab's page), remote_app (the laptop: the homelab's page address, when it has one); todo:
                              the assistants that wait for you first ({"kind": "assistant", "status", "text", "screen": its

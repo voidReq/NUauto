@@ -213,8 +213,12 @@ class App:
         self.rows, self.rows_at, self.rows_error, self.rows_try_at = None, 0, None, 0
         self.queue = {}            # job id -> pool entry, from the last review queue
         self.other_urls = None     # the Other jobs tab's links (not Proposed), as last read: the internship count
-        self.other_at = 0          # when they were last asked for
-        self.other_cache = None    # (when, rows) of the Other jobs tab, for the internship Review (gui.other_rows)
+        self.other_cache = None    # (when, rows) of the Other jobs tab (gui.other_rows)
+        self.other_last, self.other_exists = None, None  # the tab's rows as last read (kept by other_changed), is there one
+        self.other_try_at, self.other_reading = 0, False
+        self.other_gen = 0         # +1 on each change NUauto makes to the tab: a read begun before it is not kept
+        self.sheet_version = 0     # +1 each time a read finds either tab changed: the open screen reloads its lists then
+        self.seen_assistants = None  # the assistant sessions state() last saw (one ending may have changed its row)
         self.last_request = now()
         self.stopping = False
         self.window_kind = "none"  # "mac" / "gtk" (NUauto's own window), "app" / "tab" (a browser), "none"
@@ -291,13 +295,31 @@ class App:
     def refresh_soon(self, max_age=0):
         """Read the sheet again in the background when the rows are older than max_age seconds, so the lists and counts
         follow changes made elsewhere (a row finished in a run, an assistant in a terminal, the sheet itself). A failed
-        read is not tried again for 30 s."""
+        read is not tried again for max_age s (0: now, unless a read is under way). The Other jobs tab too: its screens
+        use the rows read last (other_rows)."""
+        self.refresh_other_soon(max_age)
         if self.rows is None or "sheet" in self.running_groups:
             return
-        if now() - max(self.rows_at, self.rows_try_at) < max(max_age, 1):
+        if now() - max(self.rows_at, self.rows_try_at) < max_age:
             return
         self.rows_try_at = now()
         threading.Thread(target=self.refresh_rows, kwargs={"force": True}, daemon=True).start()
+
+    def refresh_other_soon(self, max_age=0):
+        with self.lock:
+            read_at = self.other_cache[0] if self.other_cache else 0
+            if self.other_reading or now() - max(read_at, self.other_try_at) < max_age:
+                return
+            self.other_reading, self.other_try_at = True, now()
+
+        def read():
+            try:
+                other_rows()
+            except Exception:
+                pass
+            finally:
+                self.other_reading = False
+        threading.Thread(target=read, daemon=True).start()
 
     # ---- health
 
@@ -328,6 +350,8 @@ class App:
                 checks, rows = health.sheet_and_limits()
                 with self.lock:
                     if rows is not None:
+                        if rows != self.rows:
+                            self.sheet_version += 1
                         self.rows, self.rows_at, self.rows_error = rows, now(), None
                     else:
                         self.rows_error = checks[0].detail
@@ -423,7 +447,13 @@ class App:
         groups = [g for g in self.GROUPS if group_on(g)]
         for group in groups:
             self.next_run[group] = start + self.GROUPS[group][2]
+        warmed = False
         while not self.stopping:
+            if not warmed and self.rows is not None and now() - start > 5:  # Review's lists, made ahead (1-5 s each)
+                warmed = True
+                from nuauto import intern
+                threading.Thread(target=warm_review, daemon=True,
+                                 args=([("approve", "nuworks")] + ([("approve", "intern")] if intern.ENABLED else []),)).start()
             for group in groups:
                 if now() >= self.next_run.get(group, 0) and group not in self.running_groups:
                     self.next_run[group] = now() + self.GROUPS[group][1]
@@ -572,14 +602,11 @@ def review_counts(rows):
 
 def intern_count():
     """Cheap count for the menu: internships in Review (the pool and the ones that could not be read) that are not in
-    the Other jobs tab and not rated no. The tab's links are read in the background (at start, then every 10 minutes;
-    each internship Review and decision updates them too)."""
+    the Other jobs tab and not rated no. The tab's links are read in the background (APP.refresh_soon; each internship
+    Review and decision updates them too)."""
     from nuauto import intern
     if not intern.ENABLED:
         return 0
-    if now() - APP.other_at > (600 if APP.other_urls is not None else 60):
-        APP.other_at = now()
-        threading.Thread(target=read_other_quietly, daemon=True).start()
     ratings, seen = jobs.load("ratings.json", {}), APP.other_urls or set()
     return sum(1 for r in intern.load("pool.json", []) + intern.load("unread.json", [])
                if r["url"] not in seen and ratings.get(r["id"], {}).get("label") != 0)
@@ -614,6 +641,16 @@ def state():
     sheet_id = cfg.get("sheet_id") or ""
     task = APP.task
     from nuauto import intern
+    # which assistant sessions run now and what they want (the open screens reload their lists when this changes)
+    sessions = (",".join(f"{s.get('tab')}-{s.get('row')}:{s.get('slot')}:{(s.get('attention') or {}).get('kind', '')}"
+                         for s in assistants()["sessions"])
+                + "|" + ",".join(f"{s.get('tab')}-{s.get('row')}:{(s.get('attention') or {}).get('kind', '')}"
+                                 for s in homelab_assistants()))
+    if sessions != APP.seen_assistants:  # one that ended may have changed its row: the lists read the sheet again
+        if APP.seen_assistants is not None:
+            other_changed()
+            APP.refresh_soon()
+        APP.seen_assistants = sessions
     return {
         "demo": config.DEMO, "view": VIEW, "version": __import__("nuauto").__version__,
         # which machine this page runs on: "laptop" (nuauto gui) or "homelab" (its app, serve_remote), and what only the
@@ -623,13 +660,9 @@ def state():
         "homelab_link": link_state(),     # (laptop) this app's link to it: start there, its sessions, its runs
         "commit": code_commit(),          # which code this machine runs (both pages show it)
         "internships": {"on": intern.ENABLED, "term": intern.TERM, "review": intern_count()},
-        # which assistant sessions run now and what they want (the open screens reload their lists when this changes)
-        "assistants": ",".join(f"{s.get('tab')}-{s.get('row')}:{s.get('slot')}:{(s.get('attention') or {}).get('kind', '')}"
-                               for s in assistants()["sessions"])
-        + "|" + ",".join(f"{s.get('tab')}-{s.get('row')}:{(s.get('attention') or {}).get('kind', '')}"
-                         for s in homelab_assistants()),
+        "assistants": sessions,
         "mode": "homelab" if config.HAS_SERVER else "local", "setup_needed": setup_needed(),
-        "rows_loaded": rows is not None, "rows_at": APP.rows_at, "rows_error": APP.rows_error, "week": week_info(rows),
+        "rows_loaded": rows is not None, "rows_at": APP.rows_at, "sheet_version": APP.sheet_version, "rows_error": APP.rows_error, "week": week_info(rows),
         "counts": {"review": len(todo), "approved": len(approved), "company": len(agent) + len(retry), "site": len(site),
                    "apply": len(approved) + len(agent) + len(retry),  # the Apply menu item: its rows + Company sites
                    "needs_human": len(agent) + len(other)},
@@ -696,7 +729,8 @@ def todo_list(site, agent, soon):
     return waiting + rest
 
 
-OTHER_ROWS_FOR = 30  # seconds the internship Review reuses the Other jobs tab's rows (it asks on every search)
+OTHER_ROWS_FOR = 30  # seconds the Apply screen and the internship Review reuse the Other jobs tab's rows (Review asks on
+#                     every search); /api/state reads them again in the background when they are that old
 
 
 def other_rows(fresh=True):
@@ -704,45 +738,118 @@ def other_rows(fresh=True):
     the rows read in the last OTHER_ROWS_FOR seconds will do (each read costs Google quota: about 60 a minute; every
     change NUauto makes to the tab forgets them)."""
     from nuauto import intern
-    if not fresh and APP.other_cache and now() - APP.other_cache[0] < OTHER_ROWS_FOR:
-        return APP.other_cache[1]
+    cached, gen = APP.other_cache, APP.other_gen
+    if not fresh and cached and now() - cached[0] < OTHER_ROWS_FOR:
+        return cached[1]
     try:
-        rows = sheet.read_rows(worksheet(other=True))
+        rows, exists = read_tab(other=True), True
     except NoOtherTab:
-        rows = []
-    APP.other_urls = intern.sheet_urls(rows)
-    APP.other_cache = (now(), rows)
+        rows, exists = [], False
+    with APP.lock:
+        if gen != APP.other_gen:  # NUauto changed the tab while this was being read: the next ask reads it again
+            return rows
+        if rows != APP.other_last:
+            APP.sheet_version += 1
+        APP.other_last, APP.other_exists = rows, exists
+        APP.other_urls = intern.sheet_urls(rows)
+        APP.other_cache = (now(), rows)
     return rows
 
 
 def other_changed():
-    """NUauto changed the Other jobs tab: the next internship Review reads it again."""
-    APP.other_cache = None
+    """NUauto changed the Other jobs tab (or may have): the next Apply screen or internship Review reads it again."""
+    with APP.lock:
+        APP.other_gen += 1
+        APP.other_cache = None
 
 
-def read_other_quietly():
-    """other_rows in the background (for the count): a sheet that can't be read now is tried again later."""
+_review = {}  # (mode, source) -> (what it was made from, todo, urgent, details)
+_review_locks = {}
+
+
+def data_key():
+    """What Review's queue is made from, cheaply (a few ms): every file in data/ (its size and time: ratings, scores,
+    the pool, each job's details) and your settings."""
+    out = []
+    for root, dirs, files in os.walk(config.DATA_DIR):
+        dirs.sort()
+        for f in sorted(files):
+            try:
+                st = os.stat(os.path.join(root, f))
+            except OSError:
+                continue
+            out.append((root, f, st.st_mtime_ns, st.st_size))
     try:
-        other_rows()
-    except Exception:
+        st = os.stat(config.LOCAL_CONFIG_PATH)
+        out.append((st.st_mtime_ns, st.st_size))
+    except OSError:
         pass
+    return hash(tuple(out))
+
+
+def row_key(rows):
+    return tuple((r.number, r.url, r.status) for r in rows or [])
+
+
+def review_lists(mode, source="nuworks"):
+    """(todo, urgent, details) of the review queue, kept until what it is made from changes (training the taste model and
+    building the pool take 1-5 s; Review asks on every load and search)."""
+    rows = need_rows()
+    if source == "intern":
+        from nuauto import intern
+        if not intern.ENABLED:
+            raise Refused('Internships are off (add "internships": {} to local/local_config.json).')
+        other = other_rows(fresh=False)
+    with _review_locks.setdefault((mode, source), threading.Lock()):  # (a warm-up under way: wait for it, don't redo it)
+        key = (data_key(), date.today(), row_key(rows), row_key(other) if source == "intern" else None)  # (before reading)
+        kept = _review.get((mode, source))
+        if kept and kept[0] == key:
+            return kept[1:]
+        ratings = jobs.load("ratings.json", {})
+        if source == "intern":
+            todo, urgent = intern.review_queue(mode, ratings, other, rows)
+            details = {r["id"]: intern.details_for(r) for r in todo}
+        else:
+            details = jobs.load_details()
+            todo, urgent = jobs.review_queue(mode, details, ratings, rows)
+        _review[(mode, source)] = (key, todo, urgent, details)
+        return todo, urgent, details
+
+
+def warm_review(pairs):
+    """Make the review lists ahead (in the background): at start, and a few seconds after your last decision."""
+    for mode, source in pairs:
+        try:
+            review_lists(mode, source)
+        except Exception:
+            pass
+
+
+_warm = {"timer": None, "last": ("approve", "nuworks")}  # last: the list Review showed last
+
+
+def warm_review_soon():
+    """After a decision: the list Review shows is made again once you pause (WARM_AFTER s), so the next load or search
+    is instant. Only while the window's server runs."""
+    if SERVER is None:
+        return
+    if _warm["timer"]:
+        _warm["timer"].cancel()
+    _warm["timer"] = threading.Timer(WARM_AFTER, warm_review, args=([_warm["last"]],))
+    _warm["timer"].daemon = True
+    _warm["timer"].start()
+
+
+WARM_AFTER = 3
 
 
 def review(mode, q="", category="", source="nuworks"):
     """The review queue; q (words or "quoted phrases", all must appear) and category narrow what is shown.
     Decisions work on any job of the whole queue. source "intern": the internships (intern.py), whose Approve adds a
     row to the Other jobs tab."""
-    rows = need_rows()
+    todo, urgent, details = review_lists(mode, source)
+    _warm["last"] = (mode, source)
     ratings = jobs.load("ratings.json", {})
-    if source == "intern":
-        from nuauto import intern
-        if not intern.ENABLED:
-            raise Refused('Internships are off (add "internships": {} to local/local_config.json).')
-        todo, urgent = intern.review_queue(mode, ratings, other_rows(fresh=False), rows)
-        details = {r["id"]: intern.details_for(r) for r in todo}
-    else:
-        details = jobs.load_details()
-        todo, urgent = jobs.review_queue(mode, details, ratings, rows)
     APP.queue = {r["id"]: r for r in todo}
     counts = {}
     for r in todo:
@@ -807,6 +914,15 @@ def worksheet(other=False):
         raise Refused(str(e))
 
 
+def read_tab(other=False):
+    """worksheet's rows. A tab that went away since it was opened (sheet.read_rows opens it again) is NoOtherTab too."""
+    ws = worksheet(other)
+    try:
+        return sheet.read_rows(ws)
+    except sheet.NoOtherTab as e:
+        raise NoOtherTab(str(e))
+
+
 def decide(body):
     """Review answers. approve: the job goes in the sheet as Approved now (and counts as a yes for the ranking);
     yes / no: a rating only (no is skipped by Review from now on). Returns the new row for approve."""
@@ -841,6 +957,7 @@ def decide(body):
         APP.refresh_rows(force=True)
         out["row"] = next((x.number for x in APP.rows or [] if x.url == jobs.job_url(job_id)), None)
     jobs.set_rating(job_id, {"label": int(decision != "no"), "date": date.today().isoformat()})
+    warm_review_soon()
     return out
 
 
@@ -867,6 +984,7 @@ def undo(body):
         APP.refresh_rows(force=True)
     jobs.set_rating(job_id, {"label": previous["label"], "date": str(previous.get("date", ""))[:10]}
                     if isinstance(previous, dict) and previous.get("label") in (0, 1) else None)
+    warm_review_soon()
     return {}
 
 
@@ -1183,7 +1301,9 @@ def mark(body):
             sheet.mark_site_done(ws, int(row), url)
         elif action == "outcome":  # what you heard back: Accepted / Rejected (or back to Applied)
             from nuauto import setup_sheet
-            setup_sheet.ensure_dropdown(ws)  # (a sheet made before these statuses: its dropdown allows them now)
+            if (config.SHEET_ID, other) not in _dropdown_set:  # (a sheet made before these statuses: its dropdown allows them
+                setup_sheet.ensure_dropdown(ws)                 # now; once per start is enough)
+                _dropdown_set.add((config.SHEET_ID, other))
             sheet.set_outcome(ws, int(row), url, body["outcome"])
         elif action == "drop":
             sheet.drop(ws, int(row), url, body["why"])
@@ -1196,6 +1316,9 @@ def mark(body):
     else:
         APP.refresh_rows(force=True)
     return {}
+
+
+_dropdown_set = set()
 
 
 def assist_sessions():
@@ -1331,9 +1454,8 @@ def other_list():
     assistant sessions running now. exists is False until the first job is added (that makes the tab)."""
     from nuauto import assist
     from nuauto import intern
-    try:
-        rows = sheet.read_rows(worksheet(other=True))
-    except NoOtherTab:
+    rows = other_rows()
+    if not APP.other_exists:
         return {"exists": False, "tab": sheet.OTHER_TAB, "ready": [], "applied": [], "rest": [], **assistants()}
     facts = intern_facts({intern.clean_url(r.url) for r in rows if r.status == "Approved"})
     ready, applied, rest = [], [], []
@@ -1372,7 +1494,7 @@ def sheet_get():
     out = {}
     for tab in manage.TABS:
         try:
-            rows = sheet.read_rows(worksheet(other=tab == "other"))
+            rows = read_tab(other=tab == "other")
         except NoOtherTab:
             out[tab] = {"exists": False, "rows": []}
             continue
@@ -1381,7 +1503,7 @@ def sheet_get():
     return {"tabs": out, "names": manage.TABS, "busy": running("apply", "nuworks_side")}
 
 
-def jobs_tab(tab="nuworks", order="default"):
+def jobs_tab(tab="nuworks", order="default", recheck=False):
     """One tab of the Apply screen: every row of that sheet tab in sections, what is left to do first, each row with
     why it can't be moved / removed (None = it can). nuworks: approved (in the order Start goes), agent (the company's
     own site: the assistant), manual (only you can finish it on NUworks), owed (submitted on NUworks, the company site
@@ -1393,7 +1515,10 @@ def jobs_tab(tab="nuworks", order="default"):
     from nuauto import intern
     from nuauto import manage
     other = tab == "other"
-    rows = other_rows() if other else need_rows()
+    if recheck:  # the screen was just opened: answered from the rows read last, both tabs are read again behind it (a
+        APP.refresh_soon()  # change moves sheet_version, and the screen reloads by itself)
+    version = APP.sheet_version  # (before the rows: a read that lands meanwhile still moves it past this)
+    rows = other_rows(fresh=False) if other else need_rows()
     by_number = {r.number: r for r in rows}
     facts = intern_facts({intern.clean_url(r.url) for r in rows}) if other else None
 
@@ -1414,7 +1539,7 @@ def jobs_tab(tab="nuworks", order="default"):
     s = {k: [] for k in ("approved", "agent", "manual", "owed", "ready", "applied", "accepted", "rejected", "proposed",
                          "closed", "rest")}
     a = assistants()
-    out = {"tab": tab, "name": manage.TABS[tab], "busy": running("apply", "nuworks_side"), **a,
+    out = {"tab": tab, "name": manage.TABS[tab], "busy": running("apply", "nuworks_side"), **a, "sheet_version": version,
            "queue": queue_info() if REMOTE else _homelab.get("queue") if a["linked"] and config.REMOTE_ASSIST else None}
     later = {"Applied": "applied", "Accepted": "accepted", "Rejected": "rejected", "Proposed": "proposed", "Failed": "closed"}
     if other:
@@ -1424,7 +1549,7 @@ def jobs_tab(tab="nuworks", order="default"):
                 s["ready"].append(view(r, target=url, host=urlparse(url).hostname if url else None, why=why))
             else:
                 s[later.get(r.status, "rest")].append(view(r))
-        out["exists"] = bool(rows) or other_tab_exists()
+        out["exists"] = bool(rows) or bool(APP.other_exists)
     else:
         data = facts_data()
         run = apply_list(order)
@@ -1442,15 +1567,6 @@ def jobs_tab(tab="nuworks", order="default"):
         s[k].sort(key=lambda x: x["date"] or "", reverse=True)  # newest first
     out["sections"] = s
     return out
-
-
-def other_tab_exists():
-    """Is there an Other jobs tab yet (adding the first job makes it)?"""
-    try:
-        worksheet(other=True)
-        return True
-    except NoOtherTab:
-        return False
 
 
 def sheet_lookup(url):
@@ -2244,7 +2360,8 @@ GET_ROUTES = {
                                     q.get("q", "")[:200], q.get("category", "")[:40],
                                     "intern" if q.get("source") == "intern" else "nuworks"),
     "/api/apply": lambda q: apply_list(q.get("order", "default")),
-    "/api/jobs": lambda q: jobs_tab("other" if q.get("tab") == "other" else "nuworks", q.get("order", "default")),
+    "/api/jobs": lambda q: jobs_tab("other" if q.get("tab") == "other" else "nuworks", q.get("order", "default"),
+                                    q.get("recheck") == "1"),
     "/api/insights": lambda q: insights_get(q.get("source", "nuworks")),
     "/api/company": lambda q: company(),
     "/api/task": lambda q: {"task": APP.task.view(int(q.get("after", 0) or 0)) if APP.task else None},

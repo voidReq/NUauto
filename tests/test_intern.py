@@ -567,13 +567,20 @@ assert "not scored" in intern.sheet_item(unread)["notes"]
 ratings = {f"x{k}": {"label": k % 2, "date": "x"} for k in range(12)}
 nuworks = {f"x{k}": {"id": f"x{k}", "title": "Firmware" if k % 2 else "Sales", "skills": [], "function": [],
                      "description": ("firmware C embedded " if k % 2 else "sales marketing ") * 20} for k in range(12)}
-real_load = jobs.load_details
+real_load, real_train, trains = jobs.load_details, jobs.train, []
 jobs.load_details = lambda: nuworks
+jobs.train = lambda *a: (trains.append(1), real_train(*a))[1]
 pool, trained = intern.ranked_pool(ratings, [])
-assert trained and all("taste" in r for r in pool) and len(intern._TASTE) == 1
+assert trained and all("taste" in r for r in pool) and trains == [1]
 pool2, _ = intern.ranked_pool(ratings, [])
-assert [r["taste"] for r in pool2] == [r["taste"] for r in pool] and len(intern._TASTE) == 1
-jobs.load_details = real_load
+assert [r["taste"] for r in pool2] == [r["taste"] for r in pool] and trains == [1]  # not trained again
+nuworks["x1"] = {**nuworks["x1"], "description": "firmware sales " * 20}  # a job's text changed: trained again
+intern.ranked_pool(ratings, [])
+assert trains == [1, 1]
+ratings["x1"] = {"label": 0, "date": "x"}  # a new rating: trained again
+intern.ranked_pool(ratings, [])
+assert trains == [1, 1, 1]
+jobs.load_details, jobs.train = real_load, real_train
 
 # summary for the morning message; stats run
 intern.save("scans.json", [{"time": "2026-10-10T06:00", "listed": 4, "pool": 1}, {"time": "2026-10-08T06:00", "listed": 9, "pool": 9}])

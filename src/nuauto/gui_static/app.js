@@ -11,6 +11,24 @@ function safeHref(u) {
   return /^(https?:\/\/|#|\/)/i.test(u) ? u : null;
 }
 
+// A button (or form) whose handler starts something slower (it returns a promise) shows that at once, and takes no second
+// click until it is done
+const PENDING = new WeakSet();
+function busyWhile(n, handler) {
+  return (e) => {
+    if (PENDING.has(n)) { e.preventDefault(); return undefined; }
+    const r = handler(e);
+    if (r && typeof r.then === "function") {
+      const b = n.tagName === "FORM" ? n.querySelector("[type=submit]") || n : n;
+      PENDING.add(n);
+      b.setAttribute("aria-busy", "true");
+      const done = () => { PENDING.delete(n); b.removeAttribute("aria-busy"); };
+      r.then(done, done);
+    }
+    return r;
+  };
+}
+
 function el(tag, props, ...kids) {
   const n = document.createElement(tag);
   for (const [k, v] of Object.entries(props || {})) {
@@ -18,7 +36,9 @@ function el(tag, props, ...kids) {
     if (k === "class") n.className = v;
     else if (k === "text") n.textContent = v;
     else if (k === "testid") n.dataset.testid = v;
-    else if (k.startsWith("on") && typeof v === "function") n.addEventListener(k.slice(2), v);
+    else if (k.startsWith("on") && typeof v === "function") {
+      n.addEventListener(k.slice(2), (k === "onclick" && tag === "button") || (k === "onsubmit" && tag === "form") ? busyWhile(n, v) : v);
+    }
     else if (PROPS.has(k)) n[k] = v;
     else if (k === "href" || k === "src") { const h = safeHref(v); if (h) n.setAttribute(k, h); }
     else n.setAttribute(k, v === true ? "" : String(v));
@@ -95,6 +115,13 @@ function toast(msg, opts = {}) {
 }
 
 function fail(e) { toast(e.message || String(e), { error: true }); }
+
+// A change that takes a moment (the sheet): says so at once, until its answer comes
+async function working(text, p) {
+  const t = el("div", { class: "toast", role: "status", testid: "toast-working" }, el("span", { class: "spinner" }), el("span", { text }));
+  $("#toasts").append(t);
+  try { return await p; } finally { t.remove(); }
+}
 
 function modal(build, { onclose, label = "Dialog", testid = "dialog" } = {}) {
   const prev = document.activeElement;
@@ -177,7 +204,7 @@ function gone(msg, title) {
 // ------------------------------------------------------------------ shared state + polling
 
 const S = { state: null, checks: [], route: null, screen: null, task: null, taskAfter: 0, taskLog: [],
-            openQuestion: null, gone: false, lastTaskState: {} };
+            openQuestion: null, gone: false, lastTaskState: {}, routes: 0 };
 
 async function pollState() {
   if (S.gone) return;
@@ -185,9 +212,9 @@ async function pollState() {
     S.state = await api.get("/api/state");
   } catch (e) { return; }
   renderShell();
-  // the sheet was read again (a run finished, a row was applied, another window changed it): lists show it at once
-  const sheetChanged = S.rowsAt !== undefined && S.state.rows_at !== S.rowsAt;
-  S.rowsAt = S.state.rows_at;
+  // a read of the sheet found it changed (a run finished, a row was applied, another window changed it): lists show it at once
+  const sheetChanged = S.sheetVersion !== undefined && S.state.sheet_version !== S.sheetVersion;
+  S.sheetVersion = S.state.sheet_version;
   // an assistant started or ended (in its own terminal window): the Apply lists say which rows have one
   const assistantsChanged = S.assistants !== undefined && S.state.assistants !== S.assistants;
   S.assistants = S.state.assistants;
@@ -604,7 +631,7 @@ function markRow(kind, t, tab) {  // tab "other": a row of the sheet's Other job
   const text = kind === "site" ? `Mark the ${t.company} company-site application as done?` :
     `Mark ${tab === "other" ? "Other jobs " : ""}row ${t.row} (${t.company}) as Applied today? Only if you submitted it yourself.`;
   confirmBox(kind === "site" ? "Company site done?" : "You applied yourself?", text, "Yes, mark it", async () => {
-    try { await api.post("/api/mark", { action: kind, row: t.row, url: t.url, tab }); toast("Sheet updated."); pollState(); if (S.screen && S.screen.reload) S.screen.reload(); }
+    try { await working("Updating the sheet…", api.post("/api/mark", { action: kind, row: t.row, url: t.url, tab })); toast("Sheet updated."); pollState(); if (S.screen && S.screen.reload) S.screen.reload(); }
     catch (e) { fail(e); }
   });
 }
@@ -614,7 +641,7 @@ function markRow(kind, t, tab) {  // tab "other": a row of the sheet's Other job
 const SENT = ["Applied", "Accepted", "Rejected"];
 async function outcomeRow(t, outcome, tab) {
   try {
-    await api.post("/api/mark", { action: "outcome", outcome, row: t.row, url: t.url, tab });
+    await working("Updating the sheet…", api.post("/api/mark", { action: "outcome", outcome, row: t.row, url: t.url, tab }));
     toast(outcome === "Applied" ? "Back to Applied." : `Marked ${outcome.toLowerCase()}.`);
     pollState();
     if (S.screen && S.screen.reload) S.screen.reload();
@@ -632,7 +659,7 @@ function dropRow(t, tab) {  // tab "other": a row of the sheet's Other jobs tab
       el("div", { class: "row" }, ...DROP_REASONS.map(([why, label]) => el("button", { class: "btn danger", text: label, testid: `drop-${why}`,
         onclick: async () => {
           close();
-          try { await api.post("/api/mark", { action: "drop", why, row: t.row, url: t.url, tab }); toast("Dropped."); pollState(); if (S.screen && S.screen.reload) S.screen.reload(); }
+          try { await working("Dropping it…", api.post("/api/mark", { action: "drop", why, row: t.row, url: t.url, tab })); toast("Dropped."); pollState(); if (S.screen && S.screen.reload) S.screen.reload(); }
           catch (e) { fail(e); }
         } }))))));
 }
@@ -1061,18 +1088,21 @@ screens.apply = async (view) => {
     pane = el("div", { role: "tabpanel", id: "apply-pane", testid: "apply-pane" }, headBox, bar, listBox);
   fill(view, runBox, tabs, pane);
 
-  let reloads = 0;  // the newest reload wins: an older one answered last (read before a change) would undo it
-  async function reload() {
-    const mine = ++reloads;
-    const [n, o] = await Promise.allSettled([api.get(`/api/jobs?tab=nuworks&order=${sortOf("nuworks")}`), api.get("/api/jobs?tab=other")]);
-    if (mine !== reloads) return;
-    data.nuworks = n.status === "fulfilled" ? n.value : { error: n.reason.message };
-    data.other = o.status === "fulfilled" ? o.value : { error: o.reason.message };
-    for (const [t, d] of Object.entries(data)) {  // each row's key in the homelab's queue (Sort: the queue's order)
-      if (ok(d)) Object.values(d.sections).flat().forEach((r) => { r.qkey = `${t === "other" ? "other" : "jobs"}-${r.row}`; });
-    }
-    S.queue = data.nuworks.queue || data.other.queue || null;  // (the homelab's queue) each company-site row's place in it
-    draw();
+  let reloads = 0, loadedAt = 0;  // the newest reload wins: an older one answered last (read before a change) would undo it
+  async function reload(opening) {  // opening: the server answers from the rows read last and reads the sheet again behind it
+    const mine = ++reloads, again = opening === true ? "&recheck=1" : "";
+    loadedAt = Date.now();
+    // each tab is drawn as soon as its own answer comes (the other one may still be reading the sheet)
+    const one = (t, path) => api.get(path).catch((e) => ({ error: e.message })).then((d) => {
+      if (mine !== reloads) return;
+      // these rows are as new as that version: the poll does not reload the lists again for it (an open menu stays open)
+      if (ok(d) && d.sheet_version !== undefined) S.sheetVersion = Math.max(S.sheetVersion || 0, d.sheet_version);
+      if (ok(d)) Object.values(d.sections).flat().forEach((r) => { r.qkey = `${t === "other" ? "other" : "jobs"}-${r.row}`; });  // its key in the homelab's queue
+      data[t] = d;
+      S.queue = (data.nuworks && data.nuworks.queue) || (data.other && data.other.queue) || null;  // (the homelab's queue) each company-site row's place in it
+      draw();
+    });
+    await Promise.all([one("nuworks", `/api/jobs?tab=nuworks&order=${sortOf("nuworks")}${again}`), one("other", `/api/jobs?tab=other${again}`)]);
   }
 
   function running() { return S.task && S.task.kind === "apply" && S.task.state === "running"; }
@@ -1082,7 +1112,7 @@ screens.apply = async (view) => {
     const d = ok(data.nuworks) ? data.nuworks : ok(data.other) ? data.other : {};
     return { d, here: d.sessions || [], there: d.homelab || [] };
   }
-  const todo = (d, keys) => ok(d) ? keys.reduce((n, k) => n + d.sections[k].length, 0) : 0;
+  const todo = (d, keys) => ok(d) ? keys.reduce((n, k) => n + d.sections[k].length, 0) : d ? 0 : null;  // null: not read yet
   function counts() {
     const s = sessions();
     return { nuworks: todo(data.nuworks, ["approved", "agent", "manual", "owed"]), other: todo(data.other, ["ready"]),
@@ -1093,7 +1123,7 @@ screens.apply = async (view) => {
     const n = counts(), label = { nuworks: "NUworks co-ops", other: otherTabLabel(), assistants: "Assistants" };
     fill(tabs, ...TABS.map((k) => el("button", { role: "tab", testid: `tab-${k}`, "aria-selected": String(tab === k), "aria-controls": "apply-pane",
       onclick: () => { tab = k; sessionStorage.setItem("applyTab", k); drawTabs(); drawPane(); } },
-      label[k], el("span", { class: "count", text: String(n[k]) }))));
+      label[k], el("span", { class: "count", text: n[k] === null ? "…" : String(n[k]) }))));
   }
 
   // Search, kind of work, the order, Add a job: the same for both sheet tabs
@@ -1328,12 +1358,13 @@ screens.apply = async (view) => {
       el("button", { class: "btn small", text: "Follow it here", testid: "btn-follow-homelab", onclick: () => { followHomelabTask(); drawPane(); } }));
   }
 
-  await reload();
+  await reload(true);
   // refresh: the sheet changed (a run finished, a row was applied, something was done elsewhere): read the lists again
   return { task: () => { drawRun(); if (S.task && S.task.state !== "running") reload(); },
     update: () => {  // redraw when a run starts or ends here, or one starts or ends on the homelab (its "Follow it here")
       const ht = S.state && S.state.homelab_link && S.state.homelab_link.task, key = ht ? `${ht.id}:${ht.state}` : "";
       if (running() !== drawnRunning || key !== drawnHomelab) { drawnHomelab = key; drawPane(); }
+      if (S.queue && Date.now() - loadedAt > 30000) reload();  // the homelab's queue moves on by itself (its hours, its waits)
     }, refresh: reload, reload };
 };
 
@@ -1446,7 +1477,7 @@ function moveRow(names, tab, r, done) {
 function removeRow(names, tab, r, done) {
   confirmBox("Remove this job?", `${r.company} · ${r.title} (${names[tab]} row ${r.row}). Its cells are cleared; the other rows keep their numbers.`,
     "Remove", async () => {
-      try { await api.post("/api/sheet", { action: "remove", tab, row: r.row, url: r.url }); toast("Removed."); pollState(); done(); }
+      try { await working("Removing it…", api.post("/api/sheet", { action: "remove", tab, row: r.row, url: r.url })); toast("Removed."); pollState(); done(); }
       catch (err) { fail(err); }
     }, { danger: true });
 }
@@ -2305,9 +2336,12 @@ async function route() {
   document.querySelectorAll(".side nav a").forEach((a) => a.classList.toggle("active", a.dataset.route === nav));
   $("#page-title").textContent = TITLES[key];
   document.title = `${TITLES[key]} · NUauto`;
-  const view = $("#view");
-  fill(view, );
-  try { S.screen = (await screens[key](view)) || {}; } catch (e) { fail(e); S.screen = {}; }
+  const view = $("#view"), mine = ++S.routes;
+  fill(view, el("p", { class: "empty", testid: "screen-loading" }, el("span", { class: "spinner" }), " Loading…"));
+  let screen;
+  try { screen = (await screens[key](view)) || {}; } catch (e) { if (mine === S.routes) fail(e); screen = {}; }
+  if (mine !== S.routes) { if (screen.leave) screen.leave(); return; }  // you went on to another screen meanwhile
+  S.screen = screen;
   renderTaskbar();
   pollState();  // fresh counts for the new screen, not the last poll's
   view.focus({ preventScroll: true });
