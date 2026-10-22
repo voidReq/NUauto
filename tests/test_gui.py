@@ -150,8 +150,14 @@ try:
     rows = json.load(open(os.path.join(STATE, "local", "demo_sheet_DEMO-SHEET.json")))["rows"]
     assert rows[r["row"] - 1][3] == "Approved"
     assert json.load(open(os.path.join(STATE, "data", "ratings.json")))[first]["label"] == 1
+    # quick: the list made before the decision comes at once (stale: a new one is on its way), without the job just
+    # decided here; the next ask without quick waits for the new list
+    quick = get("/api/review?mode=approve&quick=1")
+    assert quick["stale"] and first not in [j["id"] for j in quick["jobs"]], quick
     # Review's list is kept between loads and made again when what it comes from changes (here: the sheet, a rating)
-    assert first not in [j["id"] for j in get("/api/review?mode=approve")["jobs"]]
+    fresh = get("/api/review?mode=approve")
+    assert not fresh["stale"] and first not in [j["id"] for j in fresh["jobs"]]
+    assert get("/api/review?mode=approve&quick=1")["stale"] is False  # nothing changed since: the kept list, fresh
     post("/api/undo", {"id": first, "row": r["row"], "previous": None})
     rows = json.load(open(os.path.join(STATE, "local", "demo_sheet_DEMO-SHEET.json")))["rows"]
     assert rows[r["row"] - 1][3] == "Proposed" and first not in json.load(open(os.path.join(STATE, "data", "ratings.json")))
@@ -819,6 +825,10 @@ try:
                                "document.querySelector('[data-testid=q-menu-u]')", timeout=120000)
         assert page.locator("[data-testid=q-menu-u]").count() == 0, "unexpected: NUworks' confirmation was not seen"
         assert page.locator("[data-testid=apply-shot]").count() == 1
+        page.click("[data-testid=btn-run-close]")  # a finished run's box closes (and stays closed when the screen redraws)
+        page.wait_for_selector("[data-testid=apply-run]", state="detached")
+        page.wait_for_timeout(2500)
+        assert page.locator("[data-testid=apply-run]").count() == 0
         # the finished rows leave the Approved list by themselves (no reopening): Applied / Needs Human rows are not Approved
         page.wait_for_function("() => !document.querySelector('[data-testid=approved-list]')", timeout=20000)
         rows = {r[1]: r[3] for r in json.load(open(os.path.join(STATE, "local", "demo_sheet_DEMO-SHEET.json")))["rows"][1:]}

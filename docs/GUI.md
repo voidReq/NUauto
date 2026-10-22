@@ -86,7 +86,8 @@ SCREENS
   Apply          (2026-10-16, my request: one place per sheet tab; the Sheet screen merged in) three tabs, each with its
                  count, the one you picked remembered (#/company, Today's buttons: NUworks co-ops; #/other: the internships):
                  NUworks co-ops (the sheet's NUworks tab: the weekly limit), "<term> internships" ("Other jobs" when
-                 internships are off: the sheet's Other jobs tab, no limits), Assistants. The live run above them.
+                 internships are off: the sheet's Other jobs tab, no limits), Assistants. The live run above them
+                 (a finished run's box has × to close it: remembered for the session, per run; 2026-10-22, my request).
                  A sheet tab: (NUworks) the week's count, At most and Start (Run on: this computer / the homelab, linked),
                  How Start works folded; (the other tab, laid out the same, 2026-10-18, my request: "same buttons, same
                  subtext") no limit here, how many are ready and applied, Run on, How Apply works folded; then one toolbar: Search this tab (words, all must appear, any case, in company,
@@ -237,6 +238,13 @@ SPEED (2026-10-22, my request: "the apply page takes quite a while to load")
   (gui.review_lists, keyed by every data/ file's size and time: a few ms); searches and filters only narrow it. The
   taste model trains again only when your ratings or a job's text change (jobs.taste_for). The lists are made ahead at
   start and a few seconds after your last decision (warm_review), so the first open and the next search are instant.
+  (2026-10-22, my request: Review still took 0.5-3 s) Review asks with quick=1: the list made last comes at once (about
+  10 ms) from the rows read last, never waiting on Google or a rebuild; when something changed since (stale) the page
+  asks again without quick and swaps the new list in without moving you (the job on screen stays, or the next one
+  still in the list; a search keeps how many it showed and the scroll; the same jobs draw nothing). A job decided here
+  after a list was made is left out of it (gui._decided). The monitor makes every kept list again when its rows, data/
+  or settings changed (warm_changed, every 15 s and on a sheet read that finds a change), so stale is rare. Each
+  source (co-ops / internships) has its own kept list: the switch is instant both ways.
 - Buttons: one whose click starts something slower shows it at once (aria-busy) and takes no second click until it
   is done (busyWhile); sheet changes from a row's menu show "Updating the sheet…" until the answer comes. Switching
   screens shows Loading… at once; a screen you already left never takes over.
