@@ -211,9 +211,10 @@ class App:
         self.notified = {}         # check id -> (status, time) of the last desktop notification
         self.first_round_done = False
         self.rows, self.rows_at, self.rows_error, self.rows_try_at = None, 0, None, 0
+        self.rows_version = 0      # sheet_version when these rows were read (the Apply screen's answer says it)
         self.queue = {}            # job id -> pool entry, from the last review queue
         self.other_urls = None     # the Other jobs tab's links (not Proposed), as last read: the internship count
-        self.other_cache = None    # (when, rows) of the Other jobs tab (gui.other_rows)
+        self.other_cache = None    # (when, rows, sheet_version then) of the Other jobs tab (gui.other_rows)
         self.other_last, self.other_exists = None, None  # the tab's rows as last read (kept by other_changed), is there one
         self.other_try_at, self.other_reading = 0, False
         self.other_gen = 0         # +1 on each change NUauto makes to the tab: a read begun before it is not kept
@@ -353,6 +354,7 @@ class App:
                         if rows != self.rows:
                             self.sheet_version += 1
                         self.rows, self.rows_at, self.rows_error = rows, now(), None
+                        self.rows_version = self.sheet_version
                     else:
                         self.rows_error = checks[0].detail
             else:
@@ -734,26 +736,31 @@ OTHER_ROWS_FOR = 30  # seconds the Apply screen and the internship Review reuse 
 
 
 def other_rows(fresh=True):
+    """other_rows_v's rows."""
+    return other_rows_v(fresh)[0]
+
+
+def other_rows_v(fresh=True):
     """The Other jobs tab's rows ([] before the tab exists); remembers its links for the menu's count. fresh=False:
     the rows read in the last OTHER_ROWS_FOR seconds will do (each read costs Google quota: about 60 a minute; every
-    change NUauto makes to the tab forgets them)."""
+    change NUauto makes to the tab forgets them). other_rows_v: (rows, the sheet_version they are as new as)."""
     from nuauto import intern
     cached, gen = APP.other_cache, APP.other_gen
     if not fresh and cached and now() - cached[0] < OTHER_ROWS_FOR:
-        return cached[1]
+        return cached[1], cached[2]
     try:
         rows, exists = read_tab(other=True), True
     except NoOtherTab:
         rows, exists = [], False
     with APP.lock:
         if gen != APP.other_gen:  # NUauto changed the tab while this was being read: the next ask reads it again
-            return rows
+            return rows, 0
         if rows != APP.other_last:
             APP.sheet_version += 1
         APP.other_last, APP.other_exists = rows, exists
         APP.other_urls = intern.sheet_urls(rows)
-        APP.other_cache = (now(), rows)
-    return rows
+        APP.other_cache = (now(), rows, APP.sheet_version)
+        return rows, APP.sheet_version
 
 
 def other_changed():
@@ -1517,8 +1524,12 @@ def jobs_tab(tab="nuworks", order="default", recheck=False):
     other = tab == "other"
     if recheck:  # the screen was just opened: answered from the rows read last, both tabs are read again behind it (a
         APP.refresh_soon()  # change moves sheet_version, and the screen reloads by itself)
-    version = APP.sheet_version  # (before the rows: a read that lands meanwhile still moves it past this)
-    rows = other_rows(fresh=False) if other else need_rows()
+    if other:
+        rows, version = other_rows_v(fresh=False)
+    else:
+        need_rows()
+        with APP.lock:  # (the rows and the version they were read at, together)
+            rows, version = APP.rows, APP.rows_version
     by_number = {r.number: r for r in rows}
     facts = intern_facts({intern.clean_url(r.url) for r in rows}) if other else None
 
