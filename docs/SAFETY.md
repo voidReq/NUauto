@@ -18,7 +18,7 @@ APPLYING (apply.py, sheet.py)
   sheet.not_on_nuworks, fingerprint; never asked = counts) | test_sheet (the counts, the refusal, the NUworks answers)
 - Weekly cap counts every sent row dated this week, Accepted / Rejected too (they went out) | sheet.applied_dates, SENT | test_sheet
 - Applied row with no/odd date is an error, never guessed | sheet.applied_dates | test_sheet
-- One application at a time, 30-60 s apart | apply.run_rows loop, time.sleep(random.uniform(30, 60)) | no test
+- One application at a time, 10-20 s apart (30-60 until 2026-10-23); rows queued from the GUI go through the same loop and limit checks | apply.run_rows loop, time.sleep(random.uniform(*apply.BETWEEN)) | test_apply (the queue)
 - One machine submits on NUworks at a time (with NUauto's page on the homelab, both can run Apply; each counts the
   weekly cap before each submit): the homelab's runs take the turn there (it lasts while that process lives), the
   laptop's ask for it over ssh (it lasts until given back, at most 3 h); refused = not started ("Not now: ..."). The

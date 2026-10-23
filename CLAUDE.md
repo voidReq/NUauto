@@ -242,7 +242,7 @@ app's device key for the homelab's page)
 COMMANDS (installed in .venv; no activation needed)
 nuauto gui             # the window (setup, review, apply, health); --demo: everything fake; --view: my real data, read-only (agents: only these two)
 nuauto approve         # viewer: my Proposed rows first, then best unrated jobs: y = Approved in the sheet, n = no, s skip
-nuauto apply [-n 3] [--order match]  # submit every Approved row (30-60s between); real terminal (or the GUI) only
+nuauto apply [-n 3] [--order match]  # submit every Approved row (10-20s between); real terminal (or the GUI) only
                        # --order: default (closing within a week, then score) | score | match | closes | pay
 nuauto rate            # taste training viewer (keys in docs/PIPELINE.md)
 nuauto update          # check NUworks for new jobs now (runs on the homelab, then syncs)

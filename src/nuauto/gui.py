@@ -76,6 +76,7 @@ class Task:
         self.log, self.events, self.question, self.dropped = [], [], None, 0
         self.row = self.screenshot = self.last_shot = self.wait_until = None
         self.done_rows = []
+        self.queue, self.queue_file = [], None  # (Apply) rows to do next, in order, and the file the run reads them from
         self.state, self.code, self.stopping = "running", None, False
         self.settling = False  # ended, its on_done (the sheet read again) not finished yet: the page still sees running
         self.started, self.ended = now(), None
@@ -135,6 +136,8 @@ class Task:
         kind = msg.get("kind")
         if kind == "row":
             self.row, self.screenshot, self.wait_until = msg, None, None
+            if msg.get("row") in self.queue:  # started: out of the queue
+                self.set_queue([n for n in self.queue if n != msg.get("row")])
         elif kind == "row_done":
             self.done_rows.append(msg)
             if self.on_row:
@@ -143,6 +146,14 @@ class Task:
             self.screenshot = self.last_shot = msg.get("path")
         elif kind == "wait":
             self.wait_until = now() + float(msg.get("seconds") or 0)
+
+    def set_queue(self, rows):
+        """(Apply) the rows to do next, in order: written where the run reads them (apply.queued)."""
+        self.queue = rows
+        tmp = self.queue_file + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(rows, f)
+        os.replace(tmp, self.queue_file)
 
     def answer(self, qid, reply):
         q = self.question
@@ -179,7 +190,7 @@ class Task:
                 "code": self.code,
                 "started": self.started, "ended": self.ended, "log_total": self.total(),
                 "log": self.log[max(0, after - self.dropped):], "question": self.question,
-                "row": self.row, "done_rows": self.done_rows, "wait_until": self.wait_until,
+                "row": self.row, "done_rows": self.done_rows, "wait_until": self.wait_until, "queue": self.queue,
                 "screenshot": shot_url(self.screenshot if self.state == "running" else self.last_shot),
                 "browser": self.browser, "background": self.background,
                 # (homelab) its browser on the virtual screen, to watch and use from your phone: the view's link and the
@@ -1117,10 +1128,15 @@ def act(body):
     args = body.get("args") or {}
     if REMOTE and kind in LAPTOP_ONLY:
         raise Refused(LAPTOP_ONLY[kind])
-    if kind == "apply" and args.get("on") == "homelab":  # (laptop) Run on the homelab: its page runs it, this app follows
-        r = homelab("POST", "/api/action", {"kind": "apply", "args": {k: args[k] for k in ("n", "row", "order") if k in args}})
+    if kind in ("apply", "apply_unqueue") and args.get("on") == "homelab":  # (laptop) Run on the homelab: its page runs it
+        r = homelab("POST", "/api/action", {"kind": kind, "args": {k: args[k] for k in ("n", "row", "order") if k in args}})
         homelab_soon()
         return homelab_task_view(r)
+    if kind == "apply_unqueue":  # a queued row's button again: out of the run's queue
+        cur = apply_run()
+        if cur and str(args.get("row")).isdigit():
+            cur.set_queue([n for n in cur.queue if n != int(args["row"])])
+        return {"queue": cur.queue if cur else [], "message": "Taken out of the queue."}
     if kind == "apply":
         from nuauto import apply
         why = apply_list()["why_not"]
@@ -1133,12 +1149,20 @@ def act(body):
         if row not in (None, ""):  # just this one Approved row (its Apply button)
             if not str(row).isdigit() or int(row) not in {r["row"] for r in apply_list()["rows"]}:
                 raise Refused("That row is not Approved (reload the list).")
+            cur = apply_run()
+            if cur:  # a run is going: this row waits in its queue (done next, in the order you clicked)
+                return queue_row(cur, int(row))
             cmd += ["--row", str(int(row))]
         elif n not in (None, ""):
             if not str(n).isdigit() or int(n) < 1:
                 raise Refused("At most how many? A whole number, 1 or more.")
             cmd += ["-n", str(int(n))]
-        task = APP.start("apply", "Applying", cmd, env=VISIBLE, on_done=lambda t: APP.run_now(["quick"]), watch=True)
+        os.makedirs(config.WORK_DIR, exist_ok=True)
+        qfile = os.path.join(config.WORK_DIR, f"apply_queue_{secrets.token_hex(4)}.json")
+        with open(qfile, "w") as f:
+            json.dump([int(n) for n in args.get("queue") or []], f)
+        task = APP.start("apply", "Applying", cmd + ["--queue", qfile], env=VISIBLE, on_done=apply_done, watch=True)
+        task.queue_file, task.queue = qfile, [int(n) for n in args.get("queue") or []]
     elif kind == "update":
         from nuauto import sync
         # the homelab's update is its own service (its timer runs it too): started there, never a second copy beside
@@ -1277,6 +1301,41 @@ def act(body):
     else:
         raise Refused(f"Unknown action {kind!r}.")
     return {"task": task.view()}
+
+
+def apply_run():
+    """The Apply run going now (that takes a queue), or None."""
+    cur = APP.task
+    return cur if cur and cur.kind == "apply" and cur.state == "running" and cur.queue_file else None
+
+
+def queue_row(cur, row):
+    if cur.stopping:
+        raise Refused("The run is stopping: Apply again once it has.")
+    if (cur.row or {}).get("row") == row:
+        raise Refused("That one is being applied to now.")
+    if row in {d.get("row") for d in cur.done_rows}:
+        raise Refused("That one was already tried in this run.")
+    if row not in cur.queue:
+        cur.set_queue(cur.queue + [row])
+    return {"queue": cur.queue, "message": f"Queued: #{cur.queue.index(row) + 1} in line."}
+
+
+def apply_done(task):
+    """An Apply run ended. Rows queued just as it was ending (it had already found the queue empty) get a run of
+    their own; a stopped or failed run drops its queue."""
+    APP.run_now(["quick"])
+    try:
+        os.remove(task.queue_file)
+    except OSError:
+        pass
+    approved = {r["row"] for r in apply_list()["rows"]}
+    left = [n for n in task.queue if n in approved]
+    if left and task.state == "done":
+        try:
+            act({"kind": "apply", "args": {"row": left[0], "queue": left[1:]}})
+        except (Refused, Busy):
+            pass
 
 
 def answer(body):

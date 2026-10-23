@@ -1106,7 +1106,7 @@ screens.apply = async (view) => {
   let words = [];  // the search box's words: a row shows when it has every one
   let folded = {};  // the sections you opened or folded, "tab:section" -> open
   try { folded = JSON.parse(sessionStorage.getItem("applyOpen") || "{}"); } catch (e) { folded = {}; }
-  let drawnRunning = null, drawnHomelab = "";
+  let drawnRunning = null, drawnHomelab = "", drawnQueue = "";
   // Made once and moved into each redraw, so what you typed (and the focus) is never lost.
   const atMost = el("input", { type: "number", min: "1", id: "apply-n", testid: "apply-n", "aria-label": "At most this many", placeholder: "all" });
   const find = el("input", { type: "search", class: "grow", testid: "apply-search", "data-find": true,
@@ -1182,6 +1182,7 @@ screens.apply = async (view) => {
 
   function drawPane() {
     drawnRunning = running();
+    drawnQueue = queueKey();
     drawBar();
     const d = data[tab];
     fill(headBox, !ok(d) ? null : tab === "nuworks" ? weekCard(d) : tab === "other" ? otherCard(d) : null);
@@ -1232,8 +1233,7 @@ screens.apply = async (view) => {
     let chips = [], next = null, open = linkOut(r.url, "Open"), about = null;
     if (key === "approved") {
       chips = [r.company_site ? el("span", { class: "chip", text: "may also want the company's site", title: r.company_site }) : null, dueChip(r)];
-      next = el("button", { class: "btn small", testid: `btn-apply-row-${r.row}`, disabled: !!d.why_not || !!(S.task && S.task.state === "running"),
-        text: "Apply", title: "Apply to just this job now", onclick: () => applyRow(r) });
+      next = applyButton(d, r);
     } else if (key === "agent") {
       chips = [dueChip(r)];
       about = r.host;
@@ -1304,7 +1304,7 @@ screens.apply = async (view) => {
       followNote(),
       d.why_not ? el("div", { class: "note warn", testid: "apply-why", text: d.why_not }) :
         el("details", { class: "how" }, el("summary", { text: "How Start works" }),
-          el("p", { class: "small muted", text: (onHomelab() ? "Approved in the sheet is your go-ahead. Each job is filled and submitted in a browser on the homelab, which you watch and use from here (its link shows when it starts), one at a time, 30–60 s apart. Only one machine applies at a time." : "Approved in the sheet is your go-ahead. Each job is filled and submitted in a visible Firefox window, one at a time, 30–60 s apart.") + " Every form is screenshotted before Submit. Questions without a saved answer come up here. A job that sends you to the company's own site, or needs something only you can give (a cover letter, a transcript), stops (nothing submitted) and moves to Company site needed or By hand on NUworks below. Stop works like Ctrl+C." })));
+          el("p", { class: "small muted", text: (onHomelab() ? "Approved in the sheet is your go-ahead. Each job is filled and submitted in a browser on the homelab, which you watch and use from here (its link shows when it starts), one at a time, 10–20 s apart. Only one machine applies at a time." : "Approved in the sheet is your go-ahead. Each job is filled and submitted in a visible Firefox window, one at a time, 10–20 s apart.") + " Every form is screenshotted before Submit. Questions without a saved answer come up here. A job that sends you to the company's own site, or needs something only you can give (a cover letter, a transcript), stops (nothing submitted) and moves to Company site needed or By hand on NUworks below. While a run goes, a row's Apply adds it to the run's queue: queued rows are done next, in the order you clicked. Stop works like Ctrl+C (and empties the queue)." })));
   }
 
   // Run on: this computer / the homelab (the laptop linked to it): where Start, and each row's Apply, run. Both tabs.
@@ -1373,6 +1373,25 @@ screens.apply = async (view) => {
     pre.scrollTop = pre.scrollHeight;
   }
 
+  // A row's Apply: just this job now. While an Apply run goes, it joins that run's queue instead (done next, in the
+  // order you clicked; the button again takes it out).
+  function applyButton(d, r) {
+    const t = S.task, live = running(), q = (live && t.queue) || [], at = q.indexOf(r.row), testid = `btn-apply-row-${r.row}`;
+    if (live && t.row && t.row.row === r.row && !t.done_rows.some((x) => x.row === r.row)) return el("button", { class: "btn small", testid, disabled: true, text: "Applying…" });
+    if (at >= 0) return el("button", { class: "btn small", testid, text: `Queued #${at + 1}`, title: "Take it out of the queue",
+      onclick: () => queueRow(r, false) });
+    return el("button", { class: "btn small", testid, disabled: !!d.why_not || !!(S.task && S.task.state === "running" && !live),
+      text: live ? "Add to queue" : "Apply", title: live ? "Apply to it next in this run" : "Apply to just this job now",
+      onclick: () => live ? queueRow(r, true) : applyRow(r) });
+  }
+
+  function queueKey() { return running() ? `${(S.task.row || {}).row}:${(S.task.queue || []).join(",")}` : ""; }
+
+  async function queueRow(r, add) {  // the run's own machine (a run followed from the homelab: there)
+    const res = await action(add ? "apply" : "apply_unqueue", S.taskWhere === "homelab" ? { row: r.row, on: "homelab" } : { row: r.row });
+    if (res && res.queue && running()) { S.task.queue = res.queue; drawPane(); }
+  }
+
   function applyRow(r) {
     confirmBox(`Apply to ${r.company}?`, `${r.title} is filled and submitted now in ${onHomelab() || runOn() === "homelab" ? "a browser on the homelab you can watch from here" : "a visible Firefox window"}, the same way Start does it. Only this job.`,
       "Apply now", async () => { if (await action("apply", runArgs({ row: r.row }))) drawPane(); });
@@ -1394,7 +1413,7 @@ screens.apply = async (view) => {
 
   await reload(true);
   // refresh: the sheet changed (a run finished, a row was applied, something was done elsewhere): read the lists again
-  return { task: () => { drawRun(); if (S.task && S.task.state !== "running") reload(); },
+  return { task: () => { drawRun(); if (S.task && S.task.state !== "running") reload(); else if (queueKey() !== drawnQueue) drawPane(); },
     update: () => {  // redraw when a run starts or ends here, or one starts or ends on the homelab (its "Follow it here")
       const ht = S.state && S.state.homelab_link && S.state.homelab_link.task, key = ht ? `${ht.id}:${ht.state}` : "";
       if (running() !== drawnRunning || key !== drawnHomelab) { drawnHomelab = key; drawPane(); }
