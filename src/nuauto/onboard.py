@@ -254,7 +254,7 @@ def resume_preview(path):
 
 
 # ---------------------------------------------------------------- your files: the resume and the transcript
-# What you give NUauto (Setup's resume step, Settings > Your files) is kept as its own copy in local/, mode 600, and
+# What you give NUauto (Setup's resume step, Settings > Applying > Your files) is kept as its own copy in local/, mode 600, and
 # local_config points at it: replacing the PDF you had elsewhere changes nothing until you give NUauto the new one.
 # The laptop then pushes the copies to the homelab at once (gui.files_post -> sync.push_documents).
 
@@ -858,7 +858,7 @@ REPO_URL = re.compile(r"^https://[A-Za-z0-9.-]+/[A-Za-z0-9._/-]+$")
 
 
 def homelab_deploy(on, repo=None):
-    """`python -m nuauto.onboard homelab-deploy on|off [<repo>]` (Settings > Homelab > Deploys, run as a GUI task): the
+    """`python -m nuauto.onboard homelab-deploy on|off [<repo>]` (Settings > Homelab > Advanced, run as a GUI task): the
     homelab deploys GitHub's main by itself (deploy_from_git; docs/DEPLOY.md, TURN ON DEPLOY FROM GITHUB), or the laptop
     pushes its code again. repo: another fork's address ("" = this project's)."""
     from nuauto import sync
@@ -951,7 +951,7 @@ def homelab_setup():
         from nuauto import assist
         run("sudo apt install -y xvfb x11vnc novnc nodejs npm tmux && "
             f"npx -y -p {q(assist.MCP_PACKAGE)} playwright install firefox", tty=True)
-    print("\nDone. Check it: Settings > Health > Run all checks now (or `nuauto doctor`); then `nuauto update` runs "
+    print("\nDone. Check it: Settings > Status > Run all checks now (or `nuauto doctor`); then `nuauto update` runs "
           "one update there.")
 
 

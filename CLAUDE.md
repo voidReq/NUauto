@@ -46,7 +46,7 @@ GIT
 HARD LIMITS
 - Under 100 applications total.
 - Weekly cap, enforced in code (count sent rows (Applied, Accepted, Rejected) with a date in the current week; refuse to
-  run past the limit). sheet.py: MAX_PER_WEEK = 11 is the default, changeable in the GUI (Settings > Applications per week, local_config.json "max_per_week", 1-30; sheet.max_per_week()), MAX_TOTAL = 99 (decided 2026-10-03). A week =
+  run past the limit). sheet.py: MAX_PER_WEEK = 11 is the default, changeable in the GUI (Settings > Applying > Applications per week, local_config.json "max_per_week", 1-30; sheet.max_per_week()), MAX_TOTAL = 99 (decided 2026-10-03). A week =
   fixed 7-day periods from local_config.json "week_start" (sheet.week_window); without it, the last
   7 days. Mine: week_start 2026-10-06 (reset because I started applying late), then every 7 days.
   Approved rows beyond the cap just wait for the next week.
@@ -79,7 +79,7 @@ SAFETY RULES (most important)
    profile. The script selects only the exact "resume_label" saved in profile.json and
    never uploads anything.
    (Added 2026-10-12, my request.) The company-site agent may also upload my unofficial transcript (local_config.json
-   "transcript_path"; GUI Settings > Your files keeps it as local/transcript.pdf; the homelab gets a copy there), only where
+   "transcript_path"; GUI Settings > Applying > Your files keeps it as local/transcript.pdf; the homelab gets a copy there), only where
    a page asks for one. (2026-10-20) The resume and the transcript given in the GUI are NUauto's own copies in local/,
    pushed to the homelab at once (docs/GUI.md, YOUR FILES).
 7. (Changed 2026-10-03; GUI added 2026-10-05.) `nuauto apply` submits every Approved row, one at a

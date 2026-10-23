@@ -3,7 +3,8 @@ homelab's page (test_homelab_app.py), so a change to the page (gui_static/) is t
 
 # every screen in app.js (screens.<name>), and the old #/company, #/other, #/sheet (they land on Apply); #/assistant/<slot>
 # needs a session
-ROUTES = ("home", "review", "apply", "company", "other", "sheet", "insights", "answers", "settings", "logs", "setup")
+ROUTES = ("home", "review", "apply", "company", "other", "sheet", "insights", "answers", "settings", "settings/jobs",
+          "settings/applying", "settings/assistant", "settings/homelab", "settings/app", "logs", "setup")
 NAV = ["home", "review", "apply", "insights", "answers", "settings"]  # the menu: the same on both
 
 

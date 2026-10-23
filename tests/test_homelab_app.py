@@ -184,13 +184,21 @@ try:
         page.wait_for_selector("[data-testid=as-approval]:has-text('Approved: it is submitting now')")
         # a laptop-only button explains instead of acting
         page.goto(f"{ORIGIN}/#/settings")
-        page.wait_for_selector("[data-testid=devices]")
+        page.wait_for_selector("[data-testid=check-google]")
         page.click("button:has-text('Log in again')")
         page.wait_for_selector("[data-testid=laptop-only]:has-text('on your laptop')")
         page.keyboard.press("Escape")
-        assert page.locator("[data-testid=btn-quit]").count() == 0 and page.locator("[data-testid=hl-panel]").count() == 0
-        # one card for the homelab (its paired devices and its assistant), no Bitwarden card (the laptop's)
-        assert page.locator("[data-testid=homelab-settings]").count() == 1 and page.locator("[data-testid=pm-settings]").count() == 0
+        page.goto(f"{ORIGIN}/#/settings/app")
+        page.wait_for_selector("[data-testid=extras-settings] [data-testid=setup-discord-url], [data-testid=extras-settings] .chip")
+        assert page.locator("[data-testid=btn-quit]").count() == 0 and page.locator("[data-testid=setup-launcher]").count() == 0
+        page.goto(f"{ORIGIN}/#/settings/assistant")
+        page.wait_for_selector("[data-testid=assistant-settings]")
+        assert page.locator("[data-testid=pm-settings]").count() == 0
+        page.goto(f"{ORIGIN}/#/settings/homelab")
+        page.wait_for_selector("[data-testid=devices]")
+        assert page.locator("[data-testid=hl-panel]").count() == 0
+        # the Homelab tab: its paired devices (and its assistant, a card of its own); no Bitwarden card (the laptop's)
+        assert page.locator("[data-testid=homelab-settings]").count() == 1
         assert page.locator("[data-testid=homelab-settings] [data-testid=devices]").count() == 1
         # Apply > Assistants: one line for the assistants and the queue; each session opened from its own row
         page.goto(f"{ORIGIN}/#/apply")

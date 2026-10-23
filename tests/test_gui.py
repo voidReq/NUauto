@@ -1295,7 +1295,9 @@ fetch("{target}", {{method: "POST", credentials: "include", body: {json.dumps(bo
         # Install it shows and Add / Import are greyed out), the status strip gets its chip, Stop using it hides it again.
         # No homelab in demo: no Assistant on your homelab card.
         local_config = os.path.join(STATE, "local", "local_config.json")
+        page.click("[data-testid=settings-tab-assistant]")
         page.wait_for_selector("[data-testid=pm-settings]")
+        assert page.url.endswith("#/settings/assistant")
         assert page.locator("[data-testid=ha-settings]").count() == 0
         assert page.inner_text("[data-testid=pm-toggle]") == "Use Bitwarden"
         assert page.locator("[data-testid=pm-install]").count() == 0 and page.locator("[data-testid=health-bitwarden]").count() == 0
@@ -1333,6 +1335,7 @@ fetch("{target}", {{method: "POST", credentials: "include", body: {json.dumps(bo
         assert page.locator("[data-testid=pm-install]").count() == 0
         assert json.load(open(local_config))["password_manager"] == ""
         page.wait_for_selector("[data-testid=health-bitwarden]", state="detached", timeout=20000)
+        page.click("[data-testid=settings-tab-app]")
         page.click("[data-testid=btn-quit]")
         page.click("[data-testid=confirm-yes]")
         page.wait_for_selector("[data-testid=gone]")

@@ -4,7 +4,7 @@
   Linux   window_gtk.py, run by the system's python3 when it has GTK + WebKitGTK (most GNOME desktops)
   else    Chrome / Chromium / Brave / Edge in app mode (--app: no tabs, no address bar), else your default browser
 Closing NUauto's own window quits NUauto (a run in progress stops the way Ctrl+C stops it). In a browser window or
-tab it keeps running until Settings > Quit, or 30 minutes after the last page closed.
+tab it keeps running until Settings > App > Quit, or 30 minutes after the last page closed.
 """
 import os
 import shutil

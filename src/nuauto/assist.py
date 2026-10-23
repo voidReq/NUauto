@@ -2166,7 +2166,7 @@ def main(argv):
         from nuauto import sheet
         if config.IS_SERVER and not config.REMOTE_APP:
             sys.exit("The NUworks side runs on the laptop (you at a terminal or the GUI); on the homelab only from "
-                     "NUauto's page there (Settings > NUauto on your homelab, on the laptop).")
+                     "NUauto's page there (Settings > Homelab > NUauto on your homelab, on the laptop).")
         apply.refuse_unattended(ui)  # a real NUworks submit: you at a terminal or the GUI, never an agent
         if nuworks_session():
             sys.exit(NUWORKS_BUSY)

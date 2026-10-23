@@ -117,7 +117,7 @@
       return [
         s.data.preview ? el("div", { class: "note small", testid: "setup-resume-preview" }, el("b", { text: "What Claude reads: " }), s.data.preview + "…") : null,
         s.data.file ? el("p", { class: "small", testid: "setup-resume-now" }, el("b", { text: "Using: " }), pdfLine(s.data.file)) : null,
-        el("p", { text: "The PDF you use on NUworks. Claude compares each posting with it. NUauto keeps its own copy (and gives your homelab one): when you change your resume, drop the new one here or in Settings > Your files." }),
+        el("p", { text: "The PDF you use on NUworks. Claude compares each posting with it. NUauto keeps its own copy (and gives your homelab one): when you change your resume, drop the new one here or in Settings > Applying > Your files." }),
         pdfDrop("setup-resume-drop", s.data.file ? "Drop a new PDF here, or" : "Drop your resume PDF here, or", give),
         s.data.suggestions.length ? el("div", { class: "small" }, el("span", { class: "muted", text: "Found on this computer: " }),
           ...s.data.suggestions.map((p) => el("button", { class: "btn small ghost", text: p.split("/").pop(), title: p, testid: "setup-resume-found",
@@ -257,7 +257,7 @@
               field("Roles that clearly don't", "Claude drops only these.", area("drop_roles")))),
           el("div", { class: "row" }, field("Match needed", "% for jobs open to your year", input("threshold", { type: "number" })),
             field("…for the year above yours", "% (two years up: dropped)", input("threshold_above", { type: "number" }))),
-          el("details", { testid: "pref-kinds-box" }, el("summary", { text: `Kinds of work: ${(p.categories || []).map((c) => c.label).join(", ")}` }),
+          el("details", { testid: "pref-kinds-box" }, el("summary", { text: `Kinds of work, with their ranking bonuses and lower match bars: ${(p.categories || []).map((c) => c.label).join(", ")}` }),
             el("p", { class: "small muted", text: "Claude sorts every job into one of these (Review and Apply can show one kind at a time). Change the list and the jobs are sorted again on the next update. A ranking bonus moves that kind up; a lower match bar lets more of it into your pool; always last keeps it in the pool but at the end." }),
             el("div", { class: "table-scroll" }, el("table", { class: "grid" }, el("thead", {}, el("tr", {}, ...["Kind of work", "What counts (Claude reads this)", "Ranking bonus", "Lower match bar", "Always last", ""].map((h) => el("th", { text: h })))),
               kindBody)),
@@ -288,7 +288,8 @@
         el("h3", { text: "NUauto on your homelab" }), homelabAssistantPanel(s.data.assistant, () => redraw())] : null];
     },
 
-    extras(s, redraw) {
+    // Discord alone: the homelab's page can change it too (the update and app icon parts are the laptop's)
+    discord(s, redraw) {
       const d = s.data;
       const url = el("input", { type: "text", placeholder: "https://discord.com/api/webhooks/…", "aria-label": "Discord webhook", testid: "setup-discord-url" });
       return [
@@ -299,6 +300,13 @@
           el("button", { class: "btn small danger", text: "Remove", onclick: async () => { if (await post({ action: "discord_remove" }, "Removed.")) redraw(); } })) :
           el("div", { class: "row" }, url, el("button", { class: "btn", text: "Save", testid: "setup-discord-save",
             onclick: async () => { if (await post({ action: "discord_save", url: url.value }, "Discord set up.")) redraw(); } })),
+      ];
+    },
+
+    extras(s, redraw) {
+      const d = s.data;
+      return [
+        ...BODY.discord(s, redraw),
         el("hr", { class: "sep" }),
         el("h2", { text: "Automatic updates" }),
         d.homelab ? el("p", { class: "small muted", text: "Your homelab checks for new jobs twice a day." }) :
@@ -315,6 +323,9 @@
       ];
     },
   };
+
+  // Settings shows some steps' bodies too (its Jobs and App tabs): the same form, saved the same way
+  window.NUautoSetupBody = (id, step, redraw) => BODY[id](step, redraw).filter(Boolean);
 
   window.NUautoSetup = async function (view) {
     let data = null;
