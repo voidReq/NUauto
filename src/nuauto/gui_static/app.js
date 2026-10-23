@@ -1558,8 +1558,14 @@ function assistantStart(d, r, tab, testid, args) {
   return assistantStartButton(d, r, tab, testid, args);
 }
 
+// Rows started on the homelab whose session doesn't show yet ("tab-row" -> until when): their button stays "Starting…"
+// through every redraw until it shows (the lists reload by themselves then), or 45 s pass
+const starting = {};
+
 function assistantStartButton(d, r, tab, testid, args) {
+  const key = `${tab}-${r.row}`;
   const remote = (d.homelab || []).find((s) => s.tab === tab && s.row === r.row);
+  if (remote || (d.sessions || []).some((s) => s.tab === tab && s.row === r.row)) delete starting[key];
   if (remote) {  // the homelab's assistant has this row: its screen, in this app (linked) or in NUauto on the homelab
     const wait = remote.attention && remote.attention.kind;
     const text = wait ? "assistant on the homelab: waiting for you" : "assistant running on the homelab";
@@ -1590,14 +1596,20 @@ function assistantStartButton(d, r, tab, testid, args) {
   // Apply, the same button as a NUworks row's: on the homelab when this is its page, or Run on says the homelab (the
   // laptop's app, through its link; the queue says when it can't); otherwise here
   const there = onHomelab() || d.linked && S.queue;
-  if (there && (onHomelab() || runOn() === "homelab")) return el("span", { class: "row" }, chip, el("button", { class: "btn small",
-    testid: onHomelab() ? testid : `${testid}-homelab-start`, text: "Apply", disabled: args.disabled || !!(q && !q.start),
-    title: q && !q.start ? q.text : "Starts the assistant on the homelab now, for just this job (you answer it on its screen)", onclick: async (e) => {
+  const pending = starting[key] > Date.now();
+  if (there && (onHomelab() || runOn() === "homelab")) return el("span", { class: "row" }, pending ? null : chip, el("button", { class: "btn small",
+    testid: onHomelab() ? testid : `${testid}-homelab-start`, text: pending ? "Starting…" : "Apply", disabled: pending || args.disabled || !!(q && !q.start),
+    title: pending ? "Its session shows up here in a few seconds" : q && !q.start ? q.text :
+      "Starts the assistant on the homelab now, for just this job (you answer it on its screen)", onclick: async (e) => {
       const btn = e.currentTarget;
       btn.disabled = true;
       btn.textContent = "Starting…";
+      starting[key] = Date.now() + 45000;
       const ok = await action("assist", onHomelab() ? args.body : { ...args.body, on: "homelab" });
-      setTimeout(() => { if (S.screen && S.screen.reload) S.screen.reload(); }, ok ? 9000 : 0);  // its session shows up in a few seconds
+      if (!ok) delete starting[key];
+      const redraw = () => { if (S.screen && S.screen.reload) S.screen.reload(); };
+      redraw();  // the queue says it runs now; the button stays "Starting…" until its session shows
+      if (ok) setTimeout(() => { if (starting[key]) { delete starting[key]; redraw(); } }, 45500);  // it never showed: Apply again
     } }));
   const full = (d.sessions || []).length >= (d.slots || 1);
   const startHere = el("button", { class: "btn small", text: "Apply", testid, disabled: full || (args.disabled || false),
@@ -1621,8 +1633,9 @@ function assistantsBar(d) {
   const here = (d.sessions || []).length, there = (d.homelab || []).length;
   if (!here && !there && !onHomelab()) return null;
   const waits = [...(d.sessions || []), ...(d.homelab || [])].filter((s) => s.attention && s.attention.kind).length;
-  const parts = [`Assistants: ${here} of ${d.slots} running${onHomelab() ? "" : " here"}`];
-  if (there) parts.push(`${there} on the homelab`);
+  // (laptop) with every one on the homelab, the line says that, not "0 of 3 running here"
+  const parts = here || !there ? [`Assistants: ${here} of ${d.slots} running${onHomelab() ? "" : " here"}`] : [];
+  if (there) parts.push(`${parts.length ? "" : "Assistants: "}${there} running on the homelab`);
   if (waits) parts.push(`${waits} ${waits === 1 ? "waits" : "wait"} for you (Today lists ${waits === 1 ? "it" : "them"})`);
   if (here >= d.slots) parts.push(onHomelab() ? "end one (on its screen) to start another" : "finish one (type /exit in its window) to start another");
   const q = d.queue || {};
