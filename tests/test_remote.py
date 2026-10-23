@@ -1126,6 +1126,15 @@ finally:
     gui.VIEW, config.DEMO, config.REMOTE_ASSIST, config.IS_SERVER, config.REMOTE_APP, config.HAS_SERVER = real_flags
     threading.excepthook = threading.__excepthook__
 
+# ---- a session whose "Did it go through?" you answered is closing: the lists leave it out (it still holds its slot)
+real_assist_sessions = assist.sessions
+try:
+    assist.sessions = lambda: [{"slot": 1, "tab": "jobs", "row": 4, "attention": {"kind": "answered"}},
+                               {"slot": 2, "tab": "jobs", "row": 5, "attention": {"kind": "approve"}}, {"slot": 3, "tab": "other", "row": 6}]
+    assert [s["slot"] for s in gui.assistants()["sessions"]] == [2, 3]
+finally:
+    assist.sessions = real_assist_sessions
+
 # ---- the GUI's Homelab assistants card: the review page's address, Pair this computer, the browser tool's screenshots
 real_flags = (gui.VIEW, config.DEMO, config.REMOTE_ASSIST, config.IS_SERVER)
 real_local = config.LOCAL

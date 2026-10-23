@@ -1397,7 +1397,10 @@ def assistants():
     homelab: the homelab's own sessions (remote_assist), so a row it works on offers no Start here."""
     from nuauto import assist
     from nuauto import link
-    return {"sessions": assist.sessions(), "slots": assist.slots(), "homelab": homelab_assistants(),
+    # one whose "Did it go through?" you answered is closing (its sheet write, its cleanup): not listed, though it still
+    # holds its slot a few seconds
+    live = [s for s in assist.sessions() if (s.get("attention") or {}).get("kind") != "answered"]
+    return {"sessions": live, "slots": assist.slots(), "homelab": homelab_assistants(),
             "homelab_review": homelab_review(), "linked": not REMOTE and link.linked()}  # linked: Start on the homelab
 
 

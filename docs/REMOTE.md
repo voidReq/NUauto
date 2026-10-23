@@ -158,7 +158,9 @@ AN ASSISTANT'S SCREEN (#/assistant/<slot> in the homelab's app; review.view / ac
                     the session started in, and never when that pane shows a shell (the assistant ended). End session
                     (/exit) and End: do it on the laptop.
   Ended             Did it go through? Yes / No / No: do it on the laptop (typed into the launcher's question). One tap:
-                    back to Apply > Assistants, and the screen says your answer until the run closes.
+                    back to Apply > Assistants, and the screen says your answer until the run closes. A session you
+                    answered is no longer listed or counted there (gui.assistants), though it holds its slot a few
+                    seconds more while it writes the sheet and cleans up (2026-10-23, my request).
 - Each answer goes in the run's actions.log with the paired device's name.
 - The agent on the homelab never opens your own network: localhost, the LAN, Tailscale addresses (so not this page,
   not the browser view) are refused in its browser and WebFetch (assist.own_network).
