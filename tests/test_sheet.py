@@ -234,6 +234,100 @@ try:
     sheet.client(interactive=True)
 finally:
     gspread.Client, gspread.oauth, config.TOKEN_PATH, config.DEMO, config.find_client_json = real
-assert made == [("Client", gspread.BackOffHTTPClient), ("oauth", gspread.BackOffHTTPClient)], made
+assert made == [("Client", sheet.HTTPClient), ("oauth", sheet.HTTPClient)], made
+assert issubclass(sheet.HTTPClient, gspread.BackOffHTTPClient)
+
+# The opened sheet and its tabs are kept (OPEN_FOR s): a read is one trip to Google, not three. Rows are always fresh.
+import time  # noqa: E402
+opens = []
+
+
+class Creds:
+    valid = True
+
+
+class FakeWs:
+    def __init__(self, title):
+        self.title, self.values = title, [HEADERS]
+
+    def get_all_values(self):
+        return self.values
+
+
+class FakeBook:
+    def __init__(self):
+        self.client = type("C", (), {"auth": Creds()})()
+        self.tabs = [FakeWs("Jobs"), FakeWs(sheet.OTHER_TAB)]
+
+    @property
+    def sheet1(self):
+        opens.append("sheet1")
+        return self.tabs[0]
+
+    def worksheet(self, title):
+        opens.append("worksheet")
+        return next(t for t in self.tabs if t.title == title)
+
+
+BOOK = FakeBook()
+real_client = sheet.client
+sheet.client = lambda interactive=True: type("G", (), {"open_by_key": lambda self, key: (opens.append("book"), BOOK)[1]})()
+config.TOKEN_PATH = tok
+sheet.forget()
+try:
+    ws = sheet.open_worksheet(interactive=False)
+    assert sheet.open_worksheet(interactive=False) is ws and sheet.open_other(interactive=False).title == sheet.OTHER_TAB
+    sheet.open_other(interactive=False)
+    assert opens == ["book", "sheet1", "worksheet"], opens               # opened once each
+    ws.values = [HEADERS, ["https://x/1", "Co", "Job", "Approved", "", ""]]
+    assert [r.status for r in sheet.read_rows(sheet.open_worksheet(interactive=False))] == ["Approved"]  # fresh rows
+    BOOK.tabs.reverse()  # Other jobs dragged to the first place: the kept main tab is still the NUworks one
+    assert sheet.open_worksheet(interactive=False).title == "Jobs"
+    BOOK.tabs.reverse()
+    opens.clear()
+    Creds.valid = False  # the access token is about to expire: open again (renewing it happens in spreadsheet())
+    sheet.open_worksheet(interactive=False)
+    assert opens == ["book", "sheet1"], opens
+    Creds.valid = True
+    opens.clear()
+    with open(tok, "a") as f:  # a new Google login: open again
+        f.write(" ")
+    sheet.open_worksheet(interactive=False)
+    assert opens == ["book", "sheet1"], opens
+    opens.clear()
+    sheet.OPEN["at"] = time.monotonic() - sheet.OPEN_FOR - 1  # kept too long
+    sheet.open_other(interactive=False)
+    assert opens == ["book", "worksheet"], opens
+
+    # Google refuses a request as unknown (a tab renamed or deleted): the kept sheet is forgotten
+    class Refused(gspread.BackOffHTTPClient):
+        def request(self, *a, **k):
+            raise gspread.exceptions.APIError(type("R", (), {"json": lambda self: {"error": {"code": self.code, "message": "x"}},
+                                                             "code": Refused.code, "text": ""})())
+    real_request = gspread.BackOffHTTPClient.request
+    gspread.BackOffHTTPClient.request = Refused.request
+    try:
+        for code, forgets in ((429, False), (400, True)):
+            Refused.code = code
+            sheet.open_worksheet(interactive=False)
+            expect(gspread.exceptions.APIError, lambda: sheet.HTTPClient.request(object.__new__(sheet.HTTPClient), "get", "u"))
+            assert bool(sheet.OPEN) != forgets, code
+    finally:
+        gspread.BackOffHTTPClient.request = real_request
+
+    # a kept tab that was renamed: read_rows opens it again, once
+    old = sheet.open_worksheet(interactive=False)
+    BOOK.tabs[0] = FakeWs("Jobs")
+    BOOK.tabs[0].values = [HEADERS, ["https://x/2", "Co", "Job", "Applied", "", ""]]
+
+    def gone():
+        sheet.forget()
+        raise gspread.exceptions.APIError(type("R", (), {"json": lambda self: {"error": {"code": 400, "message": "range"}},
+                                                         "text": ""})())
+    old.get_all_values = gone
+    assert [r.status for r in sheet.read_rows(old)] == ["Applied"]
+finally:
+    sheet.client, config.TOKEN_PATH = real_client, real[2]
+    sheet.forget()
 
 print("Submit-safety checks passed.")

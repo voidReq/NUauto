@@ -138,7 +138,11 @@ GOOGLE SHEETS LOGIN (gspread + OAuth)
 - Testing mode -> a login lasts 7 days. Re-login on the laptop: `nuauto login google`; it
   pushes the new token to the homelab. Discord warns the day before; laptop commands re-open
   the Google login by themselves when it has expired.
-- Open the sheet with open_by_key(SHEET_ID) so only the Sheets API is needed.
+- Open the sheet with open_by_key(SHEET_ID) so only the Sheets API is needed. Each process keeps the opened sheet
+  and its tabs 5 minutes (sheet.OPEN, OPEN_FOR; rows are always read fresh), so a read is one request: opened again
+  when the sheet ID or the login files change, when the access token is about to expire (an expired login is still
+  NotLoggedIn), and after a request Google refuses (sheet.HTTPClient, gspread's BackOffHTTPClient: it also waits and
+  retries on "too many requests").
 - Optional: the assistant's email codes (mail.py) need the Gmail API enabled in the same project
   (console.cloud.google.com/apis/library/gmail.googleapis.com), then `nuauto login gmail` on the laptop: Google's
   read-only Gmail permission, a token of its own (local/gmail_token.json), so the Sheets token never reads mail. It

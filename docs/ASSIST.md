@@ -11,8 +11,12 @@ COMPANY-SITE AGENT (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`;
   assist.by_hand_target, the row's own NUworks job page (never another link, no --url), never one whose Submit click is
   unresolved or past its deadline. Such a "by-hand" session is told what stopped NUauto and the exact resume label
   (assist.hand_note; the rules' NUWORKS ROWS): it clicks the job's Apply, fills the popup, uploads the transcript or the
-  cover letter, and its Submit asks me like any other. NUworks' sign-in: the one click on "Current Students And
-  Alumni", else it asks me to sign in in its browser (never typed by it: accounts.never). One application at a time on
+  cover letter, and its Submit asks me like any other. NUworks' sign-in: its browser starts signed in (2026-10-23, my
+  call: "i don't wanna sign in each time": before the agent starts, assist.seed_nuworks copies NUauto's own NUworks
+  sign-in from local/session_cookies.json into that slot's profile, only the cookies a browser sends to NUworks and its
+  two sign-in hosts (assist.nuworks_cookies; tests/test_assist.py), through the browser tool's own package so the same
+  browser build opens the profile); if that is stale, the one click on "Current Students And Alumni", else it asks me to
+  sign in in its browser (never typed by it: accounts.never). One application at a time on
   NUworks: it holds NUworks' site lock (one session per site: one by-hand session per machine), takes the NUworks turn
   (remote.nuworks_turn, so not beside the other machine's Apply), won't start while an Apply run holds the NUworks
   browser, and `nuauto apply` / the NUworks side refuse while it runs (assist.nuworks_session). The weekly cap is

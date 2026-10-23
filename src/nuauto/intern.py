@@ -708,9 +708,6 @@ def proposed_rows(rows):
     return {clean_url(r.url): r.number for r in rows or [] if r.url and r.status == "Proposed"}
 
 
-_TASTE = {}  # what the model learned from -> its taste for each pool job (Review asks again on every search)
-
-
 def ranked_pool(ratings, other_rows, nuworks_rows=()):
     """The pool, ordered like the co-ops' (jobs.ranked_pool): by score until the taste model can train, then half
     score, half taste. The model learns from your co-op and internship decisions together. Returns (pool, trained)."""
@@ -723,12 +720,7 @@ def ranked_pool(ratings, other_rows, nuworks_rows=()):
         i = by_url.get(clean_url(r.url))
         if i and r.status in ("Approved", "Applied", "Accepted", "Rejected", "Needs Human", "Failed") and i not in ratings:
             labels[i] = 1
-    key = (json.dumps(labels, sort_keys=True), len(every), tuple(r["id"] for r in pool))
-    if key not in _TASTE:
-        model = jobs.train(every, labels) if pool else None
-        _TASTE.clear()
-        _TASTE[key] = {i: float(v) for i, v in model[0]([r["id"] for r in pool]).items()} if model else None
-    taste = _TASTE[key]
+    taste = jobs.taste_for(every, labels, [r["id"] for r in pool])
     if taste:
         for r in pool:
             r["taste"] = taste[r["id"]]

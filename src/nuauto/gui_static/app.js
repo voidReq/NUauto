@@ -11,6 +11,24 @@ function safeHref(u) {
   return /^(https?:\/\/|#|\/)/i.test(u) ? u : null;
 }
 
+// A button (or form) whose handler starts something slower (it returns a promise) shows that at once, and takes no second
+// click until it is done
+const PENDING = new WeakSet();
+function busyWhile(n, handler) {
+  return (e) => {
+    if (PENDING.has(n)) { e.preventDefault(); return undefined; }
+    const r = handler(e);
+    if (r && typeof r.then === "function") {
+      const b = n.tagName === "FORM" ? n.querySelector("[type=submit]") || n : n;
+      PENDING.add(n);
+      b.setAttribute("aria-busy", "true");
+      const done = () => { PENDING.delete(n); b.removeAttribute("aria-busy"); };
+      r.then(done, done);
+    }
+    return r;
+  };
+}
+
 function el(tag, props, ...kids) {
   const n = document.createElement(tag);
   for (const [k, v] of Object.entries(props || {})) {
@@ -18,7 +36,9 @@ function el(tag, props, ...kids) {
     if (k === "class") n.className = v;
     else if (k === "text") n.textContent = v;
     else if (k === "testid") n.dataset.testid = v;
-    else if (k.startsWith("on") && typeof v === "function") n.addEventListener(k.slice(2), v);
+    else if (k.startsWith("on") && typeof v === "function") {
+      n.addEventListener(k.slice(2), (k === "onclick" && tag === "button") || (k === "onsubmit" && tag === "form") ? busyWhile(n, v) : v);
+    }
     else if (PROPS.has(k)) n[k] = v;
     else if (k === "href" || k === "src") { const h = safeHref(v); if (h) n.setAttribute(k, h); }
     else n.setAttribute(k, v === true ? "" : String(v));
@@ -95,6 +115,13 @@ function toast(msg, opts = {}) {
 }
 
 function fail(e) { toast(e.message || String(e), { error: true }); }
+
+// A change that takes a moment (the sheet): says so at once, until its answer comes
+async function working(text, p) {
+  const t = el("div", { class: "toast", role: "status", testid: "toast-working" }, el("span", { class: "spinner" }), el("span", { text }));
+  $("#toasts").append(t);
+  try { return await p; } finally { t.remove(); }
+}
 
 function modal(build, { onclose, label = "Dialog", testid = "dialog" } = {}) {
   const prev = document.activeElement;
@@ -177,7 +204,7 @@ function gone(msg, title) {
 // ------------------------------------------------------------------ shared state + polling
 
 const S = { state: null, checks: [], route: null, screen: null, task: null, taskAfter: 0, taskLog: [],
-            openQuestion: null, gone: false, lastTaskState: {} };
+            openQuestion: null, gone: false, lastTaskState: {}, routes: 0 };
 
 async function pollState() {
   if (S.gone) return;
@@ -185,9 +212,9 @@ async function pollState() {
     S.state = await api.get("/api/state");
   } catch (e) { return; }
   renderShell();
-  // the sheet was read again (a run finished, a row was applied, another window changed it): lists show it at once
-  const sheetChanged = S.rowsAt !== undefined && S.state.rows_at !== S.rowsAt;
-  S.rowsAt = S.state.rows_at;
+  // a read of the sheet found it changed (a run finished, a row was applied, another window changed it): lists show it at once
+  const sheetChanged = S.sheetVersion !== undefined && S.state.sheet_version !== S.sheetVersion;
+  S.sheetVersion = S.state.sheet_version;
   // an assistant started or ended (in its own terminal window): the Apply lists say which rows have one
   const assistantsChanged = S.assistants !== undefined && S.state.assistants !== S.assistants;
   S.assistants = S.state.assistants;
@@ -604,7 +631,7 @@ function markRow(kind, t, tab) {  // tab "other": a row of the sheet's Other job
   const text = kind === "site" ? `Mark the ${t.company} company-site application as done?` :
     `Mark ${tab === "other" ? "Other jobs " : ""}row ${t.row} (${t.company}) as Applied today? Only if you submitted it yourself.`;
   confirmBox(kind === "site" ? "Company site done?" : "You applied yourself?", text, "Yes, mark it", async () => {
-    try { await api.post("/api/mark", { action: kind, row: t.row, url: t.url, tab }); toast("Sheet updated."); pollState(); if (S.screen && S.screen.reload) S.screen.reload(); }
+    try { await working("Updating the sheet…", api.post("/api/mark", { action: kind, row: t.row, url: t.url, tab })); toast("Sheet updated."); pollState(); if (S.screen && S.screen.reload) S.screen.reload(); }
     catch (e) { fail(e); }
   });
 }
@@ -614,7 +641,7 @@ function markRow(kind, t, tab) {  // tab "other": a row of the sheet's Other job
 const SENT = ["Applied", "Accepted", "Rejected"];
 async function outcomeRow(t, outcome, tab) {
   try {
-    await api.post("/api/mark", { action: "outcome", outcome, row: t.row, url: t.url, tab });
+    await working("Updating the sheet…", api.post("/api/mark", { action: "outcome", outcome, row: t.row, url: t.url, tab }));
     toast(outcome === "Applied" ? "Back to Applied." : `Marked ${outcome.toLowerCase()}.`);
     pollState();
     if (S.screen && S.screen.reload) S.screen.reload();
@@ -632,7 +659,7 @@ function dropRow(t, tab) {  // tab "other": a row of the sheet's Other jobs tab
       el("div", { class: "row" }, ...DROP_REASONS.map(([why, label]) => el("button", { class: "btn danger", text: label, testid: `drop-${why}`,
         onclick: async () => {
           close();
-          try { await api.post("/api/mark", { action: "drop", why, row: t.row, url: t.url, tab }); toast("Dropped."); pollState(); if (S.screen && S.screen.reload) S.screen.reload(); }
+          try { await working("Dropping it…", api.post("/api/mark", { action: "drop", why, row: t.row, url: t.url, tab })); toast("Dropped."); pollState(); if (S.screen && S.screen.reload) S.screen.reload(); }
           catch (e) { fail(e); }
         } }))))));
 }
@@ -710,25 +737,55 @@ screens.review = async (view) => {
     load();
   }
 
+  // The server answers at once with the list it made last (quick); when something changed since, the new list follows
+  // (refresh) and takes its place without moving you.
   async function load() {
     const mine = ++loadSeq;  // only the newest load may show its list (an older, slower answer is dropped)
     jobs = []; i = 0; card = null; shown++;  // while it loads, no key decides on the old list (and no card of it comes back)
-    fill(body, el("p", { class: "empty", text: "Loading the review list…" }));
+    const slow = setTimeout(() => { if (mine === loadSeq && body.isConnected) fill(body, el("p", { class: "empty", text: "Loading the review list…" })); }, 150);
     await queue;  // decisions still being written go first: the server decides on its last list, which this one replaces
     const params = new URLSearchParams({ mode, q, category, source });
-    try {
-      const r = await api.get(`/api/review?${params}`);
-      if (mine !== loadSeq || !body.isConnected) return;
-      jobs = r.jobs; total = r.total; i = 0; listed = 0; cards.clear(); drawCategories(r.categories);
-      if (!q && resumeId) { i = Math.max(0, jobs.findIndex((x) => x.id === resumeId)); resumeId = null; }
-    } catch (e) { if (mine === loadSeq && body.isConnected) fill(body, el("div", { class: "note fail", text: e.message })); return; }
+    let r;
+    try { r = await api.get(`/api/review?${params}&quick=1`); }
+    catch (e) { clearTimeout(slow); if (mine === loadSeq && body.isConnected) fill(body, el("div", { class: "note fail", text: e.message })); return; }
+    clearTimeout(slow);
+    if (mine !== loadSeq || !body.isConnected) return;
+    jobs = r.jobs; total = r.total; i = 0; listed = 0; cards.clear(); drawCategories(r.categories);
+    if (!q && resumeId) { i = Math.max(0, jobs.findIndex((x) => x.id === resumeId)); resumeId = null; }
     show();
+    if (r.stale) refresh(mine, params);
+  }
+
+  // The list made from what changed since the quick one: the job on screen stays (one that left the list: the next one
+  // still in it), a search keeps how many it showed and where you scrolled, and the same jobs draw nothing again.
+  async function refresh(mine, params) {
+    let r;
+    try { await queue; r = await api.get(`/api/review?${params}`); } catch (e) { return; }
+    if (mine !== loadSeq || !body.isConnected) return;
+    const old = jobs, was = new Map(old.map((j) => [j.id, JSON.stringify({ ...j, rating: null })]));
+    const changed = (j) => was.get(j.id) !== JSON.stringify({ ...j, rating: null });  // (a rating made here is not a change)
+    total = r.total; drawCategories(r.categories);
+    if (r.jobs.length === old.length && r.jobs.every((j, k) => j.id === old[k].id && !changed(j))) return position();
+    r.jobs.forEach((j) => { if (changed(j)) cards.delete(j.id); });  // (its card may say something new too)
+    jobs = r.jobs;
+    if (listMode()) { const had = listed, y = window.scrollY; showList(true, had); window.scrollTo(0, y); return; }
+    const at = new Map(jobs.map((j, k) => [j.id, k]));
+    const next = old.slice(i).find((j) => at.has(j.id));
+    const same = next && old[i] && next.id === old[i].id && !changed(jobs[at.get(next.id)]);
+    i = next ? at.get(next.id) : jobs.length;
+    if (same) position(); else show();  // (the same job, unchanged: its card stays as it is)
+  }
+
+  function position() {
+    const filtered = !!(q || category);
+    $("#review-pos").textContent = !jobs.length ? "" : listMode() ? `${jobs.length} ${jobs.length === 1 ? "match" : "matches"} (${total} without the search) · j/k scroll` :
+      `Job ${Math.min(i + 1, jobs.length)} of ${jobs.length}${filtered ? ` (${total} without the search)` : ""} · j/k scroll`;
   }
 
   async function show() {
     const filtered = !!(q || category);
     if (listMode()) return showList(filtered);
-    $("#review-pos").textContent = jobs.length ? `Job ${Math.min(i + 1, jobs.length)} of ${jobs.length}${filtered ? ` (${total} without the search)` : ""} · j/k scroll` : "";
+    position();
     if (!jobs.length && filtered) {
       fill(body, el("div", { class: "card", testid: "review-nomatch" }, el("h2", { text: "No jobs match" }),
         el("p", { class: "muted", text: `None of the ${total} jobs to review match this search.` }),
@@ -757,9 +814,9 @@ screens.review = async (view) => {
 
   // Search results: every match as its own card with its own buttons (the job you were on is left as it was).
   const PAGE = 8;
-  function showList(filtered) {
+  function showList(filtered, upto = PAGE) {
     shown++;
-    $("#review-pos").textContent = jobs.length ? `${jobs.length} ${jobs.length === 1 ? "match" : "matches"} (${total} without the search) · j/k scroll` : "";
+    position();
     if (!jobs.length) {
       fill(body, el("div", { class: "card", testid: "review-nomatch" }, el("h2", { text: "No jobs match" }),
         el("p", { class: "muted", text: `None of the ${total} jobs to review match this search.` }),
@@ -774,7 +831,8 @@ screens.review = async (view) => {
       listed = Math.min(jobs.length, listed + PAGE);
       fill(more, listed < jobs.length ? el("button", { class: "btn", testid: "review-more", text: `Show ${Math.min(PAGE, jobs.length - listed)} more (${jobs.length - listed} left)`, onclick: next }) : "");
     };
-    next();
+    listed = 0;
+    do next(); while (listed < Math.min(upto, jobs.length));
   }
 
   async function drawItem(j, slot) {
@@ -1048,7 +1106,7 @@ screens.apply = async (view) => {
   let words = [];  // the search box's words: a row shows when it has every one
   let folded = {};  // the sections you opened or folded, "tab:section" -> open
   try { folded = JSON.parse(sessionStorage.getItem("applyOpen") || "{}"); } catch (e) { folded = {}; }
-  let drawnRunning = null, drawnHomelab = "";
+  let drawnRunning = null, drawnHomelab = "", drawnQueue = "";
   // Made once and moved into each redraw, so what you typed (and the focus) is never lost.
   const atMost = el("input", { type: "number", min: "1", id: "apply-n", testid: "apply-n", "aria-label": "At most this many", placeholder: "all" });
   const find = el("input", { type: "search", class: "grow", testid: "apply-search", "data-find": true,
@@ -1061,18 +1119,21 @@ screens.apply = async (view) => {
     pane = el("div", { role: "tabpanel", id: "apply-pane", testid: "apply-pane" }, headBox, bar, listBox);
   fill(view, runBox, tabs, pane);
 
-  let reloads = 0;  // the newest reload wins: an older one answered last (read before a change) would undo it
-  async function reload() {
-    const mine = ++reloads;
-    const [n, o] = await Promise.allSettled([api.get(`/api/jobs?tab=nuworks&order=${sortOf("nuworks")}`), api.get("/api/jobs?tab=other")]);
-    if (mine !== reloads) return;
-    data.nuworks = n.status === "fulfilled" ? n.value : { error: n.reason.message };
-    data.other = o.status === "fulfilled" ? o.value : { error: o.reason.message };
-    for (const [t, d] of Object.entries(data)) {  // each row's key in the homelab's queue (Sort: the queue's order)
-      if (ok(d)) Object.values(d.sections).flat().forEach((r) => { r.qkey = `${t === "other" ? "other" : "jobs"}-${r.row}`; });
-    }
-    S.queue = data.nuworks.queue || data.other.queue || null;  // (the homelab's queue) each company-site row's place in it
-    draw();
+  let reloads = 0, loadedAt = 0;  // the newest reload wins: an older one answered last (read before a change) would undo it
+  async function reload(opening) {  // opening: the server answers from the rows read last and reads the sheet again behind it
+    const mine = ++reloads, again = opening === true ? "&recheck=1" : "";
+    loadedAt = Date.now();
+    // each tab is drawn as soon as its own answer comes (the other one may still be reading the sheet)
+    const one = (t, path) => api.get(path).catch((e) => ({ error: e.message })).then((d) => {
+      if (mine !== reloads) return;
+      // these rows are as new as that version: the poll does not reload the lists again for it (an open menu stays open)
+      if (ok(d) && d.sheet_version !== undefined) S.sheetVersion = Math.max(S.sheetVersion || 0, d.sheet_version);
+      if (ok(d)) Object.values(d.sections).flat().forEach((r) => { r.qkey = `${t === "other" ? "other" : "jobs"}-${r.row}`; });  // its key in the homelab's queue
+      data[t] = d;
+      S.queue = (data.nuworks && data.nuworks.queue) || (data.other && data.other.queue) || null;  // (the homelab's queue) each company-site row's place in it
+      draw();
+    });
+    await Promise.all([one("nuworks", `/api/jobs?tab=nuworks&order=${sortOf("nuworks")}${again}`), one("other", `/api/jobs?tab=other${again}`)]);
   }
 
   function running() { return S.task && S.task.kind === "apply" && S.task.state === "running"; }
@@ -1082,7 +1143,7 @@ screens.apply = async (view) => {
     const d = ok(data.nuworks) ? data.nuworks : ok(data.other) ? data.other : {};
     return { d, here: d.sessions || [], there: d.homelab || [] };
   }
-  const todo = (d, keys) => ok(d) ? keys.reduce((n, k) => n + d.sections[k].length, 0) : 0;
+  const todo = (d, keys) => ok(d) ? keys.reduce((n, k) => n + d.sections[k].length, 0) : d ? 0 : null;  // null: not read yet
   function counts() {
     const s = sessions();
     return { nuworks: todo(data.nuworks, ["approved", "agent", "manual", "owed"]), other: todo(data.other, ["ready"]),
@@ -1093,7 +1154,7 @@ screens.apply = async (view) => {
     const n = counts(), label = { nuworks: "NUworks co-ops", other: otherTabLabel(), assistants: "Assistants" };
     fill(tabs, ...TABS.map((k) => el("button", { role: "tab", testid: `tab-${k}`, "aria-selected": String(tab === k), "aria-controls": "apply-pane",
       onclick: () => { tab = k; sessionStorage.setItem("applyTab", k); drawTabs(); drawPane(); } },
-      label[k], el("span", { class: "count", text: String(n[k]) }))));
+      label[k], el("span", { class: "count", text: n[k] === null ? "…" : String(n[k]) }))));
   }
 
   // Search, kind of work, the order, Add a job: the same for both sheet tabs
@@ -1121,6 +1182,7 @@ screens.apply = async (view) => {
 
   function drawPane() {
     drawnRunning = running();
+    drawnQueue = queueKey();
     drawBar();
     const d = data[tab];
     fill(headBox, !ok(d) ? null : tab === "nuworks" ? weekCard(d) : tab === "other" ? otherCard(d) : null);
@@ -1171,8 +1233,7 @@ screens.apply = async (view) => {
     let chips = [], next = null, open = linkOut(r.url, "Open"), about = null;
     if (key === "approved") {
       chips = [r.company_site ? el("span", { class: "chip", text: "may also want the company's site", title: r.company_site }) : null, dueChip(r)];
-      next = el("button", { class: "btn small", testid: `btn-apply-row-${r.row}`, disabled: !!d.why_not || !!(S.task && S.task.state === "running"),
-        text: "Apply", title: "Apply to just this job now", onclick: () => applyRow(r) });
+      next = applyButton(d, r);
     } else if (key === "agent") {
       chips = [dueChip(r)];
       about = r.host;
@@ -1243,7 +1304,7 @@ screens.apply = async (view) => {
       followNote(),
       d.why_not ? el("div", { class: "note warn", testid: "apply-why", text: d.why_not }) :
         el("details", { class: "how" }, el("summary", { text: "How Start works" }),
-          el("p", { class: "small muted", text: (onHomelab() ? "Approved in the sheet is your go-ahead. Each job is filled and submitted in a browser on the homelab, which you watch and use from here (its link shows when it starts), one at a time, 30–60 s apart. Only one machine applies at a time." : "Approved in the sheet is your go-ahead. Each job is filled and submitted in a visible Firefox window, one at a time, 30–60 s apart.") + " Every form is screenshotted before Submit. Questions without a saved answer come up here. A job that sends you to the company's own site, or needs something only you can give (a cover letter, a transcript), stops (nothing submitted) and moves to Company site needed or By hand on NUworks below. Stop works like Ctrl+C." })));
+          el("p", { class: "small muted", text: (onHomelab() ? "Approved in the sheet is your go-ahead. Each job is filled and submitted in a browser on the homelab, which you watch and use from here (its link shows when it starts), one at a time, 10–20 s apart. Only one machine applies at a time." : "Approved in the sheet is your go-ahead. Each job is filled and submitted in a visible Firefox window, one at a time, 10–20 s apart.") + " Every form is screenshotted before Submit. Questions without a saved answer come up here. A job that sends you to the company's own site, or needs something only you can give (a cover letter, a transcript), stops (nothing submitted) and moves to Company site needed or By hand on NUworks below. While a run goes, a row's Apply adds it to the run's queue: queued rows are done next, in the order you clicked. Stop works like Ctrl+C (and empties the queue)." })));
   }
 
   // Run on: this computer / the homelab (the laptop linked to it): where Start, and each row's Apply, run. Both tabs.
@@ -1284,8 +1345,9 @@ screens.apply = async (view) => {
 
   function drawRun() {
     const t = S.task;
-    if (!t || t.kind !== "apply") { fill(runBox, ); return; }
-    const live = t.state === "running";
+    const live = t && t.state === "running";
+    // a finished run's box stays until you close it (×; remembered for the session, per run)
+    if (!t || t.kind !== "apply" || (!live && sessionStorage.getItem("runClosed") === String(t.id))) { fill(runBox, ); return; }
     const now = Date.now() / 1000;
     const waiting = live && t.wait_until && t.wait_until > now;
     fill(runBox, el("div", { class: "card", testid: "apply-run" },
@@ -1293,7 +1355,9 @@ screens.apply = async (view) => {
         el("h2", { text: live ? (waiting ? `Next job in ${Math.ceil(t.wait_until - now)} s` : S.taskWhere === "homelab" ? "Applying on the homelab…" : "Applying…") : `Last run${S.taskWhere === "homelab" ? " on the homelab" : ""}: ${t.state}` })),
         live ? el("div", { class: "row" }, el("button", { class: "btn danger", testid: "btn-stop", text: "Stop", onclick: () => stopTask(t) }),
           el("button", { class: "btn ghost small", text: "Force stop", title: "Only if Stop does nothing", onclick: () =>
-            confirmBox("Force stop?", "Kills the run at once. If Submit was already clicked, that row stays Needs Human: check NUworks.", "Force stop", () => stopTask(t, true), { danger: true }) })) : null),
+            confirmBox("Force stop?", "Kills the run at once. If Submit was already clicked, that row stays Needs Human: check NUworks.", "Force stop", () => stopTask(t, true), { danger: true }) })) :
+          el("button", { class: "btn ghost small", testid: "btn-run-close", text: "×", title: "Close", "aria-label": "Close the last run's box",
+            onclick: () => { sessionStorage.setItem("runClosed", String(t.id)); fill(runBox, ); } })),
       t.browser_view ? el("p", { class: "note accent", testid: "apply-browser-view" }, el("b", { text: "Its browser: " }),
         linkOut(t.browser_view.url, "watch and use it here"), " · password ", el("code", { text: t.browser_view.password }),
         " (the homelab's screen; for this run only)") : null,
@@ -1307,6 +1371,25 @@ screens.apply = async (view) => {
       el("pre", { class: "log", testid: "task-log", tabindex: "0", "aria-label": "Run log", text: S.taskLog.slice(-400).join("\n") || "Starting…" })));
     const pre = runBox.querySelector(".log");
     pre.scrollTop = pre.scrollHeight;
+  }
+
+  // A row's Apply: just this job now. While an Apply run goes, it joins that run's queue instead (done next, in the
+  // order you clicked; the button again takes it out).
+  function applyButton(d, r) {
+    const t = S.task, live = running(), q = (live && t.queue) || [], at = q.indexOf(r.row), testid = `btn-apply-row-${r.row}`;
+    if (live && t.row && t.row.row === r.row && !t.done_rows.some((x) => x.row === r.row)) return el("button", { class: "btn small", testid, disabled: true, text: "Applying…" });
+    if (at >= 0) return el("button", { class: "btn small", testid, text: `Queued #${at + 1}`, title: "Take it out of the queue",
+      onclick: () => queueRow(r, false) });
+    return el("button", { class: "btn small", testid, disabled: !!d.why_not || !!(S.task && S.task.state === "running" && !live),
+      text: live ? "Add to queue" : "Apply", title: live ? "Apply to it next in this run" : "Apply to just this job now",
+      onclick: () => live ? queueRow(r, true) : applyRow(r) });
+  }
+
+  function queueKey() { return running() ? `${(S.task.row || {}).row}:${(S.task.queue || []).join(",")}` : ""; }
+
+  async function queueRow(r, add) {  // the run's own machine (a run followed from the homelab: there)
+    const res = await action(add ? "apply" : "apply_unqueue", S.taskWhere === "homelab" ? { row: r.row, on: "homelab" } : { row: r.row });
+    if (res && res.queue && running()) { S.task.queue = res.queue; drawPane(); }
   }
 
   function applyRow(r) {
@@ -1328,12 +1411,13 @@ screens.apply = async (view) => {
       el("button", { class: "btn small", text: "Follow it here", testid: "btn-follow-homelab", onclick: () => { followHomelabTask(); drawPane(); } }));
   }
 
-  await reload();
+  await reload(true);
   // refresh: the sheet changed (a run finished, a row was applied, something was done elsewhere): read the lists again
-  return { task: () => { drawRun(); if (S.task && S.task.state !== "running") reload(); },
+  return { task: () => { drawRun(); if (S.task && S.task.state !== "running") reload(); else if (queueKey() !== drawnQueue) drawPane(); },
     update: () => {  // redraw when a run starts or ends here, or one starts or ends on the homelab (its "Follow it here")
       const ht = S.state && S.state.homelab_link && S.state.homelab_link.task, key = ht ? `${ht.id}:${ht.state}` : "";
       if (running() !== drawnRunning || key !== drawnHomelab) { drawnHomelab = key; drawPane(); }
+      if (S.queue && Date.now() - loadedAt > 30000) reload();  // the homelab's queue moves on by itself (its hours, its waits)
     }, refresh: reload, reload };
 };
 
@@ -1446,7 +1530,7 @@ function moveRow(names, tab, r, done) {
 function removeRow(names, tab, r, done) {
   confirmBox("Remove this job?", `${r.company} · ${r.title} (${names[tab]} row ${r.row}). Its cells are cleared; the other rows keep their numbers.`,
     "Remove", async () => {
-      try { await api.post("/api/sheet", { action: "remove", tab, row: r.row, url: r.url }); toast("Removed."); pollState(); done(); }
+      try { await working("Removing it…", api.post("/api/sheet", { action: "remove", tab, row: r.row, url: r.url })); toast("Removed."); pollState(); done(); }
       catch (err) { fail(err); }
     }, { danger: true });
 }
@@ -1493,8 +1577,14 @@ function assistantStart(d, r, tab, testid, args) {
   return assistantStartButton(d, r, tab, testid, args);
 }
 
+// Rows started on the homelab whose session doesn't show yet ("tab-row" -> until when): their button stays "Starting…"
+// through every redraw until it shows (the lists reload by themselves then), or 45 s pass
+const starting = {};
+
 function assistantStartButton(d, r, tab, testid, args) {
+  const key = `${tab}-${r.row}`;
   const remote = (d.homelab || []).find((s) => s.tab === tab && s.row === r.row);
+  if (remote || (d.sessions || []).some((s) => s.tab === tab && s.row === r.row)) delete starting[key];
   if (remote) {  // the homelab's assistant has this row: its screen, in this app (linked) or in NUauto on the homelab
     const wait = remote.attention && remote.attention.kind;
     const text = wait ? "assistant on the homelab: waiting for you" : "assistant running on the homelab";
@@ -1525,14 +1615,20 @@ function assistantStartButton(d, r, tab, testid, args) {
   // Apply, the same button as a NUworks row's: on the homelab when this is its page, or Run on says the homelab (the
   // laptop's app, through its link; the queue says when it can't); otherwise here
   const there = onHomelab() || d.linked && S.queue;
-  if (there && (onHomelab() || runOn() === "homelab")) return el("span", { class: "row" }, chip, el("button", { class: "btn small",
-    testid: onHomelab() ? testid : `${testid}-homelab-start`, text: "Apply", disabled: args.disabled || !!(q && !q.start),
-    title: q && !q.start ? q.text : "Starts the assistant on the homelab now, for just this job (you answer it on its screen)", onclick: async (e) => {
+  const pending = starting[key] > Date.now();
+  if (there && (onHomelab() || runOn() === "homelab")) return el("span", { class: "row" }, pending ? null : chip, el("button", { class: "btn small",
+    testid: onHomelab() ? testid : `${testid}-homelab-start`, text: pending ? "Starting…" : "Apply", disabled: pending || args.disabled || !!(q && !q.start),
+    title: pending ? "Its session shows up here in a few seconds" : q && !q.start ? q.text :
+      "Starts the assistant on the homelab now, for just this job (you answer it on its screen)", onclick: async (e) => {
       const btn = e.currentTarget;
       btn.disabled = true;
       btn.textContent = "Starting…";
+      starting[key] = Date.now() + 45000;
       const ok = await action("assist", onHomelab() ? args.body : { ...args.body, on: "homelab" });
-      setTimeout(() => { if (S.screen && S.screen.reload) S.screen.reload(); }, ok ? 9000 : 0);  // its session shows up in a few seconds
+      if (!ok) delete starting[key];
+      const redraw = () => { if (S.screen && S.screen.reload) S.screen.reload(); };
+      redraw();  // the queue says it runs now; the button stays "Starting…" until its session shows
+      if (ok) setTimeout(() => { if (starting[key]) { delete starting[key]; redraw(); } }, 45500);  // it never showed: Apply again
     } }));
   const full = (d.sessions || []).length >= (d.slots || 1);
   const startHere = el("button", { class: "btn small", text: "Apply", testid, disabled: full || (args.disabled || false),
@@ -1556,8 +1652,9 @@ function assistantsBar(d) {
   const here = (d.sessions || []).length, there = (d.homelab || []).length;
   if (!here && !there && !onHomelab()) return null;
   const waits = [...(d.sessions || []), ...(d.homelab || [])].filter((s) => s.attention && s.attention.kind).length;
-  const parts = [`Assistants: ${here} of ${d.slots} running${onHomelab() ? "" : " here"}`];
-  if (there) parts.push(`${there} on the homelab`);
+  // (laptop) with every one on the homelab, the line says that, not "0 of 3 running here"
+  const parts = here || !there ? [`Assistants: ${here} of ${d.slots} running${onHomelab() ? "" : " here"}`] : [];
+  if (there) parts.push(`${parts.length ? "" : "Assistants: "}${there} running on the homelab`);
   if (waits) parts.push(`${waits} ${waits === 1 ? "waits" : "wait"} for you (Today lists ${waits === 1 ? "it" : "them"})`);
   if (here >= d.slots) parts.push(onHomelab() ? "end one (on its screen) to start another" : "finish one (type /exit in its window) to start another");
   const q = d.queue || {};
@@ -2393,9 +2490,12 @@ async function route() {
   document.querySelectorAll(".side nav a").forEach((a) => a.classList.toggle("active", a.dataset.route === nav));
   $("#page-title").textContent = TITLES[key];
   document.title = `${TITLES[key]} · NUauto`;
-  const view = $("#view");
-  fill(view, );
-  try { S.screen = (await screens[key](view)) || {}; } catch (e) { fail(e); S.screen = {}; }
+  const view = $("#view"), mine = ++S.routes;
+  fill(view, el("p", { class: "empty", testid: "screen-loading" }, el("span", { class: "spinner" }), " Loading…"));
+  let screen;
+  try { screen = (await screens[key](view)) || {}; } catch (e) { if (mine === S.routes) fail(e); screen = {}; }
+  if (mine !== S.routes) { if (screen.leave) screen.leave(); return; }  // you went on to another screen meanwhile
+  S.screen = screen;
   renderTaskbar();
   pollState();  // fresh counts for the new screen, not the last poll's
   view.focus({ preventScroll: true });

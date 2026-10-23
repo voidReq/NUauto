@@ -1614,6 +1614,74 @@ def hand_note(row):
             f"Resume to pick in the popup's Resume list (exactly this text): {label or 'not set: ask the user'}\n")
 
 
+# ---------- a NUworks row's browser starts signed in (my call, 2026-10-23: "i don't wanna sign in each time") ----------
+
+SEED_HOURS = 12  # a session cookie copied in lasts this long in the slot's profile (a browser drops session cookies on close)
+# Adds the cookies (JSON on stdin) to the slot's profile with the browser tool's own package (the same browser build, so
+# the profile is never opened by another version), then closes it. Run through npx, like the browser tool.
+SEED_JS = """import { createRequire } from "module";
+import fs from "fs";
+import path from "path";
+const [profile, name] = process.argv.slice(2);
+const bin = process.env.PATH.split(path.delimiter).find((p) => fs.existsSync(path.join(p, "playwright-mcp")));
+if (!bin) { console.error("the browser tool's package was not found"); process.exit(2); }
+const pw = createRequire(fs.realpathSync(path.join(bin, "playwright-mcp")))("playwright-core");
+const cookies = JSON.parse(fs.readFileSync(0, "utf8"));
+const firefox = name === "firefox";
+const ctx = await (firefox ? pw.firefox : pw.chromium).launchPersistentContext(profile,
+  { headless: true, ...(firefox || name === "chromium" ? {} : { channel: name || "chrome" }) });
+try { await ctx.addCookies(cookies); } finally { await ctx.close(); }
+"""
+COOKIE_KEYS = ("name", "value", "domain", "path", "expires", "httpOnly", "secure", "sameSite")
+
+
+def nuworks_cookies(saved, now):
+    """Of NUauto's own browser's saved cookies (local/session_cookies.json), the ones a browser sends to NUworks and its
+    two sign-in hosts (config.ALLOWED_HOSTS, SSO_HOSTS), nothing else; expired ones left out, session ones given
+    SEED_HOURS (so they outlive the profile's next close)."""
+    hosts = config.ALLOWED_HOSTS | config.SSO_HOSTS
+    out = []
+    for c in saved if isinstance(saved, list) else []:
+        d = str(c.get("domain") or "").lstrip(".").lower() if isinstance(c, dict) else ""
+        if not d or not any(h == d or h.endswith("." + d) for h in hosts):
+            continue
+        c = {k: c[k] for k in COOKIE_KEYS if k in c}
+        exp = c.get("expires")
+        if not isinstance(exp, (int, float)) or exp <= 0:
+            c["expires"] = int(now + SEED_HOURS * 3600)
+        elif exp < now:
+            continue
+        if c.get("sameSite") == "None" and not c.get("secure"):  # (Chrome refuses that pair)
+            c["sameSite"] = "Lax"
+        out.append(c)
+    return out
+
+
+def seed_nuworks(profile, d, log_):
+    """(a NUworks row's session) This slot's browser gets NUauto's NUworks sign-in before it starts. Never fails the
+    session: without it, the one click on "Current Students And Alumni", else it asks you (as before)."""
+    import time
+    try:
+        with open(config.COOKIES_PATH) as f:
+            cookies = nuworks_cookies(json.load(f), time.time())
+    except (OSError, ValueError):
+        cookies = []
+    if not cookies:
+        return log_.write("No saved NUworks sign-in to give this browser: it signs in with the one click, or asks you.")
+    js = os.path.join(d, "seed_cookies.mjs")
+    with open(js, "w") as f:
+        f.write(SEED_JS)
+    name = config.ASSIST_BROWSER or "chrome"  # (the browser tool's default)
+    cmd = ["npx", "-y", "-p", MCP_PACKAGE, "-c", " ".join(shlex.quote(a) for a in ("node", js, profile, name))]
+    try:
+        r = subprocess.run(cmd, input=json.dumps(cookies), capture_output=True, text=True, timeout=120)
+        ok = r.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        ok = False
+    log_.write("This browser starts signed in to NUworks (NUauto's own sign-in)." if ok else
+               "Could not give this browser NUauto's NUworks sign-in: it signs in with the one click, or asks you.")
+
+
 OTHER_NOTE = ("This job is not on NUworks (the sheet's Other jobs tab): nothing is submitted on NUworks afterwards. "
               "Its answer bank leaves out the NUworks co-op answers (start / end dates, co-op term): when the form "
               "asks one, guess it from the posting (record the guess) like any other.\n")
@@ -1884,6 +1952,8 @@ def run_locked(number, other, row, url, where, tab, slot, slot_lock, hand=False)
         json.dump(state, f)
     profile = slot_profile(slot)
     os.makedirs(profile, mode=0o700, exist_ok=True)
+    if hand and not config.DEMO:
+        seed_nuworks(profile, d, log_)
     cmd = session(d, answer_cmd, read_roots, profile, rules_text(answer_cmd) + context_text(
         where, row, url, other, resume, read_roots, answer_cmd, writeups, view.url if view else None, transcript, hand), where,
         view.display if view else None)

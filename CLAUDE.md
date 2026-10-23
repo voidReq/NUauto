@@ -155,8 +155,9 @@ Status values: Proposed, Approved, Applied, Failed, Needs Human, Accepted, Rejec
   leave the NUworks tab (they count toward the caps); an Applied Other job may move to NUworks (then it counts
   there; my call 2026-10-09). Unresolved Submit clicks are never moved or removed.
 Google access is OAuth only, never service accounts (docs/DEPLOY.md, GOOGLE SHEETS LOGIN). Google allows about 60 reads a
-minute: every client waits and retries on "too many requests" (gspread.BackOffHTTPClient), and the internship Review reuses
-the Other jobs rows for 30 s (each change NUauto makes forgets them).
+minute: every client waits and retries on "too many requests" (sheet.HTTPClient, gspread's BackOffHTTPClient); the opened
+sheet is kept 5 minutes (sheet.OPEN; rows are always read fresh), and Apply and the internship Review reuse the Other jobs
+rows for 30 s (each change NUauto makes forgets them; docs/GUI.md, SPEED).
 
 BROWSER (Playwright, Firefox)
 - Deterministic script, not an AI clicking around freely. Slow, human-like pacing.
@@ -241,7 +242,7 @@ app's device key for the homelab's page)
 COMMANDS (installed in .venv; no activation needed)
 nuauto gui             # the window (setup, review, apply, health); --demo: everything fake; --view: my real data, read-only (agents: only these two)
 nuauto approve         # viewer: my Proposed rows first, then best unrated jobs: y = Approved in the sheet, n = no, s skip
-nuauto apply [-n 3] [--order match]  # submit every Approved row (30-60s between); real terminal (or the GUI) only
+nuauto apply [-n 3] [--order match]  # submit every Approved row (10-20s between); real terminal (or the GUI) only
                        # --order: default (closing within a week, then score) | score | match | closes | pay
 nuauto rate            # taste training viewer (keys in docs/PIPELINE.md)
 nuauto update          # check NUworks for new jobs now (runs on the homelab, then syncs)
