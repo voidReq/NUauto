@@ -1720,4 +1720,20 @@ try:
 finally:
     accounts.PATH = pw_path
 
+# a NUworks row's browser starts signed in: only the cookies a browser sends to NUworks and its two sign-in hosts
+now_ = 1_800_000_000
+saved_ = [{"name": "nu", "value": "a", "domain": "northeastern-csm.symplicity.com", "path": "/", "expires": -1, "httpOnly": True,
+           "secure": True, "sameSite": "None", "partitionKey": "x"},
+          {"name": "sso", "value": "b", "domain": ".neu.edu", "path": "/", "expires": now_ + 99, "secure": False, "sameSite": "None"},
+          {"name": "shib", "value": "c", "domain": ".symplicity.com", "path": "/", "expires": now_ + 5, "sameSite": "Lax"},
+          {"name": "old", "value": "d", "domain": "neuidmsso.neu.edu", "path": "/", "expires": now_ - 1},
+          {"name": "ms", "value": "e", "domain": "login.microsoftonline.com", "path": "/", "expires": -1},
+          {"name": "other", "value": "f", "domain": "csm.symplicity.com.evil.example", "path": "/", "expires": -1},
+          {"name": "mail", "value": "g", "domain": "outlook.neu.edu.example", "path": "/", "expires": -1}, "junk"]
+got_ = {c["name"]: c for c in assist.nuworks_cookies(saved_, now_)}
+assert sorted(got_) == ["nu", "shib", "sso"], got_                                # nothing else, nothing expired
+assert got_["nu"]["expires"] == now_ + assist.SEED_HOURS * 3600 and "partitionKey" not in got_["nu"]   # a session one lasts
+assert got_["nu"]["sameSite"] == "None" and got_["sso"]["sameSite"] == "Lax"     # (None without secure: Lax)
+assert assist.nuworks_cookies({"not": "a list"}, now_) == []
+
 print("All assist (agent guard) checks passed.")
