@@ -111,7 +111,10 @@ SCREENS
                  (NUworks: when it closes; the other tab: when it was posted). Every row: who and what, its score / match % and pay ("score 105 = 75% match + 10 Boston + 20 security"
                  when bonuses add to it: Start goes by score), a line about it (its site, its notes), its chips (when it
                  closes: amber within a week, red once past; "may also want the company's site"; the queue's place), what to
-                 do next (Apply: after a confirm just that row, `nuauto apply --row N`; on an assistant's row Apply starts the
+                 do next (Apply: after a confirm just that row, `nuauto apply --row N`; while an Apply run goes it is Add to queue
+                 instead: the row joins that run's queue (`--queue FILE`, gui.queue_row; done next in the order clicked,
+                 the button shows Queued #k and takes it out again; Stop empties it; rows queued just as the run ended
+                 get a run of their own, gui.apply_done); on an assistant's row Apply starts the
                  assistant, where Run on says; Mark done; Submit
                  on NUworks too), Open, and More (⋯; on a phone in the row's top right corner): on a sent row Mark accepted /
                  Mark rejected (or Back to Applied: what you heard back, sheet.set_outcome), I applied myself, Drop (not
@@ -383,7 +386,7 @@ API (JSON; all need the cookie; POSTs need X-NUauto: 1)
                              or null); sessions, slots, homelab, linked, queue; nuworks also week, why_not, history,
                              order; other also exists
   GET  /api/apply            Approved rows in apply order, week, why_not, recent runs
-  POST /api/action           {"kind": apply ({"n", "order"} or {"row"})|update|login_google|login_nuworks|check_nuworks|login_claude|
+  POST /api/action           {"kind": apply ({"n", "order"} or {"row"}; a row during a run: queued, reply {"queue"})|apply_unqueue ({"row"})|update|login_google|login_nuworks|check_nuworks|login_claude|
                              install_firefox|install_claude|nuworks_side|assist|fix_permissions|review_pair|bitwarden_add|
                              bitwarden_import ({"only": [words]})|bitwarden_login|bitwarden_install, "args"} (the bitwarden_ ones
                              open a terminal window: Bitwarden asks for your master password there, never this page)

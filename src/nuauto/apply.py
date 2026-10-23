@@ -34,6 +34,7 @@ from nuauto.inspect_form import FIELDS_JS
 
 APPLY_NAME = re.compile(r"^\s*apply\s*$", re.IGNORECASE)
 APPLY_WAIT_MS = 15000  # NUworks draws the job page with JavaScript after it loads; a slow one showed no button yet
+BETWEEN = (10, 20)    # seconds between two applications, at random (was 30-60 until 2026-10-23, my call)
 
 
 def apply_button(page):
@@ -229,6 +230,23 @@ def apply_order(rows, order="default"):
             return (1, 0, r.number)
         return (0, v.toordinal() if order == "closes" else -v, r.number)  # soonest first; else best first
     return sorted(rows, key=key)
+
+
+def queued(path):
+    """The rows nuauto gui queued behind this run (each row's Apply while it runs), in the order you clicked them.
+    The GUI owns the file; it takes a row out once the run starts it."""
+    if not path:
+        return []
+    try:
+        return [int(n) for n in json.loads(open(path).read())]
+    except (OSError, ValueError, TypeError):
+        return []
+
+
+def more_queued(args, rows, seen):
+    """The queued rows still Approved and not handled in this run."""
+    approved = {r.number for r in sheet.approved(rows)}
+    return [n for n in queued(args.queue) if n in approved and n not in seen]
 
 
 def pick_row(rows, row_number, order="default"):
@@ -470,6 +488,7 @@ def main(argv=None):
     ap.add_argument("--row", type=int, help=argparse.SUPPRESS)
     ap.add_argument("--dry-run", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--ui", choices=["json"], help=argparse.SUPPRESS)  # questions as JSON lines, for nuauto gui
+    ap.add_argument("--queue", help=argparse.SUPPRESS)  # (nuauto gui) a file of rows to do next, added to while this runs
     args = ap.parse_args(argv)
     args.submit = not args.dry_run
     if args.submit:
@@ -508,7 +527,11 @@ def run_rows(args, ws, resume_label, entries, io):
         if first:
             row = pick_row(rows, args.row, args.order)
         else:
-            left = apply_order([r for r in sheet.approved(rows) if r.number not in seen], args.order)
+            approved = {r.number: r for r in sheet.approved(rows) if r.number not in seen}
+            ahead = more_queued(args, rows, seen)  # queued rows first, in the order you queued them
+            rest = [] if args.row is not None or (args.n and len(seen) >= args.n) else apply_order(
+                [r for n, r in approved.items() if n not in ahead], args.order)
+            left = [approved[n] for n in ahead] + rest
             if not left:
                 print("No more Approved rows.")
                 break
@@ -520,16 +543,17 @@ def run_rows(args, ws, resume_label, entries, io):
             print(f"--- Row {row.number}: {row.company} | {row.title}: deadline passed ({day}). Needs Human.")
             io.event("row_done", row=row.number, outcome="deadline")
             sheet.set_status(ws, row.number, "Needs Human", notes=f"deadline passed ({day}); not attempted")
-            if args.row is not None:
+            if args.row is not None and not more_queued(args, rows, seen):
                 break
             continue
         print(f"--- Row {row.number}: {row.company} | {row.title} | closes {jobs.closes_text(day)}")
         io.event("row", row=row.number, company=row.company, title=row.title)
         outcome = apply_one(row, ws, args, resume_label, entries, io)
         io.event("row_done", row=row.number, outcome=outcome)
-        if outcome == "stop" or args.row is not None or (args.n and len(seen) >= args.n):
+        last = args.row is not None or (args.n and len(seen) >= args.n)
+        if outcome == "stop" or last and not more_queued(args, rows, seen):
             break
-        wait = random.uniform(30, 60) * config.DEMO_PACE  # DEMO_PACE is 1 outside demo mode
+        wait = random.uniform(*BETWEEN) * config.DEMO_PACE  # DEMO_PACE is 1 outside demo mode
         io.event("wait", seconds=round(wait))
         time.sleep(wait)  # slow, human-like pacing between applications
 
