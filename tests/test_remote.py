@@ -1107,6 +1107,21 @@ try:
     gui.homelab_assistants()
     wait_idle()
     assert gui._homelab["busy"] is False and gui._homelab["at"] > 0
+    # something was started there: read again now, then every SOON_EVERY seconds for a while (its session shows late)
+    remote.homelab_sessions = lambda: []
+    gui.homelab_soon()
+    gui.homelab_assistants()
+    wait_idle()
+    gui._homelab["at"] -= gui.SOON_EVERY + 1
+    reads_before = gui._homelab["at"]
+    gui.homelab_assistants()
+    wait_idle()
+    assert gui._homelab["at"] > reads_before                                 # read again after SOON_EVERY, not HOMELAB_EVERY
+    gui._homelab["soon_until"] = 0
+    gui._homelab["at"] -= gui.SOON_EVERY + 1
+    reads_before = gui._homelab["at"]
+    gui.homelab_assistants()
+    assert gui._homelab["at"] == reads_before and not gui._homelab["busy"]   # the while is over: HOMELAB_EVERY again
 finally:
     gui.VIEW, config.DEMO, config.REMOTE_ASSIST, config.IS_SERVER, config.REMOTE_APP, config.HAS_SERVER = real_flags
     threading.excepthook = threading.__excepthook__

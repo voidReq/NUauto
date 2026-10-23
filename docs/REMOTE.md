@@ -239,7 +239,8 @@ THE LAPTOP'S LINK (link.py, 2026-10-15, my request: "as much support and smooth 
   page only ever talks to the laptop's server (/api/homelab/...). What the homelab's page refuses, it refuses here too,
   with the same words: the same rules, checked in one place.
 - Linked, the laptop's app also: reads the homelab's sessions, queue and running task through it every 20 s (ssh every
-  60 s without it); opens a homelab session's screen inside this window (#/assistant/h<slot>: approve its Submit, reply,
+  60 s without it; every 3 s for 45 s after a start or an answer there, gui.homelab_soon, so a new session shows at once
+  and its row's button says "Starting…" until it does); opens a homelab session's screen inside this window (#/assistant/h<slot>: approve its Submit, reply,
   end it); shows each company-site row's place in the homelab's queue, with "Start on the homelab" next to "Start here"
   (greyed out with the queue's reason when it can't start there now); Apply's "Run on: This computer / The homelab"
   (the homelab's page runs Apply on its virtual screen, one NUworks machine at a time as always; its log, screenshots,

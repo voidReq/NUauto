@@ -1413,7 +1413,9 @@ def homelab_review():
 
 HOMELAB_EVERY = 60  # seconds between reads of the homelab's sessions over ssh (in the background)
 LINK_EVERY = 20     # the same through the app's link (sessions, queue, its running task: one cheap request each)
-_homelab = {"at": 0.0, "sessions": [], "busy": False, "queue": None, "task": None, "commit": None, "error": None}
+SOON_EVERY, SOON_FOR = 3, 45  # after a start or an answer there: every 3 s for 45 s (a new session takes a few seconds to show)
+_homelab = {"at": 0.0, "sessions": [], "busy": False, "queue": None, "task": None, "commit": None, "error": None,
+            "soon_until": 0.0}
 
 
 def homelab_assistants():
@@ -1423,7 +1425,7 @@ def homelab_assistants():
     if VIEW or config.DEMO and not config.DEMO_LINK or not config.REMOTE_APP or config.IS_SERVER:
         return []
     from nuauto import link
-    every = LINK_EVERY if link.linked() else HOMELAB_EVERY
+    every = SOON_EVERY if time.time() < _homelab["soon_until"] else LINK_EVERY if link.linked() else HOMELAB_EVERY
     if time.time() - _homelab["at"] > every and not _homelab["busy"]:
         _homelab["busy"] = True
         threading.Thread(target=homelab_read, daemon=True).start()
@@ -1449,8 +1451,9 @@ def homelab_read():
 
 
 def homelab_soon():
-    """Read the homelab again at the next chance (something was started or answered there)."""
+    """Read the homelab again at the next chance, and often for a while (something was started or answered there)."""
     _homelab["at"] = 0
+    _homelab["soon_until"] = time.time() + SOON_FOR
 
 
 def link_state():
