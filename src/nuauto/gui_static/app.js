@@ -737,25 +737,55 @@ screens.review = async (view) => {
     load();
   }
 
+  // The server answers at once with the list it made last (quick); when something changed since, the new list follows
+  // (refresh) and takes its place without moving you.
   async function load() {
     const mine = ++loadSeq;  // only the newest load may show its list (an older, slower answer is dropped)
     jobs = []; i = 0; card = null; shown++;  // while it loads, no key decides on the old list (and no card of it comes back)
-    fill(body, el("p", { class: "empty", text: "Loading the review list…" }));
+    const slow = setTimeout(() => { if (mine === loadSeq && body.isConnected) fill(body, el("p", { class: "empty", text: "Loading the review list…" })); }, 150);
     await queue;  // decisions still being written go first: the server decides on its last list, which this one replaces
     const params = new URLSearchParams({ mode, q, category, source });
-    try {
-      const r = await api.get(`/api/review?${params}`);
-      if (mine !== loadSeq || !body.isConnected) return;
-      jobs = r.jobs; total = r.total; i = 0; listed = 0; cards.clear(); drawCategories(r.categories);
-      if (!q && resumeId) { i = Math.max(0, jobs.findIndex((x) => x.id === resumeId)); resumeId = null; }
-    } catch (e) { if (mine === loadSeq && body.isConnected) fill(body, el("div", { class: "note fail", text: e.message })); return; }
+    let r;
+    try { r = await api.get(`/api/review?${params}&quick=1`); }
+    catch (e) { clearTimeout(slow); if (mine === loadSeq && body.isConnected) fill(body, el("div", { class: "note fail", text: e.message })); return; }
+    clearTimeout(slow);
+    if (mine !== loadSeq || !body.isConnected) return;
+    jobs = r.jobs; total = r.total; i = 0; listed = 0; cards.clear(); drawCategories(r.categories);
+    if (!q && resumeId) { i = Math.max(0, jobs.findIndex((x) => x.id === resumeId)); resumeId = null; }
     show();
+    if (r.stale) refresh(mine, params);
+  }
+
+  // The list made from what changed since the quick one: the job on screen stays (one that left the list: the next one
+  // still in it), a search keeps how many it showed and where you scrolled, and the same jobs draw nothing again.
+  async function refresh(mine, params) {
+    let r;
+    try { await queue; r = await api.get(`/api/review?${params}`); } catch (e) { return; }
+    if (mine !== loadSeq || !body.isConnected) return;
+    const old = jobs, was = new Map(old.map((j) => [j.id, JSON.stringify({ ...j, rating: null })]));
+    const changed = (j) => was.get(j.id) !== JSON.stringify({ ...j, rating: null });  // (a rating made here is not a change)
+    total = r.total; drawCategories(r.categories);
+    if (r.jobs.length === old.length && r.jobs.every((j, k) => j.id === old[k].id && !changed(j))) return position();
+    r.jobs.forEach((j) => { if (changed(j)) cards.delete(j.id); });  // (its card may say something new too)
+    jobs = r.jobs;
+    if (listMode()) { const had = listed, y = window.scrollY; showList(true, had); window.scrollTo(0, y); return; }
+    const at = new Map(jobs.map((j, k) => [j.id, k]));
+    const next = old.slice(i).find((j) => at.has(j.id));
+    const same = next && old[i] && next.id === old[i].id && !changed(jobs[at.get(next.id)]);
+    i = next ? at.get(next.id) : jobs.length;
+    if (same) position(); else show();  // (the same job, unchanged: its card stays as it is)
+  }
+
+  function position() {
+    const filtered = !!(q || category);
+    $("#review-pos").textContent = !jobs.length ? "" : listMode() ? `${jobs.length} ${jobs.length === 1 ? "match" : "matches"} (${total} without the search) · j/k scroll` :
+      `Job ${Math.min(i + 1, jobs.length)} of ${jobs.length}${filtered ? ` (${total} without the search)` : ""} · j/k scroll`;
   }
 
   async function show() {
     const filtered = !!(q || category);
     if (listMode()) return showList(filtered);
-    $("#review-pos").textContent = jobs.length ? `Job ${Math.min(i + 1, jobs.length)} of ${jobs.length}${filtered ? ` (${total} without the search)` : ""} · j/k scroll` : "";
+    position();
     if (!jobs.length && filtered) {
       fill(body, el("div", { class: "card", testid: "review-nomatch" }, el("h2", { text: "No jobs match" }),
         el("p", { class: "muted", text: `None of the ${total} jobs to review match this search.` }),
@@ -784,9 +814,9 @@ screens.review = async (view) => {
 
   // Search results: every match as its own card with its own buttons (the job you were on is left as it was).
   const PAGE = 8;
-  function showList(filtered) {
+  function showList(filtered, upto = PAGE) {
     shown++;
-    $("#review-pos").textContent = jobs.length ? `${jobs.length} ${jobs.length === 1 ? "match" : "matches"} (${total} without the search) · j/k scroll` : "";
+    position();
     if (!jobs.length) {
       fill(body, el("div", { class: "card", testid: "review-nomatch" }, el("h2", { text: "No jobs match" }),
         el("p", { class: "muted", text: `None of the ${total} jobs to review match this search.` }),
@@ -801,7 +831,8 @@ screens.review = async (view) => {
       listed = Math.min(jobs.length, listed + PAGE);
       fill(more, listed < jobs.length ? el("button", { class: "btn", testid: "review-more", text: `Show ${Math.min(PAGE, jobs.length - listed)} more (${jobs.length - listed} left)`, onclick: next }) : "");
     };
-    next();
+    listed = 0;
+    do next(); while (listed < Math.min(upto, jobs.length));
   }
 
   async function drawItem(j, slot) {
@@ -1314,8 +1345,9 @@ screens.apply = async (view) => {
 
   function drawRun() {
     const t = S.task;
-    if (!t || t.kind !== "apply") { fill(runBox, ); return; }
-    const live = t.state === "running";
+    const live = t && t.state === "running";
+    // a finished run's box stays until you close it (×; remembered for the session, per run)
+    if (!t || t.kind !== "apply" || (!live && sessionStorage.getItem("runClosed") === String(t.id))) { fill(runBox, ); return; }
     const now = Date.now() / 1000;
     const waiting = live && t.wait_until && t.wait_until > now;
     fill(runBox, el("div", { class: "card", testid: "apply-run" },
@@ -1323,7 +1355,9 @@ screens.apply = async (view) => {
         el("h2", { text: live ? (waiting ? `Next job in ${Math.ceil(t.wait_until - now)} s` : S.taskWhere === "homelab" ? "Applying on the homelab…" : "Applying…") : `Last run${S.taskWhere === "homelab" ? " on the homelab" : ""}: ${t.state}` })),
         live ? el("div", { class: "row" }, el("button", { class: "btn danger", testid: "btn-stop", text: "Stop", onclick: () => stopTask(t) }),
           el("button", { class: "btn ghost small", text: "Force stop", title: "Only if Stop does nothing", onclick: () =>
-            confirmBox("Force stop?", "Kills the run at once. If Submit was already clicked, that row stays Needs Human: check NUworks.", "Force stop", () => stopTask(t, true), { danger: true }) })) : null),
+            confirmBox("Force stop?", "Kills the run at once. If Submit was already clicked, that row stays Needs Human: check NUworks.", "Force stop", () => stopTask(t, true), { danger: true }) })) :
+          el("button", { class: "btn ghost small", testid: "btn-run-close", text: "×", title: "Close", "aria-label": "Close the last run's box",
+            onclick: () => { sessionStorage.setItem("runClosed", String(t.id)); fill(runBox, ); } })),
       t.browser_view ? el("p", { class: "note accent", testid: "apply-browser-view" }, el("b", { text: "Its browser: " }),
         linkOut(t.browser_view.url, "watch and use it here"), " · password ", el("code", { text: t.browser_view.password }),
         " (the homelab's screen; for this run only)") : null,

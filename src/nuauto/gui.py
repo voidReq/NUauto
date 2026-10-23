@@ -351,12 +351,15 @@ class App:
                 checks, rows = health.sheet_and_limits()
                 with self.lock:
                     if rows is not None:
-                        if rows != self.rows:
+                        changed = rows != self.rows
+                        if changed:
                             self.sheet_version += 1
                         self.rows, self.rows_at, self.rows_error = rows, now(), None
                         self.rows_version = self.sheet_version
                     else:
-                        self.rows_error = checks[0].detail
+                        changed, self.rows_error = False, checks[0].detail
+                if changed and SERVER is not None:
+                    warm_changed()  # Review's lists follow the sheet behind your back
             else:
                 checks = health.run(self.GROUPS[group][0])
             self._store(group, checks)
@@ -449,7 +452,7 @@ class App:
         groups = [g for g in self.GROUPS if group_on(g)]
         for group in groups:
             self.next_run[group] = start + self.GROUPS[group][2]
-        warmed = False
+        warmed, warmed_at = False, now()
         while not self.stopping:
             if not warmed and self.rows is not None and now() - start > 5:  # Review's lists, made ahead (1-5 s each)
                 warmed = True
@@ -470,6 +473,9 @@ class App:
                 self.quit()
             if REMOTE and config.IS_SERVER:
                 reload_config()  # settings saved on the laptop (sync) or here: this process reads them again
+            if now() - warmed_at >= WARM_EVERY:
+                warmed_at = now()
+                warm_changed()
             time.sleep(2)
 
     def run_now(self, groups):
@@ -770,8 +776,10 @@ def other_changed():
         APP.other_cache = None
 
 
-_review = {}  # (mode, source) -> (what it was made from, todo, urgent, details)
+_review = {}  # (mode, source) -> (what it was made from, todo, urgent, details, when it was started)
 _review_locks = {}
+_decided = {}  # job id -> (when, mode): decided in Review since; a list made before leaves it out (gui.review)
+ROWS_FOR = 60  # seconds the NUworks tab's rows count as fresh (APP.refresh_rows)
 
 
 def data_key():
@@ -798,20 +806,42 @@ def row_key(rows):
     return tuple((r.number, r.url, r.status) for r in rows or [])
 
 
-def review_lists(mode, source="nuworks"):
-    """(todo, urgent, details) of the review queue, kept until what it is made from changes (training the taste model and
-    building the pool take 1-5 s; Review asks on every load and search)."""
-    rows = need_rows()
+def review_key(source, rows, other):
+    return data_key(), date.today(), row_key(rows), row_key(other) if source == "intern" else None
+
+
+def review_lists(mode, source="nuworks", quick=False):
+    """((todo, urgent, details, when it was started), stale) of the review queue, kept until what it is made from
+    changes (training the taste model and building the pool take 1-5 s; Review asks on every load and search).
+    quick: the list made last comes at once, made from the rows read last, even when something changed since; it is
+    made again behind it, and stale says so (Review then asks again without quick and swaps the new list in)."""
     if source == "intern":
         from nuauto import intern
         if not intern.ENABLED:
             raise Refused('Internships are off (add "internships": {} to local/local_config.json).')
-        other = other_rows(fresh=False)
+    kept = _review.get((mode, source))
+    if quick and kept and APP.rows is not None and (source != "intern" or APP.other_cache):
+        old = now() - APP.rows_at >= ROWS_FOR
+        if old:
+            APP.refresh_soon(ROWS_FOR)
+        other = None
+        if source == "intern":
+            read_at, other, _ = APP.other_cache
+            if now() - read_at >= OTHER_ROWS_FOR:
+                old = True
+                APP.refresh_other_soon(OTHER_ROWS_FOR)
+        changed = kept[0] != review_key(source, APP.rows, other)
+        if changed and not _review_locks.setdefault((mode, source), threading.Lock()).locked():
+            threading.Thread(target=warm_review, args=([(mode, source)],), daemon=True).start()
+        return kept[1:], old or changed
+    rows = need_rows()
+    other = other_rows(fresh=False) if source == "intern" else None
     with _review_locks.setdefault((mode, source), threading.Lock()):  # (a warm-up under way: wait for it, don't redo it)
-        key = (data_key(), date.today(), row_key(rows), row_key(other) if source == "intern" else None)  # (before reading)
+        key = review_key(source, rows, other)  # (before reading)
         kept = _review.get((mode, source))
         if kept and kept[0] == key:
-            return kept[1:]
+            return kept[1:], False
+        started = now()
         ratings = jobs.load("ratings.json", {})
         if source == "intern":
             todo, urgent = intern.review_queue(mode, ratings, other, rows)
@@ -819,12 +849,13 @@ def review_lists(mode, source="nuworks"):
         else:
             details = jobs.load_details()
             todo, urgent = jobs.review_queue(mode, details, ratings, rows)
-        _review[(mode, source)] = (key, todo, urgent, details)
-        return todo, urgent, details
+        _review[(mode, source)] = (key, todo, urgent, details, started)
+        return (todo, urgent, details, started), False
 
 
 def warm_review(pairs):
-    """Make the review lists ahead (in the background): at start, and a few seconds after your last decision."""
+    """Make the review lists ahead (in the background): at start, a few seconds after your last decision, and when
+    what one is made from changes (warm_changed)."""
     for mode, source in pairs:
         try:
             review_lists(mode, source)
@@ -832,6 +863,23 @@ def warm_review(pairs):
             pass
 
 
+def warm_changed():
+    """Every list already made whose sheet rows, data/ or settings changed is made again now (from the monitor, every
+    WARM_EVERY s, and when a sheet read finds a change), so opening Review almost never waits."""
+    stale = []
+    for (mode, source), kept in list(_review.items()):
+        if source == "intern" and not APP.other_cache:
+            continue
+        try:
+            if kept[0] != review_key(source, APP.rows, APP.other_cache[1] if source == "intern" else None):
+                stale.append((mode, source))
+        except Exception:
+            pass
+    if stale:
+        threading.Thread(target=warm_review, args=(stale,), daemon=True).start()
+
+
+WARM_EVERY = 15
 _warm = {"timer": None, "last": ("approve", "nuworks")}  # last: the list Review showed last
 
 
@@ -850,12 +898,18 @@ def warm_review_soon():
 WARM_AFTER = 3
 
 
-def review(mode, q="", category="", source="nuworks"):
+def review(mode, q="", category="", source="nuworks", quick=False):
     """The review queue; q (words or "quoted phrases", all must appear) and category narrow what is shown.
     Decisions work on any job of the whole queue. source "intern": the internships (intern.py), whose Approve adds a
-    row to the Other jobs tab."""
-    todo, urgent, details = review_lists(mode, source)
+    row to the Other jobs tab. quick: the list made last, at once (review_lists; stale: ask again without quick)."""
+    (todo, urgent, details, started), stale = review_lists(mode, source, quick)
     _warm["last"] = (mode, source)
+
+    def gone(job_id):  # decided here after the list was made (approve / no in Approve leaves both lists)
+        d = _decided.get(job_id)
+        return d is not None and d[0] >= started and (mode == "rate" or d[1] == "approve")
+    todo = [r for r in todo if not gone(r["id"])]
+    urgent = [r for r in urgent if not gone(r["id"])]
     ratings = jobs.load("ratings.json", {})
     APP.queue = {r["id"]: r for r in todo}
     counts = {}
@@ -878,7 +932,7 @@ def review(mode, q="", category="", source="nuworks"):
                     "match": r["match"], "closes_text": jobs.closes_text(day),
                     "soon": day is not None and (day - date.today()).days <= jobs.URGENT_DAYS,
                     "rating": (ratings.get(r["id"]) or {}).get("label")})
-    return {"jobs": out, "urgent": [r["id"] for r in urgent], "mode": mode, "source": source, "total": len(todo),
+    return {"jobs": out, "urgent": [r["id"] for r in urgent], "mode": mode, "source": source, "total": len(todo), "stale": stale,
             "categories": [{"key": k, "label": jobs.category_label(k), "count": counts[k]}
                            for k in sorted(counts, key=lambda k: (-counts[k], k))]}
 
@@ -964,6 +1018,7 @@ def decide(body):
         APP.refresh_rows(force=True)
         out["row"] = next((x.number for x in APP.rows or [] if x.url == jobs.job_url(job_id)), None)
     jobs.set_rating(job_id, {"label": int(decision != "no"), "date": date.today().isoformat()})
+    _decided[job_id] = (now(), mode)
     warm_review_soon()
     return out
 
@@ -991,6 +1046,7 @@ def undo(body):
         APP.refresh_rows(force=True)
     jobs.set_rating(job_id, {"label": previous["label"], "date": str(previous.get("date", ""))[:10]}
                     if isinstance(previous, dict) and previous.get("label") in (0, 1) else None)
+    _decided.pop(job_id, None)
     warm_review_soon()
     return {}
 
@@ -2369,7 +2425,7 @@ GET_ROUTES = {
     "/api/health": lambda q: {"checks": [c.to_dict() for c in APP.checks()], "running": sorted(APP.running_groups)},
     "/api/review": lambda q: review(q.get("mode", "approve") if q.get("mode") in ("approve", "rate") else "approve",
                                     q.get("q", "")[:200], q.get("category", "")[:40],
-                                    "intern" if q.get("source") == "intern" else "nuworks"),
+                                    "intern" if q.get("source") == "intern" else "nuworks", q.get("quick") == "1"),
     "/api/apply": lambda q: apply_list(q.get("order", "default")),
     "/api/jobs": lambda q: jobs_tab("other" if q.get("tab") == "other" else "nuworks", q.get("order", "default"),
                                     q.get("recheck") == "1"),
