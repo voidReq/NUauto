@@ -1135,8 +1135,10 @@ fetch("{target}", {{method: "POST", credentials: "include", body: {json.dumps(bo
         # a new Review: it shows first, flagged; Approve (y) turns that same row Approved again (no second row)
         review_again()
         page.wait_for_function(harbor_first)
+        # (the list made last may come first, its card from before the undo: the new list's card follows)
+        page.locator("[data-testid=job-card] .facts", has_text=f"already Proposed (Other jobs row {harbor_row})").wait_for()
         facts = page.inner_text("[data-testid=job-card] .facts")
-        assert f"already Proposed (Other jobs row {harbor_row})" in facts and "your Proposed row in the Other jobs tab" in facts, facts
+        assert "your Proposed row in the Other jobs tab" in facts, facts
         page.keyboard.press("y")
         page.locator("[data-testid=toast]", has_text="Approved: adding it to the Other jobs tab.").last.wait_for()
         again = eventually(lambda: (r := other_row(HARBOR)) and r["status"] == "Approved" and r, "the same row Approved again")
