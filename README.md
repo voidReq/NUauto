@@ -18,16 +18,22 @@ you to the company's own site, or aren't on NUworks at all, go to a Claude agent
 ## Install
 
 You need a NUworks account, a Google account, and [Claude Code](https://claude.com/claude-code) (the setup screen
-installs it if missing). Linux or macOS:
+installs it if missing).
+
+**The app:** download the AppImage (Linux) or .dmg (macOS 12+) from
+[Releases](https://github.com/voidReq/NUauto/releases/latest); the release page says how to open it.
+
+**From source** (to change it), Linux or macOS:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/voidReq/NUauto/main/install.sh | sh
 ```
 
-It installs everything in your home folder (no sudo) and opens the setup screen, which walks you through Google,
-your sheet, your resume, the NUworks login and what you're looking for. Your files stay in `~/NUauto/local/`.
-`nuauto assist` also needs Node.js and Google Chrome. A packaged app (AppImage / .dmg) can be built with
-`sh packaging/build.sh`; no release is published yet.
+It installs everything in your home folder (no sudo), with your files in `~/NUauto/local/`.
+
+Either way, the setup screen walks you through Google, your sheet, your resume, the NUworks login and what you're
+looking for. `nuauto assist` also needs Node.js and Google Chrome. If the browser won't start on Linux, it may need
+system libraries: `sudo ~/NUauto/.venv/bin/python -m playwright install-deps firefox` (Debian/Ubuntu).
 
 ## Use it
 
