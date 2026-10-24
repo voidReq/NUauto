@@ -679,8 +679,9 @@ def steps(checks):
         out.append({"id": id_, "title": title, "status": "done" if done else "optional" if optional else "todo",
                     "detail": detail, "data": data})
 
+    from nuauto import sheet
     add("welcome", "Welcome", bool(cfg.get("tos_ack")), "You read NUworks' terms of use and know the limits.",
-        week=11, total=99)
+        week=sheet.max_per_week(), total=sheet.MAX_TOTAL)  # the limits the code enforces (Settings > Applying)
     ff = checks.get("firefox")
     cl = checks.get("claude")
     tools_ok = bool(ff and ff.status == health.OK and cl and cl.status == health.OK)
