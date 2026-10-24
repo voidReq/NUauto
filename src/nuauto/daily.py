@@ -118,7 +118,7 @@ def claude_ready():
     from nuauto import health
     status = health.claude_status()
     if status is None:
-        stop("claude", "NUauto: Claude Code not found", f"Scoring can't run. Install Claude Code on {where()} (README.md, Setup).")
+        stop("claude", "NUauto: Claude Code not found", f"Scoring can't run. Install Claude Code on {where()} (README.md, Install).")
         return False
     if status and not status.get("loggedIn"):
         stop("claude", "NUauto: Claude Code is logged out", f"Scoring can't run. On {where()} run: claude auth login")

@@ -62,7 +62,7 @@ def check_claude():
     else:  # older code on the homelab (before the next push)
         path = shutil.which("claude", path=os.path.expanduser("~/.local/bin") + os.pathsep + os.environ.get("PATH", ""))
     if not path:
-        return say("FAIL", "claude CLI not found (Claude triage/scoring can't run): see README.md, Setup")
+        return say("FAIL", "claude CLI not found (Claude triage/scoring can't run): see README.md, Install")
     try:
         logged_in = json.loads(sh([path, "auth", "status", "--json"]).stdout).get("loggedIn")
     except (OSError, ValueError, AttributeError, subprocess.TimeoutExpired):

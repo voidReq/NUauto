@@ -287,7 +287,7 @@ def firefox():
     except Exception as e:
         first = (str(e).strip().splitlines() or [""])[0][:160]
         return [check("firefox", "Browser", FAIL, f"Playwright's Firefox does not start: {first} "
-                      "(on Linux it may need system libraries: see README.md, Setup).", ("install_firefox", "Install the browser"))]
+                      "(on Linux it may need system libraries: see README.md, Install).", ("install_firefox", "Install the browser"))]
     return [check("firefox", "Browser", OK, "Playwright's Firefox is installed and starts.")]
 
 
