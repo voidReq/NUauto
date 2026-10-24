@@ -67,7 +67,8 @@ SAFETY RULES (most important)
 1. No guessing, ever. If unsure about anything, stop and ask me. (The one exception: the company-site agent's
    recorded guesses, which I answer all at once before Submit: COMPANY-SITE AGENT, 2026-10-11.)
 2. Only act on Approved rows. (Exception: `nuauto assist <row>` works on a Needs Human row I
-   approved earlier; the row only changes after I press Submit myself and answer y.)
+   approved earlier; the row only changes after I press Submit myself and answer y.) Recording what I sent myself
+   (the Mark-done page, gui.mark, daily.record_hand_applications) writes Applied rows: a record, not an application.
 3. Field filling uses two local files:
    - profile.json: basic info (name, email, phone, address, school, etc.)
    - answers.json: answer bank (see below)
@@ -80,7 +81,8 @@ SAFETY RULES (most important)
    never uploads anything.
    (Added 2026-10-12, my request.) The company-site agent may also upload my unofficial transcript (local_config.json
    "transcript_path"; GUI Settings > Applying > Your files keeps it as local/transcript.pdf; the homelab gets a copy there), only where
-   a page asks for one. (2026-10-20) The resume and the transcript given in the GUI are NUauto's own copies in local/,
+   a page asks for one (the prompt says so; the guard allows uploading only the resume, the transcript or an approved
+   cover letter). (2026-10-20) The resume and the transcript given in the GUI are NUauto's own copies in local/,
    pushed to the homelab at once (docs/GUI.md, YOUR FILES).
 7. (Changed 2026-10-03; GUI added 2026-10-05.) `nuauto apply` submits every Approved row, one at a
    time, with no per-job prompt: Approved in the sheet IS my approval. It runs only with me there:
@@ -104,8 +106,8 @@ ANSWER BANK (answers.json)
 - No match: stop, ask me in the terminal, save my answer, reuse it next time.
 - If wording is slightly different, ask me again; I can then mark it as an alias of an
   existing question.
-- Dropdowns/radios: only select an option whose text exactly matches my saved answer.
-  If not present, ask me.
+- Dropdowns: only select an option whose text exactly matches my saved answer.
+  If not present, ask me. apply.py fills only text inputs and dropdowns: a radio, tick box or file field stops the run.
 - always_ask entries (e.g., salary, work authorization) are never auto-filled.
   (Changed 2026-10-09, my call.) Demographic / voluntary self-identify questions (gender, race, Hispanic/Latino,
   veteran, disability) are saved and reused like any answer; the agent no longer asks on every such page.
@@ -166,7 +168,8 @@ BROWSER (Playwright, Firefox)
 - Persistent browser profile in local/browser_profile/; I log in by hand (`nuauto login`) and the
   session is reused. Never handle my password in code or prompts. (The one exception: the random per-site
   passwords NUauto makes for job-site accounts, COMPANY-SITE AGENT below; never my own accounts' passwords.)
-- Domain lock: only northeastern-csm.symplicity.com (config.ALLOWED_HOSTS). Jobs whose Apply
+- Domain lock (the NUworks runner: apply, jobs, inspect; not `nuauto login`, not the assistant's browser): only
+  northeastern-csm.symplicity.com (config.ALLOWED_HOSTS). Jobs whose Apply
   popup links to an external site (Workday, iCIMS, Greenhouse...) are marked Needs Human; I
   apply there. Exception: during the one-click re-login only, SSO_HOSTS are allowed (never
   typing credentials).
@@ -175,7 +178,8 @@ BROWSER (Playwright, Firefox)
 - Only ONE Playwright session may use local/browser_profile/ at a time (Firefox locks it, and since
   2026-10-05 browser.lock_profile refuses a second one): not while apply.py, jobs.py or browser.py are
   running. Use a separate profile dir if in doubt.
-  The homelab has its own copy and uses it during its update runs (08:00/18:00 New York).
+  The homelab has its own copy and uses it during its update runs (08:00/18:00 New York; its timers: deploy/systemd/,
+  also weekly, intern every 2 h, assist every 10 min).
 
 GUI (`nuauto gui`; details: docs/GUI.md)
 - Agents test with `nuauto gui --demo` (everything fake: sheet, NUworks pages, Claude, temp folder) or `nuauto gui
@@ -192,14 +196,15 @@ GUI (`nuauto gui`; details: docs/GUI.md)
 
 COMPANY-SITE AGENT (`nuauto assist`; every rule: docs/ASSIST.md, read it before changing the agent)
 - Only Needs Human rows stopped at an external application, Approved Other jobs rows, and (2026-10-16, my call) Needs
-  Human rows stopped on NUworks for something only I can give (cover letter, transcript, an answer in my words): on
-  those it works NUworks itself (their own job page only), one at a time on NUworks (not beside an Apply run).
+  Human rows stopped on NUworks itself (anything but an external application, e.g. a cover letter, transcript, an answer
+  in my words; a NUworks job link, deadline not passed, no unresolved Submit click: assist.by_hand_target): on
+  those it works NUworks itself (their own job page only: a prompt rule; code checks only the starting link), one at a time on NUworks (not beside an Apply run).
 - Cover letters: written for one application only (my call: never saved or reused); I approve the text in its end
   list, NUauto makes the PDF it uploads (letter.py), and the session's end deletes it.
 - The one hard rule: NOTHING is submitted without my review, enforced in code (Claude Code hooks -> assist.decide,
   tests/test_assist.py); a guard that fails or times out blocks. Captchas are mine (the guard refuses them). Passwords:
-  only NUauto's {{NEW_PASSWORD}} / {{PASSWORD}} placeholders, never on Google / Microsoft / Apple / LinkedIn / GitHub /
-  Northeastern sign-ins. Bash only the answer-bank commands; reads only inside allowed paths, never secrets.
+  only NUauto's {{NEW_PASSWORD}} / {{PASSWORD}} placeholders, never on the sign-ins in accounts.NEVER (Google, Microsoft,
+  Apple, LinkedIn, GitHub, Northeastern, Duo, Bitwarden...). Bash only the answer-bank commands; reads only inside allowed paths, never secrets.
 - It guesses what my answers don't cover, records each guess, and asks me everything at once before Submit.
 
 NUWORKS LOGIN / AUTH FLOW (read this before touching the browser)
@@ -237,16 +242,19 @@ FILES: an installable package (`pip install -e .`), code in src/nuauto/; the map
 SECRETS (in local/), never print, log or copy their contents: token.json, session_cookies.json,
 client_secret.json, discord_webhook.txt, web_secret.txt, accounts.json (job-site logins; only `nuauto accounts export`
 writes them out, for my password manager), gmail_token.json (read-only Gmail login), homelab_link.json (the laptop
-app's device key for the homelab's page)
+app's device key for the homelab's page). With "remote_assist", sync copies gmail_token.json and merges accounts.json to
+the homelab (sync.push, sync.share)
 
 COMMANDS (installed in .venv; no activation needed)
 nuauto gui             # the window (setup, review, apply, health); --demo: everything fake; --view: my real data, read-only (agents: only these two)
+                       # also --port N, --no-open, --browser; with --demo: --remote, --linked, --demo-state a,b, --screenshots DIR
 nuauto approve         # viewer: my Proposed rows first, then best unrated jobs: y = Approved in the sheet, n = no, s skip
 nuauto apply [-n 3] [--order match]  # submit every Approved row (10-20s between); real terminal (or the GUI) only
+                       # (the GUI's per-row Apply uses the hidden --row N; rows Applied during a run go in --queue FILE)
                        # --order: default (closing within a week, then score) | score | match | closes | pay
 nuauto rate            # taste training viewer (keys in docs/PIPELINE.md)
 nuauto update          # check NUworks for new jobs now (runs on the homelab, then syncs)
-nuauto status          # Approved rows + weekly count (also pushes code to the homelab)
+nuauto status          # Approved rows + weekly count (also pushes code to the homelab, unless deploy_from_git)
 nuauto login           # manual SSO login; close the window when done
 nuauto login google    # Google Sheets login, every 7 days (Discord warns the day before); renews the Gmail one too
 nuauto login gmail     # read-only Gmail login for the agent's email codes (once; then renewed with login google)
@@ -259,11 +267,14 @@ nuauto assist [<row>]  # company-site agent for a Needs Human row; asks me befor
 nuauto accounts [export [<file>] [--all]]   # the job-site logins the agent made (no passwords shown); Bitwarden's import file
 nuauto accounts import <file>|- --only <text>   # my own logins from Bitwarden for those sites (bw list items --search ...)
 nuauto accounts export --bitwarden              # NUauto's new logins straight into my vault (bw unlocked by me; no file)
-nuauto review pair [<name>] | devices | unpair <name>   # NUauto's page on the homelab: pair my phone (docs/REMOTE.md)
-nuauto review demo                                      # that page with made-up sessions, locally (= nuauto gui --demo --remote; agents)
+nuauto review pair [<name>] | devices | unpair <name>|--all   # NUauto's page on the homelab: pair my phone (docs/REMOTE.md)
+nuauto review demo                                      # that page with made-up sessions, locally (= nuauto gui --demo --remote --no-open; agents)
 nuauto onboard homelab-setup                            # set a homelab up step by step (Settings > Homelab > Set it up opens it)
 nuauto onboard homelab-check <ssh name> [<folder>]      # what that homelab has, read-only over ssh
-nuauto assist queue | start <nuworks|other> <row>      # (homelab) the assistant's queue / start one row's session in tmux
+nuauto onboard homelab-deploy on|off [<fork address>]   # turn deploy_from_git on/off there
+nuauto link pair | status | forget                      # the laptop app's link to the homelab's page (docs/REMOTE.md)
+nuauto assist queue | start <nuworks|other> <row> [--again]   # (homelab) the assistant's queue / start one row's session in tmux
+nuauto assist nuworks <row> | sessions | auto           # a by-hand NUworks row / (homelab) running sessions / the timer's auto-start
 nuauto assist other [<row>]                      # same agent for the sheet's Other jobs tab (no NUworks step after)
 nuauto assist other add <url> <company> <title>  # add a job there as Approved
 nuauto sheet add <nuworks|other> <url> [<company> <title>] [--proposed]   # add a job by hand
@@ -273,7 +284,7 @@ nuauto setup-sheet format          # restyle the sheet (formatting only, safe to
 nuauto jobs stats | pool | suggest 5
 nuauto intern update [--here] | approve | rate | stats | pool   # Summer internships (Simplify's + vanshb03's lists); approve -> Other jobs tab
 nuauto intern fetch <url> [--browser]                 # read one posting from its job site now (nothing saved)
-nuauto daily [weekly] / nuauto web # what the homelab's timers / Mark-done service run
+nuauto daily [weekly] / nuauto web # what the homelab's timers run / nuauto-web (Mark-done page; NUauto's page on :8766 with remote_app)
 python -m nuauto.<module> ...      # any module's own command line (same as the nuauto tools)
 
 TESTS

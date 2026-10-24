@@ -7,8 +7,8 @@ The agent never sees your inbox. Code reads the mail that arrived in the last WI
 name the site the agent is on (its company, or a link to its own host), and hands back one code, or one link to that
 same site. Nothing else from any message reaches the agent or the logs. Never for Google / Microsoft / Apple /
 LinkedIn / GitHub / Northeastern sign-ins (accounts.never).
-The login lives in local/gmail_token.json (mode 600, never synced, never shown), apart from the Sheets login: that one
-can't read mail.
+The login lives in local/gmail_token.json (mode 600, never shown; copied to the homelab only with "remote_assist",
+sync.push), apart from the Sheets login: that one can't read mail.
 """
 import base64
 import html
