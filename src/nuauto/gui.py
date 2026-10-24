@@ -492,7 +492,11 @@ class App:
     def run_now(self, groups):
         for g in groups:
             if g in self.GROUPS and group_on(g):
-                threading.Thread(target=self.run_group, args=(g,), daemon=True).start()
+                # the sheet: a read already under way may have started before the change being checked, so wait for
+                # it and read again (run_group would skip)
+                kw = {"target": self.refresh_rows, "kwargs": {"force": True}} if g == "sheet" else \
+                    {"target": self.run_group, "args": (g,)}
+                threading.Thread(daemon=True, **kw).start()
 
     def quit(self):
         if self.stopping:
