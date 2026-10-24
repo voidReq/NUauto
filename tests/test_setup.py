@@ -193,6 +193,11 @@ steps = {s["id"]: s for s in onboard.steps({})}
 assert list(steps) == ["welcome", "tools", "google_client", "google_login", "sheet", "resume", "nuworks", "preferences", "extras",
                       "internships", "password_manager", "homelab"]
 assert steps["welcome"]["status"] == "todo" and steps["extras"]["status"] == "optional" and not onboard.complete(list(steps.values()))
+# the welcome step names the limits the code enforces: the weekly one from Settings (max_per_week), not a fixed 11
+from nuauto import sheet  # noqa: E402
+config.LOCAL["max_per_week"] = 5
+assert next(s for s in onboard.steps({}) if s["id"] == "welcome")["data"] == {"week": 5, "total": sheet.MAX_TOTAL}
+config.LOCAL.pop("max_per_week")
 os.remove(config.TOKEN_PATH)
 
 # the optional steps at the end: Password manager always; Assistant on your homelab only with a homelab (not on the
