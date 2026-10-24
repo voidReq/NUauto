@@ -671,6 +671,7 @@ screens.review = async (view) => {
   const interns = (S.state && S.state.internships) || { on: false };
   let source = interns.on && sessionStorage.getItem("reviewSource") === "intern" ? "intern" : "nuworks";
   let jobs = [], i = 0, card = null, history = {}, shown = 0, total = 0, resumeId = null, listed = 0, loadSeq = 0;
+  let moved = false;  // you went to another job (or decided one) since the list came: a newer list keeps your place
   let q = sessionStorage.getItem("reviewQ") || "", category = sessionStorage.getItem("reviewCat") || "";
   const cards = new Map();  // job id -> promise of its card (the next ones are fetched ahead)
   let queue = Promise.resolve();  // decisions are sent to the server one at a time, behind the screen
@@ -752,12 +753,14 @@ screens.review = async (view) => {
     if (mine !== loadSeq || !body.isConnected) return;
     jobs = r.jobs; total = r.total; i = 0; listed = 0; cards.clear(); drawCategories(r.categories);
     if (!q && resumeId) { i = Math.max(0, jobs.findIndex((x) => x.id === resumeId)); resumeId = null; }
+    moved = i > 0;
     show();
     if (r.stale) refresh(mine, params);
   }
 
   // The list made from what changed since the quick one: the job on screen stays (one that left the list: the next one
   // still in it), a search keeps how many it showed and where you scrolled, and the same jobs draw nothing again.
+  // Not moved yet: the new list from its first job (the quick list's first may no longer come first).
   async function refresh(mine, params) {
     let r;
     try { await queue; r = await api.get(`/api/review?${params}`); } catch (e) { return; }
@@ -770,7 +773,7 @@ screens.review = async (view) => {
     jobs = r.jobs;
     if (listMode()) { const had = listed, y = window.scrollY; showList(true, had); window.scrollTo(0, y); return; }
     const at = new Map(jobs.map((j, k) => [j.id, k]));
-    const next = old.slice(i).find((j) => at.has(j.id));
+    const next = moved ? old.slice(i).find((j) => at.has(j.id)) : jobs[0];
     const same = next && old[i] && next.id === old[i].id && !changed(jobs[at.get(next.id)]);
     i = next ? at.get(next.id) : jobs.length;
     if (same) position(); else show();  // (the same job, unchanged: its card stays as it is)
@@ -798,7 +801,7 @@ screens.review = async (view) => {
         el("p", { class: "muted", text: mode !== "approve" ? "Ratings teach the ranking your taste (it needs 5 yes and 5 no)." :
           toSites ? `Approved internships wait in Apply > ${otherTabLabel()}.` :
           "Approved jobs are in your sheet. Apply to them next." }),
-        el("div", { class: "row" }, jobs.length ? el("button", { class: "btn", text: "Back one", onclick: () => { i = Math.max(0, i - 1); show(); } }) : null,
+        el("div", { class: "row" }, jobs.length ? el("button", { class: "btn", text: "Back one", onclick: () => { moved = true; i = Math.max(0, i - 1); show(); } }) : null,
           el("a", { class: "btn primary", href: toSites ? "#/other" : mode === "approve" ? "#/apply" : "#/home",
             text: mode === "approve" ? "Go to Apply" : "Done" }))));
       return;
@@ -878,6 +881,7 @@ screens.review = async (view) => {
   function decide(decision) {
     const j = jobs[i];
     if (!j) return;
+    moved = true;
     if (decision === "skip") { i++; return show(); }
     if (decision === "back") { i = Math.max(0, i - 1); return show(); }
     const index = i;

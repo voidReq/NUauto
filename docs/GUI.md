@@ -266,7 +266,8 @@ SPEED (2026-10-22, my request: "the apply page takes quite a while to load")
   taste model trains again only when your ratings or a job's text change (jobs.taste_for). The lists are made ahead at
   start and a few seconds after your last decision (warm_review). (2026-10-22, my request: Review still took 0.5-3 s)
   Review asks with quick=1: the list made last comes at once (about 10 ms), never waiting on Google or a rebuild; when
-  something changed since (stale) the page asks again without quick and swaps the new list in without moving you. A job
+  something changed since (stale) the page asks again without quick and swaps the new list in: once you moved (decided, skipped, went back) it keeps
+  your place; before that it starts at the new list's first job (a quick list's first may no longer come first). A job
   decided here after a list was made is left out of it (gui._decided). The monitor makes every kept list again when its
   rows, data/ or settings changed (warm_changed, every 15 s), so stale is rare. Each source (co-ops / internships) has
   its own kept list.
