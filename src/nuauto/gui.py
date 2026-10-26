@@ -552,7 +552,11 @@ def closing(r):
     """When the row's NUworks posting closes (from the saved job data): the date, its text, whether it is past or
     within a week. All empty/false when the job is unknown or lists no deadline."""
     from nuauto import apply
-    day = apply.row_closes(r)
+    return closing_of(apply.row_closes(r))
+
+
+def closing_of(day):
+    """A close date for the page (closing(); an internship's in intern_facts): None = none listed."""
     left = (day - date.today()).days if day else None
     return {"closes": day.isoformat() if day else None, "closes_text": jobs.closes_text(day),
             "past": left is not None and left < 0, "soon": left is not None and 0 <= left <= jobs.URGENT_DAYS}
@@ -1559,7 +1563,8 @@ def homelab_task_view(r):
 
 
 def intern_facts(urls):
-    """For the Other jobs card: the match %, score and pay (from intern.py's data) of the internships among these links."""
+    """For the Other jobs card: the match %, score, pay and close date (from intern.py's data; the posting's own date,
+    when it gives one) of the internships among these links."""
     from nuauto import insights
     from nuauto import intern
     if not intern.ENABLED or not urls:
@@ -1571,13 +1576,15 @@ def intern_facts(urls):
         s, p = scores.get(i), pool.get(i)
         if s is None or x["url"] not in urls:
             continue
-        pay = (intern.load(f"details/{i}.json", None) or {}).get("pay") or None
+        d = intern.load(f"details/{i}.json", None) or {}
+        pay = d.get("pay") or None
         hour = insights.hourly(pay)
         cat = p["category"] if p else cats.get(i)
         cat = cat if cat in jobs.CATEGORIES else None  # (the Apply tab's kind-of-work filter)
         out[x["url"]] = {"match": s["match"], "score": p["rank"] if p else None, "score_text": jobs.rank_text(p) if p else None,
                          "pay": pay, "pay_hour": hour[1] if hour else None, "posted_text": intern.posted_text(x),
-                         "category": cat, "category_label": jobs.category_label(cat) if cat else None}
+                         "category": cat, "category_label": jobs.category_label(cat) if cat else None,
+                         **closing_of(jobs.closes(d) if d else None)}
     return out
 
 
@@ -1589,13 +1596,13 @@ def other_list():
     rows = other_rows()
     if not APP.other_exists:
         return {"exists": False, "tab": sheet.OTHER_TAB, "ready": [], "applied": [], "rest": [], **assistants()}
-    facts = intern_facts({intern.clean_url(r.url) for r in rows if r.status == "Approved"})
+    facts = intern_facts({intern.real_url(r.url) for r in rows if r.status == "Approved"})
     ready, applied, rest = [], [], []
     for r in rows:
         if r.status == "Approved":
             url, why = assist.other_target(r)
             ready.append(row_view(r, target=url, host=urlparse(url).hostname if url else None, why=why,
-                                  **facts.get(intern.clean_url(r.url), {})))
+                                  **facts.get(intern.real_url(r.url), {})))
         elif r.status == "Applied":
             applied.append(row_view(r))
         else:
@@ -1656,21 +1663,24 @@ def jobs_tab(tab="nuworks", order="default", recheck=False):
         with APP.lock:  # (the rows and the version they were read at, together)
             rows, version = APP.rows, APP.rows_version
     by_number = {r.number: r for r in rows}
-    facts = intern_facts({intern.clean_url(r.url) for r in rows}) if other else None
+    facts = intern_facts({intern.real_url(r.url) for r in rows}) if other else None
 
     def locks(v):  # what Move and Remove allow on this row
         r = by_number[v["row"]]
         return {**v, "locked": manage.movable(r, tab, "move"), "remove_locked": manage.movable(r, tab, "remove")}
 
     seen = {} if other else sheet.nuworks_seen()
+    done = {r.number: why for r, why in sheet.maybe_filled(rows, seen)}  # (Applied rows whose job looks filled)
 
     def on_nuworks(r):  # what NUworks said about a sent row at the last check (current: about the row as it is now)
         a = seen.get(jobs.job_id(r.url)) if r.status in sheet.SENT else None
-        return {"nuworks": {**{k: a.get(k) for k in ("applied", "status", "expired", "interviewing", "checked")},
-                            "current": a.get("fingerprint") == sheet.fingerprint(r)}} if a else {}
+        keys = ("applied", "status", "expired", "interviewing", "hiring", "interviewing_since", "interviewing_ended",
+                "filled_since", "checked")
+        return {"nuworks": {**{k: a.get(k) for k in keys}, "current": a.get("fingerprint") == sheet.fingerprint(r),
+                            "done": done.get(r.number)}} if a else {}
 
     def view(r, **extra):
-        more = facts.get(intern.clean_url(r.url), {}) if other else {**closing(r), **job_facts(r, data), **on_nuworks(r)}
+        more = facts.get(intern.real_url(r.url), {}) if other else {**closing(r), **job_facts(r, data), **on_nuworks(r)}
         return locks(row_view(r, **more, **extra))
     s = {k: [] for k in ("approved", "agent", "manual", "owed", "ready", "applied", "accepted", "rejected", "proposed",
                          "closed", "rest")}

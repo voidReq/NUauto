@@ -27,9 +27,9 @@ Command line and plumbing
 Sheet and NUworks
   sheet.py        the Google Sheet. open_worksheet() / open_other() (kept OPEN_FOR s: OPEN, forget(), HTTPClient retries),
                   read_rows(); limits: max_per_week(), week_window(), applied_dates(), total_count() (not_on_nuworks,
-                  rejected_not_withdrawn), check_limits(); writers: set_status, mark_submit_started / resolve_submit,
-                  mark_applied_by_hand, mark_site_done, set_outcome, drop, approve_proposed, unapprove, mark_on_laptop,
-                  append_note, add_proposed; create_sheet(), google_login().
+                  rejected_not_withdrawn, maybe_filled), check_limits(); writers: set_status, mark_submit_started /
+                  resolve_submit, mark_applied_by_hand, mark_site_done, set_outcome, drop, approve_proposed, unapprove,
+                  mark_on_laptop, append_note, add_proposed; create_sheet(), google_login().
   manage.py       rows by hand: add(), move(), remove() (cells cleared, never deleted), lookup(), check_url(), movable().
   setup_sheet.py  one-time setup (refuses a sheet with data: HasData); format_sheet(); ensure_dropdown().
   browser.py      Playwright Firefox. launch() (lock_profile(): one process on the profile), install_domain_lock(),
@@ -46,15 +46,17 @@ Job pool
   jobs.py         the NUworks pool. PREFS / set_prefs(), cmd_list, cmd_triage_*, cmd_details (hard_rules), cmd_score_*,
                   cmd_cat_*, build_pool(), ranked_pool() (taste model), review_queue(), job_view(), rate_viewer(),
                   cmd_rate / cmd_approve / cmd_suggest / cmd_stats, set_rating(), check_applied(), check_applications()
-                  (what NUworks says about sent rows -> data/applications.json).
+                  (what NUworks says about sent rows -> data/applications.json; application_answer(): applied, and the
+                  job's hiring stage tracked across checks).
   fields.py       per-field starting preferences (the wizard's "What do you study?").
   intern.py       Summer internships (Simplify's and vanshb03's lists, one job on both kept once): the second pool, built
-                  like jobs.py (refresh, triage, fetch, score, category, build_pool); approve() -> manage.add("other");
-                  update(), review_queue(), stats(). Short links -> the posting's own (real_links, real_url; used by
-                  assist.other_target). Data in data/intern/.
+                  like jobs.py (refresh, triage, fetch, redate, score, category, build_pool); approve() ->
+                  manage.add("other"); update(), review_queue(), closing_dates(), stats(). Short links -> the posting's
+                  own (real_links, real_url; used by assist.other_target). Data in data/intern/.
   postings.py     reads one posting from a company's own job site, no login; public addresses only (allowed_host).
-  daily.py        what the homelab timers run. main() -> scan() (via step()), reminders(), record_hand_applications(),
-                  applications(), internships(); run_claude(), notify() / discord(), weekly().
+  daily.py        what the homelab timers run. main() -> scan() (via step()), applications(), reminders() (the morning
+                  message: morning(), its lines; record_hand_applications()), internships(); run_claude(); messages:
+                  notify() / discord(), alert() (a problem, once a day each), later() (a line for the next morning).
   insights.py     summarize(): pay, places, kinds of work, sheet statuses; text() for `nuauto insights`.
   web.py          Mark-done page (homelab, port 8765). link() signs URLs, Handler.do_GET (confirm) / do_POST; main() also
                   starts gui.serve_remote() when the homelab's page is on.
@@ -149,7 +151,8 @@ MAIN FLOWS
 
 STATE ON DISK (STATE_DIR = repo root; app-data folder when packaged; a temp folder in demo mode and tests)
   data/   the pool, owned by the homelab (the laptop pulls a copy): list.json, triage.json, scores.json, categories.json,
-          category_sets.json, pool.json, details/<id>.json (jobs.py); scans.json, last_run.json (daily.py);
+          category_sets.json, pool.json, details/<id>.json (jobs.py); scans.json, last_run.json, later.json, told.json
+          (daily.py);
           applications.json (jobs.check_applications); ratings.json (jobs.set_rating, merged between machines);
           intern/ (intern.py: listings, source, failed, unread, triage, scores, categories, pool, details/, update.lock).
   work/   Claude's batches: <kind>_in_NNN.json / <kind>_out_NNN.json, resume.txt (jobs.py writes the inputs, the claude
@@ -198,19 +201,20 @@ REPO LAYOUT (what is not a module)
 TESTS (`nuauto test` runs every tests/test_*.py, 4 at a time: offline, no sheet, no real NUworks, no network; browser tests
 use headless Firefox on local pages or demo mode. Run it before pushing; CI runs it on Ubuntu and macOS.)
   test_sync      sync.CODE is complete (a new module or prompt must be in it), absolute imports, rsync options, units
-  test_sheet     sheet.py: parsing, week and total limits, max_per_week, not_on_nuworks, submit safety, drop, set_outcome,
-                 mark_on_laptop, retries, the kept sheet (OPEN)
-  test_jobs      hard rules, pool, model; sheet.add_proposed / approve_proposed
+  test_sheet     sheet.py: parsing, week and total limits, max_per_week, not_on_nuworks, maybe_filled, submit safety,
+                 drop, set_outcome, mark_on_laptop, retries, the kept sheet (OPEN)
+  test_jobs      hard rules, pool, model; sheet.add_proposed / approve_proposed; application_answer (the hiring stage)
   test_apply     apply.check_popup, run_rows and its queue, BETWEEN
   test_answers   answers.py, apply.fill_extra_fields (a local form), JsonIO, json_ui_allowed
   test_browser   domain lock, goto retry, profile lock
   test_demo      the real apply.py on demo mode's fake pages (stops, cap, Ctrl+C, GUI gone, CLAUDECODE refusals)
-  test_daily     daily.py's summary, to-do, Claude errors
+  test_daily     daily.py's morning message, alerts once a day, Claude errors, the applications check
   test_web       Mark-done links (signatures; GET never changes the sheet)
   test_deploy    deploy.py on a throwaway git repo
   test_doctor_remote   doctor.check_remote_assist          test_health   health.py's checks
   test_insights  Insights numbers          test_selftest  `nuauto selftest`          test_setup  the wizard (onboard.py)
-  test_intern    internship pool, postings.py (links, parsing, the network guard, fetch tries), short links, Review queue
+  test_intern    internship pool, postings.py (links, parsing, close dates, the network guard, fetch tries, redate),
+                 short links, Review queue
   test_assist    the agent's guard, answer bank, slots, passwords, uploads, by-hand rows
   test_accounts  accounts.py: sites, Bitwarden export / import of your own logins
   test_mail      mail.py: Gmail's format, which mail counts, the `email` command

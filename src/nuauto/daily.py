@@ -1,8 +1,9 @@
 """Pool update: list -> Claude triage -> details -> Claude score -> pool -> notifications (Discord + desktop).
 
 Runs on the homelab (systemd user timer nuauto-daily.timer, 08:00 and 18:00 New York time).
-  nuauto daily          # the update; the morning run also sends deadline reminders
-  nuauto daily weekly   # Sunday summary (nuauto-weekly.timer)
+  nuauto daily          # the update; the morning run also sends the one message a day (morning())
+  nuauto daily weekly   # nuauto-weekly.timer (Sunday): nothing to send since 2026-10-26
+Messages: the morning message, and a problem when it happens (alert(): at most once a day each).
 From the laptop: `nuauto update` starts the homelab run and then syncs.
 Uses the hidden (headless) browser; never applies to anything and only reads the sheet.
 Claude runs as `claude -p` (Sonnet) with only Read/Write tools, one call per batch.
@@ -28,6 +29,10 @@ CLAUDE = config.tool_path("claude") or "claude"
 AUTH_RE = re.compile(r"authenticat|logged out|/login|log in|oauth|401", re.I)
 SCANS = "scans.json"  # per-run counts for the morning summary (data/)
 LAST_RUN = "last_run.json"  # data/: how the last update went and why it stopped (the GUI's New jobs check, with a fix)
+LATER = "later.json"  # data/: what the next morning message adds (later(): {kind: [items]}), cleared once it is sent
+TOLD = "told.json"  # data/: when each problem was last told (alert(): at most once a day each)
+TELL_AGAIN = timedelta(hours=20)  # (a problem still there the next morning is told again)
+QUIET = []  # set during the morning run's scan: its problems go in the morning message (wrong_line), not their own
 RETRY_WAIT = 120  # seconds before the job list is read once more: NUworks is sometimes slow for a while
 STOPPED = []  # this run's stops, in order: (reason, what stopped); main() keeps the first in LAST_RUN
 LOG_PATH = os.path.join(config.LOGS_DIR, f"daily-{datetime.now():%Y%m%d-%H%M}.txt")
@@ -46,6 +51,27 @@ def notify(title, body=""):
     log(f"NOTIFY: {title} | {body}")
     health.desktop_notify(title, body)  # Linux desktop / macOS (local mode); nothing on a headless homelab
     discord(f"**{title}**\n{body}" if body else f"**{title}**")
+
+
+def alert(title, body=""):
+    """A problem worth a message now (a login to renew, a run that stopped). The same title at most once a day: the
+    2-hourly internship update and the twice-daily update would otherwise repeat it every run."""
+    told, now = jobs.load(TOLD, {}), datetime.now()
+    last = told.get(title)
+    if last and now - datetime.fromisoformat(last) < TELL_AGAIN:
+        return log(f"ALERT (told at {last}): {title} | {body}")
+    told[title] = now.isoformat(timespec="minutes")
+    jobs.save(TOLD, {k: v for k, v in told.items() if now - datetime.fromisoformat(v) < timedelta(days=7)})
+    if QUIET:
+        return log(f"ALERT (in the morning message): {title} | {body}")
+    notify(title, body)
+
+
+def later(kind, items):
+    """Things for the next morning message instead of a message now (kinds: "recorded", "closed", "deployed")."""
+    kept = jobs.load(LATER, {})
+    kept[kind] = [*kept.get(kind, []), *(i for i in items if i not in kept.get(kind, []))][-10:]
+    jobs.save(LATER, kept)
 
 
 def discord(text):
@@ -68,7 +94,7 @@ def stop(reason, title, body, said=None):
     reason: nuworks_login (NUworks wants you to log in), nuworks (NUworks did not answer: the next run usually works),
     claude (Claude Code logged out or missing), failed (anything else). said: what stopped, in a few words."""
     STOPPED.append((reason, said or title.removeprefix("NUauto: ")))
-    notify(title, body)
+    alert(title, body)
 
 
 def record_run(code):
@@ -160,22 +186,31 @@ def step(fn, *args):
 
 
 def main():
-    """The scan, then (morning run) the reminders. A failed scan still sends the reminders, from the sheet
-    and the last saved pool."""
+    """The scan and the applications check, then (morning run) the morning message. A failed scan still sends it, from
+    the sheet and the last saved pool."""
     before = {r["id"] for r in jobs.load("pool.json", [])}
     STOPPED.clear()
+    is_morning = datetime.now().hour < 12  # the one message a day, with the morning run: it carries this run's problems
+    if is_morning:
+        QUIET.append(True)
     try:
-        code = scan(before)
-    except Exception as e:  # e.g. NUworks too slow, or the browser profile is busy because apply.py is running
-        traceback.print_exc()
-        what = f"{type(e).__name__}: {str(e)[:150]}"
-        # Playwright's TimeoutError: a NUworks page did not load (Claude's calls time out as TimeoutExpired)
-        stop("nuworks" if type(e).__name__ == "TimeoutError" else "failed", "NUauto: daily update failed", what,
-             said="NUworks did not load in time" if type(e).__name__ == "TimeoutError" else what[:120])
-        code = 1
-    if datetime.now().hour < 12:  # reminders once a day, with the morning run
+        try:
+            code = scan(before)
+        except Exception as e:  # e.g. NUworks too slow, or the browser profile is busy because apply.py is running
+            traceback.print_exc()
+            what = f"{type(e).__name__}: {str(e)[:150]}"
+            # Playwright's TimeoutError: a NUworks page did not load (Claude's calls time out as TimeoutExpired)
+            stop("nuworks" if type(e).__name__ == "TimeoutError" else "failed", "NUauto: daily update failed", what,
+                 said="NUworks did not load in time" if type(e).__name__ == "TimeoutError" else what[:120])
+            code = 1
+        try:
+            applications()
+        except Exception as e:  # never stops the morning message
+            log(f"applications check failed: {type(e).__name__}: {str(e)[:150]}")
+    finally:
+        QUIET.clear()
+    if is_morning:
         reminders(before, ok=code == 0)
-    applications()
     code = internships() or code
     record_run(code)
     return code
@@ -183,7 +218,8 @@ def main():
 
 def applications():
     """Every run: ask NUworks about each sent row (jobs.check_applications), so the total limit counts what NUworks has.
-    Never changes the run's result: a sheet or NUworks that can't be read now is asked again next run."""
+    Never changes the run's result: a sheet or NUworks that can't be read now is asked again next run. What to withdraw
+    (Rejected rows NUworks still has, jobs that look filled) goes in the log here and in the morning message."""
     from nuauto import setup_sheet
     from nuauto import sheet
     try:
@@ -202,10 +238,9 @@ def applications():
     waiting = sheet.rejected_not_withdrawn(rows, seen)
     if waiting:
         log(f"rejected, not withdrawn on NUworks: row{'s' if len(waiting) > 1 else ''} {', '.join(str(r.number) for r in waiting)}")
-        if datetime.now().hour < 12:  # the message once a day, with the morning run
-            notify(f"{len(waiting)} rejected application{'s' if len(waiting) > 1 else ''} still on NUworks",
-                   "\n".join(f"{r.title[:40]} | {r.company[:22]}" for r in waiting)
-                   + "\nWithdraw on NUworks: until you do they count toward the total.")
+    done = sheet.maybe_filled(rows, seen)
+    if done:
+        log("job looks filled: " + ", ".join(f"row {r.number} ({why})" for r, why in done))
 
 
 def internships():
@@ -277,44 +312,178 @@ def scan(before):
     new = [r for r in pool if r["id"] not in before]
     gone = len(before - {r["id"] for r in pool})
     log(f"pool {len(pool)} ({len(new)} new, {gone} closed or dropped)")
-    record_scan(len(set(jobs.load("list.json", {})) - listed_before), len(new))
-    if new:
-        top = "\n".join(f"{r['effective']}%  {r['title'][:45]} | {r['company'][:25]}" for r in new[:5])
-        notify(f"{len(new)} new job{'s' if len(new) > 1 else ''} in your NUworks pool",
-               top + "\nRun: nuauto approve")
+    best = max(new, key=lambda r: r["effective"], default=None)  # (the morning message names it)
+    record_scan(len(set(jobs.load("list.json", {})) - listed_before), len(new),
+                best and {"score": best["effective"], "text": f"{best['title'][:40]} | {best['company'][:22]}"})
     return 0
 
 
 def reminders(before, ok):
-    """Morning reminders. After a good scan, first records jobs applied to by hand (needs the fresh list)."""
-    rows = sheet_rows()
+    """The morning message. After a good scan, first records jobs applied to by hand (needs the fresh list)."""
+    rows = sheet_rows(tell=False)  # (the message itself says when the sheet can't be read)
     if rows is not None and ok:
         try:
             rows = record_hand_applications(before, rows) or rows
-        except Exception as e:  # never let this block the reminders
+        except Exception as e:  # never let this block the message
             log(f"hand applications check failed: {type(e).__name__}: {str(e)[:150]}")
-    pool = jobs.load("pool.json", [])
-    summary = scan_summary(jobs.load(SCANS, []), datetime.now())
+    notify("NUauto morning", morning(rows, jobs.load("pool.json", []), other=other_rows()))
+    jobs.save(LATER, {})
+
+
+def other_rows():
+    """The Other jobs tab's rows when internships are on (their Approved ones can close too), else None."""
     from nuauto import intern
-    if intern.ENABLED:
-        summary += "\n" + intern.summary()
-    for name, fn in [("approved", lambda: approved_notice(rows)), ("urgent", lambda: urgent_notice(pool, rows)),
-                     ("todo", lambda: todo_notice(rows, summary if ok else summary + " (this morning's scan failed)")),
-                     ("google", google_notice)]:
+    if not intern.ENABLED:
+        return None
+    try:
+        return intern.other_rows(interactive=False)
+    except BaseException as e:  # gspread's login flow can sys.exit; the message still goes out
+        log(f"could not read the Other jobs tab ({type(e).__name__})")
+        return None
+
+
+def morning(rows, pool, now=None, other=None):
+    """The one message a day (since 2026-10-26: before, each of these was a message of its own, several a day). Short:
+    a line for each thing that applies: new jobs, what closes, what only you can do, what to withdraw, what was recorded
+    or updated, this week's count, what is wrong. rows: None when the sheet can't be read; other: the Other jobs
+    tab's."""
+    now = now or datetime.now()
+    lines = []
+    for name, fn in [("new", lambda: new_line(now)), ("closing", lambda: closing_line(rows, pool, now.date(), other)),
+                     ("todo", lambda: todo_line(rows)), ("withdraw", lambda: withdraw_line(rows)),
+                     ("later", later_lines), ("week", lambda: week_line(rows)), ("wrong", lambda: wrong_line(rows))]:
         try:
-            fn()
-        except Exception as e:  # one broken reminder must not stop the others
-            log(f"{name} reminder failed: {type(e).__name__}: {str(e)[:150]}")
+            got = fn()
+        except Exception as e:  # one broken line must not stop the message
+            log(f"{name} line failed: {type(e).__name__}: {str(e)[:150]}")
+            continue
+        lines += got if isinstance(got, list) else [got] if got else []
+    if config.REMOTE_APP:
+        from nuauto import review
+        lines.append(review.page_url())
+    return "\n".join(lines)
 
 
-def google_notice():
-    """Heads-up the day before the 7-day Google login runs out."""
+def names(items, most=3, width=22):
+    """A few short names: "A, B, C +2"."""
+    items = [i[:width] for i in items]
+    return ", ".join(items[:most]) + (f" +{len(items) - most}" if len(items) > most else "")
+
+
+def scan_part(scans, now, what, hours=24):
+    """How many jobs made a pool in the last `hours` (each run's counts: record_scan), with the best of them."""
+    recent = [s for s in scans if now - datetime.fromisoformat(s["time"]) <= timedelta(hours=hours)]
+    n = sum(s["pool"] for s in recent)
+    best = max((s["best"] for s in recent if s.get("best")), key=lambda b: b["score"], default=None)
+    return f"{n} {what}{'s' if n != 1 else ''}" + (f" (best: {best['text']})" if best and n else "")
+
+
+def new_line(now):
+    from nuauto import intern
+    parts = [scan_part(jobs.load(SCANS, []), now, "co-op")]
+    if intern.ENABLED:
+        parts.append(scan_part(intern.load("scans.json", []), now, "internship"))
+    return "New: " + " · ".join(parts)
+
+
+def closing_line(rows, pool, today, other=None, days=3):
+    """Approved rows on both tabs that close within a week (by name and day, soonest first: apply to those first; an
+    internship's date is its posting's, when it gives one), and how many pool jobs (co-ops, internships) close within
+    `days` that are not in the sheet yet and not rated no."""
+    from nuauto import intern
+    details, dates = jobs.load_details(), intern.closing_dates() if other is not None else {}
+    due = [(jobs.closes(d), r) for r in rows or [] if r.status == "Approved"
+           and (d := details.get(jobs.job_id(r.url))) and jobs.closes(d)]
+    due += [(dates[intern.real_url(r.url)], r) for r in other or [] if r.status == "Approved"
+            and intern.real_url(r.url) in dates]
+    due = sorted(((day, r) for day, r in due if 0 <= (day - today).days <= jobs.URGENT_DAYS), key=lambda x: x[0])
+    in_sheet = {jobs.job_id(r.url) for r in rows or []} | {intern.real_url(r.url) for r in other or []}
+    ratings = jobs.load("ratings.json", {})
+    pools = pool + (intern.load("pool.json", []) if other is not None else [])
+    listed = lambda r: r["id"] in in_sheet or bool(r.get("url")) and intern.real_url(r["url"]) in in_sheet  # noqa: E731
+    soon = [r for r in pools if r.get("closes") and not listed(r) and ratings.get(r["id"], {}).get("label") != 0
+            and 0 <= (datetime.fromisoformat(r["closes"]).date() - today).days <= days]
+    log(f"approved closing within {jobs.URGENT_DAYS} days: {len(due)}; pool closing within {days} days: {len(soon)}")
+
+    def when(day):
+        n = (day - today).days
+        return "today" if n == 0 else "tomorrow" if n == 1 else f"{day:%a}"
+    parts = ([names([f"{r.company[:22]} {when(day)}" for day, r in due], 4, 40)] if due else []) \
+        + ([f"{len(soon)} pool job{'s' if len(soon) != 1 else ''} within {days} days (Review)"] if soon else [])
+    return "Closing soon: " + " · ".join(parts) if parts else None
+
+
+def todo_line(rows):
+    """What only you can finish: company-site applications still owed and external jobs (Needs Human), the counts and
+    the first few: each name links to its job, its ✓ to the Mark-done page (when it is set up)."""
     from nuauto import sheet
-    age = sheet.google_login_age()
-    if age is not None and age >= config.GOOGLE_LOGIN_DAYS - 1:
-        left = config.GOOGLE_LOGIN_DAYS - age
-        title = "NUworks: Google login has expired" if left <= 0 else "NUworks: Google login expires today"
-        notify(title, "On the laptop run: `nuauto login google`")
+    from nuauto import web
+    site = [r for r in rows if r.status == "Applied" and r.notes.startswith(sheet.SITE_MARK)] if rows else []
+    ext = [r for r in rows if r.status == "Needs Human" and r.notes.startswith("External application")] if rows else []
+    log(f"todo: {len(site)} company-site, {len(ext)} external")
+    if not site and not ext:
+        return None
+
+    def item(r, action):  # no Mark-done page configured (web_base_url "") = no ✓
+        mark = f" [✓]({web.link(action, r.number, jobs.job_id(r.url))})" if web.BASE_URL else ""
+        return f"[{r.company[:22]}]({r.url}){mark}"
+    counts = ([f"{len(site)} company site{'s' if len(site) != 1 else ''} owed"] if site else []) \
+        + ([f"{len(ext)} external application{'s' if len(ext) != 1 else ''}"] if ext else [])
+    items = [item(r, "site") for r in site] + [item(r, "applied") for r in ext]
+    return (f"To do: {', '.join(counts)}: " + " · ".join(items[:3]) + (f" +{len(items) - 3}" if len(items) > 3 else "")
+            + (" (✓ marks one done)" if web.BASE_URL else ""))
+
+
+def withdraw_line(rows):
+    """Applications NUworks still has that you may withdraw there, so they stop counting toward the total: Rejected
+    rows, and Applied rows whose job looks filled (the applications check just before: sheet.maybe_filled)."""
+    from nuauto import sheet
+    if rows is None:
+        return None
+    seen = sheet.nuworks_seen()
+    rejected = [r.company for r in sheet.rejected_not_withdrawn(rows, seen)]
+    filled = [r.company for r, _ in sheet.maybe_filled(rows, seen)]
+    parts = ([f"rejected {names(rejected)}"] if rejected else []) + ([f"may be filled {names(filled)}"] if filled else [])
+    return "Withdraw on NUworks to free room: " + " · ".join(parts) if parts else None
+
+
+LATER_TEXT = {"recorded": "Recorded what you applied to on NUworks", "closed": "Approved internships now closed",
+              "deployed": "Updated"}
+
+
+def later_lines():
+    """What other runs kept for this message (later())."""
+    return [f"{LATER_TEXT.get(k, k)}: {names(v, 2, 60) if k == 'deployed' else names(v)}"
+            for k, v in jobs.load(LATER, {}).items() if v]
+
+
+def week_line(rows):
+    from nuauto import sheet
+    if rows is None:
+        return None
+    week, total = sheet.check_limits_safe(rows)
+    waiting = sum(1 for r in rows if r.status == "Approved")
+    return f"Week: {week}/{sheet.max_per_week()} applied · total {total}/{sheet.MAX_TOTAL} · {waiting} Approved waiting"
+
+
+FIX = {"nuworks_login": "run `nuauto login` on the laptop", "claude": "run `claude auth login` on {where}",
+       "nuworks": "NUworks was slow; the next run usually works", "failed": "the update's log on {where} says why"}
+
+
+def wrong_line(rows):
+    """What is wrong now: this run stopped (its message was held for this one: alert, QUIET), the sheet can't be read,
+    or the Google login runs out."""
+    from nuauto import sheet
+    parts = [f"the update stopped: {said} ({FIX.get(reason, FIX['failed']).format(where=where())})"
+             for reason, said in STOPPED[:1]]
+    if rows is None:
+        parts.append("can't read the sheet (the Google login? on the laptop run `nuauto login google`)")
+    else:
+        age = sheet.google_login_age()
+        if age is not None and age >= config.GOOGLE_LOGIN_DAYS - 1:
+            parts.append(("the Google login has expired" if age >= config.GOOGLE_LOGIN_DAYS else
+                          "the Google login expires today") + ": on the laptop run `nuauto login google`")
+    return "Wrong: " + " · ".join(parts) if parts else None
 
 
 def record_hand_applications(before, rows):
@@ -339,114 +508,39 @@ def record_hand_applications(before, rows):
             n = len(ws.get_all_values()) + 1
             ws.update(range_name=f"A{n}:F{n}", values=[[jobs.job_url(i), d.get("company", ""), d.get("title", ""), "Applied",
                       "Applied by hand (seen on NUworks)", datetime.now().strftime(sheet.DATE_FMT)]], value_input_option="RAW")
-        done.append(f"{d.get('title', i)[:40]} | {d.get('company', '')[:22]}")
-    notify(f"Recorded {len(done)} application{'s' if len(done) > 1 else ''} you made on NUworks", "\n".join(done))
+        done.append(d.get("company") or d.get("title", i))
+    log(f"hand applications: recorded {', '.join(done)}")
+    later("recorded", done)
     return sheet.read_rows(ws)
 
 
-def record_scan(listed, pooled):
-    """Remember this run's counts (new NUworks postings, new pool jobs) for the morning summary."""
+def record_scan(listed, pooled, best=None):
+    """Remember this run's counts (new NUworks postings, new pool jobs) and its best new job ({"score", "text"}) for the
+    morning message."""
     scans = jobs.load(SCANS, [])
-    scans.append({"time": datetime.now().isoformat(timespec="minutes"), "listed": listed, "pool": pooled})
+    scans.append({"time": datetime.now().isoformat(timespec="minutes"), "listed": listed, "pool": pooled,
+                  **({"best": best} if best else {})})
     jobs.save(SCANS, scans[-60:])
 
 
-def scan_summary(scans, now, hours=24):
-    recent = [s for s in scans if now - datetime.fromisoformat(s["time"]) <= timedelta(hours=hours)]
-    listed, pooled = sum(s["listed"] for s in recent), sum(s["pool"] for s in recent)
-    return (f"Last {hours}h ({len(recent)} scan{'s' if len(recent) != 1 else ''}): {listed} new posting{'s' if listed != 1 else ''}"
-            f" on NUworks, {pooled} made your pool" + (" (nuauto approve)" if pooled else ""))
-
-
-def todo_notice(rows, summary):
-    """Morning message, always sent: scan counts, then things only you can do: company-site applications
-    still owed, and external jobs (Needs Human)."""
-    from nuauto import sheet
-    from nuauto import web
-    site = [r for r in rows if r.status == "Applied" and r.notes.startswith(sheet.SITE_MARK)] if rows else []
-    ext = [r for r in rows if r.status == "Needs Human" and r.notes.startswith("External application")] if rows else []
-    if not site and not ext:
-        log("todo: nothing owed")
-        return notify("NUauto morning", summary + ("\nNothing only you need to finish." if rows is not None else ""))
-    lines = [summary, "Only you can finish:"]
-    def mark(label, action, r):  # no Mark-done page configured (web_base_url "") = no link
-        return f" · [{label}]({web.link(action, r.number, jobs.job_id(r.url))})" if web.BASE_URL else ""
-    for r in site:
-        lines.append(f"• {r.company[:25]}: apply on their site too ([job]({r.url})){mark('Mark done', 'site', r)}")
-    for r in ext:
-        lines.append(f"• {r.company[:25]}: external application ([job]({r.url})){mark('Mark applied', 'applied', r)}")
-    log(f"todo: {len(site)} company-site, {len(ext)} external")
-    notify("NUauto morning", "\n".join(lines))
-
-
-def sheet_rows():
-    """Sheet rows, or None if the sheet can't be read (e.g. the Google token expired)."""
+def sheet_rows(tell=True):
+    """Sheet rows, or None if the sheet can't be read (e.g. the Google token expired). tell: a message about it (the
+    morning message says it in its own line)."""
     try:
         from nuauto import sheet
         return sheet.read_rows(sheet.open_worksheet())
     except BaseException as e:  # gspread's login flow can sys.exit
         log(f"could not read the sheet ({type(e).__name__})")
-        notify("NUauto: can't read the Google sheet",
-               "Google login probably expired (it lasts 7 days). On the laptop run: `nuauto login google`")
+        if tell:
+            alert("NUauto: can't read the Google sheet",
+                  "Google login probably expired (it lasts 7 days). On the laptop run: `nuauto login google`")
         return None
 
 
-def approved_notice(rows):
-    """Approved rows (not applied yet) that close today or tomorrow."""
-    if rows is None:
-        return
-    details = jobs.load_details()
-    today = datetime.now().date()
-    due = []
-    for r in rows:
-        d = details.get(jobs.job_id(r.url)) if r.status == "Approved" else None
-        day = jobs.closes(d) if d else None
-        if day is not None and 0 <= (day - today).days <= 1:
-            due.append((day, r))
-    log(f"approved closing today/tomorrow: {len(due)}")
-    if due:
-        body = "\n".join(f"{jobs.closes_text(day)}  {r.title[:40]} | {r.company[:22]}" for day, r in sorted(due, key=lambda x: x[0]))
-        notify(f"{len(due)} Approved job{'s' if len(due) > 1 else ''} close today or tomorrow", body + "\nRun: nuauto apply")
-
-
-def urgent_notice(pool, rows, days=3):
-    """Pool jobs closing within `days` that are not in the sheet yet and not rated no."""
-    in_sheet = {jobs.job_id(r.url) for r in rows} if rows is not None else set()
-    ratings = jobs.load("ratings.json", {})
-    today = datetime.now().date()
-    soon = sorted((r for r in pool if r.get("closes") and r["id"] not in in_sheet
-                   and ratings.get(r["id"], {}).get("label") != 0
-                   and 0 <= (datetime.fromisoformat(r["closes"]).date() - today).days <= days),
-                  key=lambda r: r["closes"])
-    log(f"closing within {days} days, not in sheet: {len(soon)}")
-    if soon:
-        body = "\n".join(f"{r['closes'][5:]}  {r['match']}%  {r['title'][:40]} | {r['company'][:22]}" for r in soon[:5])
-        notify(f"{len(soon)} pool job{'s' if len(soon) > 1 else ''} close within {days} days", body + "\nRun: nuauto approve")
-
-
 def weekly():
-    """Sunday summary: this week's applications, Approved rows waiting, jobs to look at."""
-    from nuauto import sheet
-    rows = sheet_rows()
-    if rows is None:
-        return 1
-    week, total = sheet.check_limits_safe(rows)
-    waiting = [r for r in rows if r.status == "Approved"]
-    details, ratings = jobs.load_details(), jobs.load("ratings.json", {})
-    today = datetime.now().date()
-    soon = [r for r in waiting if (d := details.get(jobs.job_id(r.url))) and jobs.closes(d)
-            and jobs.closes(d) <= today + timedelta(days=7)]
-    in_sheet = {jobs.job_id(r.url) for r in rows}
-    unseen = [r for r in jobs.load("pool.json", []) if r["id"] not in in_sheet and r["id"] not in ratings]
-    room = max(0, sheet.max_per_week() - week)
-    lines = [f"Applied {sheet.week_window()[1]}: {week}/{sheet.max_per_week()} (total {total}/{sheet.MAX_TOTAL}).",
-             f"Approved and waiting: {len(waiting)}" + (f" ({len(soon)} close within 7 days)" if soon else "") + ".",
-             f"Pool jobs you haven't looked at: {len(unseen)}."]
-    if waiting:
-        lines.append(f"Run `nuauto apply` (room for {room} this week).")
-    elif room:
-        lines.append(f"Nothing Approved. Run `nuauto approve` to pick up to {room}.")
-    notify("NUauto weekly check-in", "\n".join(lines))
+    """`nuauto daily weekly` (Sunday, nuauto-weekly.timer). Since 2026-10-26 it sends nothing: the morning message has
+    this week's count every day. Kept so the installed timer still runs cleanly."""
+    log("weekly: nothing to send (the morning message has the week's count)")
     return 0
 
 
@@ -454,5 +548,5 @@ if __name__ == "__main__":
     try:
         sys.exit(weekly() if sys.argv[1:] == ["weekly"] else main())
     except Exception as e:  # main() handles scan failures itself; this catches the rest
-        notify("NUauto: daily update failed", f"{type(e).__name__}: {str(e)[:150]}")
+        alert("NUauto: daily update failed", f"{type(e).__name__}: {str(e)[:150]}")
         raise

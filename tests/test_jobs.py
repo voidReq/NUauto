@@ -216,4 +216,27 @@ rate, _ = jobs.review_queue("rate", details, {}, rows, TODAY)
 assert [r["id"] for r in rate] == ["902"]  # the rating viewer is unchanged
 jobs.load, jobs.ranked_pool = real_load, real_ranked
 
+# what the applications check keeps about a sent row's job: its hiring stage, and when it started / stopped interviewing
+def job(flag="0", stage="Available", applied=True):
+    return {"job_id": "j", "applied": applied, "application_status": "applied" if applied else None, "expired": False,
+            "is_interviewing": flag, "internal_status": {"_id": "1", "_label": stage}}
+a = jobs.application_answer(job(), None, "t1")
+assert (a["hiring"], a["interviewing"], a["interviewing_since"], a["interviewing_ended"], a["filled_since"]) == \
+    ("Available", False, None, None, None) and a["applied"] and a["checked"] == "t1"
+a = jobs.application_answer(job("1"), a, "t2")                       # the flag alone is interviewing
+assert a["interviewing"] and a["interviewing_since"] == "t2" and not a["interviewing_ended"]
+a = jobs.application_answer(job(None, "Interviewing"), a, "t3")      # so is the Hiring Status alone; since stays
+assert a["interviewing_since"] == "t2" and not a["interviewing_ended"]
+a = jobs.application_answer(job(), a, "t4")                          # neither: it stopped (it may be filled)
+assert a["interviewing_since"] == "t2" and a["interviewing_ended"] == "t4" and not a["filled_since"]
+a = jobs.application_answer(job(stage="Filled"), a, "t5")
+assert a["interviewing_ended"] == "t4" and a["filled_since"] == "t5"
+assert jobs.application_answer(job(stage="Filled"), a, "t6")["filled_since"] == "t5"   # the first time seen stays
+a = jobs.application_answer(job("1"), a, "t7")                       # interviewing again: a new period
+assert a["interviewing_since"] == "t7" and not a["interviewing_ended"] and not a["filled_since"]
+old = {"applied": True, "interviewing": True, "checked": "t0"}       # an answer saved before the tracking: only the flag
+assert jobs.application_answer(job(), old, "t1")["interviewing_ended"] == "t1"
+assert jobs.application_answer(job(), {**old, "interviewing": False}, "t1")["interviewing_ended"] is None
+assert jobs.application_answer({**job(), "internal_status": None}, None, "t1")["hiring"] is None
+
 print("All job-pool checks passed.")

@@ -107,14 +107,20 @@ A question from a run (an unknown form field, an option to pick, "did it submit?
                  Human rows only you can finish there: a cover letter, a transcript; the assistant can work them on NUworks
                  with you, or a chip says why not), Still owed (submitted on NUworks, the company site still wants you:
                  Mark the company site done; the NUworks side to send again: Submit on NUworks too), Applied ("not on
-                 NUworks" chip when NUworks has no application for it: it doesn't count toward the total; "interviewing
-                 (NUworks)"), Accepted, Rejected, Proposed, Dropped or failed, Other rows; Recent runs here at the end. The
+                 NUworks" chip when NUworks has no application for it: it doesn't count toward the total; the job's own
+                 hiring stage at the last check (jobs.application_answer): "job interviewing", then amber "job stopped
+                 interviewing" or "job filled" (sheet.maybe_filled: it may be filled; withdrawing on NUworks frees its
+                 place in the total). Until 2026-10-26 an "interviewing (NUworks)" chip showed the job's is_interviewing
+                 flag as if it were yours: it is about the job, set also on jobs you never applied to, and NUworks never
+                 shows a student whom an employer picked), Accepted, Rejected, Proposed, Dropped or failed, Other rows;
+                 Recent runs here at the end. The
                  other tab: Ready to apply (Approved: the assistant), Applied, Accepted, Rejected, Proposed, Dropped or
                  failed, Other rows (Sort: score, match %, pay, sheet order, and on the homelab's page the queue's order
                  first; it changes the view only).
                  Every row looks alike: who and what, score / match % and pay ("score 105 = 75% match + 10 Boston + 20
                  security" when bonuses add to it: Start goes by score), a line about it (site, notes), chips (when it
-                 closes, or was posted: amber within a week, red once past; "may also want the company's site"; the queue's
+                 closes, amber within a week, red once past; an internship's from its posting (gui.intern_facts), else
+                 "no close date · posted N days ago"; "may also want the company's site"; the queue's
                  place; "do it on the laptop" when the homelab's browser was refused), what to do next, Open, and More (⋯;
                  on a phone in the row's top right corner).
                  Next: Apply on an Approved NUworks row, after a confirm, just that row (`nuauto apply --row N`); while an

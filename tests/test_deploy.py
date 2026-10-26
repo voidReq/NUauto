@@ -67,8 +67,8 @@ class Fake(deploy.Deploy):
     def install_deps(self):
         self.installs += 1
 
-    def announce(self, text):
-        self.said.append(text)
+    def announce(self, text, later=False):
+        self.said.append(("later: " if later else "") + text)
 
 
 deploy.time.sleep = lambda s: None  # the restart check waits a few seconds
@@ -95,12 +95,12 @@ first_sha = d.load_state()["sha"]
 n = len(d.calls)
 assert d.run() == 0 and len(d.calls) == n and not d.said, "the same commit again must do nothing"
 
-# a docs-only commit: copied, no web restart, no reinstall, one Discord message, tests/ never copied
+# a docs-only commit: copied, no web restart, no reinstall, a line for the morning message, tests/ never copied
 commit({"docs/DEPLOY.md": "v2\n", "tests/test_x.py": "changed\n"}, "docs only")
 assert d.run() == 0
 assert read_live("docs/DEPLOY.md") == "v2\n" and not os.path.exists(os.path.join(LIVE, "tests"))
 assert ("restart", "nuauto-web.service") not in d.calls and d.installs == 0
-assert len(d.said) == 1 and "docs only" in d.said[0], d.said
+assert len(d.said) == 1 and d.said[0].startswith("later: ") and "docs only" in d.said[0], d.said
 assert d.load_state()["sha"] != first_sha
 
 # web code changed + a new module: both copied, web restarted

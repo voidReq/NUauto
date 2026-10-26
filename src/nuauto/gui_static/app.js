@@ -595,7 +595,7 @@ screens.home = (view) => {
   return { update: draw, health: () => draw(S.state) };
 };
 
-// When the NUworks posting closes: a chip (red once past, amber within a week), or "no deadline listed".
+// When the posting closes (NUworks', or an internship's own): a chip (red once past, amber within a week), or "no deadline listed".
 function dueChip(t) {
   if (!t.closes) return el("span", { class: "chip", text: "no deadline listed", testid: "due" });
   return el("span", { class: "chip" + (t.past ? " fail" : t.soon ? " warn" : ""), testid: "due",
@@ -1257,8 +1257,9 @@ screens.apply = async (view) => {
       next = el("button", { class: "btn small primary", text: "Submit on NUworks too", testid: `retry-btn-${r.row}`,
         onclick: () => confirmBox("Submit on NUworks too?", `${r.company} · ${r.title} is Applied on the company site. This submits the same job on NUworks.`,
           "Submit on NUworks", () => action("nuworks_side", runArgs({ row: r.row }))) });
-    } else if (key === "ready") {  // (when it was posted where NUworks rows say when they close)
-      chips = [r.posted_text ? el("span", { class: "chip", testid: "posted", text: r.posted_text }) : null];
+    } else if (key === "ready") {  // an internship: when it closes (its posting's date), else when it was posted
+      chips = [r.closes ? dueChip(r) : r.posted_text ? el("span", { class: "chip", testid: "posted", text: `no close date · ${r.posted_text}`,
+        title: "Neither the list nor the company's posting gives a closing date." }) : null];
       about = r.host || r.why;
       next = assistantStart(d, r, "other", `other-assist-${r.row}`, { disabled: !r.target, body: { row: r.row, tab: "other" } });
       open = r.target ? linkOut(r.target, "Open") : null;
@@ -1267,7 +1268,15 @@ screens.apply = async (view) => {
       const nu = r.nuworks;  // what NUworks said at the last check (the twice-daily update)
       if (nu && nu.current && nu.applied === false) chips.push(el("span", { class: "chip warn", testid: `not-on-nuworks-${r.row}`,
         text: "not on NUworks", title: `NUworks has no application for this job (checked ${nu.checked}): it doesn't count toward your total.` }));
-      if (nu && nu.applied && nu.interviewing) chips.push(el("span", { class: "chip accent", text: "interviewing (NUworks)" }));
+      // the job's own hiring stage (sheet.maybe_filled, jobs.application_answer), never yours: NUworks doesn't show that
+      const day = (t) => (t || "").slice(0, 10);
+      if (nu && nu.done === "filled") chips.push(el("span", { class: "chip warn", testid: `job-filled-${r.row}`, text: "job filled",
+        title: `NUworks' Hiring Status for this job is Filled (since ${day(nu.filled_since)}). If you haven't heard back, you can withdraw on NUworks: until you do it counts toward your total.` }));
+      else if (nu && nu.done) chips.push(el("span", { class: "chip warn", testid: `job-stopped-${r.row}`, text: "job stopped interviewing",
+        title: `The employer was interviewing for this job (from ${day(nu.interviewing_since)}) and stopped (${day(nu.interviewing_ended)}): it may be filled. If you haven't heard back, you can withdraw on NUworks: until you do it counts toward your total.` }));
+      else if (nu && nu.applied && r.status === "Applied" && (nu.interviewing || nu.hiring === "Interviewing")) chips.push(el("span", {
+        class: "chip", testid: `job-interviewing-${r.row}`, text: "job interviewing",
+        title: `The employer is interviewing for this job (NUworks, checked ${day(nu.checked)}). That is about the job, not your application: NUworks doesn't show students whom an employer picked.` }));
     }
     const facts = r.match != null || r.score != null || r.pay ? jobFacts(r) : null;
     return el("li", { class: "job-row", testid: `job-${tab}-${r.row}` },
