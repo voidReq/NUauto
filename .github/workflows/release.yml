@@ -30,13 +30,17 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - name: Build
         run: sh packaging/build.sh
-      - name: Libraries Firefox needs (for the smoke test)
-        if: runner.os == 'Linux'
-        run: sudo packaging/build/venv/bin/python -m playwright install-deps firefox
       - name: Smoke test
+        # Linux: first without installing Firefox's system libraries (GitHub's runners ship Firefox, so they have them;
+        # apt can take 20+ minutes when Ubuntu's mirror is slow); if it fails, they are installed and it runs once more
         run: |
           if [ "$RUNNER_OS" = Linux ]; then APP="$(ls dist/*.AppImage)"; else APP=packaging/build/dist/NUauto.app/Contents/MacOS/NUauto; fi
-          packaging/build/venv/bin/python packaging/smoke.py "$APP"
+          if ! packaging/build/venv/bin/python packaging/smoke.py "$APP"; then
+            [ "$RUNNER_OS" = Linux ] || exit 1
+            echo "Smoke test failed: installing the system libraries Firefox needs, then once more"
+            sudo packaging/build/venv/bin/python -m playwright install-deps firefox
+            packaging/build/venv/bin/python packaging/smoke.py "$APP"
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: nuauto-${{ matrix.os }}

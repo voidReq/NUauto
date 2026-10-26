@@ -29,6 +29,18 @@ jobs:
           uv venv --python 3.12 .venv
           uv pip install --python .venv/bin/python -e .
       - name: Install Playwright's Firefox
-        run: .venv/bin/python -m playwright install --with-deps firefox
+        # GitHub's Linux runners ship Firefox, so they already have the system libraries it needs; they are installed
+        # (apt, which can take 20+ minutes when Ubuntu's mirror is slow) only if Firefox does not start without them
+        run: |
+          .venv/bin/python -m playwright install firefox
+          if [ "$RUNNER_OS" = Linux ] && ! .venv/bin/python - <<'EOF'
+          from playwright.sync_api import sync_playwright
+          with sync_playwright() as p:
+              p.firefox.launch().close()
+          EOF
+          then
+            echo "Firefox did not start: installing the system libraries it needs"
+            sudo .venv/bin/python -m playwright install-deps firefox
+          fi
       - name: Tests
         run: .venv/bin/nuauto test
