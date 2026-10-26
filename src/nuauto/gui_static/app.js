@@ -595,7 +595,7 @@ screens.home = (view) => {
   return { update: draw, health: () => draw(S.state) };
 };
 
-// When the NUworks posting closes: a chip (red once past, amber within a week), or "no deadline listed".
+// When the posting closes (NUworks', or an internship's own): a chip (red once past, amber within a week), or "no deadline listed".
 function dueChip(t) {
   if (!t.closes) return el("span", { class: "chip", text: "no deadline listed", testid: "due" });
   return el("span", { class: "chip" + (t.past ? " fail" : t.soon ? " warn" : ""), testid: "due",
@@ -1257,8 +1257,9 @@ screens.apply = async (view) => {
       next = el("button", { class: "btn small primary", text: "Submit on NUworks too", testid: `retry-btn-${r.row}`,
         onclick: () => confirmBox("Submit on NUworks too?", `${r.company} · ${r.title} is Applied on the company site. This submits the same job on NUworks.`,
           "Submit on NUworks", () => action("nuworks_side", runArgs({ row: r.row }))) });
-    } else if (key === "ready") {  // (when it was posted where NUworks rows say when they close)
-      chips = [r.posted_text ? el("span", { class: "chip", testid: "posted", text: r.posted_text }) : null];
+    } else if (key === "ready") {  // an internship: when it closes (its posting's date), else when it was posted
+      chips = [r.closes ? dueChip(r) : r.posted_text ? el("span", { class: "chip", testid: "posted", text: `no close date · ${r.posted_text}`,
+        title: "Neither the list nor the company's posting gives a closing date." }) : null];
       about = r.host || r.why;
       next = assistantStart(d, r, "other", `other-assist-${r.row}`, { disabled: !r.target, body: { row: r.row, tab: "other" } });
       open = r.target ? linkOut(r.target, "Open") : null;

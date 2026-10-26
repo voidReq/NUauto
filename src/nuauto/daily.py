@@ -326,17 +326,30 @@ def reminders(before, ok):
             rows = record_hand_applications(before, rows) or rows
         except Exception as e:  # never let this block the message
             log(f"hand applications check failed: {type(e).__name__}: {str(e)[:150]}")
-    notify("NUauto morning", morning(rows, jobs.load("pool.json", [])))
+    notify("NUauto morning", morning(rows, jobs.load("pool.json", []), other=other_rows()))
     jobs.save(LATER, {})
 
 
-def morning(rows, pool, now=None):
+def other_rows():
+    """The Other jobs tab's rows when internships are on (their Approved ones can close too), else None."""
+    from nuauto import intern
+    if not intern.ENABLED:
+        return None
+    try:
+        return intern.other_rows(interactive=False)
+    except BaseException as e:  # gspread's login flow can sys.exit; the message still goes out
+        log(f"could not read the Other jobs tab ({type(e).__name__})")
+        return None
+
+
+def morning(rows, pool, now=None, other=None):
     """The one message a day (since 2026-10-26: before, each of these was a message of its own, several a day). Short:
     a line for each thing that applies: new jobs, what closes, what only you can do, what to withdraw, what was recorded
-    or updated, this week's count, what is wrong. rows: None when the sheet can't be read."""
+    or updated, this week's count, what is wrong. rows: None when the sheet can't be read; other: the Other jobs
+    tab's."""
     now = now or datetime.now()
     lines = []
-    for name, fn in [("new", lambda: new_line(now)), ("closing", lambda: closing_line(rows, pool, now.date())),
+    for name, fn in [("new", lambda: new_line(now)), ("closing", lambda: closing_line(rows, pool, now.date(), other)),
                      ("todo", lambda: todo_line(rows)), ("withdraw", lambda: withdraw_line(rows)),
                      ("later", later_lines), ("week", lambda: week_line(rows)), ("wrong", lambda: wrong_line(rows))]:
         try:
@@ -373,24 +386,31 @@ def new_line(now):
     return "New: " + " · ".join(parts)
 
 
-def closing_line(rows, pool, today, days=3):
-    """Approved rows that close today or tomorrow (by name: Start goes by closing date), and how many pool jobs close
-    within `days` that are not in the sheet yet and not rated no."""
-    details = jobs.load_details()
-    due = []
-    for r in rows or []:
-        d = details.get(jobs.job_id(r.url)) if r.status == "Approved" else None
-        day = jobs.closes(d) if d else None
-        if day is not None and 0 <= (day - today).days <= 1:
-            due.append((day, r))
-    in_sheet = {jobs.job_id(r.url) for r in rows or []}
+def closing_line(rows, pool, today, other=None, days=3):
+    """Approved rows on both tabs that close within a week (by name and day, soonest first: apply to those first; an
+    internship's date is its posting's, when it gives one), and how many pool jobs (co-ops, internships) close within
+    `days` that are not in the sheet yet and not rated no."""
+    from nuauto import intern
+    details, dates = jobs.load_details(), intern.closing_dates() if other is not None else {}
+    due = [(jobs.closes(d), r) for r in rows or [] if r.status == "Approved"
+           and (d := details.get(jobs.job_id(r.url))) and jobs.closes(d)]
+    due += [(dates[intern.clean_url(r.url)], r) for r in other or [] if r.status == "Approved"
+            and intern.clean_url(r.url) in dates]
+    due = sorted(((day, r) for day, r in due if 0 <= (day - today).days <= jobs.URGENT_DAYS), key=lambda x: x[0])
+    in_sheet = {jobs.job_id(r.url) for r in rows or []} | {intern.clean_url(r.url) for r in other or []}
     ratings = jobs.load("ratings.json", {})
-    soon = [r for r in pool if r.get("closes") and r["id"] not in in_sheet and ratings.get(r["id"], {}).get("label") != 0
+    pools = pool + (intern.load("pool.json", []) if other is not None else [])
+    listed = lambda r: r["id"] in in_sheet or bool(r.get("url")) and intern.clean_url(r["url"]) in in_sheet  # noqa: E731
+    soon = [r for r in pools if r.get("closes") and not listed(r) and ratings.get(r["id"], {}).get("label") != 0
             and 0 <= (datetime.fromisoformat(r["closes"]).date() - today).days <= days]
-    log(f"approved closing today/tomorrow: {len(due)}; pool closing within {days} days, not in sheet: {len(soon)}")
-    parts = ([f"Approved {names([r.company for _, r in sorted(due, key=lambda x: x[0])])} by tomorrow"] if due else []) \
+    log(f"approved closing within {jobs.URGENT_DAYS} days: {len(due)}; pool closing within {days} days: {len(soon)}")
+
+    def when(day):
+        n = (day - today).days
+        return "today" if n == 0 else "tomorrow" if n == 1 else f"{day:%a}"
+    parts = ([names([f"{r.company[:22]} {when(day)}" for day, r in due], 4, 40)] if due else []) \
         + ([f"{len(soon)} pool job{'s' if len(soon) != 1 else ''} within {days} days (Review)"] if soon else [])
-    return "Closing: " + " · ".join(parts) if parts else None
+    return "Closing soon: " + " · ".join(parts) if parts else None
 
 
 def todo_line(rows):

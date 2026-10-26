@@ -416,7 +416,8 @@ def intern_setup(today):
                                          skills="C, Python and Linux")
         posts[x["url"]] = text
         d = intern.details_of(x, {"how": "demo", "description": text, "location": "", "pay": "$38-$46 per hour",
-                                  "deadline": None, "closed": False}, today)
+                                  "deadline": (today + timedelta(days=20)).isoformat() if n == 5 else None,  # (its own date)
+                                  "closed": False}, today)
         intern.save(f"details/{x['id']}.json", d)
         scores[x["id"]] = {"match": match, "year_req": year_req, "met": ["C", "Python"], "partial": ["testing"],
                            "missing": ["industry tools", "a previous internship"],

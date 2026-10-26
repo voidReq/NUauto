@@ -579,6 +579,9 @@ try:
     done = post("/api/decide", {"id": beacon["id"], "decision": "approve", "mode": "approve"})
     assert done["tab"] == "other" and done["row"], done
     assert beacon["id"] not in [j["id"] for j in get("/api/review?mode=approve&source=intern")["jobs"]]  # the list moved on
+    # its row on Apply says when it closes (its posting's own date: demo.intern_setup), the others when they were posted
+    ready = {x["row"]: x for x in get("/api/jobs?tab=other&recheck=1")["sections"]["ready"]}
+    assert ready[done["row"]]["closes"] and not ready[done["row"]]["soon"] and "(in 20 days)" in ready[done["row"]]["closes_text"], ready
     post("/api/undo", {"id": beacon["id"], "row": done["row"], "previous": done["previous"], "tab": "other"})
     assert json.load(open(other_file))["rows"][done["row"] - 1][3] == "Proposed"
     post("/api/undo", {"id": "s" + "0" * 32, "row": done["row"], "previous": None, "tab": "other"}, expect=409)  # not a listing

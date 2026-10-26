@@ -141,7 +141,13 @@ year's lists are new repos: changing the term moves the addresses with it); off 
   page's schema.org JobPosting data, else the page's text (needs 1500+ characters that read like a posting), else
   the page in a hidden browser (fresh, no profile, no images, for pages built by JavaScript). Read-only GETs, 1 s
   apart per site, never to a non-public address (checked after redirects too). Pay and deadline are read when the
-  site gives them. A posting that says it is gone is marked closed: not scored. A posting no way could read in 3 runs
+  site gives them (the deadline: schema.org validThrough, Workday's endDate, iCIMS's page data, Oracle's
+  ExternalPostedEndDate, Greenhouse's application_deadline; postings.end_day drops a placeholder years away). Greenhouse,
+  Lever, Ashby, SmartRecruiters, Eightfold and Workable have no date in their data; dates written only in a posting's
+  text are not read (12/11/2026 can be either month: no guessing). Postings read before a site's date was read
+  (intern.REDATE: Oracle, 2026-10-26) are read once more for the date alone (intern.redate, 40 per run). The close date
+  shows on Review and Apply, and the morning message's Closing soon line uses it. A posting that says it is gone is
+  marked closed: not scored. A posting no way could read in 3 runs
   (each with the browser; not twice a day) shows in Review after the scored ones, unscored: none is dropped for being
   unreadable. 4. Claude score (prompts/INTERN_SCORE_PROMPT.md): the same match formula as the co-ops, plus year_req,
   who may apply compared with your standing DURING the internship (a sophomore now = a rising junior then): ok =

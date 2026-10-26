@@ -19,6 +19,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from datetime import date
 from urllib.parse import parse_qs, urlparse
 
 UA = "Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0"
@@ -123,11 +124,17 @@ def _ld_place(o):
     return "; ".join(x for x in out if x)
 
 
+def end_day(v):
+    """The close date in a job site's data (YYYY-MM-DD: its first 10 characters), or None. A date years away is a
+    placeholder for "no end" (Oracle's 4712-12-31), not a deadline."""
+    s = str(v or "")[:10]
+    return s if re.fullmatch(r"\d{4}-\d\d-\d\d", s) and int(s[:4]) <= date.today().year + 2 else None
+
+
 def from_jsonld(o):
     desc = text_of(o.get("description"))
-    end = str(o.get("validThrough") or "")[:10]
     return {"title": str(o.get("title") or ""), "description": desc, "location": _ld_place(o),
-            "pay": _ld_pay(o) or pay_from_text(desc), "deadline": end if re.fullmatch(r"\d{4}-\d\d-\d\d", end) else None}
+            "pay": _ld_pay(o) or pay_from_text(desc), "deadline": end_day(o.get("validThrough"))}
 
 
 # ---------------------------------------------------------------- the job sites' own data (pure: offline-tested)
@@ -213,14 +220,13 @@ def parse_api(k, data, url):
         info = data.get("jobPostingInfo") or {}
         desc = text_of(info.get("jobDescription"))
         place = "; ".join([info.get("location") or ""] + list(info.get("additionalLocations") or []))
-        end = str(info.get("endDate") or "")[:10]
         return {"title": info.get("title") or "", "description": desc, "location": place.strip("; "),
-                "pay": pay_from_text(desc), "deadline": end if re.fullmatch(r"\d{4}-\d\d-\d\d", end) else None,
+                "pay": pay_from_text(desc), "deadline": end_day(info.get("endDate")),
                 "closed": info.get("canApply") is False}
     if k == "greenhouse":
         desc = text_of(data.get("content"))
         return {"title": data.get("title") or "", "description": desc, "location": (data.get("location") or {}).get("name") or "",
-                "pay": pay_from_text(desc), "deadline": None}
+                "pay": pay_from_text(desc), "deadline": end_day(data.get("application_deadline"))}
     if k == "lever":
         parts = [data.get("description") or data.get("descriptionPlain") or ""]
         for block in data.get("lists") or []:
@@ -267,7 +273,7 @@ def parse_api(k, data, url):
                 parts += [f"<h3>{title}</h3>" if title else "", it[key]]
         desc = text_of("\n".join(parts))
         return {"title": it.get("Title") or "", "description": desc, "location": it.get("PrimaryLocation") or "",
-                "pay": pay_from_text(desc), "deadline": None}
+                "pay": pay_from_text(desc), "deadline": end_day(it.get("ExternalPostedEndDate"))}
     if k == "eightfold":
         desc = text_of(data.get("job_description"))
         return {"title": data.get("name") or "", "description": desc, "location": data.get("location") or "",

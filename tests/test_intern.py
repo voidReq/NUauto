@@ -93,6 +93,11 @@ sr = P("smartrecruiters", {"name": "T", "active": True, "jobAd": {"sections": {"
 assert sr["location"] == "Austin, TX" and sr["description"].startswith("Role")
 assert P("oracle", {"items": []}, "u") is None
 assert "Qualifications" in P("oracle", {"items": [{"Title": "T", "ExternalDescriptionStr": LONG, "ExternalQualificationsStr": "<p>C</p>"}]}, "u")["description"]
+# close dates in a job site's own data (Oracle's posting end, Greenhouse's deadline); a far-off placeholder is none
+assert P("oracle", {"items": [{"ExternalDescriptionStr": LONG, "ExternalPostedEndDate": "2026-12-05T05:00:00+00:00"}]}, "u")["deadline"] == "2026-12-05"
+assert P("oracle", {"items": [{"ExternalDescriptionStr": LONG, "ExternalPostedEndDate": "4712-12-31T00:00:00+00:00"}]}, "u")["deadline"] is None
+assert P("greenhouse", {"content": LONG, "application_deadline": "2026-11-20T23:59:00-05:00"}, "u")["deadline"] == "2026-11-20"
+assert P("greenhouse", {"content": LONG, "application_deadline": None}, "u")["deadline"] is None
 assert P("eightfold", {"name": "T", "job_description": LONG}, "u")["description"]
 assert P("workable", {"title": "T", "description": LONG, "requirements": "<p>C</p>", "location": {"city": "Boston", "region": "MA"}},
          "u")["location"] == "Boston, MA"
@@ -626,6 +631,27 @@ intern.ranked_pool(ratings, [])
 assert trains == [1, 1, 1]
 jobs.load_details, jobs.train = real_load, real_train
 
+# a posting from a job site whose close date NUauto reads only now (REDATE): read once more, for the date alone
+listings_now = intern.load("listings.json", {})
+lid = next(iter(listings_now))
+kept_details = intern.load(f"details/{lid}.json", None)
+intern.save(f"details/{lid}.json", {"id": lid, "url": listings_now[lid]["url"], "how": "oracle", "deadline": None,
+                                    "posting_end": None, "description": "scored text"})
+reads = []
+real_read = postings.read_plain
+postings.read_plain = lambda url, client: reads.append(url) or {"deadline": "2026-12-05", "description": "new text"}
+try:
+    assert intern.redate(lambda m: None) == 1 and len(reads) == 1
+    again = intern.load(f"details/{lid}.json", None)
+    assert again["deadline"] == "2026-12-05" and again["redated"] and again["description"] == "scored text", again
+    assert intern.redate(lambda m: None) == 0 and len(reads) == 1      # once only
+    assert intern.closing_dates()[intern.clean_url(listings_now[lid]["url"])] == date(2026, 12, 5)
+finally:
+    postings.read_plain = real_read
+    if kept_details is None:
+        os.remove(intern.path(f"details/{lid}.json"))
+    else:
+        intern.save(f"details/{lid}.json", kept_details)
 # stats run
 intern.stats()
 

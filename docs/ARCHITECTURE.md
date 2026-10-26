@@ -50,9 +50,9 @@ Job pool
                   job's hiring stage tracked across checks).
   fields.py       per-field starting preferences (the wizard's "What do you study?").
   intern.py       Summer internships (Simplify's and vanshb03's lists, one job on both kept once): the second pool, built
-                  like jobs.py (refresh, triage, fetch, score, category, build_pool); approve() -> manage.add("other");
-                  update(), review_queue(), stats(). Short links -> the posting's own (real_links, real_url; used by
-                  assist.other_target). Data in data/intern/.
+                  like jobs.py (refresh, triage, fetch, redate, score, category, build_pool); approve() ->
+                  manage.add("other"); update(), review_queue(), closing_dates(), stats(). Short links -> the posting's
+                  own (real_links, real_url; used by assist.other_target). Data in data/intern/.
   postings.py     reads one posting from a company's own job site, no login; public addresses only (allowed_host).
   daily.py        what the homelab timers run. main() -> scan() (via step()), applications(), reminders() (the morning
                   message: morning(), its lines; record_hand_applications()), internships(); run_claude(); messages:
@@ -213,7 +213,8 @@ use headless Firefox on local pages or demo mode. Run it before pushing; CI runs
   test_deploy    deploy.py on a throwaway git repo
   test_doctor_remote   doctor.check_remote_assist          test_health   health.py's checks
   test_insights  Insights numbers          test_selftest  `nuauto selftest`          test_setup  the wizard (onboard.py)
-  test_intern    internship pool, postings.py (links, parsing, the network guard, fetch tries), short links, Review queue
+  test_intern    internship pool, postings.py (links, parsing, close dates, the network guard, fetch tries, redate),
+                 short links, Review queue
   test_assist    the agent's guard, answer bank, slots, passwords, uploads, by-hand rows
   test_accounts  accounts.py: sites, Bitwarden export / import of your own logins
   test_mail      mail.py: Gmail's format, which mail counts, the `email` command

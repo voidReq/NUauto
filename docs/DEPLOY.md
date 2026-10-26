@@ -62,12 +62,13 @@ Unit files live in this repo (deploy/systemd/) and are installed in ~/.config/sy
   - the internship update (when "internships" is on).
   DISCORD (since 2026-10-26, my request: fewer, shorter messages, glanced at once a day). Two kinds only:
   - "NUauto morning" (daily.morning), always sent, a line for each thing that applies: New (pool co-ops and
-    internships of the last 24h, each with the best one), Closing (Approved rows closing today or tomorrow by name, pool
-    jobs closing within 3 days not in the sheet), To do (company-site applications owed, external Needs Human rows,
-    with their job and signed Mark links), Withdraw on NUworks (Rejected / may be filled), what other runs kept for it
-    (daily.later -> data/later.json: applications recorded from NUworks, approved internships now closed, deploys),
-    Week (this week's count, the total, Approved waiting), Wrong (this run stopped, the sheet can't be read, the Google
-    login runs out), and NUauto's page when there is one.
+    internships of the last 24h, each with the best one), Closing soon (Approved rows on both tabs closing within a week,
+    soonest first with the day, an internship's date from its posting; pool co-ops and internships closing within 3
+    days not in the sheet, counted), To do (company-site applications owed, external Needs Human rows, the first three:
+    each name links to its job, its ✓ to the Mark-done page), Withdraw on NUworks (Rejected / may be filled), what
+    other runs kept for it (daily.later -> data/later.json: applications recorded from NUworks, approved internships
+    now closed, deploys), Week (this week's count, the total, Approved waiting), Wrong (this run stopped, the sheet
+    can't be read, the Google login runs out), and NUauto's page when there is one.
   - a problem when it happens (daily.alert: a run that stopped, a login to renew, the sheet unreadable, a crash): the
     same title at most once a day (data/told.json, TELL_AGAIN), so the 2-hourly internship update failing the same way
     is told once. The morning run's own problems go in the morning message instead (daily.QUIET).

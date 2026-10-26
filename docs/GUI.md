@@ -119,7 +119,8 @@ A question from a run (an unknown form field, an option to pick, "did it submit?
                  first; it changes the view only).
                  Every row looks alike: who and what, score / match % and pay ("score 105 = 75% match + 10 Boston + 20
                  security" when bonuses add to it: Start goes by score), a line about it (site, notes), chips (when it
-                 closes, or was posted: amber within a week, red once past; "may also want the company's site"; the queue's
+                 closes, amber within a week, red once past; an internship's from its posting (gui.intern_facts), else
+                 "no close date · posted N days ago"; "may also want the company's site"; the queue's
                  place; "do it on the laptop" when the homelab's browser was refused), what to do next, Open, and More (⋯;
                  on a phone in the row's top right corner).
                  Next: Apply on an Approved NUworks row, after a confirm, just that row (`nuauto apply --row N`); while an

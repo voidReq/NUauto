@@ -631,6 +631,42 @@ def fetch(log=print, limit=None, browser_limit=None):
     return ok, bad
 
 
+# Job sites whose data has a close date NUauto reads only since 2026-10-26 (Oracle's ExternalPostedEndDate): their
+# postings read before that are read once more, for the date alone (redate)
+REDATE = {"oracle"}
+
+
+def redate(log=print, limit=40):
+    """Saved postings from a REDATE job site with no close date: read again once (plain requests only), keeping only the
+    date they give (the text was scored as it was). Returns how many got one."""
+    from nuauto import postings
+    listings = load("listings.json", {})
+    todo = [d for i, d in load_details().items()
+            if d.get("how") in REDATE and not d.get("deadline") and not d.get("redated") and i in listings][:limit]
+    if not todo:
+        return 0
+    client, dated = postings.Client(), 0
+    for d in todo:
+        try:
+            day = postings.read_plain(d["url"], client).get("deadline")
+        except Exception:  # (unreadable now, or the network): no date, and it is not tried again
+            day = None
+        save(f"details/{d['id']}.json", {**d, "deadline": day, "redated": date.today().isoformat()})
+        dated += bool(day)
+    log(f"postings read again for their close date: {len(todo)}, {dated} give one")
+    return dated
+
+
+def closing_dates():
+    """{posting link (clean_url): the day it closes} for the internships whose posting gives one (jobs.closes)."""
+    listings, out = load("listings.json", {}), {}
+    for i, d in load_details().items():
+        day = jobs.closes(d)
+        if day and i in listings:
+            out[clean_url(listings[i]["url"])] = day
+    return out
+
+
 # ---------------------------------------------------------------- 4. score, 4b. category
 
 def score_export(limit=None):
@@ -951,6 +987,7 @@ def update():
                                  "NUauto: internship triage incomplete", fields):
             return 1
         fetch(daily.log)
+        redate(daily.log)
         if not daily.claude_step(ready, "INTERN_SCORE_PROMPT.md", score_export(), score_import,
                                  "NUauto: internship scoring incomplete", fields):
             return 1
