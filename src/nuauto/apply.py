@@ -371,6 +371,14 @@ def submit_nuworks_side(row, ws, io=None):
     job on NUworks too, with the same checks as apply_one. The outcome goes into Notes; the row stays
     Applied (same job, so the weekly count does not change). Returns the note."""
     log = browser.RunLog(f"row{row.number}_nuworks_side")
+    try:
+        browser.lock_profile("nuauto assist (NUworks side)")  # launch() below then reuses this lock
+    except browser.ProfileBusy as e:  # another run has the NUworks browser: nothing opened, the row goes on the retry list
+        note = (f"NUworks side NOT submitted: {str(e).rstrip('.')}: Apply > Company sites, or `nuauto assist "
+                f"nuworks {row.number}`.")
+        log.write(note)
+        sheet.append_note(ws, row.number, row.url, note)
+        return note
     resume_label = load_resume_label()
     entries = answers.load()
     io = io or (answers.TerminalIO() if sys.stdin.isatty() else answers.NoTerminalIO())
