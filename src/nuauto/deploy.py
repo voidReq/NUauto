@@ -87,9 +87,10 @@ class Deploy:
         if r.returncode:
             raise DeployError("reinstalling the package failed: " + r.stderr.strip()[-300:])
 
-    def announce(self, text):
+    def announce(self, text, later=False):
+        """A failed deploy: a message now. later: a deploy that worked, a line in the next morning message instead."""
         from nuauto import daily
-        daily.discord(text)
+        daily.later("deployed", [text]) if later else daily.discord(text)
 
     # ---- helpers
     def say(self, msg):
@@ -290,7 +291,7 @@ class Deploy:
         self.say(f"deployed {sha[:7]} ({subject[:60]}): {what}" if changed else f"deployed {sha[:7]}: nothing to copy")
         if changed:
             try:
-                self.announce(f"**Deployed** {sha[:7]}: {subject[:80]}\n{what}")
+                self.announce(f"{sha[:7]} {subject[:50]}", later=True)
             except Exception:
                 pass
         return 0

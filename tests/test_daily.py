@@ -3,6 +3,7 @@
 Uses a temp data dir, temp log file and a stubbed notify: no sheet, no Discord, no network.
 """
 import json
+import re
 import os
 import tempfile
 from datetime import datetime
@@ -40,25 +41,22 @@ assert asked == ["dropdown", 2], asked
 log_text = open(daily.LOG_PATH).read()
 assert "applications: 1 count toward the total; NUworks has none for row 2" in log_text, log_text[-300:]
 assert "rejected, not withdrawn on NUworks: row 3" in log_text, log_text[-300:]   # NUworks still has the Rejected row's application
-# an Applied row whose job stopped interviewing / got filled: in the log every run, in a message once per change
+# an Applied row whose job stopped interviewing / got filled: in the log every run, no message (the morning one has it)
 R_APPS.append(sheet.Row(4, "https://n/jobs/detail/c", "Filled Co", "Firmware", "Applied", "", "2026-10-03"))
 saved = os.path.join(config.DATA_DIR, sheet.APPLICATIONS)
-answer = {"applied": True, "fingerprint": sheet.fingerprint(R_APPS[2]), "interviewing_ended": "t2"}
-daily.jobs.check_applications = lambda rows: {"c": answer}
+answers = {"b": {"applied": True, "fingerprint": sheet.fingerprint(R_APPS[1])},
+           "c": {"applied": True, "fingerprint": sheet.fingerprint(R_APPS[2]), "interviewing_ended": "t2"}}
+daily.jobs.check_applications = lambda rows: answers
 sent.clear()
 daily.applications()
-assert "job looks filled: row 4 (stopped interviewing)" in open(daily.LOG_PATH).read()
-assert [t for t, _ in sent] == ["1 job you applied to may be filled"] and "Firmware | Filled Co: stopped interviewing" in sent[0][1]
+assert "job looks filled: row 4 (stopped interviewing)" in open(daily.LOG_PATH).read() and sent == [], sent
 os.makedirs(config.DATA_DIR, exist_ok=True)
-with open(saved, "w") as f:                                 # (what that check saved)
-    json.dump({"c": answer}, f)
-sent.clear()
-daily.applications()
-assert sent == []                                           # the same news: told once
-daily.jobs.check_applications = lambda rows: {"c": {**answer, "filled_since": "t3"}}
-daily.applications()
-assert [t for t, _ in sent] == ["1 job you applied to may be filled"] and ": filled" in sent[0][1]
+with open(saved, "w") as f:                                 # (what that check saved: the morning message reads it)
+    json.dump(answers, f)
+line = daily.withdraw_line(R_APPS)
+assert line == "Withdraw on NUworks to free room: rejected Co · may be filled Filled Co", line
 os.remove(saved)
+assert daily.withdraw_line(R_APPS) is None and daily.withdraw_line(None) is None
 R_APPS.pop()
 def no_nuworks(rows):
     raise SystemExit(daily.jobs.NOT_LOGGED_IN)
@@ -73,34 +71,57 @@ assert "applications check skipped" in open(daily.LOG_PATH).read()
 sheet.open_worksheet, sheet.read_rows, daily.jobs.check_applications, setup_sheet.ensure_dropdown = real_sheet_fns
 daily.applications = lambda: None  # (main() below: never the real sheet or NUworks)
 
-# record_scan keeps per-run counts; scan_summary adds up the last 24 hours only
-daily.record_scan(12, 2)
+# record_scan keeps per-run counts and the best new job; scan_part adds up the last 24 hours only
+daily.record_scan(12, 2, {"score": 109, "text": "Firmware Co-op | Harbor (score 109)"})
 scans = daily.jobs.load(daily.SCANS, [])
-assert len(scans) == 1 and scans[0]["listed"] == 12 and scans[0]["pool"] == 2, scans
-now = datetime(2026, 10, 5, 8, 5)
-scans = [{"time": "2026-10-04T07:00", "listed": 99, "pool": 9},   # older than 24h: ignored
-         {"time": "2026-10-04T18:04", "listed": 5, "pool": 1},
-         {"time": "2026-10-05T08:03", "listed": 3, "pool": 0}]
-s = daily.scan_summary(scans, now)
-assert s == "Last 24h (2 scans): 8 new postings on NUworks, 1 made your pool (nuauto approve)", s
-s = daily.scan_summary([], now)
-assert s == "Last 24h (0 scans): 0 new postings on NUworks, 0 made your pool", s
+assert len(scans) == 1 and scans[0]["listed"] == 12 and scans[0]["pool"] == 2 and scans[0]["best"]["score"] == 109, scans
 for _ in range(70):
     daily.record_scan(1, 0)
-assert len(daily.jobs.load(daily.SCANS, [])) == 60  # capped
+assert len(daily.jobs.load(daily.SCANS, [])) == 60 and "best" not in daily.jobs.load(daily.SCANS, [])[-1]  # capped
+now = datetime(2026, 10, 5, 8, 5)
+scans = [{"time": "2026-10-04T07:00", "listed": 99, "pool": 9, "best": {"score": 200, "text": "old"}},  # older than 24h
+         {"time": "2026-10-04T18:04", "listed": 5, "pool": 1, "best": {"score": 90, "text": "A | X (score 90)"}},
+         {"time": "2026-10-05T08:03", "listed": 3, "pool": 2, "best": {"score": 95, "text": "B | Y (score 95)"}}]
+assert daily.scan_part(scans, now, "co-op") == "3 co-ops (best: B | Y (score 95))"
+assert daily.scan_part([], now, "internship") == "0 internships"
+daily.jobs.save(daily.SCANS, scans)
 
-# morning message is always sent, with the summary first
-row = lambda n, status, notes: sheet.Row(n, f"https://x/jobs/{n}", f"Co{n}", "Title", status, notes, "")
-daily.todo_notice([row(2, "Applied", "")], "SUMMARY")
-assert sent[-1] == ("NUauto morning", "SUMMARY\nNothing only you need to finish."), sent[-1]
-daily.todo_notice(None, "SUMMARY")  # sheet unreadable: still the summary, no claim about the to-do list
-assert sent[-1] == ("NUauto morning", "SUMMARY"), sent[-1]
-web.BASE_URL = ""  # no Mark-done page: no links
-daily.todo_notice([row(3, "Applied", sheet.SITE_MARK + " ..."), row(4, "Needs Human", "External application ...")], "SUMMARY")
-title, body = sent[-1]
-lines = body.split("\n")
-assert title == "NUauto morning" and lines[:2] == ["SUMMARY", "Only you can finish:"], sent[-1]
-assert "Co3" in lines[2] and "Co4" in lines[3] and "Mark" not in body, body
+# a problem: a message at once, then the same one at most once a day however often the runs fail
+sent.clear()
+daily.alert("NUauto: X broke", "why")
+daily.alert("NUauto: X broke", "why")
+assert sent == [("NUauto: X broke", "why")], sent
+told = daily.jobs.load(daily.TOLD, {})
+daily.jobs.save(daily.TOLD, {**told, "NUauto: X broke": (datetime.now() - daily.TELL_AGAIN).isoformat(timespec="minutes")})
+daily.alert("NUauto: X broke", "why")
+assert len(sent) == 2, sent                                 # the next day: told again
+
+# the morning message: always sent, one short line for each thing that applies
+row = lambda n, status, notes, day="2026-10-05": sheet.Row(n, f"https://x/jobs/{n}", f"Co{n}", "Title", status, notes, day)
+web.BASE_URL = ""  # no Mark-done page: no Mark links
+config.REMOTE_APP = False  # (your own settings may have the homelab's page: its link would end the message)
+sheet.google_login_age = lambda: 1
+lines = daily.morning([row(2, "Applied", "")], [], now).split("\n")
+assert lines[0] == "New: 3 co-ops (best: B | Y (score 95))" and len(lines) == 2, lines
+assert re.fullmatch(r"Week: \d+/\d+ applied · total 1/99 · 0 Approved waiting", lines[1]), lines  # (this week: by today)
+lines = daily.morning([row(3, "Applied", sheet.SITE_MARK + " ..."), row(4, "Needs Human", "External application ...", "")],
+                      [], now).split("\n")
+assert lines[1] == "To do: 1 company site owed, 1 external application: [Co3](https://x/jobs/3) · [Co4](https://x/jobs/4)", lines
+daily.later("recorded", ["Acme"])
+daily.later("recorded", ["Acme", "Beta"])                   # (kept once each)
+daily.later("deployed", ["abc1234 Shorter messages"])
+sheet.google_login_age = lambda: 7
+lines = daily.morning(None, [], now).split("\n")             # the sheet can't be read: no to-do or week, said why
+assert lines[1:] == ["Recorded what you applied to on NUworks: Acme, Beta", "Updated: abc1234 Shorter messages",
+                     "Wrong: can't read the sheet (the Google login? on the laptop run `nuauto login google`)"], lines
+lines = daily.morning([], [], now).split("\n")
+assert lines[-1] == "Wrong: the Google login has expired: on the laptop run `nuauto login google`", lines
+sheet.google_login_age = lambda: 1
+config.REMOTE_APP = True
+from nuauto import review  # noqa: E402
+real_page, review.page_url = review.page_url, lambda slot=None: "http://page/"
+assert daily.morning([], [], now).split("\n")[-1] == "http://page/"   # the homelab's page ends it
+review.page_url, config.REMOTE_APP = real_page, False
 
 # a batch's Claude is shut in work/ (the batches hold web text: job postings, Simplify's list): it runs there, may read
 # and edit only there (Edit rules cover Write; never a bare Write, which would allow every path), no shell, web or MCP
@@ -145,7 +166,8 @@ assert sent == [("T", "Claude failed on triage_in_001.json: API Error: 529 Overl
 # no batches: nothing to do, no login check
 assert daily.claude_step(lambda: 1 / 0, "TRIAGE_PROMPT.md", [], no_import, "T") is True
 
-# a failed scan (e.g. NUworks too slow) still sends the morning reminders, from the sheet + last saved pool
+# a failed scan (e.g. NUworks too slow) still sends the morning message, from the sheet + last saved pool; the
+# problem is in it (no message of its own), and one broken line never stops the others
 class Morning(datetime):
     @classmethod
     def now(cls, tz=None):
@@ -157,24 +179,23 @@ def never(*a):
     raise AssertionError("hand-application check needs a fresh list; must not run after a failed scan")
 real_scan = daily.scan
 daily.scan, daily.record_hand_applications = slow, never
-daily.sheet_rows = lambda: [row(4, "Needs Human", "External application ...")]
-daily.google_notice = lambda: 1 / 0  # one broken reminder must not stop the others
+daily.sheet_rows = lambda tell=True: [row(4, "Needs Human", "External application ...", "")]
+daily.closing_line = lambda *a: 1 / 0
 sent.clear()
-assert daily.main() == 1
-titles = [t for t, _ in sent]
-assert titles[0] == "NUauto: daily update failed" and "TimeoutError" in sent[0][1], sent
-assert "NUauto morning" in titles, sent
-body = dict(sent)["NUauto morning"]
-assert "(this morning's scan failed)" in body and "Co4" in body, body
+assert daily.main() == 1 and not daily.QUIET
+assert [t for t, _ in sent] == ["NUauto morning"], sent
+body = sent[0][1]
+assert "1 external application: [Co4]" in body and "Wrong: the update stopped: NUworks did not load in time (NUworks was slow" in body, body
+assert daily.jobs.load(daily.LATER, {}) == {}               # what it kept went out with it
 
-# afternoon run: no reminders
+# the evening run: no morning message, and the same problem was told today already: nothing
 class Evening(Morning):
     @classmethod
     def now(cls, tz=None):
         return datetime(2026, 10, 5, 18, 6)
 daily.datetime = Evening
 sent.clear()
-assert daily.main() == 1 and [t for t, _ in sent] == ["NUauto: daily update failed"], sent
+assert daily.main() == 1 and sent == [], sent
 
 # why a run stopped is kept for the GUI (last_run.json), and a slow NUworks gets a second try
 daily.scan = real_scan

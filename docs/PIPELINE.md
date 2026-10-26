@@ -117,7 +117,7 @@ year's lists are new repos: changing the term moves the addresses with it); off 
   runs work through the backlog, best titles (fit) and newest first (intern.priority).
 - Lists: a listing counts when it is for the term (Simplify's "terms"; vanshb03's has only a season, "Summer", on a
   list whose address says the term's year). One its list closes (or drops) stays, marked inactive; an approved one
-  that closes sends a Discord message (intern.closed_notice). Ids: "s..." Simplify's, "sv..." vanshb03's.
+  that closes is named in the next morning message (intern.closed_notice). Ids: "s..." Simplify's, "sv..." vanshb03's.
 - Short links (2026-10-26, my request): vanshb03's list gives go.vansh.nyc/<code> links, not the posting's. Each update
   asks where each new one leads (intern.real_links: its redirect only, the posting is not opened; 0.2 s apart; public
   addresses only; 5 failures in a row and the rest wait for the next run) and the listing keeps the posting's own link
@@ -156,7 +156,7 @@ year's lists are new repos: changing the term moves the addresses with it); off 
   as yes; one data/ratings.json. Approve = an Approved row in the Other jobs tab (Notes "<term> internship (<list>);
   match ..."), so no weekly or total cap; Undo = that row back to Proposed. Apply: `nuauto assist other <row>`.
 - Data: data/intern/ (listings, source, links, triage, details/, failed, scores, categories, category_sets, pool, unread,
-  scans). Discord: new pool internships after a run; the morning message adds the last day's internship counts.
+  scans). No message per run: the morning message counts the last day's new pool internships, with the best one.
 - `nuauto intern fetch <url> [--browser]` reads one posting now (nothing saved); `intern stats` shows each step.
 
 INSIGHTS (insights.py; `nuauto insights`, the GUI's Insights): read-only pay, places and kinds of work for the pool and

@@ -50,34 +50,46 @@ WHAT RUNS ON THE HOMELAB
 Unit files live in this repo (deploy/systemd/) and are installed in ~/.config/systemd/user/. All run with TZ New York.
 - nuauto-daily.timer -> nuauto-daily.service: `nuauto daily` at 08:00 and 18:00 New York time
   (+0-15 min random, Persistent=true so a missed run happens at boot). Every run, in order:
-  - the scan (docs/PIPELINE.md): list -> Claude triage -> details -> Claude score -> Claude category -> pool; new pool
-    jobs are announced; counts go to data/scans.json.
-  - the morning run only (before noon): the reminders. First, if the scan worked, jobs you applied to by hand on
-    NUworks become Applied rows (jobs.check_applied). Then messages: Approved rows closing today or tomorrow, pool jobs
-    closing within 3 days that are not in the sheet, the Google login warning (once 1 day is left), and "NUauto
-    morning" (always sent): new postings and new pool jobs in the last 24h, then the to-do list (company-site
-    applications owed, external Needs Human rows) with signed Mark links.
+  - the scan (docs/PIPELINE.md): list -> Claude triage -> details -> Claude score -> Claude category -> pool; counts
+    and the best new job go to data/scans.json.
   - the applications check: NUworks is asked about every sent row (jobs.check_applications -> data/applications.json), so
     the total limit counts what NUworks has; the Status dropdown is set again (Accepted / Rejected reach an older
-    sheet); a Rejected row NUworks still has is in the log, and in the morning message until you withdraw it there.
-    An Applied row whose job looks filled (its Hiring Status turned Filled, or it was interviewing and stopped:
-    sheet.maybe_filled) is in the log every run, and in a message once, the run that first sees it.
+    sheet). Rejected rows NUworks still has and Applied rows whose job looks filled (its Hiring Status turned Filled, or
+    it was interviewing and stopped: sheet.maybe_filled) are in the log, and in the morning message until you withdraw
+    them there.
+  - the morning run only (before noon): if the scan worked, jobs you applied to by hand on NUworks become Applied rows
+    (jobs.check_applied); then the morning message.
   - the internship update (when "internships" is on).
+  DISCORD (since 2026-10-26, my request: fewer, shorter messages, glanced at once a day). Two kinds only:
+  - "NUauto morning" (daily.morning), always sent, a line for each thing that applies: New (pool co-ops and
+    internships of the last 24h, each with the best one), Closing (Approved rows closing today or tomorrow by name, pool
+    jobs closing within 3 days not in the sheet), To do (company-site applications owed, external Needs Human rows,
+    with their job and signed Mark links), Withdraw on NUworks (Rejected / may be filled), what other runs kept for it
+    (daily.later -> data/later.json: applications recorded from NUworks, approved internships now closed, deploys),
+    Week (this week's count, the total, Approved waiting), Wrong (this run stopped, the sheet can't be read, the Google
+    login runs out), and NUauto's page when there is one.
+  - a problem when it happens (daily.alert: a run that stopped, a login to renew, the sheet unreadable, a crash): the
+    same title at most once a day (data/told.json, TELL_AGAIN), so the 2-hourly internship update failing the same way
+    is told once. The morning run's own problems go in the morning message instead (daily.QUIET).
+  Not on Discord any more: new pool jobs per update, new internships per 2-hourly update, the separate deadline and
+  Google login messages, recorded applications, closed internships, "Deployed", the Sunday check-in. Unchanged: the
+  assistant's messages (it waits for you, wants to Submit, ended: docs/REMOTE.md), a failed deploy, device pairing.
   If the job list fails (NUworks slow), it is read once more 2 minutes later (daily.RETRY_WAIT), and a page load gets one
-  retry after 60 s; the morning reminders still go out, from the sheet and the last saved pool. Why a run stopped goes
+  retry after 60 s; the morning message still goes out, from the sheet and the last saved pool. Why a run stopped goes
   to data/last_run.json (daily.record_run: nuworks_login, nuworks, claude or failed, in a few words); the laptop pulls
   it with data/, and the GUI's New jobs check shows it on Today with the fix (Log in to NUworks, Run it again, Log in to
-  Claude there). Discord says the same: a login only when NUworks really asks for one.
+  Claude there). Discord says the same (once a day at most): a login only when NUworks really asks for one.
   Claude runs as `claude -p --model sonnet`, one call per batch file, shut in work/ (it runs there and may read and
   write only there: no shell, web or MCP tools; the batches hold web text, job postings, so nothing in one can reach
   local/, the code or your home). Headless browser; never applies to anything.
-- nuauto-weekly.timer -> nuauto-weekly.service: `nuauto daily weekly`, Sunday 19:00 New York time
-  (Discord check-in: this week's count, Approved rows waiting, pool jobs you haven't looked at).
+- nuauto-weekly.timer -> nuauto-weekly.service: `nuauto daily weekly`, Sunday 19:00 New York time. Sends nothing
+  since 2026-10-26 (the morning message has the week's count); kept so the installed timer runs cleanly (deploy never
+  removes unit files: `systemctl --user disable --now nuauto-weekly.timer` turns it off).
 - nuauto-intern.timer -> nuauto-intern.service: `nuauto intern update` every 2 hours (:40 on even hours New York,
   +0-10 min). Needs "internships" in local_config.json (docs/PIPELINE.md, SUMMER INTERNSHIPS); without it the run stops at
   once saying so. Simplify's and vanshb03's lists, postings from the companies' own job sites, Claude triage / score /
-  category, Discord for new pool internships. `nuauto daily` runs the same update after the NUworks one; a lock keeps
-  it to one at a time. The laptop's `nuauto intern update` starts it here.
+  category; the morning message counts new pool internships. `nuauto daily` runs the same update after the NUworks
+  one; a lock keeps it to one at a time. The laptop's `nuauto intern update` starts it here.
 - nuauto-deploy.timer -> nuauto-deploy.service: `nuauto deploy` 2 min after boot, then every 5 minutes (deploy_from_git
   only). Looks at GitHub's main; a new commit is unpacked aside (work/deploy/), imported as a check (deploy.MODULES),
   then its changed files are copied in (the old ones kept to undo), the package is reinstalled if pyproject.toml
@@ -87,7 +99,7 @@ Unit files live in this repo (deploy/systemd/) and are installed in ~/.config/sy
   import, or a web that does not come back, is undone and Discord says so once. It waits while an update (`nuauto
   daily`, `nuauto intern update`) or a NUworks run started from NUauto's page (`nuauto apply`, `nuauto assist nuworks`:
   nuauto-web's children, which a restart would cut off) runs; assistant sessions run in scopes of their own and are
-  not cut off. Record: local/deployed.json; log: logs/deploy.log; Discord: "Deployed <commit>" when files changed.
+  not cut off. Record: local/deployed.json; log: logs/deploy.log; the next morning message: "Updated: <commit>".
 - nuauto-assist.timer -> nuauto-assist.service: `nuauto assist auto` every 10 minutes: the assistant's queue. Does
   nothing unless "remote_assist" and "remote_auto" are on (docs/REMOTE.md).
 - nuauto-web.service: `nuauto web`, always on (Restart=on-failure). Serves the signed Mark-done links on
@@ -172,8 +184,9 @@ SYNC (sync.py; runs automatically inside `nuauto` on the laptop, homelab mode on
 DEPLOYING A CHANGE
 With deploy_from_git (the homelab pulls main; no unit file or dependency steps by hand):
 1. Change code on the laptop (on a branch; merge to main when approved).
-2. Merge to main. Within 5 minutes the homelab has it (Discord: "Deployed <commit>"). Now: `nuauto deploy`
-   (starts the run on the homelab and shows the end of its log). A branch on the laptop never reaches the homelab.
+2. Merge to main. Within 5 minutes the homelab has it (the next morning message: "Updated: <commit>"). Now:
+   `nuauto deploy` (starts the run on the homelab and shows the end of its log). A branch on the laptop never reaches
+   the homelab.
 3. `nuauto doctor` shows the deployed commit; a failed deploy shows as FAIL with the reason (logs/deploy.log).
    Roll back: revert the commit on main (a new commit), merge it; the homelab deploys the revert.
 What it copies: src/nuauto/, prompts/, docs/, deploy/systemd/ and the top-level pyproject.toml, README.md, CLAUDE.md,

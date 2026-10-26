@@ -54,8 +54,9 @@ Job pool
                   update(), review_queue(), stats(). Short links -> the posting's own (real_links, real_url; used by
                   assist.other_target). Data in data/intern/.
   postings.py     reads one posting from a company's own job site, no login; public addresses only (allowed_host).
-  daily.py        what the homelab timers run. main() -> scan() (via step()), reminders(), record_hand_applications(),
-                  applications(), internships(); run_claude(), notify() / discord(), weekly().
+  daily.py        what the homelab timers run. main() -> scan() (via step()), applications(), reminders() (the morning
+                  message: morning(), its lines; record_hand_applications()), internships(); run_claude(); messages:
+                  notify() / discord(), alert() (a problem, once a day each), later() (a line for the next morning).
   insights.py     summarize(): pay, places, kinds of work, sheet statuses; text() for `nuauto insights`.
   web.py          Mark-done page (homelab, port 8765). link() signs URLs, Handler.do_GET (confirm) / do_POST; main() also
                   starts gui.serve_remote() when the homelab's page is on.
@@ -150,7 +151,8 @@ MAIN FLOWS
 
 STATE ON DISK (STATE_DIR = repo root; app-data folder when packaged; a temp folder in demo mode and tests)
   data/   the pool, owned by the homelab (the laptop pulls a copy): list.json, triage.json, scores.json, categories.json,
-          category_sets.json, pool.json, details/<id>.json (jobs.py); scans.json, last_run.json (daily.py);
+          category_sets.json, pool.json, details/<id>.json (jobs.py); scans.json, last_run.json, later.json, told.json
+          (daily.py);
           applications.json (jobs.check_applications); ratings.json (jobs.set_rating, merged between machines);
           intern/ (intern.py: listings, source, failed, unread, triage, scores, categories, pool, details/, update.lock).
   work/   Claude's batches: <kind>_in_NNN.json / <kind>_out_NNN.json, resume.txt (jobs.py writes the inputs, the claude
@@ -206,7 +208,7 @@ use headless Firefox on local pages or demo mode. Run it before pushing; CI runs
   test_answers   answers.py, apply.fill_extra_fields (a local form), JsonIO, json_ui_allowed
   test_browser   domain lock, goto retry, profile lock
   test_demo      the real apply.py on demo mode's fake pages (stops, cap, Ctrl+C, GUI gone, CLAUDECODE refusals)
-  test_daily     daily.py's summary, to-do, Claude errors, the applications check's messages
+  test_daily     daily.py's morning message, alerts once a day, Claude errors, the applications check
   test_web       Mark-done links (signatures; GET never changes the sheet)
   test_deploy    deploy.py on a throwaway git repo
   test_doctor_remote   doctor.check_remote_assist          test_health   health.py's checks

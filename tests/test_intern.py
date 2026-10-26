@@ -232,7 +232,6 @@ assert "rising junior" in intern.standing() and "2029" in intern.standing()
 
 # ---------------------------------------------------------------- vanshb03's list: a season, not terms; the same job on two lists
 assert set(intern.LIST_URLS) == {"simplify", "vansh"} and all(intern.LIST_URLS.values())
-assert intern.lists_text() == "Simplify's and vanshb03's lists"
 
 
 def van(n, title="Firmware Intern", season="Summer", active=True, url=None, places=("Boston, MA",), company=None):
@@ -627,11 +626,7 @@ intern.ranked_pool(ratings, [])
 assert trains == [1, 1, 1]
 jobs.load_details, jobs.train = real_load, real_train
 
-# summary for the morning message; stats run
-intern.save("scans.json", [{"time": "2026-10-10T06:00", "listed": 4, "pool": 1}, {"time": "2026-10-08T06:00", "listed": 9, "pool": 9}])
-from datetime import datetime  # noqa: E402
-assert intern.summary(datetime(2026, 10, 10, 8, 0)) == \
-    "Internships (Summer 2027): 4 new on Simplify's and vanshb03's lists, 1 made your pool (Review > Summer internships)"
+# stats run
 intern.stats()
 
 # the whole update, Claude's calls stood in for, the list read from the demo file
@@ -660,18 +655,18 @@ intern.save("demo_listings.json", raw + [sim(11, title="Robotics Intern", places
 intern.save("demo_postings.json", {"https://jobs.example.com/11": TEXT})
 assert intern.update() == 0
 pool = intern.load("pool.json", [])
-assert ID(11) in {r["id"] for r in pool} and sent and sent[-1][0] == "1 new internship in your pool", sent
-assert "Robotics Intern" in sent[-1][1]
-# an approved internship that Simplify closes: a message (the sheet is only read)
+assert ID(11) in {r["id"] for r in pool} and sent == [], sent  # no message: the morning one counts it
+best = intern.load("scans.json", [])[-1]["best"]
+assert best["score"] == 91 and best["text"].startswith("Robotics Intern") and "(91% match)" in best["text"], best
+# an approved internship that Simplify closes: a line in the next morning message (the sheet is only read)
 real_rows = intern.other_rows
 intern.other_rows = lambda interactive=True: [R(4, "https://jobs.example.com/11", "Approved"), R(5, "https://jobs.example.com/6", "Applied")]
-sent.clear()
 intern.closed_notice([ID(11), ID(6)], daily)
-assert len(sent) == 1 and sent[0][0] == "1 approved internship closed on Simplify's list" and "Other jobs row 4" in sent[0][1], sent
+kept = daily.jobs.load(daily.LATER, {})["closed"]
+assert sent == [] and len(kept) == 1 and kept[0].endswith("(row 4)"), (sent, kept)
 intern.other_rows = lambda interactive=True: (_ for _ in ()).throw(sheet.NotLoggedIn("expired"))
-sent.clear()
-intern.closed_notice([ID(11)], daily)  # the sheet can't be read: no message, no crash
-assert sent == []
+intern.closed_notice([ID(11)], daily)  # the sheet can't be read: nothing kept, no crash
+assert sent == [] and daily.jobs.load(daily.LATER, {})["closed"] == kept
 intern.other_rows = real_rows
 # a crash in the 2-hourly run: Discord says so, the unit fails
 real_update = intern.update

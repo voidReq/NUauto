@@ -28,7 +28,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 from nuauto import config
@@ -115,12 +115,6 @@ def list_of(i):
 
 def list_name(i):
     return NAMES[list_of(i)]
-
-
-def lists_text():
-    """The lists read, for messages: "Simplify's list", or "Simplify's and vanshb03's lists"."""
-    on = [NAMES[k].removesuffix(" list") for k, _, _ in LISTS if LIST_URLS.get(k)]
-    return f"{on[0]} list" if len(on) == 1 else ", ".join(on[:-1]) + f" and {on[-1]} lists" if on else "no list"
 
 
 def clean_url(url):
@@ -929,8 +923,9 @@ def run_lock():
 
 
 def update():
-    """The whole update: list -> triage -> postings -> score -> category -> pool, then a notification for new pool
-    jobs. Returns 0, or 1 if a step stopped (already notified)."""
+    """The whole update: list -> triage -> postings -> score -> category -> pool; the counts (and the best new one) go to
+    scans.json for the morning message (no message of its own since 2026-10-26). Returns 0, or 1 if a step stopped
+    (already told: daily.alert)."""
     from nuauto import daily
     lock = run_lock()
     if lock is None:
@@ -963,20 +958,18 @@ def update():
         pool = save_pool()
         new = [r for r in pool if r["id"] not in before]
         daily.log(f"internship pool {len(pool)} ({len(new)} new)")
+        best = max(new, key=lambda r: r["match"], default=None)
         scans = load("scans.json", [])
         scans.append({"time": datetime.now().isoformat(timespec="minutes"), "listed": len(changed[0]) if changed else 0,
-                      "pool": len(new)})
+                      "pool": len(new), **({"best": {"score": best["match"], "text": f"{best['title'][:40]} | "
+                                                     f"{best['company'][:22]} ({best['match']}% match)"}} if best else {})})
         save("scans.json", scans[-200:])
-        if new:
-            top = "\n".join(f"{r['match']}%  {r['title'][:45]} | {r['company'][:25]}" for r in new[:5])
-            daily.notify(f"{len(new)} new internship{'s' if len(new) > 1 else ''} in your pool",
-                         top + "\nReview: NUauto > Review > Summer internships (or nuauto intern approve)")
         return 0
 
 
 def closed_notice(closed, daily):
-    """Internships you approved that their list now shows as closed: a message, so no assistant run is spent on
-    one. The sheet is only read."""
+    """Internships you approved that their list now shows as closed: a line in the morning message (daily.later), so no
+    assistant run is spent on one. The sheet is only read."""
     listings = load("listings.json", {})
     urls = {listings[i]["url"]: listings[i] for i in closed if i in listings}
     try:
@@ -985,19 +978,8 @@ def closed_notice(closed, daily):
         daily.log(f"closed internships: could not read the sheet ({type(e).__name__})")
         return
     if rows:
-        daily.notify(f"{len(rows)} approved internship{'s' if len(rows) > 1 else ''} closed on "
-                     + (list_name(urls[real_url(rows[0].url)]["id"]) if len(rows) == 1 else "their lists"),
-                     "\n".join(f"Other jobs row {r.number}: {r.title[:40]} | {r.company[:22]}" for r in rows)
-                     + "\nCheck the posting before starting the assistant (or remove the row on the Sheet screen).")
-
-
-def summary(now=None, hours=24):
-    """For the morning message: what the last day's internship updates found."""
-    now = now or datetime.now()
-    recent = [s for s in load("scans.json", []) if now - datetime.fromisoformat(s["time"]) <= timedelta(hours=hours)]
-    listed, pooled = sum(s["listed"] for s in recent), sum(s["pool"] for s in recent)
-    return (f"Internships ({TERM}): {listed} new on {lists_text()}, {pooled} made your pool"
-            + (" (Review > Summer internships)" if pooled else ""))
+        daily.log(f"closed internships: Other jobs rows {', '.join(str(r.number) for r in rows)}")
+        daily.later("closed", [f"{r.company[:22]} (row {r.number})" for r in rows])
 
 
 def stats():
