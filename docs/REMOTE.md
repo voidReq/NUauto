@@ -112,6 +112,8 @@ THE QUEUE (remote.py; nuauto-assist.timer every 10 minutes runs `nuauto assist a
 - One session per job site (assist.site_key): the host, but each company on a board companies share by path is its own
   site (job-boards.greenhouse.io/<company>, jobs.lever.co/<company>, jobs.ashbyhq.com/<company>,
   apply.workable.com/<company>, wd1.myworkdaysite.com/<company>), so two companies' Greenhouse jobs run side by side.
+  A row with a short link (vanshb03's go.vansh.nyc/...) counts as the site it leads to (intern.real_url), not the
+  shortener.
 - Some sites refuse an automated browser (they show it a sign-in page with no way to register). End such a session
   with "End: do it on the laptop" (or "No: do it on the laptop" at "Did it go through?"): no question after, and the
   row's Notes get "DO ON THE LAPTOP..." (assist.LAPTOP_MARK, at the end): the homelab never starts it again, and the

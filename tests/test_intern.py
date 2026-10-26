@@ -307,12 +307,17 @@ assert later[VID(3)]["dup_of"] == ID(23) and later[VID(1)]["dup_of"] == ID(21) a
 assert later[ID(21)]["active"] and later[ID(23)]["active"] is False
 
 # refresh: both lists from a local server (ETag), duplicates left out of "new", a list that fails doesn't stop the other
-FILES, ASKED = {}, []
+FILES, ASKED, REDIRECTS = {}, [], {}
 
 
 class Lists(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         ASKED.append((self.path, self.headers.get("If-None-Match")))
+        if self.path in REDIRECTS:  # a short link: where it leads
+            self.send_response(302)
+            self.send_header("Location", REDIRECTS[self.path])
+            self.end_headers()
+            return
         if self.path not in FILES:
             self.send_response(404)
             self.end_headers()
@@ -357,6 +362,46 @@ intern.LIST_URLS["vansh"] = lbase + "/Summer2026/vansh.json"  # another year's l
 FILES["/Summer2026/vansh.json"] = [van(40)]
 intern.refresh(logged.append)
 assert VID(40) not in intern.load("listings.json", {})
+# short links (vanshb03's go.vansh.nyc/...; here the list server): a listing saved with one (before NUauto read them)
+# gets where it leads on the next update even when no list changed; its read posting too, and it is read again
+intern.LIST_URLS["vansh"] = lbase + "/Summer2027/vansh2.json"
+FILES["/Summer2027/vansh2.json"] = [van(41, title="Sensors Intern", url=lbase + "/go/a"), van(42, url=lbase + "/go/dead")]
+intern.refresh(logged.append)
+assert intern.load("listings.json", {})[VID(41)]["url"] == lbase + "/go/a"  # not a short host yet: kept as it is
+intern.save(f"details/{VID(41)}.json", {"id": VID(41), "url": lbase + "/go/a", "description": "x"})
+intern.save("failed.json", {VID(41): {"tries": 3, "last": "2026-10-01", "why": "page: no posting text"}})
+real_short, intern.SHORT_HOSTS, intern.SHORT_SPACING = intern.SHORT_HOSTS, ("127.0.0.1",), 0
+REDIRECTS.update({"/go/a": "/go/b", "/go/b": "https://jobs.example.org/sensors?utm_source=vansh"})  # one hop to another short link
+ASKED.clear()
+assert intern.refresh(logged.append) is None  # no list changed
+got = intern.load("listings.json", {})
+assert got[VID(41)]["url"] == "https://jobs.example.org/sensors" and got[VID(41)]["list_url"] == lbase + "/go/a", got[VID(41)]
+assert got[VID(42)]["url"] == lbase + "/go/dead" and "list_url" not in got[VID(42)]  # 404: asked again next run
+assert intern.load(f"details/{VID(41)}.json", {})["url"] == "https://jobs.example.org/sensors"
+assert VID(41) not in intern.load("failed.json", {})  # read again, now from the job site's own link
+assert intern.load("links.json", {}) == {lbase + "/go/a": "https://jobs.example.org/sensors"}
+assert [p for p, _ in ASKED if p.startswith("/go/")] == ["/go/a", "/go/b", "/go/dead"], ASKED
+assert "short links: 1 found, 1 not yet" in logged, logged
+ASKED.clear()
+FILES["/Summer2027/vansh2.json"].append(van(43))  # the list changes: the known link stays, the failed one is asked again
+intern.refresh(logged.append)
+assert intern.load("listings.json", {})[VID(41)]["url"] == "https://jobs.example.org/sensors"
+assert [p for p, _ in ASKED if p.startswith("/go/")] == ["/go/dead"], ASKED
+# a row added with the short link is the same job (Review leaves it out); the assistant opens and holds the real site
+assert intern.real_url(lbase + "/go/a?utm_source=x") == "https://jobs.example.org/sensors"
+assert intern.real_url(lbase + "/go/new") == lbase + "/go/new" and intern.real_url("https://x.com/a?utm_source=v") == "https://x.com/a"
+assert intern.sheet_urls([sheet.Row(3, lbase + "/go/a", "Co", "T", "Approved", "", "")]) == {"https://jobs.example.org/sensors"}
+from nuauto import assist  # noqa: E402
+assert assist.other_target(sheet.Row(3, lbase + "/go/a", "Co", "T", "Approved", "", "")) == ("https://jobs.example.org/sensors", None)
+assert assist.site_key(assist.other_target(sheet.Row(3, lbase + "/go/a", "Co", "T", "Approved", "", ""))[0]) == "jobs.example.org"
+assert "https" in assist.other_target(sheet.Row(3, lbase + "/go/new", "Co", "T", "Approved", "", ""))[1]  # not known: as it is
+# the shortener down: 5 failures in a row and the rest wait for the next run
+ASKED.clear()
+dead = {f"d{k}": {"id": f"d{k}", "url": f"{lbase}/go/dead{k}"} for k in range(8)}
+assert intern.real_links(dead, logged.append) == 0 and len(ASKED) == 5 and "5 in a row failed" in logged[-2], (ASKED, logged[-2:])
+intern.SHORT_HOSTS = real_short
+for name in ("links.json", "failed.json", f"details/{VID(41)}.json"):
+    os.remove(intern.path(name))
 lsrv.shutdown()
 intern.LIST_URLS = real_urls
 for name in ("listings.json", "source.json"):

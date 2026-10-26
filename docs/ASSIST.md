@@ -123,7 +123,9 @@ ACCOUNTS (added 2026-10-10, my call; accounts.py)
 - Never on Google / Microsoft / Apple / LinkedIn / GitHub / Northeastern sign-ins, nor the other providers in
   accounts.NEVER (accounts.never). "Sign in with Google" buttons are mine.
 - A site is its host; on a host companies share (Workday's myworkdaysite.com, Greenhouse / Lever / Ashby / Workable)
-  host/<company> (accounts.site; assist.site_key).
+  host/<company> (accounts.site; assist.site_key). An Other jobs row with an internship list's short link
+  (go.vansh.nyc/...) is its posting's own link once the internship update knows it (assist.other_target ->
+  intern.real_url), so its site is the job site, not the shortener (2026-10-26).
 - `nuauto accounts export` (or Settings) writes Bitwarden's import file (one login per site, matched on its host; the
   jobs in its notes); `--all` every login again. `nuauto accounts export --bitwarden` (2026-10-11) puts the logins
   NUauto made and Bitwarden doesn't have yet straight into my vault with `bw` (I unlock it: BW_SESSION; NUauto never
