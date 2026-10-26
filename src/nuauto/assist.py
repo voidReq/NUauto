@@ -211,10 +211,13 @@ def check_link(url):
 
 def other_target(row, url_override=None):
     """(url, None) if the agent may work on this Other jobs tab row (Approved, an https link that is not NUworks),
-    else (None, reason)."""
+    else (None, reason). A short link (an internship list's go.vansh.nyc/...) is the posting's own link once the
+    internship update knows it (intern.real_url), so the session holds that job site, not the shortener."""
+    from nuauto import intern
     if row.status != "Approved":
         return None, f"it is {row.status or 'not marked'}, not Approved"
-    return check_link(url_override or row.url)
+    url = url_override or row.url
+    return check_link(intern.real_url(url) if intern.short(url) else url)
 
 
 def parse_refs(text):

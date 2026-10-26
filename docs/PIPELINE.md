@@ -118,6 +118,14 @@ year's lists are new repos: changing the term moves the addresses with it); off 
 - Lists: a listing counts when it is for the term (Simplify's "terms"; vanshb03's has only a season, "Summer", on a
   list whose address says the term's year). One its list closes (or drops) stays, marked inactive; an approved one
   that closes sends a Discord message (intern.closed_notice). Ids: "s..." Simplify's, "sv..." vanshb03's.
+- Short links (2026-10-26, my request): vanshb03's list gives go.vansh.nyc/<code> links, not the posting's. Each update
+  asks where each new one leads (intern.real_links: its redirect only, the posting is not opened; 0.2 s apart; public
+  addresses only; 5 failures in a row and the rest wait for the next run) and the listing keeps the posting's own link
+  (list_url: the short one). The answers are in data/intern/links.json, so each is asked once; a later download of the
+  list keeps the real link while the short one is the same. So the job site's own data, the same job on two lists and
+  new Other jobs rows all use the real link. A sheet row added earlier with a short link is matched through links.json
+  (intern.real_url: Review leaves it out, closed_notice finds it), and the assistant opens and holds the real job site
+  (assist.other_target), so several such rows run side by side. The sheet's cells are never rewritten.
 - Dedupe (intern.mark_dupes): the same job on both lists is kept once: the listing seen first (the same day:
   Simplify's) stays, the other gets dup_of and is left out of everything. Once a duplicate, always. The same job =
   the same posting link (no www / case / tracking / trailing /apply / locale), or the same company and job number in
@@ -147,7 +155,7 @@ year's lists are new repos: changing the term moves the addresses with it); off 
   trained). The model learns from co-op and internship decisions together, plus Other jobs rows (Approved, Applied...)
   as yes; one data/ratings.json. Approve = an Approved row in the Other jobs tab (Notes "<term> internship (<list>);
   match ..."), so no weekly or total cap; Undo = that row back to Proposed. Apply: `nuauto assist other <row>`.
-- Data: data/intern/ (listings, source, triage, details/, failed, scores, categories, category_sets, pool, unread,
+- Data: data/intern/ (listings, source, links, triage, details/, failed, scores, categories, category_sets, pool, unread,
   scans). Discord: new pool internships after a run; the morning message adds the last day's internship counts.
 - `nuauto intern fetch <url> [--browser]` reads one posting now (nothing saved); `intern stats` shows each step.
 

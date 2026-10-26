@@ -29,7 +29,7 @@ import time
 import urllib.error
 import urllib.request
 from datetime import date, datetime, timedelta
-from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 from nuauto import config
 from nuauto import jobs
@@ -63,6 +63,8 @@ YEAR_REQS = ("ok", "one_year_up", "two_years_up", "grad")  # the scorer's "who m
 TRIES = 3            # runs that read a posting every way (browser too) before it shows as unreadable
 STALE_DAYS = 45      # older postings are flagged (internships fill on a rolling basis)
 TRIAGE_BATCH = 250
+SHORT_HOSTS = ("go.vansh.nyc",)  # link shorteners a list gives instead of the posting's link (vanshb03's)
+SHORT_SPACING = 0.2  # seconds between two short links asked
 
 
 # ---------------------------------------------------------------- storage
@@ -168,6 +170,8 @@ def merge(listings, data, today=None, key="simplify", year=None):
         x = slim(sim, key)
         old = out.get(x["id"])
         seen.add(x["id"])
+        if old and old.get("list_url") == x["url"]:  # the same short link: where it leads is known (real_links)
+            x.update(url=old["url"], list_url=old["list_url"])
         if old is None:
             if x["active"]:  # (the first download also has every listing Simplify already closed)
                 new.append(x["id"])
@@ -181,6 +185,105 @@ def merge(listings, data, today=None, key="simplify", year=None):
             out[i] = {**x, "active": False, "gone": today}
             closed.append(i)
     return out, new, closed
+
+
+# ---------------------------------------------------------------- short links (vanshb03's go.vansh.nyc/...)
+
+def short(url):
+    return (urlparse(str(url or "")).hostname or "").lower() in SHORT_HOSTS
+
+
+class _Stay(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k):
+        return None  # the redirect is the answer: the posting itself is not opened
+
+
+def unshorten(url, hops=3):
+    """Where a short link leads (its redirect; one to another short link is followed), without opening the posting.
+    ValueError (or postings.Unreadable: not a public address) if it doesn't lead to a web link."""
+    from nuauto import postings
+    opener = urllib.request.build_opener(_Stay)
+    for _ in range(hops):
+        postings.check_url(url)
+        try:
+            with opener.open(urllib.request.Request(url, headers={"User-Agent": "NUauto (internship list check)"}),
+                             timeout=30) as r:
+                raise ValueError(f"no redirect (HTTP {r.status})")
+        except urllib.error.HTTPError as e:
+            e.close()
+            if e.code not in (301, 302, 303, 307, 308) or not e.headers.get("Location"):
+                raise ValueError(f"HTTP {e.code}")
+            url = urljoin(url, e.headers["Location"])
+        if not url.startswith(("https://", "http://")):
+            raise ValueError(f"not a web link: {url[:80]!r}")
+        if not short(url):
+            return clean_url(url)
+    raise ValueError("too many redirects")
+
+
+_LINKS = {}  # links.json as last read: {"mtime", "links"}
+
+
+def links():
+    """{short link: the posting's own link} (links.json; real_links fills it)."""
+    try:
+        mtime = os.path.getmtime(path("links.json"))
+    except OSError:
+        return {}
+    if _LINKS.get("mtime") != mtime:
+        _LINKS.update(mtime=mtime, links=load("links.json", {}))
+    return _LINKS["links"]
+
+
+def real_url(url):
+    """A link as the pool has it: a short link -> the posting's own link once known (links.json); any other link
+    without its tracking parameters. For sheet rows added with a short link, and the assistant's start link
+    (assist.other_target: one session per job site)."""
+    url = clean_url(url)
+    return links().get(url, url) if short(url) else url
+
+
+def real_links(listings, log=print):
+    """Each listing's short link -> the posting's own link (in place; list_url keeps the short one), so the job site's
+    own data (postings.py), the same job on two lists (mark_dupes) and one assistant session per job site all see the
+    real one. Each short link is asked once (links.json keeps the answers); one that fails is asked again next run.
+    A listing whose link changes gets it in its read posting too, and is read again if no way could. Returns how many
+    listings changed."""
+    known = dict(links())
+    todo = [] if config.DEMO else sorted({x["url"] for x in listings.values() if short(x["url"]) and x["url"] not in known})
+    if todo:
+        log(f"short links: asking where {len(todo)} lead")
+    bad, in_row = 0, 0
+    try:
+        for n, u in enumerate(todo, 1):
+            try:
+                known[u] = unshorten(u)
+                in_row = 0
+            except Exception as e:
+                bad, in_row = bad + 1, in_row + 1
+                if in_row == 5:  # the shortener is down: the rest wait for the next run
+                    log(f"short links: 5 in a row failed ({type(e).__name__}: {str(e)[:80]}); the rest wait for the next run")
+                    break
+            if n % 100 == 0:
+                save("links.json", known)
+            time.sleep(SHORT_SPACING)
+    finally:
+        if todo:
+            save("links.json", known)
+    if todo:
+        log(f"short links: {len(todo) - bad} found" + (f", {bad} not yet" if bad else ""))
+    changed, failed = 0, load("failed.json", {})
+    for i, x in listings.items():
+        if short(x["url"]) and x["url"] in known:
+            listings[i] = {**x, "url": known[x["url"]], "list_url": x["url"]}
+            changed += 1
+            d = load(f"details/{i}.json", None)
+            if d:
+                save(f"details/{i}.json", {**d, "url": known[x["url"]]})
+            failed.pop(i, None)
+    if changed:
+        save("failed.json", failed)
+    return changed
 
 
 # ---------------------------------------------------------------- the same job on two lists
@@ -390,7 +493,7 @@ def refresh(log=print):
         year = re.search(r"20\d\d", url)
         listings, new[key], closed[key] = merge(listings, data, key=key, year=year and year.group())
         got = True
-    if got:
+    if real_links(listings, log) or got:
         listings, _ = mark_dupes(listings)
         save("listings.json", listings)
     save("source.json", src)
@@ -700,12 +803,12 @@ def save_pool(today=None):
 
 def sheet_urls(rows):
     """The Other jobs tab's links, except Proposed rows (Review shows those first, like your Proposed NUworks rows)."""
-    return {clean_url(r.url) for r in rows or [] if r.url and r.status != "Proposed"}
+    return {real_url(r.url) for r in rows or [] if r.url and r.status != "Proposed"}
 
 
 def proposed_rows(rows):
     """{link: row number} of the Other jobs tab's Proposed rows (e.g. an approval you undid)."""
-    return {clean_url(r.url): r.number for r in rows or [] if r.url and r.status == "Proposed"}
+    return {real_url(r.url): r.number for r in rows or [] if r.url and r.status == "Proposed"}
 
 
 def ranked_pool(ratings, other_rows, nuworks_rows=()):
@@ -717,7 +820,7 @@ def ranked_pool(ratings, other_rows, nuworks_rows=()):
     labels = jobs.my_labels(every, ratings, nuworks_rows)
     by_url = {d.get("url"): i for i, d in details.items()}
     for r in other_rows or []:
-        i = by_url.get(clean_url(r.url))
+        i = by_url.get(real_url(r.url))
         if i and r.status in ("Approved", "Applied", "Accepted", "Rejected", "Needs Human", "Failed") and i not in ratings:
             labels[i] = 1
     taste = jobs.taste_for(every, labels, [r["id"] for r in pool])
@@ -877,13 +980,13 @@ def closed_notice(closed, daily):
     listings = load("listings.json", {})
     urls = {listings[i]["url"]: listings[i] for i in closed if i in listings}
     try:
-        rows = [r for r in other_rows(interactive=False) if r.status == "Approved" and clean_url(r.url) in urls]
+        rows = [r for r in other_rows(interactive=False) if r.status == "Approved" and real_url(r.url) in urls]
     except BaseException as e:  # the sheet can't be read now (e.g. the Google login expired): no message
         daily.log(f"closed internships: could not read the sheet ({type(e).__name__})")
         return
     if rows:
         daily.notify(f"{len(rows)} approved internship{'s' if len(rows) > 1 else ''} closed on "
-                     + (list_name(urls[clean_url(rows[0].url)]["id"]) if len(rows) == 1 else "their lists"),
+                     + (list_name(urls[real_url(rows[0].url)]["id"]) if len(rows) == 1 else "their lists"),
                      "\n".join(f"Other jobs row {r.number}: {r.title[:40]} | {r.company[:22]}" for r in rows)
                      + "\nCheck the posting before starting the assistant (or remove the row on the Sheet screen).")
 
