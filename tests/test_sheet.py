@@ -94,6 +94,15 @@ on = {"c": {"applied": True, "fingerprint": fp["c"]}}
 assert [r.number for r in sheet.rejected_not_withdrawn(R3, on)] == [4]
 on["c"]["applied"] = False
 assert sheet.rejected_not_withdrawn(R3, on) == [] and sheet.rejected_not_withdrawn(R3, {}) == []   # withdrawn / never asked
+# an Applied row whose job looks filled (its Hiring Status, or it stopped interviewing) while NUworks has the application
+jobs_now = {"b": {"applied": True, "fingerprint": fp["b"], "interviewing_ended": "t2"},
+            "c": {"applied": True, "fingerprint": fp["c"], "filled_since": "t2"}}   # (c is Rejected: not listed)
+assert [(r.number, why) for r, why in sheet.maybe_filled(R3, jobs_now)] == [(3, "stopped interviewing")]
+jobs_now["b"]["filled_since"] = "t3"
+assert [(r.number, why) for r, why in sheet.maybe_filled(R3, jobs_now)] == [(3, "filled")]
+jobs_now["b"]["applied"] = False                                          # withdrawn: nothing left to do
+assert sheet.maybe_filled(R3, jobs_now) == [] and sheet.maybe_filled(R3, {}) == []
+assert sheet.maybe_filled(R3, {"b": {"applied": True, "fingerprint": "older", "filled_since": "t3"}}) == []
 R3[0].notes += " NUworks side submitted."                                 # it changed since NUworks was asked: it counts
 assert sheet.total_count(R3, seen) == 3 and sheet.total_count(R3, {}) == 3  # (never asked: counts)
 many = rows_with([("Applied", "2026-09-01")] * sheet.MAX_TOTAL)

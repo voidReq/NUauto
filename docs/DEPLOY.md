@@ -60,6 +60,8 @@ Unit files live in this repo (deploy/systemd/) and are installed in ~/.config/sy
   - the applications check: NUworks is asked about every sent row (jobs.check_applications -> data/applications.json), so
     the total limit counts what NUworks has; the Status dropdown is set again (Accepted / Rejected reach an older
     sheet); a Rejected row NUworks still has is in the log, and in the morning message until you withdraw it there.
+    An Applied row whose job looks filled (its Hiring Status turned Filled, or it was interviewing and stopped:
+    sheet.maybe_filled) is in the log every run, and in a message once, the run that first sees it.
   - the internship update (when "internships" is on).
   If the job list fails (NUworks slow), it is read once more 2 minutes later (daily.RETRY_WAIT), and a page load gets one
   retry after 60 s; the morning reminders still go out, from the sheet and the last saved pool. Why a run stopped goes

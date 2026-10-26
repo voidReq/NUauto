@@ -1267,7 +1267,15 @@ screens.apply = async (view) => {
       const nu = r.nuworks;  // what NUworks said at the last check (the twice-daily update)
       if (nu && nu.current && nu.applied === false) chips.push(el("span", { class: "chip warn", testid: `not-on-nuworks-${r.row}`,
         text: "not on NUworks", title: `NUworks has no application for this job (checked ${nu.checked}): it doesn't count toward your total.` }));
-      if (nu && nu.applied && nu.interviewing) chips.push(el("span", { class: "chip accent", text: "interviewing (NUworks)" }));
+      // the job's own hiring stage (sheet.maybe_filled, jobs.application_answer), never yours: NUworks doesn't show that
+      const day = (t) => (t || "").slice(0, 10);
+      if (nu && nu.done === "filled") chips.push(el("span", { class: "chip warn", testid: `job-filled-${r.row}`, text: "job filled",
+        title: `NUworks' Hiring Status for this job is Filled (since ${day(nu.filled_since)}). If you haven't heard back, you can withdraw on NUworks: until you do it counts toward your total.` }));
+      else if (nu && nu.done) chips.push(el("span", { class: "chip warn", testid: `job-stopped-${r.row}`, text: "job stopped interviewing",
+        title: `The employer was interviewing for this job (from ${day(nu.interviewing_since)}) and stopped (${day(nu.interviewing_ended)}): it may be filled. If you haven't heard back, you can withdraw on NUworks: until you do it counts toward your total.` }));
+      else if (nu && nu.applied && r.status === "Applied" && (nu.interviewing || nu.hiring === "Interviewing")) chips.push(el("span", {
+        class: "chip", testid: `job-interviewing-${r.row}`, text: "job interviewing",
+        title: `The employer is interviewing for this job (NUworks, checked ${day(nu.checked)}). That is about the job, not your application: NUworks doesn't show students whom an employer picked.` }));
     }
     const facts = r.match != null || r.score != null || r.pay ? jobFacts(r) : null;
     return el("li", { class: "job-row", testid: `job-${tab}-${r.row}` },

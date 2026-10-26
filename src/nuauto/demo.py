@@ -534,6 +534,19 @@ def setup(state_names=()):
         _write(config.LOCAL_CONFIG_PATH, {**cfg, "remote_assist": True, "assist_slots": 3, "web_listen_host": "127.0.0.1",
                                           "remote_auto": {"nuworks": False, "other": True}}, mode=0o644)
     _write(_path(f"demo_sheet_{SHEET_ID}.json"), {"title": "NUauto jobs (demo)", "rows": rows})
+    # what the last NUworks check said about three of those (jobs.application_answer): the job chips on the Apply screen
+    checked = f"{today.isoformat()}T08:10"
+    week_ago = f"{(today - timedelta(days=7)).isoformat()}T08:10"
+    seen = {}
+    for r, (hiring, more) in zip(sheet.parse_rows(rows), [
+            ("Interviewing", {"interviewing": True, "interviewing_since": week_ago}),
+            ("Available", {"interviewing_since": week_ago, "interviewing_ended": checked}),
+            ("Filled", {"interviewing_since": week_ago, "interviewing_ended": checked, "filled_since": checked})]):
+        seen[jobs.job_id(r.url)] = {"applied": True, "status": "applied", "expired": False, "interviewing": False,
+                                    "hiring": hiring, "interviewing_since": None, "interviewing_ended": None,
+                                    "filled_since": None, **more, "checked": checked, "row": r.number,
+                                    "fingerprint": sheet.fingerprint(r)}
+    _write(os.path.join(config.DATA_DIR, sheet.APPLICATIONS), seen)
     _write(_path(f"demo_sheet_{SHEET_ID}.other.json"), {"rows": [list(sheet.HEADERS)] + other})
 
 

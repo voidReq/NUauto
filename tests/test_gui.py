@@ -562,6 +562,10 @@ try:
     approved_one = get("/api/jobs?tab=nuworks")["sections"]["approved"][0]
     post("/api/mark", {"action": "outcome", "outcome": "Accepted", "row": approved_one["row"], "url": approved_one["url"]}, expect=409)
     post("/api/mark", {"action": "outcome", "outcome": "Failed", "row": sent["row"], "url": sent["url"]}, expect=409)
+    # the job's hiring stage at the last check (demo.setup's answers; sheet.maybe_filled): the chips on Applied rows
+    stage = {r["row"]: (r["nuworks"]["hiring"], r["nuworks"]["done"])
+             for r in get("/api/jobs?tab=nuworks")["sections"]["applied"] if r.get("nuworks")}
+    assert stage == {2: ("Interviewing", None), 3: ("Available", "stopped interviewing"), 4: ("Filled", "filled")}, stage
     # NUworks' answer about a sent row (the twice-daily update: data/applications.json): "not on NUworks" when it has none
     with open(os.path.join(STATE, "data", "applications.json"), "w") as f:
         json.dump({sent["url"].rstrip("/").split("/")[-1]: {"applied": False, "status": None, "expired": False,

@@ -1663,11 +1663,14 @@ def jobs_tab(tab="nuworks", order="default", recheck=False):
         return {**v, "locked": manage.movable(r, tab, "move"), "remove_locked": manage.movable(r, tab, "remove")}
 
     seen = {} if other else sheet.nuworks_seen()
+    done = {r.number: why for r, why in sheet.maybe_filled(rows, seen)}  # (Applied rows whose job looks filled)
 
     def on_nuworks(r):  # what NUworks said about a sent row at the last check (current: about the row as it is now)
         a = seen.get(jobs.job_id(r.url)) if r.status in sheet.SENT else None
-        return {"nuworks": {**{k: a.get(k) for k in ("applied", "status", "expired", "interviewing", "checked")},
-                            "current": a.get("fingerprint") == sheet.fingerprint(r)}} if a else {}
+        keys = ("applied", "status", "expired", "interviewing", "hiring", "interviewing_since", "interviewing_ended",
+                "filled_since", "checked")
+        return {"nuworks": {**{k: a.get(k) for k in keys}, "current": a.get("fingerprint") == sheet.fingerprint(r),
+                            "done": done.get(r.number)}} if a else {}
 
     def view(r, **extra):
         more = facts.get(intern.clean_url(r.url), {}) if other else {**closing(r), **job_facts(r, data), **on_nuworks(r)}

@@ -113,8 +113,9 @@ def fingerprint(row):
 
 
 def nuworks_seen():
-    """{job id: {"applied", "status", "expired", "interviewing", "checked", "row", "fingerprint"}}: NUworks' answers from
-    the last check (the twice-daily update); {} when there is none (or it can't be read)."""
+    """{job id: {"applied", "status", "expired", "interviewing", "hiring", "interviewing_since", "interviewing_ended",
+    "filled_since", "checked", "row", "fingerprint"}} (jobs.application_answer): NUworks' answers from the last check
+    (the twice-daily update); {} when there is none (or it can't be read)."""
     try:
         with open(os.path.join(config.DATA_DIR, APPLICATIONS)) as f:
             data = json.load(f)
@@ -147,6 +148,24 @@ def rejected_not_withdrawn(rows, seen=None):
         s = seen.get(jobs.job_id(r.url)) if r.status == "Rejected" and r.url else None
         if s and s.get("applied") and s.get("fingerprint") == fingerprint(r):
             out.append(r)
+    return out
+
+
+def maybe_filled(rows, seen=None):
+    """[(row, "filled" | "stopped interviewing")]: the Applied rows of the NUworks tab whose job looks done hiring
+    at the last check (jobs.application_answer: its Hiring Status is Filled, or it was interviewing and isn't any
+    more) while NUworks still has your application (about the row as it is now). If you haven't heard back,
+    withdrawing there frees its place in the total. Never asked = not listed."""
+    from nuauto import jobs
+    seen = nuworks_seen() if seen is None else seen
+    out = []
+    for r in rows:
+        s = seen.get(jobs.job_id(r.url)) if r.status == "Applied" and r.url else None
+        if s and s.get("applied") and s.get("fingerprint") == fingerprint(r):
+            if s.get("filled_since"):
+                out.append((r, "filled"))
+            elif s.get("interviewing_ended"):
+                out.append((r, "stopped interviewing"))
     return out
 
 

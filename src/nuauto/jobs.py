@@ -674,9 +674,35 @@ def check_applied(ids):
     return found
 
 
+def application_answer(raw, prev, now):
+    """What NUworks' job record (/api/v3/jobs/<id>) says about a sent row: applied, application_status, expired, and the
+    job's own hiring stage, tracked across checks (prev: the last answer). All of it is about the job, not you: NUworks
+    never shows a student whom an employer picked (checked 2026-10-26: your application record has no status, and
+    My Interviews lists only interviews booked through NUworks).
+    "hiring": its Hiring Status (internal_status: Available, Interviewing, Filled, Expired...); "interviewing": its
+    is_interviewing flag (hidden on NUworks' pages; set on about 1 job in 5, also jobs nobody here applied to, nearly
+    always on those whose Hiring Status is Interviewing). "interviewing_since" / "interviewing_ended": when the job was
+    first seen interviewing (either of the two) and when it stopped (it may be filled); "filled_since": when its
+    Hiring Status was first seen Filled."""
+    prev = prev or {}
+    stage = raw.get("internal_status")
+    hiring = (stage.get("_label") if isinstance(stage, dict) else stage) or None
+    flag = str(raw.get("is_interviewing")) == "1"
+    # (answers saved before 2026-10-26 have only the flag: one that had it was interviewing at its check)
+    was = prev.get("interviewing_since") or (prev.get("checked") if prev.get("interviewing") else None)
+    if flag or hiring == "Interviewing":
+        since, ended = (now if not was or prev.get("interviewing_ended") else was), None
+    else:
+        since, ended = was, (prev.get("interviewing_ended") or now) if was else None
+    return {"applied": bool(raw.get("applied")), "status": raw.get("application_status") or None,
+            "expired": bool(raw.get("expired")), "interviewing": flag, "hiring": hiring,
+            "interviewing_since": since, "interviewing_ended": ended,
+            "filled_since": (prev.get("filled_since") or now) if hiring == "Filled" else None, "checked": now}
+
+
 def check_applications(rows):
-    """Ask NUworks about every sent row of the NUworks tab (Applied, Accepted, Rejected; its job's own data: applied,
-    application_status, expired, is_interviewing) and keep its answers in data/applications.json, each with the row's
+    """Ask NUworks about every sent row of the NUworks tab (Applied, Accepted, Rejected; its job's own data, see
+    application_answer) and keep its answers in data/applications.json, each with the row's
     fingerprint (sheet.not_on_nuworks: an answer counts only for the row as it was then). So the total limit counts what
     NUworks has: a company-site application whose NUworks side never went out doesn't. Returns {job id: answer}.
     Read-only on NUworks; rows it can't read keep their last answer."""
@@ -700,9 +726,8 @@ def check_applications(rows):
                 except Exception:
                     raw = None
                 if raw and raw.get("job_id") == i:
-                    seen[i] = {"applied": bool(raw.get("applied")), "status": raw.get("application_status") or None,
-                               "expired": bool(raw.get("expired")), "interviewing": str(raw.get("is_interviewing")) == "1",
-                               "checked": now, "row": r.number, "fingerprint": sheet.fingerprint(r)}
+                    seen[i] = {**application_answer(raw, seen.get(i), now), "row": r.number,
+                               "fingerprint": sheet.fingerprint(r)}
                 browser.pause(page, 1.5, 3)
             log.write(f"asked NUworks about {len(sent)} sent rows: "
                       f"{sum(1 for r in sent if (seen.get(job_id(r.url)) or {}).get('applied'))} it has")

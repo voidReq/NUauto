@@ -2,6 +2,7 @@
 
 Uses a temp data dir, temp log file and a stubbed notify: no sheet, no Discord, no network.
 """
+import json
 import os
 import tempfile
 from datetime import datetime
@@ -39,6 +40,26 @@ assert asked == ["dropdown", 2], asked
 log_text = open(daily.LOG_PATH).read()
 assert "applications: 1 count toward the total; NUworks has none for row 2" in log_text, log_text[-300:]
 assert "rejected, not withdrawn on NUworks: row 3" in log_text, log_text[-300:]   # NUworks still has the Rejected row's application
+# an Applied row whose job stopped interviewing / got filled: in the log every run, in a message once per change
+R_APPS.append(sheet.Row(4, "https://n/jobs/detail/c", "Filled Co", "Firmware", "Applied", "", "2026-10-03"))
+saved = os.path.join(config.DATA_DIR, sheet.APPLICATIONS)
+answer = {"applied": True, "fingerprint": sheet.fingerprint(R_APPS[2]), "interviewing_ended": "t2"}
+daily.jobs.check_applications = lambda rows: {"c": answer}
+sent.clear()
+daily.applications()
+assert "job looks filled: row 4 (stopped interviewing)" in open(daily.LOG_PATH).read()
+assert [t for t, _ in sent] == ["1 job you applied to may be filled"] and "Firmware | Filled Co: stopped interviewing" in sent[0][1]
+os.makedirs(config.DATA_DIR, exist_ok=True)
+with open(saved, "w") as f:                                 # (what that check saved)
+    json.dump({"c": answer}, f)
+sent.clear()
+daily.applications()
+assert sent == []                                           # the same news: told once
+daily.jobs.check_applications = lambda rows: {"c": {**answer, "filled_since": "t3"}}
+daily.applications()
+assert [t for t, _ in sent] == ["1 job you applied to may be filled"] and ": filled" in sent[0][1]
+os.remove(saved)
+R_APPS.pop()
 def no_nuworks(rows):
     raise SystemExit(daily.jobs.NOT_LOGGED_IN)
 daily.jobs.check_applications = no_nuworks

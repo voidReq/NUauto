@@ -193,6 +193,7 @@ def applications():
     except Exception as e:  # (the morning reminders say so when it is the Google login)
         return log(f"applications check skipped: the sheet can't be read ({type(e).__name__})")
     log("applications on NUworks")
+    before = {(r.number, why) for r, why in sheet.maybe_filled(rows)}  # (the message tells each change once)
     ok, seen = step(jobs.check_applications, rows)
     if not ok:
         return log(f"applications check stopped: {seen}")
@@ -206,6 +207,14 @@ def applications():
             notify(f"{len(waiting)} rejected application{'s' if len(waiting) > 1 else ''} still on NUworks",
                    "\n".join(f"{r.title[:40]} | {r.company[:22]}" for r in waiting)
                    + "\nWithdraw on NUworks: until you do they count toward the total.")
+    done = sheet.maybe_filled(rows, seen)
+    if done:
+        log("job looks filled: " + ", ".join(f"row {r.number} ({why})" for r, why in done))
+    new = [(r, why) for r, why in done if (r.number, why) not in before]
+    if new:
+        notify(f"{len(new)} job{'s' if len(new) > 1 else ''} you applied to may be filled",
+               "\n".join(f"{r.title[:40]} | {r.company[:22]}: {why}" for r, why in new)
+               + "\nIf you haven't heard back, you can withdraw on NUworks: until you do they count toward the total.")
 
 
 def internships():
