@@ -196,7 +196,8 @@ REPO LAYOUT (what is not a module)
   deploy/systemd/ (homelab units: daily, weekly, intern, deploy, assist timers + services; web service)
   packaging/ (the packaged app: nuauto.spec, build.sh, distros.sh, entry.py, AppRun, desktop file, icons, smoke.py)
   .github/workflows/ (tests.yml: `nuauto test` on Ubuntu + macOS, on PRs and main; release.yml: AppImages + DMGs, built on
-  PRs (Intel Mac: tags only), released on v* tags)
+  PRs (Intel Mac: tags only), released on v* tags. Firefox's system libraries are installed on Linux only when Firefox
+  won't start without them: GitHub's runners already have them, and apt can take 20+ minutes on a slow Ubuntu mirror)
 
 TESTS (`nuauto test` runs every tests/test_*.py, 4 at a time: offline, no sheet, no real NUworks, no network; browser tests
 use headless Firefox on local pages or demo mode. Run it before pushing; CI runs it on Ubuntu and macOS.)
