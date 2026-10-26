@@ -131,7 +131,8 @@ for i, end in (("n1", "2026-10-05"), ("n2", "2026-10-09"), ("n3", "2026-10-20"))
 nrow = lambda n, i, status: sheet.Row(n, f"https://x/jobs/{i}", f"Co {i}", "T", status, "", "2026-10-01")  # noqa: E731
 real_dates = intern.closing_dates
 intern.closing_dates = lambda: {"https://acme.example/j/1": date(2026, 10, 6)}
-other = [sheet.Row(2, "https://acme.example/j/1?utm_source=Simplify", "Acme", "Intern", "Approved", "", ""),
+intern.save("links.json", {"https://go.vansh.nyc/AB": "https://acme.example/j/1"})  # (a row added with vanshb03's short link)
+other = [sheet.Row(2, "https://go.vansh.nyc/AB", "Acme", "Intern", "Approved", "", ""),
          sheet.Row(3, "https://beta.example/j/2", "Beta", "Intern", "Approved", "", "")]
 pool = [{"id": "p1", "closes": "2026-10-07"}, {"id": "n1", "closes": "2026-10-05"}, {"id": "p2", "closes": "2026-10-20"}]
 line = daily.closing_line([nrow(5, "n1", "Approved"), nrow(6, "n2", "Approved"), nrow(7, "n3", "Approved"),
@@ -139,6 +140,7 @@ line = daily.closing_line([nrow(5, "n1", "Approved"), nrow(6, "n2", "Approved"),
 assert line == f"Closing soon: Co n1 today, Acme tomorrow, Co n2 {date(2026, 10, 9):%a} · 1 pool job within 3 days (Review)", line
 assert daily.closing_line([], [], date(2026, 10, 5)) is None
 intern.closing_dates = real_dates
+os.remove(intern.path("links.json"))
 for i in ("n1", "n2", "n3"):
     os.remove(os.path.join(config.DATA_DIR, "details", f"{i}.json"))
 

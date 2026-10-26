@@ -1596,13 +1596,13 @@ def other_list():
     rows = other_rows()
     if not APP.other_exists:
         return {"exists": False, "tab": sheet.OTHER_TAB, "ready": [], "applied": [], "rest": [], **assistants()}
-    facts = intern_facts({intern.clean_url(r.url) for r in rows if r.status == "Approved"})
+    facts = intern_facts({intern.real_url(r.url) for r in rows if r.status == "Approved"})
     ready, applied, rest = [], [], []
     for r in rows:
         if r.status == "Approved":
             url, why = assist.other_target(r)
             ready.append(row_view(r, target=url, host=urlparse(url).hostname if url else None, why=why,
-                                  **facts.get(intern.clean_url(r.url), {})))
+                                  **facts.get(intern.real_url(r.url), {})))
         elif r.status == "Applied":
             applied.append(row_view(r))
         else:
@@ -1663,7 +1663,7 @@ def jobs_tab(tab="nuworks", order="default", recheck=False):
         with APP.lock:  # (the rows and the version they were read at, together)
             rows, version = APP.rows, APP.rows_version
     by_number = {r.number: r for r in rows}
-    facts = intern_facts({intern.clean_url(r.url) for r in rows}) if other else None
+    facts = intern_facts({intern.real_url(r.url) for r in rows}) if other else None
 
     def locks(v):  # what Move and Remove allow on this row
         r = by_number[v["row"]]
@@ -1680,7 +1680,7 @@ def jobs_tab(tab="nuworks", order="default", recheck=False):
                             "done": done.get(r.number)}} if a else {}
 
     def view(r, **extra):
-        more = facts.get(intern.clean_url(r.url), {}) if other else {**closing(r), **job_facts(r, data), **on_nuworks(r)}
+        more = facts.get(intern.real_url(r.url), {}) if other else {**closing(r), **job_facts(r, data), **on_nuworks(r)}
         return locks(row_view(r, **more, **extra))
     s = {k: [] for k in ("approved", "agent", "manual", "owed", "ready", "applied", "accepted", "rejected", "proposed",
                          "closed", "rest")}

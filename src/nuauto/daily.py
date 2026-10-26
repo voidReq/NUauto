@@ -394,13 +394,13 @@ def closing_line(rows, pool, today, other=None, days=3):
     details, dates = jobs.load_details(), intern.closing_dates() if other is not None else {}
     due = [(jobs.closes(d), r) for r in rows or [] if r.status == "Approved"
            and (d := details.get(jobs.job_id(r.url))) and jobs.closes(d)]
-    due += [(dates[intern.clean_url(r.url)], r) for r in other or [] if r.status == "Approved"
-            and intern.clean_url(r.url) in dates]
+    due += [(dates[intern.real_url(r.url)], r) for r in other or [] if r.status == "Approved"
+            and intern.real_url(r.url) in dates]
     due = sorted(((day, r) for day, r in due if 0 <= (day - today).days <= jobs.URGENT_DAYS), key=lambda x: x[0])
-    in_sheet = {jobs.job_id(r.url) for r in rows or []} | {intern.clean_url(r.url) for r in other or []}
+    in_sheet = {jobs.job_id(r.url) for r in rows or []} | {intern.real_url(r.url) for r in other or []}
     ratings = jobs.load("ratings.json", {})
     pools = pool + (intern.load("pool.json", []) if other is not None else [])
-    listed = lambda r: r["id"] in in_sheet or bool(r.get("url")) and intern.clean_url(r["url"]) in in_sheet  # noqa: E731
+    listed = lambda r: r["id"] in in_sheet or bool(r.get("url")) and intern.real_url(r["url"]) in in_sheet  # noqa: E731
     soon = [r for r in pools if r.get("closes") and not listed(r) and ratings.get(r["id"], {}).get("label") != 0
             and 0 <= (datetime.fromisoformat(r["closes"]).date() - today).days <= days]
     log(f"approved closing within {jobs.URGENT_DAYS} days: {len(due)}; pool closing within {days} days: {len(soon)}")
