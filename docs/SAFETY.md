@@ -143,7 +143,8 @@ COMPANY-SITE AGENT (assist.py, prompts/ASSIST_PROMPT.md)
 - Every Submit-type question (click, Enter, type submit) lists the open guesses, the answers the user changed, how many were confirmed, and values typed with no saved answer or guess behind them (the guard's own record of type / fill_form / select_option) | assist.submit_ask, review_lines, unexplained, record_typed | test_assist; that the agent records every guess is prompt-only: the typed-values list is the check
 - Rows the agent may take: Needs Human + "External application" (never NUworks, even with --url: check_link), Approved Other jobs rows, and the by-hand rows above | assist.assist_target, other_target, by_hand_target, check_link | test_assist
 - Sheet touched only by the launcher, after you answer y; agent has no sheet access | assist.run (mark_applied_by_hand), tools limited to the list above | test_assist (target rules only; the y/n flow is not tested)
-- NUworks side after a company-site submit reuses apply code, outcome appended to Notes | apply.submit_nuworks_side, sheet.append_note | no test
+- NUworks side after a company-site submit reuses apply code, outcome appended to Notes | apply.submit_nuworks_side, sheet.append_note | no test (the
+  NUworks browser busy with another run: "NOT submitted" in Notes, nothing opened, retry allowed: test_apply)
 - NUworks side never sent twice: apply.NUWORKS_CLICK_MARK goes in Notes before the click; a retry refuses once it (or "submitted") is there | assist.nuworks_side_blocked | test_assist
 - Every guard decision logged | assist.hook -> actions.log | no test
 - Playwright MCP pinned to one version (guard tested against its tool inputs) | assist.MCP_PACKAGE | no test

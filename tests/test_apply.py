@@ -92,4 +92,27 @@ assert run([7], n=1) == [2, 7]                                # Start (-n 1): it
 assert run([], n=2) == [2, 3]
 assert apply.BETWEEN == (10, 20)
 
+# the NUworks side when another process has the NUworks browser: no crash, nothing opened, "NOT submitted" in Notes
+# (so the row is on the GUI's retry list) and a retry still allowed
+import subprocess, sys
+from nuauto import assist, browser, config, gui
+tmp = tempfile.mkdtemp()
+config.LOCAL_DIR, config.LOGS_DIR, config.PROFILE_LOCK_PATH = tmp, tmp, os.path.join(tmp, "browser_profile.lock")
+holder = subprocess.Popen([sys.executable, "-c", "import sys\nfrom nuauto import browser, config\n"
+                           "config.LOCAL_DIR, config.PROFILE_LOCK_PATH = sys.argv[1], sys.argv[2]\n"
+                           "browser.lock_profile('probe.py')\nprint('locked', flush=True)\nsys.stdin.read()",
+                           tmp, config.PROFILE_LOCK_PATH], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+assert holder.stdout.readline().strip() == "locked"
+notes = []
+saved = sheet.append_note, apply.sync_playwright
+sheet.append_note = lambda ws, n, url, text: notes.append((n, text))
+apply.sync_playwright = lambda: (_ for _ in ()).throw(AssertionError("opened a browser"))
+try:
+    note = apply.submit_nuworks_side(sheet.Row(9, "u9", "C9", "T", "Applied", "", ""), None)
+finally:
+    sheet.append_note, apply.sync_playwright = saved
+    holder.communicate("")
+assert notes == [(9, note)] and "probe.py" in note and "nuauto assist nuworks 9" in note, notes
+assert note.startswith(gui.NUWORKS_SIDE_NOT_SENT[0]) and assist.nuworks_side_blocked(note) is None, note
+
 print("All checks passed.")
