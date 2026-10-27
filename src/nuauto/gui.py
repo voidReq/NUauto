@@ -585,7 +585,7 @@ def job_facts(r, data, d=None):
     hour = insights.hourly(pay)
     cat = p["category"] if p else categories.get(i)
     cat = cat if cat in jobs.CATEGORIES else None  # not sorted into your current kinds yet
-    return {"match": (scores.get(i) or {}).get("match"), "pay": pay, "pay_hour": hour[1] if hour else None,
+    return {"match": (scores.get(i) or {}).get("match"), "pay": pay, "year_asked": jobs.year_asked(d, scores.get(i)), "pay_hour": hour[1] if hour else None,
             "score": p["rank"] if p else None, "score_text": jobs.rank_text(p) if p else None,
             "category": cat, "category_label": jobs.category_label(cat) if cat else None}
 
@@ -742,7 +742,7 @@ def assistant_todo():
 
 
 def todo_list(site, agent, soon):
-    """Today's "Only you can do these": the assistants waiting for you first, then everything else soonest deadline
+    """Today's "Waiting on you": the assistants waiting for you first, then everything else soonest deadline
     first (no deadline last). Each item once: a company-site row whose assistant waits for you is that assistant's item."""
     waiting = assistant_todo()
     busy = {(t["tab"], t["row"]) for t in waiting}
@@ -1095,6 +1095,31 @@ def insights_get(source="nuworks"):
     except Exception:
         pass
     return {**insights.collect(APP.rows), "source": "nuworks", **both}
+
+
+def job_detail(tab, url):
+    """One Apply row's saved posting for its dropdown (read-only): where, pay, when it closes, the skills, kinds of work
+    and tags NUworks (or the internship list) gives, and the text. known is False when NUauto holds nothing on that link."""
+    from nuauto import insights
+    from nuauto import intern
+    url = str(url or "")
+    if tab == "other":
+        found = {x["url"]: i for i, x in intern.load("listings.json", {}).items()}.get(intern.real_url(url))
+        d = (intern.load(f"details/{found}.json", None) if found else None) or {}
+    else:
+        found = jobs.job_id(url)
+        d = (jobs.load(f"details/{found}.json", None) if found.isalnum() else None) or {}
+    if not d:
+        return {"known": False}
+    cat = jobs.load("categories.json", {}).get(found) if tab != "other" else intern.load("categories.json", {}).get(found)
+    score = (jobs if tab != "other" else intern).load("scores.json", {}).get(found)
+    day = jobs.closes(d)
+    return {"known": True, "location": d.get("location") or "", "pay": d.get("pay") or "",
+            "category_label": jobs.category_label(cat) if cat in jobs.CATEGORIES else None,
+            "tag": insights.tag_of(d), "year_asked": jobs.year_asked(d, score), "skills": d.get("skills") or [], "function": d.get("function") or [],
+            "experience": d.get("experience") or [], "term": d.get("term") or [], "lengths": d.get("lengths") or [],
+            "class_levels": d.get("class_levels") or [], "closes_text": jobs.closes_text(day),
+            "description": jobs.text_blocks(d.get("description")), "qualifications": jobs.text_blocks(d.get("qualifications"))}
 
 
 def apply_list(order="default"):
@@ -1583,6 +1608,7 @@ def intern_facts(urls):
         cat = cat if cat in jobs.CATEGORIES else None  # (the Apply tab's kind-of-work filter)
         out[x["url"]] = {"match": s["match"], "score": p["rank"] if p else None, "score_text": jobs.rank_text(p) if p else None,
                          "pay": pay, "pay_hour": hour[1] if hour else None, "posted_text": intern.posted_text(x),
+                         "year_asked": jobs.year_asked(d, s),
                          "category": cat, "category_label": jobs.category_label(cat) if cat else None,
                          **closing_of(jobs.closes(d) if d else None)}
     return out
@@ -1647,8 +1673,8 @@ def jobs_tab(tab="nuworks", order="default", recheck=False):
     why it can't be moved / removed (None = it can). nuworks: approved (in the order Start goes), agent (the company's
     own site: the assistant), manual (only you can finish it on NUworks), owed (submitted on NUworks, the company site
     still wants you; or the NUworks side to send again), applied, proposed, closed (Failed: dropped or failed), rest;
-    and the week, why Start can't run, recent runs. other: ready (Approved: the assistant), applied, proposed, closed,
-    rest. Both: the assistant sessions, how many may run, the homelab's queue."""
+    and the week, why Start can't run, recent runs. other: ready (Approved: the assistant), expired (Approved, but the
+    posting has closed), applied, proposed, closed, rest. Both: the assistant sessions, how many may run, the homelab's queue."""
     from nuauto import apply
     from nuauto import assist
     from nuauto import intern
@@ -1682,7 +1708,7 @@ def jobs_tab(tab="nuworks", order="default", recheck=False):
     def view(r, **extra):
         more = facts.get(intern.real_url(r.url), {}) if other else {**closing(r), **job_facts(r, data), **on_nuworks(r)}
         return locks(row_view(r, **more, **extra))
-    s = {k: [] for k in ("approved", "agent", "manual", "owed", "ready", "applied", "accepted", "rejected", "proposed",
+    s = {k: [] for k in ("approved", "agent", "manual", "owed", "ready", "expired", "applied", "accepted", "rejected", "proposed",
                          "closed", "rest")}
     a = assistants()
     out = {"tab": tab, "name": manage.TABS[tab], "busy": running("apply", "nuworks_side"), **a, "sheet_version": version,
@@ -1692,7 +1718,8 @@ def jobs_tab(tab="nuworks", order="default", recheck=False):
         for r in rows:
             if r.status == "Approved":
                 url, why = assist.other_target(r)
-                s["ready"].append(view(r, target=url, host=urlparse(url).hostname if url else None, why=why))
+                v = view(r, target=url, host=urlparse(url).hostname if url else None, why=why)
+                s["expired" if v.get("past") else "ready"].append(v)  # a closed posting leaves Ready to apply
             else:
                 s[later.get(r.status, "rest")].append(view(r))
         out["exists"] = bool(rows) or bool(APP.other_exists)
@@ -1914,12 +1941,13 @@ def logins_export(body):
 
 
 def settings_get():
+    from nuauto import daily
     from nuauto import onboard
     from nuauto import assist
     from nuauto import mail
     cfg = read_local()
     return {"settings": {k: cfg.get(k, [] if k in LIST_SETTINGS else "") for k in PUBLIC_SETTINGS},
-            "assist_slots": assist.slots(), "internships": onboard.internships_info(),
+            "assist_slots": assist.slots(), "assist_discord": daily.assistant_discord_on(), "internships": onboard.internships_info(),
             "gmail": {"ready": mail.ready(), "days_left": mail.days_left() if mail.ready() else None},
             "max_per_week": sheet.max_per_week(), "max_per_week_ceiling": sheet.MAX_PER_WEEK_CEILING,
             "resume_label": health.resume_label(), "discord": os.path.exists(config.DISCORD_WEBHOOK_PATH),
@@ -2112,6 +2140,10 @@ def settings_put(body):
         if not isinstance(n, int) or isinstance(n, bool) or not 1 <= n <= 3:
             raise Refused("Assistants at once: 1, 2 or 3.")
         updates["assist_slots"] = n
+    if "assist_discord" in body:  # on each machine: its assistant's messages
+        if not isinstance(body["assist_discord"], bool):
+            raise Refused("Assistant messages on Discord: on or off.")
+        updates["assist_discord"] = body["assist_discord"]
     old = read_local()
     old_remote = app_on(old)
     if updates:
@@ -2122,7 +2154,7 @@ def settings_put(body):
         from nuauto import intern
         importlib.reload(intern)
     # what the homelab runs by itself (its page, its assistant, the internship updates, the Mark-done page): sent now
-    homelab_keys = remote_keys | ({"internships", "web_base_url", "assist_slots"} & set(updates))
+    homelab_keys = remote_keys | ({"internships", "web_base_url", "assist_slots", "assist_discord"} & set(updates))
     if homelab_keys:
         remote_changed(old_remote, restart="web_base_url" in updates and updates["web_base_url"] != old.get("web_base_url", ""))
     APP.run_now(["quick", "bitwarden"] if {"password_manager"} & set(updates) else ["quick"])
@@ -2505,6 +2537,7 @@ GET_ROUTES = {
     "/api/review": lambda q: review(q.get("mode", "approve") if q.get("mode") in ("approve", "rate") else "approve",
                                     q.get("q", "")[:200], q.get("category", "")[:40],
                                     "intern" if q.get("source") == "intern" else "nuworks", q.get("quick") == "1"),
+    "/api/job": lambda q: job_detail("other" if q.get("tab") == "other" else "nuworks", q.get("url", "")[:2000]),
     "/api/apply": lambda q: apply_list(q.get("order", "default")),
     "/api/jobs": lambda q: jobs_tab("other" if q.get("tab") == "other" else "nuworks", q.get("order", "default"),
                                     q.get("recheck") == "1"),

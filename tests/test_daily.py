@@ -248,4 +248,17 @@ assert run["reason"] == "nuworks" and run["said"] == "NUworks did not load in ti
 daily.scan = lambda before: 0
 assert daily.main() == 0 and daily.jobs.load(daily.LAST_RUN, {})["ok"] is True  # a good run clears it
 
+# what the company-site assistant says goes to Discord unless local_config "assist_discord" is false; nothing else is affected
+posted = []
+daily.discord = posted.append
+config.LOCAL_CONFIG_PATH = os.path.join(tmp, "local_config.json")
+config.LOCAL = {k: v for k, v in config.LOCAL.items() if k != "assist_discord"}  # (not your own setting)
+daily.discord_assistant("on by default (no file)")
+json.dump({"assist_discord": False}, open(config.LOCAL_CONFIG_PATH, "w"))
+daily.discord_assistant("off")
+daily.discord("the morning message")
+json.dump({"assist_discord": True}, open(config.LOCAL_CONFIG_PATH, "w"))
+daily.discord_assistant("on again")
+assert posted == ["on by default (no file)", "the morning message", "on again"], posted
+
 print("All morning-summary checks passed.")

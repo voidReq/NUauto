@@ -894,6 +894,18 @@ def details_for(r):
                  "pay": "", "skills": [], "description": "", "qualifications": "", "deadline": None, "posting_end": None}
 
 
+def closes_func():
+    """row -> the date its posting closes (the list's saved details), or None when unknown / no date given. The listings
+    are read once, for any number of rows."""
+    by_url = {x["url"]: i for i, x in load("listings.json", {}).items()}
+
+    def closes(row):
+        i = by_url.get(real_url(row.url))
+        d = load(f"details/{i}.json", None) if i else None
+        return jobs.closes(d) if d else None
+    return closes
+
+
 def job_view(r, d, today=None):
     """One internship for the GUI's Review card: jobs.job_view plus where it is from (the posting's own link)."""
     listing = load("listings.json", {}).get(r["id"]) or {}

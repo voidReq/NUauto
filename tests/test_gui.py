@@ -124,7 +124,12 @@ try:
     ins = get("/api/insights")  # the demo: 8 pool jobs, one paid yearly (made hourly), one with no pay
     assert ins["pool"]["count"] == 8 and ins["pool"]["pay"]["listed"] == 7 and ins["rows"] == sum(x["count"] for x in ins["statuses"])
     assert ins["applied"]["count"] == {x["label"]: x["count"] for x in ins["statuses"]}["Applied"]
+    assert {"skills", "functions", "tags"} <= set(ins["pool"]) and ins["pool"]["skills"], ins["pool"]  # the demo's jobs list skills
     applying = get("/api/apply")["rows"]
+    detail = get("/api/job?tab=nuworks&url=" + urllib.parse.quote(applying[0]["url"]))  # an Apply row's dropdown: its saved posting
+    assert detail["known"] and detail["skills"] and detail["description"] and isinstance(detail["tag"], (str, type(None))), detail
+    assert get("/api/job?tab=nuworks&url=" + urllib.parse.quote("https://nuworks.invalid/jobs/../../x")) == {"known": False}
+    assert get("/api/job?tab=other&url=" + urllib.parse.quote("https://example.invalid/nothing")) == {"known": False}
     assert applying and all({"closes", "closes_text", "past", "soon", "company_site", "match", "pay", "pay_hour", "score", "score_text"} <= set(r) for r in applying), applying
     assert all(isinstance(r["match"], int) for r in applying) and any(r["pay"] for r in applying), applying
     post("/api/action", {"kind": "apply", "args": {"row": 1}}, expect=409)       # the header row: not an Approved row
@@ -342,6 +347,11 @@ try:
     assert s["settings"]["assist_writeups"] == ["~/notes/writeups"] and s["assist_slots"] == 2
     assert json.load(open(local_config))["assist_slots"] == 2
     post("/api/settings", {"assist_slots": 3})
+    assert get("/api/settings")["assist_discord"] is True                        # on until you switch it off
+    assert post("/api/settings", {"assist_discord": False})["assist_discord"] is False
+    assert json.load(open(local_config))["assist_discord"] is False
+    post("/api/settings", {"assist_discord": "no"}, expect=409)
+    assert post("/api/settings", {"assist_discord": True})["assist_discord"] is True
     for bad in ("http://x.example", "nope", "https://x example"):
         post("/api/settings", {"web_base_url": bad}, expect=409)
     assert post("/api/settings", {"web_base_url": "https://mark.example.com/"})["settings"]["web_base_url"] == "https://mark.example.com"
@@ -581,6 +591,8 @@ try:
     assert beacon["id"] not in [j["id"] for j in get("/api/review?mode=approve&source=intern")["jobs"]]  # the list moved on
     # its row on Apply says when it closes (its posting's own date: demo.intern_setup), the others when they were posted
     ready = {x["row"]: x for x in get("/api/jobs?tab=other&recheck=1")["sections"]["ready"]}
+    secs_other = get("/api/jobs?tab=other")["sections"]  # a closed internship posting is not "ready to apply"
+    assert not any(x.get("past") for x in secs_other["ready"]) and all(x.get("past") for x in secs_other["expired"]), secs_other
     assert ready[done["row"]]["closes"] and not ready[done["row"]]["soon"] and "(in 20 days)" in ready[done["row"]]["closes_text"], ready
     post("/api/undo", {"id": beacon["id"], "row": done["row"], "previous": done["previous"], "tab": "other"})
     assert json.load(open(other_file))["rows"][done["row"] - 1][3] == "Proposed"
@@ -775,7 +787,7 @@ try:
         # /api/jobs: the same Approved rows, in Start's order, as /api/apply; every section is there for both tabs
         jobs = get("/api/jobs?tab=nuworks")
         assert [r["row"] for r in jobs["sections"]["approved"]] == [r["row"] for r in get("/api/apply")["rows"]]
-        every = {"approved", "agent", "manual", "owed", "ready", "applied", "accepted", "rejected", "proposed", "closed", "rest"}  # (both tabs: the other tab's stay empty)
+        every = {"approved", "agent", "manual", "owed", "ready", "expired", "applied", "accepted", "rejected", "proposed", "closed", "rest"}  # (both tabs: the other tab's stay empty)
         assert set(jobs["sections"]) == every and jobs["sections"]["ready"] == [], list(jobs["sections"])
         assert jobs["tab"] == "nuworks" and jobs["order"] == "default" and jobs["week"] == get("/api/apply")["week"] and "history" in jobs
         assert [r["company"] for r in jobs["sections"]["agent"]] == ["Iron Valley Medical"], jobs["sections"]["agent"]
@@ -902,8 +914,20 @@ fetch("{target}", {{method: "POST", credentials: "include", body: {json.dumps(bo
         page.click("[data-testid=tab-nuworks]")
         page.wait_for_selector("[data-testid=job-nuworks-10]")
         assert page.locator("[data-testid=job-nuworks-10] [data-testid=due]").count() == 1  # due date on the company-site row
+        # a row opens like a dropdown: its skills, tags and posting; closed again, hidden; the list keeps it open
+        first = next(r["row"] for r in get("/api/company")["agent"] if get("/api/job?tab=nuworks&url=" + urllib.parse.quote(r["url"]))["known"])
+        page.wait_for_selector(f"[data-testid=job-nuworks-{first}]")
+        assert not page.is_visible(f"[data-testid=job-detail-nuworks-{first}]")
+        page.click(f"[data-testid=job-toggle-nuworks-{first}]")
+        page.wait_for_selector(f"[data-testid=job-detail-nuworks-{first}] [data-testid=job-detail-about]")
+        assert page.get_attribute(f"[data-testid=job-toggle-nuworks-{first}]", "aria-expanded") == "true"
+        assert page.locator(f"[data-testid=job-detail-nuworks-{first}] .jd-row .chip").count() >= 2
+        assert page.locator(f"[data-testid=job-detail-nuworks-{first}] [data-testid=job-expand]").count() == 1
+        page.click(f"[data-testid=job-toggle-nuworks-{first}]")
+        assert not page.is_visible(f"[data-testid=job-detail-nuworks-{first}]")
         page.click("[data-testid=nav-home]")
         page.wait_for_selector("[data-testid=todo-company-10]")
+        assert page.inner_text("[data-testid=todo] h2") == "Waiting on you"
         assert page.locator("[data-testid=todo] [data-testid=due]").count() == len(get("/api/state")["todo"])
         # Insights: the status ring has one arc per status, bars have real sizes, the toggle switches to Applied
         ins = get("/api/insights")  # again: the runs above changed the sheet
@@ -911,6 +935,10 @@ fetch("{target}", {{method: "POST", credentials: "include", body: {json.dumps(bo
         page.wait_for_selector("[data-testid=ins-status] svg")
         assert page.locator("[data-testid=ins-status] svg circle").count() == len(ins["statuses"])
         assert page.locator("[data-testid=ins-status] .legend li").count() == len(ins["statuses"])
+        arcs = page.eval_on_selector_all("[data-testid=ins-status] svg circle", "cs => cs.map(c => getComputedStyle(c).stroke)")
+        assert len(set(arcs)) == len(arcs) and "none" not in arcs, arcs  # every status its own color (Proposed and Rejected were both grey)
+        assert page.locator("[data-testid=tags-skills] .chip").count() == len(ins["pool"]["skills"])
+        assert page.locator("[data-testid=ins-function]").count() == (1 if ins["pool"]["functions"] else 0)
         assert page.locator("[data-testid=pay-bars] .vb").count() == 6
         heights = page.eval_on_selector_all("[data-testid=pay-bars] .vb-bar", "bs => bs.map(b => b.getBoundingClientRect().height)")
         assert max(heights) > 50 and sum(1 for h in heights if h > 0) == sum(1 for b in ins["pool"]["pay"]["buckets"] if b["count"]), heights

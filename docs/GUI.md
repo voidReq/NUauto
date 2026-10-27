@@ -58,8 +58,9 @@ again by itself). A task that is running (not an Apply run on Apply itself) show
 A question from a run (an unknown form field, an option to pick, "did it submit?") is a dialog: answers.JsonIO below.
   Today          "Finish setting up" (until setup is done), Needs attention (health problems with fix buttons), This
                  week (applied of the limit, room left, the total), Next steps (Review N new jobs; "Review N internships"
-                 when internships are on and some wait; Apply to N approved; Check for new jobs now), Only you can do
-                 these: the assistants that wait for you first (approve, answer, did it go through: its screen, or "in
+                 when internships are on and some wait; Apply to N approved; Check for new jobs now), Waiting on you
+                 (until 2026-10-27 "Only you can do these"; the assistant does the company sites now, so it is just what
+                 waits on you): the assistants that wait for you first (approve, answer, did it go through: its screen, or "in
                  its terminal window"), then each item with its due date, soonest first (a company site to finish, a
                  company-site application, a job closing soon); each opens where you do it (Apply, Review)
   Review         one pool job at a time. Approve mode: Approve (y) adds it to the sheet as Approved at once
@@ -114,15 +115,23 @@ A question from a run (an unknown form field, an option to pick, "did it submit?
                  flag as if it were yours: it is about the job, set also on jobs you never applied to, and NUworks never
                  shows a student whom an employer picked), Accepted, Rejected, Proposed, Dropped or failed, Other rows;
                  Recent runs here at the end. The
-                 other tab: Ready to apply (Approved: the assistant), Applied, Accepted, Rejected, Proposed, Dropped or
+                 other tab: Ready to apply (Approved: the assistant; an internship whose posting has closed leaves it for
+                 Closed postings, folded: sections.expired, not changed in the sheet, Drop clears it; the homelab's queue
+                 skips them too, intern.closes_func), Applied, Accepted, Rejected, Proposed, Dropped or
                  failed, Other rows (Sort: score, match %, pay, sheet order, and on the homelab's page the queue's order
                  first; it changes the view only).
-                 Every row looks alike: who and what, score / match % and pay ("score 105 = 75% match + 10 Boston + 20
+                 Every row looks alike: its company (click it: a dropdown, 2026-10-27) with the role under it, score / match % and pay ("score 105 = 75% match + 10 Boston + 20
                  security" when bonuses add to it: Start goes by score), a line about it (site, notes), chips (when it
                  closes, amber within a week, red once past; an internship's from its posting (gui.intern_facts), else
-                 "no close date · posted N days ago"; "may also want the company's site"; the queue's
+                 "no close date · posted N days ago"; "asks for juniors+" (jobs.year_asked: the class year a posting asks for,
+                 when above yours; from NUworks' class levels, the scorer's class_req, an internship's year_req); the queue's
                  place; "do it on the laptop" when the homelab's browser was refused), what to do next, Open, and More (⋯;
-                 on a phone in the row's top right corner).
+                 on a phone in the row's top right corner). The dropdown (GET /api/job?tab=&url=, read when it opens, open
+                 rows stay open across redraws): where, pay, close date; kind of work and your tags (AR/XR...), the class
+                 year asked, job functions, skills and the like (NUworks' own labels); the posting, cut short with
+                 "Show the whole posting". Nothing is shown for a job NUauto holds no posting for. (The "may also want the
+                 company's site" chip on Ready to apply rows was removed 2026-10-27: such a job lands in Company site
+                 needed by itself.)
                  Next: Apply on an Approved NUworks row, after a confirm, just that row (`nuauto apply --row N`); while an
                  Apply run goes it is Add to queue: the row joins the run's queue (`--queue FILE`, gui.queue_row; done next
                  in the order clicked; the button shows Queued #k and takes it out again (apply_unqueue); Stop empties it;
@@ -163,7 +172,9 @@ A question from a run (an unknown form field, an option to pick, "did it submit?
                  sheet tab stands (a status ring: arcs in an order checked for color-blind separation, with a labeled
                  legend), then for Your pool / Applied: median and usual pay, share in Massachusetts, closing this week
                  (pool) or pay listed (applied); an hourly-pay histogram; by state (top 5 + Other, top cities); kind of
-                 work. insights.py, also `nuauto insights` in a terminal. Read-only; pay that doesn't read as $10-150/h
+                 work; skills and tags (NUworks' skill labels, top 20; your own tags from the preferences found in the text; an
+                 internship list gives no skills), job function, class year asked (jobs.year_asked).
+                 insights.py, also `nuauto insights` in a terminal. Read-only; pay that doesn't read as $10-150/h
                  counts as not listed
   Answers        the answer bank as a table (exact-match rules unchanged); locked while a run uses it. NUworks / Other
                  jobs switch: the Other jobs bank (answers_other.json) is its own table; the NUworks one has a "NUworks
@@ -468,7 +479,7 @@ API (JSON; all need the cookie; POSTs need X-NUauto: 1)
   GET  /api/answers?bank=    entries + version (bank other: answers_other.json); POST /api/answers {"bank", "entries",
                              "version"}. answers.json entries carry nuworks_only; leave_blank is kept while empty
   GET  /api/settings         settings (no secrets; logins: {sites, new}, never a password); POST /api/settings {"resume_label", "week_start", "max_per_week", "accounts_email",
-                             "assist_effort", "assist_read_paths", "assist_writeups", "assist_slots" (1-3), "transcript_path",
+                             "assist_effort", "assist_read_paths", "assist_writeups", "assist_slots" (1-3), "assist_discord" (bool), "transcript_path",
                              "internships" ({"on", "term", "threshold", "lists"}), "web_base_url", "password_manager" ("" |
                              "bitwarden"), "bitwarden_import" [words], and with a homelab "remote_app", "remote_assist",
                              "remote_auto" (true / false, or {"nuworks": bool, "other": bool}: a tab left out stays as it

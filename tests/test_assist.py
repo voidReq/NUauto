@@ -15,6 +15,8 @@ config.ANSWERS_PATH = os.path.join(tmp, "answers.json")
 config.OTHER_ANSWERS_PATH = os.path.join(tmp, "answers_other.json")  # never the real banks
 config.LOCAL_DIR = os.path.join(tmp, "local")  # the session locks (slots, sites, rows) and the bank's lock: never the real local/
 config.REMOTE_ASSIST, config.IS_SERVER = False, False  # your own settings (a homelab, remote_assist) never leak in
+config.LOCAL = {k: v for k, v in config.LOCAL.items() if k not in ("assist_discord", "assist_effort")}  # nor these two
+config.LOCAL_CONFIG_PATH = os.path.join(tmp, "local_config.json")  # (assist.session and daily.assistant_discord_on read them)
 
 from nuauto import answers  # noqa: E402
 from nuauto import assist  # noqa: E402
@@ -1088,8 +1090,18 @@ try:
     attention("stop", {"last_assistant_message": "hello"})
     assert len(sent) == 4 and len(shown) == 1 and "tmux" not in shown[0][1] and "8766" not in shown[0][1]
     assert not os.path.exists(os.path.join(d4, assist.MESSAGE))
+    # Settings "Message me on Discord" off: the homelab's session still keeps its news for the app, sends nothing
+    config.IS_SERVER = True
+    json.dump({"assist_discord": False}, open(config.LOCAL_CONFIG_PATH, "w"))
+    d5 = tempfile.mkdtemp()
+    with open(os.path.join(d5, "state.json"), "w") as f:
+        json.dump({**fresh(), "company": "Echo", "where": "row 6", "password_sites": [], "tmux": "nuauto1", "slot": 1}, f)
+    os.environ[assist.STATE_ENV] = d5
+    attention("stop", {"last_assistant_message": "a question for you"})
+    assert len(sent) == 4 and json.load(open(os.path.join(d5, assist.ATTENTION)))["kind"] == "waiting"
 finally:
     daily.discord, config.IS_SERVER, review.page_url = real_discord, real_server, real_page
+    os.remove(config.LOCAL_CONFIG_PATH)  # (the assistant's messages are on again for the rest)
     os.environ.pop(assist.STATE_ENV, None)
 title, body = assist.attention_text("waiting", "row 1", "Acme", "hi", {"tmux": "nuauto2", "review_url": PAGE1})
 assert title == "NUauto: Acme" and "Its terminal: ssh homelab -t tmux attach -t nuauto2" in body

@@ -1416,7 +1416,7 @@ def open_approval(d, state, target, why):
         write_private(os.path.join(d, APPROVAL), a)
     write_private(os.path.join(d, ATTENTION), {"kind": "approve", "since": a["since"], "time": a["since"], "said": target["what"]})
     log(d, f"needs you: approve {target['what']} on {target['url']} (review page)")
-    daily.discord(f"**NUauto: {state.get('company') or 'assistant'}**\nReady to submit ({state.get('where', '')}): "
+    daily.discord_assistant(f"**NUauto: {state.get('company') or 'assistant'}**\nReady to submit ({state.get('where', '')}): "
                   f"{target['what']}. Approve or decline: {review.page_url(state.get('slot') or 1)}")
     return a
 
@@ -1563,7 +1563,7 @@ def attention_main(kind):
                 write_private(os.path.join(d, MESSAGE), (data.get("last_assistant_message") or "").encode())
             title, body = attention_text(kind, st.get("where", ""), st.get("company", ""), said,
                                          {"tmux": st.get("tmux"), "review_url": review.page_url(st.get("slot") or 1)})
-            daily.discord(f"**{title}**\n{body}")
+            daily.discord_assistant(f"**{title}**\n{body}")
             return
         from nuauto import health
         health.desktop_notify(*attention_text(kind, st.get("where", ""), st.get("company", ""), said))
@@ -1984,7 +1984,7 @@ def run_locked(number, other, row, url, where, tab, slot, slot_lock, hand=False)
         write_private(os.path.join(d, ATTENTION), {"kind": "finish", "since": t_.time(), "time": t_.time(), "said": ""})
         from nuauto import daily
         from nuauto import review
-        daily.discord(f"**NUauto: {row.company}**\nSession ended ({where}). Did it go through? Answer on the review page: "
+        daily.discord_assistant(f"**NUauto: {row.company}**\nSession ended ({where}). Did it go through? Answer on the review page: "
                       f"{review.page_url(slot)}")
     reply = "laptop" if laptop else None
     try:

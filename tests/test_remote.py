@@ -92,6 +92,10 @@ cands = remote.candidates(main_rows, other_rows, lambda r: closes.get(r.number),
 order = [(c["tab"], c["row"]) for c in cands]
 assert order == [("jobs", 3), ("jobs", 2), ("jobs", 11), ("other", 2), ("jobs", 4), ("jobs", 9), ("other", 3),
                  ("jobs", 10), ("other", 8)], order
+# an internship (Other jobs row) whose posting has closed is no candidate; unknown dates and open ones stay
+gone = remote.candidates(main_rows, other_rows, lambda r: closes.get(r.number), TODAY,
+                         other_closes=lambda r: TODAY - timedelta(days=1) if r.number == 2 else TODAY if r.number == 3 else None)
+assert ("other", 2) not in [(c["tab"], c["row"]) for c in gone] and ("other", 3) in [(c["tab"], c["row"]) for c in gone]
 c3 = dict(cands[0])
 assert c3.pop("row_url") == next(r.url for r in main_rows if r.number == 3)  # the sheet row's own link (Drop checks it)
 assert c3 == {"tab": "jobs", "row": 3, "url": "https://beta.icims.com/job/1", "host": "beta.icims.com", "company": "Co3",

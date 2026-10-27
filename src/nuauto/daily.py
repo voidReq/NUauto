@@ -89,6 +89,23 @@ def discord(text):
         log(f"discord post failed: {type(e).__name__}")
 
 
+def assistant_discord_on():
+    """Settings > Company-site assistant > "Message me on Discord" (local_config "assist_discord", on unless set to false).
+    Read from the file each time: the homelab's web page and its sessions run for days."""
+    try:
+        with open(config.LOCAL_CONFIG_PATH) as f:
+            return json.load(f).get("assist_discord", True) is not False
+    except (OSError, ValueError):
+        return config.LOCAL.get("assist_discord", True) is not False
+
+
+def discord_assistant(text):
+    """discord() for what the company-site assistant says (needs you, ready to submit, a session ended or started): off
+    when you check the app yourself. Everything else (the morning message, alerts, deploys) is not affected."""
+    if assistant_discord_on():  # (off: say nothing at all: the guard hook calls this, and its stdout must stay pure JSON)
+        discord(text)
+
+
 def stop(reason, title, body, said=None):
     """A step stopped the run: tell you, and keep why for the GUI (LAST_RUN; health.updates turns it into a fix).
     reason: nuworks_login (NUworks wants you to log in), nuworks (NUworks did not answer: the next run usually works),

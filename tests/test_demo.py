@@ -91,6 +91,9 @@ assert view["url"] == jobs.job_url(view["id"]) and {"header", "bullet", "text"} 
 assert jobs.text_blocks("Responsibilities:\n- Build things\nPlain line") == [
     {"kind": "header", "text": "Responsibilities"}, {"kind": "bullet", "text": "Build things"},
     {"kind": "text", "text": "Plain line"}]
+# a bullet mark alone on its line belongs to the next line's text (some postings are written that way); a last one is dropped
+assert jobs.text_blocks("-\n10 paid holidays\n\n-\nFlexible time off\n-") == [
+    {"kind": "bullet", "text": "10 paid holidays"}, {"kind": "bullet", "text": "Flexible time off"}]
 rate, _ = jobs.review_queue("rate", details, {"900103": {"label": 1, "date": "2026-10-01"}}, sheet.read_rows(ws))
 assert "900103" not in [r["id"] for r in rate] and len(rate) == len(todo) - 1
 

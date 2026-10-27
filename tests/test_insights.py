@@ -36,6 +36,11 @@ details = {
 }
 pool = [{"id": "1", "category": "security"}, {"id": "2", "category": "embedded"}, {"id": "3", "category": "other"},
         {"id": "4", "category": "software"}, {"id": "5", "category": "security"}]
+# skills / functions / your tags: a job counts once per skill; a job with none adds nothing (job 4, 5, 6 here)
+details["1"].update(skills=["Python", "Python", "C"], function=["Software Development"], title="XR firmware",
+                    description="Build augmented reality headset firmware.")
+details["2"].update(skills=["Python"], function=["Software Development", "Data Analysis"], description="Wearable sensors.")
+details["3"].update(skills=["Excel"])
 row = lambda n, i, status: sheet.Row(n, jobs.job_url(i), f"Co {i}", "Co-op", status, "", "")
 rows = [row(2, "1", "Applied"), row(3, "6", "Applied"), row(4, "2", "Approved"), row(5, "9", "Needs Human"),
         row(6, "7", "Proposed"), row(7, "8", "Applied")]  # 8: no saved job data at all
@@ -53,6 +58,16 @@ assert p["places"][0] == {"label": "Massachusetts", "count": 2}
 assert {x["label"] for x in p["places"]} == {"Massachusetts", "Texas", "Remote", "New Hampshire"}
 assert len(p["cities"]) == 3 and all(c["count"] == 1 for c in p["cities"])  # at most 3 top cities
 assert p["categories"][0] == {"label": "Security", "count": 2}
+
+assert p["skills"] == [{"label": "Python", "count": 2}, {"label": "C", "count": 1}, {"label": "Excel", "count": 1}], p["skills"]
+assert p["functions"] == [{"label": "Software Development", "count": 2}, {"label": "Data Analysis", "count": 1}]
+assert p["tags"] == [{"label": "AR/XR", "count": 1}, {"label": "wearables", "count": 1}], p["tags"]
+assert insights.tag_of({}) is None and insights.tag_of({"skills": None, "description": None}) is None  # a posting may lack parts
+ys = insights.summarize(pool, {"1": {"class_levels": ["Junior", "Senior"]}, "2": {}, "3": {}}, None, today=TODAY,
+                        scores={"2": {"class_req": "senior_plus"}, "3": {"class_req": "none"}})["pool"]["years"]
+assert ys == [{"label": "Juniors+", "count": 1}, {"label": "Seniors+", "count": 1}], ys  # in year order; none for job 3
+many = insights.group([({"skills": [f"S{n}"]}, None) for n in range(40)], TODAY)
+assert len(many["skills"]) == insights.TOP_SKILLS and all(x["label"] != "Other" for x in many["skills"])
 
 a = s["applied"]  # rows 2, 3, 7: job 8 has no details (counted, no pay, "Not listed"); job 6 gets its category from
 assert a["count"] == 3 and a["pay"]["listed"] == 2 and a["in_ma"] == 2  # categories.json (no longer in the pool)
