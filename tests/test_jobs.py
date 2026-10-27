@@ -239,4 +239,14 @@ assert jobs.application_answer(job(), old, "t1")["interviewing_ended"] == "t1"
 assert jobs.application_answer(job(), {**old, "interviewing": False}, "t1")["interviewing_ended"] is None
 assert jobs.application_answer({**job(), "internal_status": None}, None, "t1")["hiring"] is None
 
+# the class year a posting asks for, when above yours (a sophomore): NUworks' levels, the scorer's reading, an internship's year_req
+assert jobs.MY_YEAR == 1
+assert jobs.year_asked({"class_levels": ["Graduate", "Junior", "Senior"]}) == "Juniors+"
+assert jobs.year_asked({"class_levels": ["Freshmen", "Sophomore"]}) is None and jobs.year_asked({}) is None
+assert jobs.year_asked({"class_levels": ["Graduate"]}) == "Grad students"
+assert jobs.year_asked({}, {"class_req": "junior_plus"}) == "Juniors+" and jobs.year_asked({}, {"class_req": "none"}) is None
+assert jobs.year_asked({"class_levels": ["Junior"]}, {"class_req": "senior_plus"}) == "Seniors+"
+assert [jobs.year_asked({}, {"year_req": y}) for y in ("ok", "one_year_up", "two_years_up", "grad")] == \
+    [None, "Juniors+", "Seniors+", "Grad students"]
+
 print("All job-pool checks passed.")

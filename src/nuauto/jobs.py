@@ -73,6 +73,23 @@ YEAR_WORDS = ["freshm", "sophomore", "junior", "senior"]  # as they appear in NU
 MY_YEAR = YEARS.index(PREFS["class_year"])
 NEXT_YEAR = (YEARS + ["grad"])[MY_YEAR + 1]  # for the flag: "junior+" when you are a sophomore
 CLASS_REQ_YEAR = {"none": -1, "junior_plus": 2, "senior_plus": 3, "grad": 4}  # the scorer's class_req, as a year
+YEAR_ASKED = {1: "Sophomores+", 2: "Juniors+", 3: "Seniors+", 4: "Grad students"}  # a posting's lowest year, as a tag
+INTERN_YEAR_REQ = {"one_year_up": 1, "two_years_up": 2, "grad": None}  # an internship's year_req: years above yours (None: grad)
+
+
+def year_asked(d, score=None):
+    """The class year a posting asks for when that is above yours ("Juniors+", "Seniors+", "Grad students"), else None.
+    From NUworks' class levels (d), the scorer's reading of the description (score["class_req"]) or, for an internship,
+    its score["year_req"] (which is already compared with your year)."""
+    score = score or {}
+    levels = " ".join(d.get("class_levels") or []).lower()
+    listed = [i for i, w in enumerate(YEAR_WORDS) if w in levels]
+    asked = min(listed) if listed else 4 if "grad" in levels else -1
+    asked = max(asked, CLASS_REQ_YEAR.get(score.get("class_req"), -1))
+    if score.get("year_req") in INTERN_YEAR_REQ:
+        up = INTERN_YEAR_REQ[score["year_req"]]
+        asked = max(asked, 4 if up is None else MY_YEAR + up)
+    return YEAR_ASKED.get(asked) if asked > MY_YEAR else None
 
 RULES = {
     # server-side search filters (ids from /api/v2/jobs/filters/students)
@@ -1100,6 +1117,22 @@ HEADER_START = re.compile(
     r"essential|day[- ]to[- ]day|what we|you will|you'll|you have|team|the opportunity|company|eligibility)",
     re.IGNORECASE)
 BULLET = re.compile(r"^(?:[-•*·▪●◦]|\d{1,2}[.)])\s+")
+LONE_BULLET = re.compile(r"^(?:[-•*·▪●◦]|\d{1,2}[.)])$")
+
+
+def post_lines(text):
+    """A posting's non-empty lines, stripped. Some postings put the bullet mark alone on a line and its text on the next:
+    those two become one bullet line (a mark with nothing after it is dropped)."""
+    mark = None
+    for raw in str(text or "").split("\n"):
+        s = raw.strip()
+        if not s:
+            continue
+        if LONE_BULLET.match(s):
+            mark = s
+            continue
+        yield f"{mark} {s}" if mark else s
+        mark = None
 
 
 def is_header(line):
@@ -1160,10 +1193,7 @@ def job_lines(r, d, width):
 
     def body(text):
         prev = None
-        for raw in str(text).split("\n"):
-            s = raw.strip()
-            if not s:
-                continue
+        for s in post_lines(text):
             if is_header(s):
                 out.append([])
                 out.append([("▍ ", "bar"), (s.rstrip(":").upper(), "header")])
@@ -1328,10 +1358,7 @@ def search_match(r, d, terms):
 def text_blocks(text):
     """Description text as [{"kind": "header" | "bullet" | "text", "text": ...}], by the same rules as job_lines."""
     out = []
-    for raw in str(text or "").split("\n"):
-        s = raw.strip()
-        if not s:
-            continue
+    for s in post_lines(text):
         m = BULLET.match(s)
         if is_header(s):
             out.append({"kind": "header", "text": s.rstrip(":")})

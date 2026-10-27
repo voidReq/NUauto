@@ -28,6 +28,8 @@ STATES = {"AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas", "C
           "SC": "South Carolina", "SD": "South Dakota", "TN": "Tennessee", "TX": "Texas", "UT": "Utah", "VT": "Vermont",
           "VA": "Virginia", "WA": "Washington", "WV": "West Virginia", "WI": "Wisconsin", "WY": "Wyoming", "PR": "Puerto Rico"}
 TOP_PLACES = 5
+TOP_SKILLS = 20
+TOP_FUNCTIONS = 8
 _NUM = r"\$?\s*(\d[\d,]*(?:\.\d+)?)\s*(k)?"
 PAY_RE = re.compile(_NUM + r"(?:\s*(?:-|–|to)\s*" + _NUM + r")?.*?\b(?:per|an|a|/)\s*(hour|hr|year|yr)", re.I)
 
@@ -65,6 +67,13 @@ def place(location):
     return (", ".join(parts) or "United States"), None
 
 
+def tag_of(d):
+    """The name of your interest tag (jobs.job_tag) a saved posting matches, or None. A posting may lack parts: an
+    internship's has no skills, a job NUauto holds nothing on is {}."""
+    return jobs.job_tag({"title": d.get("title") or "", "description": d.get("description") or "",
+                         "qualifications": d.get("qualifications") or "", "skills": d.get("skills") or []})
+
+
 def counted(counter, top=None, order=None):
     """[{"label", "count"}], biggest first (or in `order`); past `top`, the rest folds into one "Other"."""
     items = [(k, counter[k]) for k in order if counter.get(k)] if order else counter.most_common()
@@ -87,6 +96,11 @@ def group(entries, today):
         if state:
             cities[f"{label}, {state}"] += 1
     cats = Counter(jobs.category_label(c) if c in jobs.CATEGORIES else jobs.category_label("other") for _, c in entries if c)
+    # each job counts once per skill / function, however often it lists it
+    skills = Counter(s for d, _ in entries for s in set(d.get("skills") or []) if s)
+    functions = Counter(f for d, _ in entries for f in set(d.get("function") or []) if f)
+    tags = Counter(t for d, _ in entries for t in [tag_of(d)] if t)
+    years = Counter(d["year_asked"] for d, _ in entries if d.get("year_asked"))
     closing = [jobs.closes(d) for d, _ in entries if d]
     week = sum(1 for c in closing if c and 0 <= (c - today).days <= 7)
     return {
@@ -102,14 +116,19 @@ def group(entries, today):
         "in_ma": places.get("Massachusetts", 0),
         "states": sum(1 for k in places if k in STATES.values()),
         "categories": counted(cats, top=8),
+        "skills": counted(skills)[:TOP_SKILLS],  # no folded "Other": a skill the top leaves out is not one kind of thing
+        "functions": counted(functions)[:TOP_FUNCTIONS],
+        "tags": counted(tags),
+        "years": counted(years, order=list(jobs.YEAR_ASKED.values())),  # jobs asking for a year above yours
         "closing_week": week,
     }
 
 
-def summarize(pool, details, rows, categories=None, today=None, id_of=None):
+def summarize(pool, details, rows, categories=None, today=None, id_of=None, scores=None):
     """Everything the Insights screen and `nuauto insights` show. pool: data/pool.json entries; details: {id: job
     data}; rows: sheet.Row list (or None when the sheet can't be read); categories: {id: category} for jobs the pool
-    no longer lists; id_of: a row's link -> its job id (default: NUworks' own, jobs.job_id)."""
+    no longer lists; id_of: a row's link -> its job id (default: NUworks' own, jobs.job_id); scores: {id: the scorer's
+    reading} (the class year a description asks for)."""
     from nuauto import sheet
     today = today or date.today()
     categories = categories or {}
@@ -117,7 +136,9 @@ def summarize(pool, details, rows, categories=None, today=None, id_of=None):
 
     def entry(job_id):
         cat = (in_pool.get(job_id) or {}).get("category") or categories.get(job_id)
-        return details.get(job_id) or {}, cat
+        d = details.get(job_id) or {}
+        ask = jobs.year_asked(d, (scores or {}).get(job_id))
+        return ({**d, "year_asked": ask} if ask else d), cat
 
     applied = [entry((id_of or jobs.job_id)(r.url)) for r in rows or [] if r.status in sheet.SENT]
     statuses = Counter(r.status for r in rows or [] if r.status)
@@ -131,7 +152,8 @@ def summarize(pool, details, rows, categories=None, today=None, id_of=None):
 
 def collect(rows):
     """summarize() on this machine's data/ (the NUworks co-ops; rows: the sheet's NUworks tab)."""
-    return summarize(jobs.load("pool.json", []), jobs.load_details(), rows, jobs.load("categories.json", {}))
+    return summarize(jobs.load("pool.json", []), jobs.load_details(), rows, jobs.load("categories.json", {}),
+                     scores=jobs.load("scores.json", {}))
 
 
 def collect_intern(rows):
@@ -140,7 +162,7 @@ def collect_intern(rows):
     from nuauto import intern
     by_url = {x["url"]: i for i, x in intern.load("listings.json", {}).items()}
     return summarize(intern.load("pool.json", []), intern.load_details(), rows, intern.load("categories.json", {}),
-                     id_of=lambda url: by_url.get(intern.clean_url(url)))
+                     id_of=lambda url: by_url.get(intern.clean_url(url)), scores=intern.load("scores.json", {}))
 
 
 def money(x):
@@ -182,6 +204,10 @@ def text(s):
         if g["categories"]:
             out.append("  Kind of work:")
             out += ["  " + line for line in bar_lines(g["categories"], 16)]
+        for label, items in (("Skills", g["skills"][:10]), ("Job function", g["functions"][:5]), ("Your tags", g["tags"]),
+                             ("Asks for a year above yours", g["years"])):
+            if items:
+                out.append(f"  {label}: " + ", ".join(f"{i['label']} {i['count']}" for i in items))
         if key == "pool":
             out.append(f"  Closing within 7 days: {g['closing_week']}")
         out.append("")

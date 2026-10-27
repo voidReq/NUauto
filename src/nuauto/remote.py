@@ -94,11 +94,12 @@ def match_of(notes):
     return int(m.group(1)) if m else -1
 
 
-def candidates(main_rows, other_rows, closes=None, today=None):
+def candidates(main_rows, other_rows, closes=None, today=None, other_closes=None):
     """The rows the queue may start, best first: [{"tab", "row", "url", "row_url", "host", "company", "title", "closes",
     "match", "laptop", "hand"}] (host: its job site, assist.site_key; row_url: the sheet row's own link; hand: a row
     worked on NUworks itself (assist.by_hand_target), which only you start: it needs you there).
-    closes(row) -> its closing date or None (NUworks rows; apply.row_closes). Pure apart from closes."""
+    closes(row) -> its closing date or None (NUworks rows; apply.row_closes); other_closes: the same for the Other jobs
+    tab's rows (intern.closes_func). A row past its deadline is never a candidate. Pure apart from those."""
     from nuauto import assist
     from nuauto import jobs
     today = today or date.today()
@@ -121,6 +122,9 @@ def candidates(main_rows, other_rows, closes=None, today=None):
     for r in other_rows or []:
         url, _ = assist.other_target(r)
         if url:
+            day = other_closes(r) if other_closes else None
+            if day and day < today:
+                continue  # the posting has closed
             out.append({"tab": "other", "row": r.number, "url": url, "row_url": r.url, "host": assist.site_key(url), "company": r.company,
                         "title": r.title, "closes": None, "match": match_of(r.notes), "laptop": assist.LAPTOP_MARK in r.notes})
     urgent = lambda c: c["closes"] is not None and (c["closes"] - today).days <= jobs.URGENT_DAYS  # noqa: E731
@@ -467,6 +471,7 @@ def queue_inputs():
     free slots, NUworks applications left). One sheet read."""
     from nuauto import apply
     from nuauto import assist
+    from nuauto import intern
     from nuauto import sheet
     ws = sheet.open_worksheet(interactive=False)
     main_rows = sheet.read_rows(ws)
@@ -476,7 +481,7 @@ def queue_inputs():
         other_rows = []
     running, claims = assist.sessions(), live_claims()
     free = max(0, assist.slots() - len(running))
-    return (candidates(main_rows, other_rows, apply.row_closes), running, claims, _read_auto(), free,
+    return (candidates(main_rows, other_rows, apply.row_closes, other_closes=intern.closes_func()), running, claims, _read_auto(), free,
             jobs_left(main_rows, running, claims))
 
 
@@ -539,7 +544,7 @@ def auto():
         lines = [f"{c['company']}: {c['title']}" + (f" (ended right away: ssh -t homelab tmux attach -t "
                                                      f"{tmux_name(c['tab'], c['row'])} shows why)" if c in dead else "")
                  for c in started]
-        daily.discord("**NUauto: assistants started on the homelab**\n" + "\n".join(lines)
+        daily.discord_assistant("**NUauto: assistants started on the homelab**\n" + "\n".join(lines)
                       + f"\nThey ping you when they need you: {review.page_url()}")
 
 

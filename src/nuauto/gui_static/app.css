@@ -4,7 +4,7 @@
   --text: #1c1c1e; --muted: #67676d; --faint: #9a9aa0;
   --accent: #3355d1; --accent-hover: #2846b8; --accent-ink: #ffffff; --accent-soft: #e9edfc;
   --ok: #13703c; --ok-soft: #e2f3e9; --warn: #8a5000; --warn-soft: #fcf0d9; --fail: #c4352b; --fail-soft: #fbe6e3;
-  --off: #a5a5ab; --win: #0b7a75; --shadow: 0 1px 2px rgba(20, 20, 30, .05), 0 4px 16px rgba(20, 20, 30, .05);
+  --off: #a5a5ab; --win: #0b7a75; --reject: #8a47b8; --shadow: 0 1px 2px rgba(20, 20, 30, .05), 0 4px 16px rgba(20, 20, 30, .05);
   --radius: 12px; --radius-sm: 8px;
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Cantarell, Ubuntu, "Noto Sans", Roboto, sans-serif;
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", "DejaVu Sans Mono", Menlo, monospace;
@@ -15,7 +15,7 @@
     --text: #ececee; --muted: #a3a3ab; --faint: #75757d;
     --accent: #7f9cff; --accent-hover: #9bb2ff; --accent-ink: #0c1024; --accent-soft: #1e2546;
     --ok: #4cc38a; --ok-soft: #15291f; --warn: #f0b354; --warn-soft: #2e2413; --fail: #ff7d70; --fail-soft: #331a18;
-    --off: #6b6b72; --win: #3cc9bf; --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 6px 20px rgba(0, 0, 0, .25);
+    --off: #6b6b72; --win: #3cc9bf; --reject: #c79bf2; --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 6px 20px rgba(0, 0, 0, .25);
   }
 }
 
@@ -163,9 +163,13 @@ label.field span.muted { font-weight: 400; }
 .job .facts dt { color: var(--muted); font-weight: 500; }
 .job .facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .job .why { border-left: 3px solid var(--accent); padding: 4px 0 4px 12px; margin: 12px 0; }
-.job .desc h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 18px 0 6px; }
-.job .desc ul { margin: 0 0 8px; padding-left: 20px; }
-.job .desc p { margin: 0 0 8px; }
+.job-detail { flex: 1 1 100%; padding: 6px 0 8px; }
+.job-detail .jd-row { display: grid; grid-template-columns: 76px 1fr; gap: 12px; align-items: baseline; margin-top: 12px; }
+.job-detail .jd-chips { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.job-detail .desc { margin-top: 16px; }
+.job-detail .desc h3, .job .desc h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 18px 0 6px; }
+.job-detail .desc ul, .job .desc ul { margin: 0 0 8px; padding-left: 20px; }
+.job-detail .desc p, .job .desc p { margin: 0 0 8px; }
 .match { font-weight: 700; }
 .match.good { color: var(--ok); }
 .match.ok { color: var(--warn); }
@@ -175,7 +179,7 @@ label.field span.muted { font-weight: 400; }
 /* review: search results as a list of cards */
 .joblist .slot { margin-bottom: 16px; }
 .joblist .slot > .card, .joblist .slot > .note { margin-bottom: 0; }
-.job .desc.clamp { max-height: 9.5em; overflow: hidden; -webkit-mask-image: linear-gradient(#000 60%, transparent); mask-image: linear-gradient(#000 60%, transparent); }
+.job-detail .desc.clamp, .job .desc.clamp { max-height: 9.5em; overflow: hidden; -webkit-mask-image: linear-gradient(#000 60%, transparent); mask-image: linear-gradient(#000 60%, transparent); }
 .job .inline-decide { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
 .card.decided { padding: 12px 20px; }
 .row.center { justify-content: center; margin-bottom: 16px; }
@@ -306,3 +310,13 @@ details summary { cursor: pointer; font-weight: 600; margin: 8px 0; }
 .vb-bar { display: block; width: 100%; background: var(--accent); border-radius: 4px 4px 0 0; }
 .vb-label { font-size: 12px; color: var(--muted); padding-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 table.grid input[type=number] { width: 90px; }
+.job-toggle { font: inherit; background: none; border: 0; padding: 0; margin: 0; color: inherit; text-align: left; cursor: pointer;
+  display: block; max-width: 100%; overflow-wrap: anywhere; }
+.job-toggle:hover b { text-decoration: underline; }
+.job-toggle .jt-company, .job-toggle .jt-title { display: block; }
+.job-toggle .jt-title { font-weight: 400; }
+.job-toggle .caret { display: inline-block; width: 14px; margin-left: -14px;  /* hangs in the margin: every line below starts at the same edge */ color: var(--muted); font-size: 11px; transition: transform .12s; }
+.job-toggle.open .caret { transform: rotate(90deg); }
+.tagblock { margin-top: 10px; }
+.tagblock .tagrow { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.tag-n { font-weight: 500; opacity: .75; font-variant-numeric: tabular-nums; }

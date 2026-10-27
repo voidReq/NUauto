@@ -587,7 +587,7 @@ screens.home = (view) => {
             text: "Check for new jobs now", onclick: () => action("update") }),
           el("p", { class: "small muted", text: lu ? `Last check ${ago(lu.time)}: ${lu.listed} new on NUworks, ${lu.pool} made your pool.` :
             "No check for new jobs has run yet." }))),
-      el("div", { class: "card", testid: "todo" }, el("h2", { text: "Only you can do these" }), todoList(st.todo)));
+      el("div", { class: "card", testid: "todo" }, el("h2", { text: "Waiting on you" }), todoList(st.todo)));
     const weekBar = view.querySelector("[data-testid=week-bar]");
     if (weekBar) weekBar.style.width = pct + "%";
   }
@@ -981,6 +981,17 @@ function decidedText(mine) {
   return mine.row ? `approved · ${mine.tab === "other" ? "Other jobs row" : "row"} ${mine.row}` : "approved";
 }
 
+function descBlocks(blocks) {  // a posting's text: headers, bullets in one list, paragraphs
+  const out = [];
+  let ul = null;
+  for (const b of blocks) {
+    if (b.kind === "bullet") { if (!ul) { ul = el("ul"); out.push(ul); } ul.append(el("li", { text: b.text })); continue; }
+    ul = null;
+    out.push(b.kind === "header" ? el("h3", { text: b.text }) : el("p", { text: b.text }));
+  }
+  return out;
+}
+
 function jobCard(c, j, mine, compact) {  // compact: the posting is cut short, with a button for the rest
   // An internship whose posting could not be read has no match, threshold or description (c.unread): say so, no margin math.
   const unscored = c.match === null || c.match === undefined;
@@ -1000,16 +1011,7 @@ function jobCard(c, j, mine, compact) {  // compact: the posting is cut short, w
     c.flags.length ? ["Flags", el("span", { class: "row" }, ...c.flags.map((f) => el("span", { class: "chip", text: f })))] : null,
     c.skills.length ? ["Skills", c.skills.join(", ")] : null,
   ].filter(Boolean);
-  const desc = (blocks) => {
-    const out = [];
-    let ul = null;
-    for (const b of blocks) {
-      if (b.kind === "bullet") { if (!ul) { ul = el("ul"); out.push(ul); } ul.append(el("li", { text: b.text })); continue; }
-      ul = null;
-      out.push(b.kind === "header" ? el("h3", { text: b.text }) : el("p", { text: b.text }));
-    }
-    return out;
-  };
+  const desc = descBlocks;
   return el("article", { class: "card job", testid: "job-card", "data-job": c.id },
     el("div", { class: "row between" }, el("div", { class: "row" }, el("span", { class: "chip accent", text: c.category_label || c.category.replace("_", " ") }),
       c.tag ? el("span", { class: "chip", text: c.tag }) : null, j.soon ? el("span", { class: "chip warn", text: "closing soon" }) : null,
@@ -1037,6 +1039,27 @@ function clamped(node) {  // a long posting cut to a few lines until you ask for
 function jobFacts(r) {
   const fit = r.score != null && r.score !== r.match ? `score ${r.score_text}` : r.match != null ? `${r.match}% match` : "match not scored";
   return el("div", { class: "small muted", testid: "job-facts", text: [fit, r.pay ? `pay ${r.pay}` : "pay not listed"].join(" · ") });
+}
+
+// The dropdown under an Apply row (click its name): where it is, pay and close date, its tags and skills, then the posting
+// (cut short, with a button for the rest). Read when it opens (/api/job); a known posting is kept for the page's life.
+const JOB_DETAIL = new Map();
+async function jobDetailBody(tab, r) {
+  const key = `${tab}|${r.url}`;
+  let c = JOB_DETAIL.get(key);
+  if (!c) { c = await api.get(`/api/job?tab=${tab}&url=${encodeURIComponent(r.url)}`); if (c.known) JOB_DETAIL.set(key, c); }
+  if (!c.known) return el("p", { class: "small muted", testid: "job-detail-unknown", text: "NUauto has no saved posting for this job yet." });
+  const tags = (label, items, cls) => items.length ? el("div", { class: "jd-row" }, el("span", { class: "small muted", text: label }),
+    el("div", { class: "jd-chips" }, ...items.map((t) => el("span", { class: "chip" + (cls ? " " + cls : ""), text: t })))) : null;
+  const about = [c.location, c.pay ? `pay ${c.pay}` : "pay not listed", c.closes_text.startsWith("no ") ? c.closes_text : `closes ${c.closes_text}`].filter(Boolean);
+  const more = [...c.experience, ...c.term, ...c.lengths, ...c.class_levels];
+  const text = c.description.length || c.qualifications.length;
+  return el("div", {}, el("div", { class: "small muted", testid: "job-detail-about", text: about.join(" · ") }),
+    tags("Kind", [c.category_label, c.tag].filter(Boolean), "accent"), tags("Asks for", c.year_asked ? [c.year_asked] : [], "warn"),
+    tags("Function", c.function), tags("Skills", c.skills),
+    tags("Also", more),
+    text ? clamped(el("div", { class: "desc" }, descBlocks(c.description), c.qualifications.length ? [el("h3", { text: "Qualifications" }), descBlocks(c.qualifications)] : null)) :
+      el("p", { class: "small muted", text: "No description saved." }));
 }
 
 // Sorting and filtering the Apply tabs' lists. On the NUworks tab the sort is the order Start goes (the server sorts:
@@ -1081,6 +1104,7 @@ const NU_SECTIONS = [
 ];
 const OTHER_SECTIONS = [
   ["ready", "Ready to apply", "Apply starts the assistant (Claude) on that job's own site; nothing is submitted without your review."],
+  ["expired", "Closed postings", "Approved, but the posting's closing date has passed: the assistant skips them. Drop one (More) to clear it."],
   ["applied", "Applied", null],
   ["accepted", "Accepted", null],
   ["rejected", "Rejected", null],
@@ -1103,6 +1127,7 @@ screens.apply = async (view) => {
   if (!TABS.includes(tab)) tab = "nuworks";
   if (S.focus) { tab = S.focus === "other" ? "other" : "nuworks"; S.focus = null; }  // Today's buttons, #/company, #/other
   const data = { nuworks: null, other: null };
+  const openRows = new Set();  // rows whose dropdown is open (a redraw keeps them open)
   const SORT_OPTS = { nuworks: ["default", "score", "match", "closes", "pay"],
     other: (onHomelab() ? ["queue"] : []).concat(["score", "match", "pay", "sheet"]) };
   const sortOf = (k) => { const v = sessionStorage.getItem("applySort:" + k); return SORT_OPTS[k].includes(v) ? v : SORT_OPTS[k][0]; };
@@ -1236,7 +1261,7 @@ screens.apply = async (view) => {
     const other = tab === "other";
     let chips = [], next = null, open = linkOut(r.url, "Open"), about = null;
     if (key === "approved") {
-      chips = [r.company_site ? el("span", { class: "chip", text: "may also want the company's site", title: r.company_site }) : null, dueChip(r)];
+      chips = [dueChip(r)];  // (a job that sends you to the company's own site lands in Company site needed by itself)
       next = applyButton(d, r);
     } else if (key === "agent") {
       chips = [dueChip(r)];
@@ -1278,12 +1303,33 @@ screens.apply = async (view) => {
         class: "chip", testid: `job-interviewing-${r.row}`, text: "job interviewing",
         title: `The employer is interviewing for this job (NUworks, checked ${day(nu.checked)}). That is about the job, not your application: NUworks doesn't show students whom an employer picked.` }));
     }
+    if (r.year_asked) chips = [el("span", { class: "chip warn", testid: `year-${tab}-${r.row}`, text: `asks for ${r.year_asked.toLowerCase()}`,
+      title: "The posting asks for a class year above yours." }), ...chips];
     const facts = r.match != null || r.score != null || r.pay ? jobFacts(r) : null;
-    return el("li", { class: "job-row", testid: `job-${tab}-${r.row}` },
-      el("div", { class: "what" }, key === "approved" ? el("span", { class: "muted", text: `${r.place}. `, title: `Start applies to this one ${ordinal(r.place)}` }) : null,
-        el("b", { text: r.company || "(no company)" }), r.title ? ` · ${r.title}` : "", facts,
+    const id = `${tab}-${key}-${r.row}`, panel = el("div", { class: "job-detail", testid: `job-detail-${tab}-${r.row}` });
+    const toggle = el("button", { class: "job-toggle", testid: `job-toggle-${tab}-${r.row}`, "aria-expanded": "false",
+      onclick: () => show(!openRows.has(id)) },
+      el("span", { class: "jt-company" }, el("span", { class: "caret", "aria-hidden": "true", text: "▸" }),
+        key === "approved" ? el("span", { class: "muted", text: `${r.place}. `, title: `Start applies to this one ${ordinal(r.place)}` }) : null,
+        el("b", { text: r.company || "(no company)" })),
+      r.title ? el("span", { class: "jt-title", text: r.title }) : null);  // company on one line, the role under it: never a ragged split
+    async function show(on) {
+      on ? openRows.add(id) : openRows.delete(id);
+      toggle.setAttribute("aria-expanded", String(on));
+      toggle.classList.toggle("open", on);
+      panel.hidden = !on;
+      if (!on || panel.dataset.loaded) return;
+      try { fill(panel, await jobDetailBody(tab, r)); panel.dataset.loaded = "1"; }
+      catch (e) { fill(panel, el("p", { class: "small fail", text: e.message })); }
+    }
+    const li = el("li", { class: "job-row", testid: `job-${tab}-${r.row}` },
+      el("div", { class: "what" }, toggle, facts,
         about ? el("div", { class: "small muted", text: about }) : null),
-      el("div", { class: "row" }, ...chips, el("span", { class: "acts" }, next, el("span", { class: "tail" }, open, rowMenu(d, key, r, other)))));
+      el("div", { class: "row" }, ...chips, el("span", { class: "acts" }, next, el("span", { class: "tail" }, open, rowMenu(d, key, r, other)))),
+      panel);
+    panel.hidden = true;
+    if (openRows.has(id)) show(true);
+    return li;
   }
 
   // More: the same four for every row (each greyed out with the reason when it can't be done to this one)
@@ -1694,7 +1740,7 @@ function svg(tag, attrs, ...kids) {
 }
 // Status colors (state, not series): each always shown with its label and count in the legend.
 const STATUS_COLOR = { Proposed: "var(--off)", Approved: "var(--accent)", Applied: "var(--ok)", "Needs Human": "var(--warn)", Failed: "var(--fail)",
-  Accepted: "var(--win)", Rejected: "var(--faint)" };
+  Accepted: "var(--win)", Rejected: "var(--reject)" };
 // Ring (and legend) order, chosen with the dataviz palette validator so no two neighbors are the hard-to-tell pairs
 // (red/amber, green/amber next to each other); labels, counts and 2px gaps carry identity too.
 const RING = ["Applied", "Needs Human", "Accepted", "Proposed", "Failed", "Rejected", "Approved"];
@@ -1735,6 +1781,12 @@ function vbars(items, testid) {
     el("span", { class: "vb-n", text: i.count ? String(i.count) : "" }),
     el("span", { class: "vb-col" }, el("span", { class: "vb-bar", "data-h": i.count ? Math.max(3, (100 * i.count) / top) : 0 })),
     el("span", { class: "vb-label", text: i.label }))));
+}
+
+function tagCloud(label, items, cls, testid) {  // tags with how many jobs carry each (biggest first)
+  return el("div", { class: "tagblock" }, el("div", { class: "small muted", text: label }),
+    el("div", { class: "tagrow", testid }, ...items.map((i) => el("span", { class: "chip" + (cls ? " " + cls : ""), title: `${i.label}: ${i.count}` },
+      i.label, el("span", { class: "tag-n", text: String(i.count) })))));
 }
 
 function sizeBars(root) {  // widths/heights from data-* (the CSP allows no inline style attributes from markup)
@@ -1787,7 +1839,17 @@ screens.insights = async (view) => {
       el("div", { class: "grid2" },
         el("div", { class: "card", testid: "ins-where" }, el("h2", { text: "Where" }), hbars(g.places, "where-bars"),
           g.cities.length ? el("p", { class: "small muted", text: "Top cities: " + g.cities.map((c) => `${c.label} (${c.count})`).join(", ") }) : null),
-        g.categories.length ? el("div", { class: "card", testid: "ins-kind" }, el("h2", { text: "Kind of work" }), hbars(g.categories, "kind-bars")) : null)];
+        g.categories.length ? el("div", { class: "card", testid: "ins-kind" }, el("h2", { text: "Kind of work" }), hbars(g.categories, "kind-bars")) : null),
+      // Skills and tags: what the postings themselves list (NUworks' skill tags and job functions; your own tags from jobs.PREFS
+      // found in the text); an internship list gives no skills, so its card is just left out
+      g.skills.length || g.tags.length || g.functions.length ? el("div", { class: "grid2" },
+        g.skills.length || g.tags.length ? el("div", { class: "card", testid: "ins-skills" }, el("h2", { text: "Skills and tags" }),
+          g.tags.length ? tagCloud("Your tags", g.tags, "accent", "tags-yours") : null,
+          g.skills.length ? tagCloud("Skills the jobs list", g.skills, "", "tags-skills") : null) : null,
+        g.functions.length ? el("div", { class: "card", testid: "ins-function" }, el("h2", { text: "Job function" }), hbars(g.functions, "function-bars")) : null) : null,
+      el("div", { class: "card", testid: "ins-years" }, el("h2", { text: "Class year asked" }),
+        g.years.length ? hbars(g.years, "years-bars") : el("p", { class: "small muted", text: "None ask for a year above yours." }),
+        g.years.length ? el("p", { class: "small muted", text: `${g.years.reduce((n, y) => n + y.count, 0)} of ${g.count} ask for a year above yours; the rest ask for your year or name none.` }) : null)];
     fill(view, sources ? el("div", { class: "row toolbar" }, sources) : null, status,
       el("div", { class: "row between ins-head" }, el("h2", { text: which === "pool" ? `${intern ? "Internships" : "Jobs"} in your pool` : `${intern ? "Internships" : "Jobs"} you applied to` }), seg), ...body);
     view.querySelectorAll(".swatch").forEach((s) => { s.style.background = STATUS_COLOR[s.dataset.status] || "var(--off)"; });
@@ -2211,6 +2273,7 @@ screens.settings = async (view) => {
     writeups.value = (s.assist_writeups || []).join("\n");
     const slots = el("select", { "aria-label": "Assistants at once", testid: "set-assist-slots" }, ...[1, 2, 3].map((n) => el("option", { value: String(n), text: String(n) })));
     slots.value = String(d.assist_slots);
+    const ping = el("input", { type: "checkbox", checked: !!d.assist_discord, testid: "set-assist-discord" });
     const lines = (t) => t.value.split("\n").map((x) => x.trim()).filter(Boolean);
     const L = d.logins;
     const exportBtn = el("button", { class: "btn small", testid: "btn-export-logins", disabled: !L.new,
@@ -2235,12 +2298,14 @@ screens.settings = async (view) => {
         el("label", { class: "field" }, "Folders it may read", el("span", { class: "muted small", text: "Your projects, one per line: it reads them for longer answers. Keys, tokens, .env files and NUauto's own logins are never read." }), folders),
         el("label", { class: "field" }, "Writeups (optional)", el("span", { class: "muted small", text: "Folders of your own project or security writeups, one per line: where it looks first for material for longer answers (copied to your homelab if its assistant runs there)." }), writeups)],
       el("label", { class: "field" }, "Assistants at once", el("span", { class: "muted small", text: "How many company-site applications may run side by side, each in its own browser (1 to 3, on each computer)." }), slots),
+      el("label", { class: "row small" }, ping, "Message me on Discord when an assistant needs me",
+        el("span", { class: "muted", text: "(off: look in the app. Needs you, ready to submit, session ended or started. The morning message and alerts stay.)" })),
       el("div", { class: "row between" }, el("span", { class: "small muted", testid: "logins-count",
         text: !L.sites ? "No logins made yet." : pmOn ? `Logins it made: ${plural(L.sites, "site")}. Bitwarden is on: they go into your vault from Password manager, below.` :
           `Logins it made: ${plural(L.sites, "site")}${L.new ? `, ${L.new} not exported yet` : ", all exported"}` }), here || pmOn ? null : exportBtn),
       el("div", {}, el("button", { class: "btn primary", text: "Save", testid: "assistant-save", onclick: async () => {
         try {
-          const both = { accounts_email: email.value, assist_effort: effort.value, assist_slots: Number(slots.value) };
+          const both = { accounts_email: email.value, assist_effort: effort.value, assist_slots: Number(slots.value), assist_discord: ping.checked };
           d = await api.post("/api/settings", here ? both :
             { ...both, assist_read_paths: lines(folders), assist_writeups: lines(writeups) });
           toast("Saved."); draw();

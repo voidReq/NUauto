@@ -14,7 +14,7 @@ WHAT IT IS
 - `nuauto assist [other] <row>` runs on the homelab too, inside a tmux session, so an application can go on with the
   laptop closed. Its browser draws on a virtual screen there; you see and use that browser in a web page (noVNC) on
   your phone or laptop, over Tailscale only. Its screen in the app (its row in Apply, Apply > Assistants, or its item in
-  Today's "Only you can do these"): approve or decline its Submit, reply, watch its browser and terminal, end it.
+  Today's "Waiting on you"): approve or decline its Submit, reply, watch its browser and terminal, end it.
 - Sessions start by themselves from your approved rows (the queue), and a claim keeps the laptop and the homelab off
   each other's rows and job sites.
 
@@ -144,7 +144,10 @@ RUN ONE BY HAND
 - At the start the terminal shows the browser view's link and its password for this run only (shown nowhere else: not in
   a log, not on Discord; its screen in the app shows it to your paired devices).
 - Discord says when the session waits for you (a question, the end list, a captcha), wants to Submit, or ended: the
-  company, the agent's first line, the link to its screen in the app (and the tmux attach command).
+  company, the agent's first line, the link to its screen in the app (and the tmux attach command). Settings >
+  Company-site assistant > "Message me on Discord" (local_config.json "assist_discord", default on; daily.discord_assistant,
+  read from the file each time) turns exactly these off, plus "assistants started"; the morning message, alerts, deploys
+  and `review pair --discord` still go. Mine is off (2026-10-27): I check the app.
 - Ends like on the laptop: /exit (or End session on its screen), then "Did you press Submit...?" (the screen's Yes / No
   types the answer there) y = Applied. The virtual screen stops with it. No answer in 24 h: the row stays as it was
   (check it yourself) and the slot is free again.
@@ -228,7 +231,7 @@ FROM THE LAPTOP'S GUI (each thing in one place, 2026-10-14)
 - Settings > Homelab (a source install), cards: which homelab (Check, Use this homelab, Set it up, Log in to Claude
   there, Stop using it); NUauto on your homelab (its page and its assistant, on / off; Pair this computer; Open it; its
   queue's settings); Paired devices; This app (the link, below). Setup's one optional Homelab step is the same.
-- Today's "Only you can do these": a homelab session that waits for you is an item there (Open its screen).
+- Today's "Waiting on you": a homelab session that waits for you is an item there (Open its screen).
 - Apply > Assistants: one line, how many assistants run here and on the homelab and how many wait for you, then every
   session with where you answer it; a row the homelab works on has "assistant running on the homelab: open" (its
   screen). Linked, that screen opens in this window; else in your browser (the page refuses frames, and its cookie
