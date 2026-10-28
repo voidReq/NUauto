@@ -42,7 +42,7 @@ for s, k in [("Not Selected", "rejected"), ("No longer under consideration", "re
              ("Not Selected: No longer under consideration", "rejected"), ("We are not moving forward", "rejected"),
              ("Withdrawn", "withdrawn"), ("Inactive", "closed"), ("Position Filled", "closed"),
              ("Job Posting Closed", "closed"), ("Submitted", "active"), ("In Progress", "active"),
-             ("Under Review", "active"), ("", "unknown"), ("Boston, MA", "unknown")]:
+             ("Under Review", "active"), ("Not Submitted", "draft"), ("", "unknown"), ("Boston, MA", "unknown")]:
     assert workday.kind(s) == k, (s, workday.kind(s))
 
 # ---------- reading a table row ----------
@@ -51,7 +51,10 @@ e = workday.entry(["Job Title", "Job Req", "Status", "Date Submitted"],
 assert e["title"] == "Software Engineering Co-op" and e["status"] == "Not Selected" and "R12345" in e["text"]
 e2 = workday.entry([], ["Data Analyst Intern", "10/02/2026", "No longer under consideration"])  # no headers
 assert e2["title"] == "Data Analyst Intern" and e2["status"] == "No longer under consideration"
-assert workday.entry(["Title"], ["A", "B"])["title"] == "A"  # headers that don't line up are ignored
+assert workday.entry(["Title"], ["A", "B"])["title"] == "A"
+assert workday.entry(["Job Title", "Status"], ["IT Analyst", "Not Submitted\nCreated on October 12, 2026"])["status"] == \
+    "Not Submitted"  # a cell's first line only
+assert workday.TABS.match("Inactive (1)").group(2) == "1" and workday.TABS.match("Active (0)")  # headers that don't line up are ignored
 
 # ---------- logins, and where a password may go ----------
 data = {

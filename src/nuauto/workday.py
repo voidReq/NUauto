@@ -22,6 +22,7 @@ from nuauto import accounts
 
 HOSTS = ("myworkdayjobs.com", "myworkdaysite.com")
 # What a status says (Workday's words differ per company: "Not Selected", "No longer under consideration", "Inactive")
+DRAFT = re.compile(r"not submitted|draft", re.I)
 WITHDRAWN = re.compile(r"withdr[ae]wn?", re.I)
 REJECTED = re.compile(r"not selected|no longer (being )?(under )?consider|not (been )?moving forward|not been selected|"
                       r"unsuccessful|\brejected\b", re.I)
@@ -38,9 +39,9 @@ def is_workday(host):
 
 
 def kind(status):
-    """rejected | closed | withdrawn | active | unknown: what a Workday status means for you."""
+    """rejected | closed | withdrawn | draft | active | unknown: what a Workday status means for you."""
     s = status or ""
-    for name, rx in (("withdrawn", WITHDRAWN), ("rejected", REJECTED), ("closed", CLOSED), ("active", ACTIVE)):
+    for name, rx in (("draft", DRAFT), ("withdrawn", WITHDRAWN), ("rejected", REJECTED), ("closed", CLOSED), ("active", ACTIVE)):
         if rx.search(s):
             return name
     return "unknown"
@@ -124,7 +125,7 @@ def may_sign_in(url, a, data=None):
 def entry(heads, cells):
     """One application row of Candidate Home's table: {"title", "status", "text"} (columns by their headers, else the
     first cell is the title and the status is the cell that reads like one)."""
-    cells = [c.strip() for c in cells]
+    cells = [(c.strip().splitlines() or [""])[0].strip() for c in cells]  # "Not Submitted\nCreated on ...": its first line
     heads = [h.strip().lower() for h in heads] if len(heads) == len(cells) else []
     pick = lambda rx: next((cells[i] for i, h in enumerate(heads) if re.search(rx, h)), None)  # noqa: E731
     title = pick(r"title|job|position") or (cells[0] if cells else "")
@@ -173,6 +174,29 @@ SIGN_IN_BUTTON = '[data-automation-id="utilityButtonSignIn"]'  # the page's own 
 ERRORS = '[data-automation-id="errorMessage"], [role="alert"]'
 
 
+TABS = re.compile(r"^\s*(active|inactive)\s*\((\d+)\)", re.I)  # My Applications' tabs: "Active (0)", "Inactive (1)"
+TERMS = re.compile(r"I have read and agree|agree to the terms", re.I)
+
+
+def wait_for(page, check, seconds):
+    """Check every half second, up to `seconds`: True once check() is."""
+    for _ in range(int(seconds * 2)):
+        if check():
+            return True
+        page.wait_for_timeout(500)
+    return check()
+
+
+def counts(page):
+    """{"active": n, "inactive": n} from My Applications' tabs ({} until they show)."""
+    out = {}
+    for t in page.get_by_role("tab").all_inner_texts():
+        m = TABS.match(t)
+        if m:
+            out[m.group(1).lower()] = int(m.group(2))
+    return out
+
+
 def signed_out(page):
     return _visible(page.locator(SIGN_IN_BUTTON)) or _visible(page.locator('input[data-automation-id="password"]'))
 
@@ -182,6 +206,11 @@ def sign_in(page, a, log):
     from nuauto import browser
     name = norm(a["site"]).replace(" ", "_")
     email = page.locator('input[data-automation-id="email"]')
+    wait_for(page, lambda: _visible(email) or _visible(page.locator(SIGN_IN_BUTTON)) or bool(counts(page)), 25)
+    if counts(page):
+        return None  # signed in already
+    if not _visible(email) and TERMS.search(page.locator("body").inner_text()):
+        return "the site asks you to agree to its terms first: do that once by hand, then this works"
     if not _visible(email):
         for sel in ('[data-automation-id="signInLink"]', SIGN_IN_BUTTON):
             if _visible(page.locator(sel)):
@@ -195,9 +224,8 @@ def sign_in(page, a, log):
         page.locator('[data-automation-id="signInLink"]').first.click()
         browser.pause(page, 1.5, 3)
     password = page.locator('input[data-automation-id="password"]')
+    wait_for(page, lambda: _visible(email) and _visible(password), 10)
     if not (_visible(email) and _visible(password)):
-        if not signed_out(page):
-            return None  # signed in already
         return "no sign-in form found"
     if not may_sign_in(page.url, a):
         return f"the sign-in is on {urlparse(page.url).hostname}, not this login's site: not signing in"
@@ -211,10 +239,7 @@ def sign_in(page, a, log):
     button = catcher if _visible(catcher) else page.locator('[data-automation-id="signInSubmitButton"]')
     log.write(f"{a['site']}: signing in ({'click_filter' if button is catcher else 'signInSubmitButton'})")
     button.first.click(force=True)
-    for _ in range(10):  # up to ~20 s for the page to come back signed in
-        page.wait_for_timeout(2000)
-        if not signed_out(page):
-            break
+    wait_for(page, lambda: bool(counts(page)) or (not signed_out(page) and _visible(page.get_by_text("Candidate Home"))), 30)
     log.screenshot(page, f"{name}_after_signin")
     if signed_out(page):
         said = [t.strip() for t in page.locator(ERRORS).all_inner_texts() if t.strip()]
@@ -265,26 +290,36 @@ def check_site(p, a, log, headless):
             log.screenshot(page, f"{norm(a['site']).replace(' ', '_')}_stopped")
             return res
         name = norm(a["site"]).replace(" ", "_")
-        if "userhome" not in page.url.lower():
+        if not counts(page) and "userhome" not in page.url.lower():
             page.goto(a["home"], wait_until="domcontentloaded", timeout=45000)
-            browser.pause(page, 2, 4)
-        log.screenshot(page, f"{name}_active")
-        res["apps"] = [{**e, "tab": "Active"} for e in read_table(page)]
-        tab = page.get_by_role("tab", name=re.compile(r"^\s*inactive", re.I))
-        if _visible(tab):
-            tab.first.click()
-            browser.pause(page, 1.5, 3)
-            log.screenshot(page, f"{name}_inactive")
-            seen = {e["text"] for e in res["apps"]}
-            res["apps"] += [{**e, "tab": "Inactive"} for e in read_table(page) if e["text"] not in seen]
+        if not wait_for(page, lambda: bool(counts(page)), 30):
+            log.screenshot(page, f"{name}_no_list")
+            res["error"] = ("sign-in didn't work (see the screenshots)" if signed_out(page)
+                            else "signed in, but My Applications didn't show (see the screenshot)")
+            return res
+        want = counts(page)
+        seen = set()
+        for label in ("Active", "Inactive"):
+            if not want.get(label.lower()):
+                continue
+            tab = page.get_by_role("tab", name=re.compile(rf"^\s*{label}\b", re.I))
+            if label == "Inactive" or tab.first.get_attribute("aria-selected") != "true":
+                tab.first.click()
+                wait_for(page, lambda: tab.first.get_attribute("aria-selected") == "true", 10)
+            wait_for(page, lambda: len(read_table(page)) >= want[label.lower()], 10)
+            log.screenshot(page, f"{name}_{label.lower()}")
+            got = [e for e in read_table(page) if (norm(e["title"]), norm(e["status"])) not in seen]
+            seen.update((norm(e["title"]), norm(e["status"])) for e in got)
+            res["apps"] += [{**e, "tab": label} for e in got]
+            if len(got) != want[label.lower()]:
+                res["error"] = f"read {len(got)} of the {want[label.lower()]} {label} application(s) (see the screenshot)"
         for e in res["apps"]:
             e["kind"] = kind(e["status"])
             if e["tab"] == "Inactive" and e["kind"] in ("active", "unknown"):
                 e["kind"] = "closed"  # on the Inactive tab, whatever its status still says
-        if not res["apps"]:
+        if not res["apps"] and sum(want.values()):
             with open(f"{log.dir}/{name}.txt", "w") as f:  # what the page said, to see why nothing was read
                 f.write(page.locator("body").inner_text())
-            res["error"] = "signed in, but read no applications (see the screenshot)"
         return res
     except Exception as e:
         text = str(e).splitlines()[0][:120] if str(e) else ""
