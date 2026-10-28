@@ -169,22 +169,35 @@ def _visible(loc):
         return False
 
 
+SIGN_IN_BUTTON = '[data-automation-id="utilityButtonSignIn"]'  # the page's own "Sign In": there while signed out
+ERRORS = '[data-automation-id="errorMessage"], [role="alert"]'
+
+
+def signed_out(page):
+    return _visible(page.locator(SIGN_IN_BUTTON)) or _visible(page.locator('input[data-automation-id="password"]'))
+
+
 def sign_in(page, a, log):
     """Sign in with this site's saved login (once). Returns None, or why not."""
     from nuauto import browser
+    name = norm(a["site"]).replace(" ", "_")
     email = page.locator('input[data-automation-id="email"]')
     if not _visible(email):
-        for sel in ('[data-automation-id="signInLink"]', '[data-automation-id="utilityButtonSignIn"]'):
+        for sel in ('[data-automation-id="signInLink"]', SIGN_IN_BUTTON):
             if _visible(page.locator(sel)):
+                log.write(f"{a['site']}: opening the sign-in ({sel})")
                 page.locator(sel).first.click()
                 browser.pause(page, 1.5, 3)
                 break
     if _visible(page.locator('input[data-automation-id="verifyPassword"]')) and \
             _visible(page.locator('[data-automation-id="signInLink"]')):  # the create-account form: go to sign-in
+        log.write(f"{a['site']}: create-account form shown: going to its sign-in")
         page.locator('[data-automation-id="signInLink"]').first.click()
         browser.pause(page, 1.5, 3)
     password = page.locator('input[data-automation-id="password"]')
     if not (_visible(email) and _visible(password)):
+        if not signed_out(page):
+            return None  # signed in already
         return "no sign-in form found"
     if not may_sign_in(page.url, a):
         return f"the sign-in is on {urlparse(page.url).hostname}, not this login's site: not signing in"
@@ -192,15 +205,20 @@ def sign_in(page, a, log):
     browser.pause(page, 0.5, 1.2)
     password.first.fill(a["password"])
     browser.pause(page, 0.5, 1.2)
-    # Workday lays a click catcher (click_filter) over its buttons: a forced click lands on it, as a person's does
-    page.locator('[data-automation-id="signInSubmitButton"]').first.click(force=True)
-    try:
-        page.wait_for_load_state("networkidle", timeout=20000)
-    except Exception:
-        pass
-    browser.pause(page, 2, 4)
-    if _visible(page.locator('input[data-automation-id="password"]')):
-        return "sign-in didn't work (wrong password, or the site wants something else)"
+    log.screenshot(page, f"{name}_signin")  # the password box shows dots only
+    # Workday lays a click catcher (click_filter) over its buttons: that is what a person's click lands on
+    catcher = page.locator('[data-automation-id="click_filter"][aria-label="Sign In"]')
+    button = catcher if _visible(catcher) else page.locator('[data-automation-id="signInSubmitButton"]')
+    log.write(f"{a['site']}: signing in ({'click_filter' if button is catcher else 'signInSubmitButton'})")
+    button.first.click(force=True)
+    for _ in range(10):  # up to ~20 s for the page to come back signed in
+        page.wait_for_timeout(2000)
+        if not signed_out(page):
+            break
+    log.screenshot(page, f"{name}_after_signin")
+    if signed_out(page):
+        said = [t.strip() for t in page.locator(ERRORS).all_inner_texts() if t.strip()]
+        return "sign-in didn't work" + (f": the site says {said[0][:120]!r}" if said else " (see the screenshots)")
     return None
 
 
