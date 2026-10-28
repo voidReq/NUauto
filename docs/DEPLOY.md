@@ -91,6 +91,10 @@ Unit files live in this repo (deploy/systemd/) and are installed in ~/.config/sy
   once saying so. Simplify's and vanshb03's lists, postings from the companies' own job sites, Claude triage / score /
   category; the morning message counts new pool internships. `nuauto daily` runs the same update after the NUworks
   one; a lock keeps it to one at a time. The laptop's `nuauto intern update` starts it here.
+- nuauto-workday.timer -> nuauto-workday.service: `nuauto workday auto` once a day (13:10 New York, +0-20 min):
+  signs in to each Workday site NUauto has a login for (read-only, headless), marks clear rejections tied to one sent
+  row Rejected, and messages Discord about them, the NUworks rows to withdraw, and closed / unclear statuses (each once;
+  data/workday.json). Needs the logins here (remote_assist merges accounts.json); without them it does nothing.
 - nuauto-deploy.timer -> nuauto-deploy.service: `nuauto deploy` 2 min after boot, then every 5 minutes (deploy_from_git
   only). Looks at GitHub's main; a new commit is unpacked aside (work/deploy/), imported as a check (deploy.MODULES),
   then its changed files are copied in (the old ones kept to undo), the package is reinstalled if pyproject.toml

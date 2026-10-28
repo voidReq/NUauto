@@ -119,6 +119,30 @@ assert [r.number for _, r, _ in workday.offers(dup, list(got.values()), {"NUwork
 apps[0]["kind"] = "active"
 assert [r.number for _, r, _ in workday.offers(results, list(got.values()), {"NUworks": rows})] == [3]
 
+# ---------- what the daily run tells ----------
+apps[0]["kind"] = "rejected"
+odd = [{**workday.entry(["Job Title", "Status"], ["SWE Co-op", "Process Completed"]), "tab": "Active", "kind": "unknown"},
+       {**workday.entry(["Job Title", "Status"], ["Unknown Role", "Not Selected"]), "tab": "Inactive", "kind": "rejected"}]
+res2 = [{"site": ACME, "company": "Acme", "apps": apps + odd}]
+u = workday.unclear(res2, list(got.values()), {"NUworks": rows})
+assert ("Acme", "Unknown Role", "Not Selected", "") in u  # a rejection tied to no row: told, never marked
+assert not any(t == "Software Engineering Co-op" for _, t, _, _ in u)  # tied to one row: marked, not told
+assert workday.unclear(res2, list(got.values()), {"NUworks": done})  # already Rejected rows are left out
+assert not any(w == "NUworks row 2" for *_, w in workday.unclear(res2, list(got.values()), {"NUworks": done}))
+sent = []
+from nuauto import daily  # noqa: E402
+daily.notify, daily.alert = (lambda t, b="": sent.append(("notify", b))), (lambda t, b="": sent.append(("alert", b)))
+workday.tell([("NUworks", rows[0], apps[0])], [rows[0]], u, [{"site": ACME, "company": "Acme", "error": "sign-in didn't work"}])
+assert sent[0][0] == "notify" and "Rejected (marked): Acme, SWE Co-op" in sent[0][1] and "Withdraw on NUworks" in sent[0][1]
+assert sent[1] == ("alert", "Acme: sign-in didn't work")
+sent.clear()
+workday.tell([], [], [], [])
+assert sent == []  # nothing new: no message
+workday.save(res2, {"a | b | c"})
+assert workday.last()["told"] == ["a | b | c"] and workday.STATE.startswith(os.environ["NUAUTO_STATE_DIR"])
+unit = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "deploy", "systemd", "nuauto-workday.service")
+assert "nuauto workday auto" in open(unit).read()
+
 # the command is reachable and its module reaches the homelab
 from nuauto import cli, sync  # noqa: E402
 assert cli.TOOLS["workday"] == "workday" and "workday.py" in sync.PACKAGE

@@ -244,6 +244,8 @@ WORKDAY STATUSES (workday.py, `nuauto workday`; 2026-10-28, my request: many com
 - Passwords never printed or logged (only the site, what it read, screenshots of Candidate Home) | workday.main, check_site | no test
 - No guessing: a status is tied to a sheet row only by the posting's requisition id or title words, or a login's only job and a site's only application, then to exactly one sent row (its link in Notes, else company + title); anything else is listed, not offered | workday.which_job, which_row, offers | test_workday
 - The sheet changes only after your y per row (Rejected, via sheet.set_outcome); without a terminal it only lists | workday.main | test_workday (what is offered); the y/n: no test
+- The daily run (`nuauto workday auto`, nuauto-workday.timer; my call 2026-10-28) marks by itself only a clear rejection ("Not Selected", "No longer under consideration"...: kind "rejected") tied to exactly one sent row; closed / unclear statuses and untied rejections are only told on Discord, each once (data/workday.json) | workday.main, unclear, tell | test_workday (unclear, tell); the filter in main: no test
+- A sign-in's own terms box (the terms you accepted when you applied) is ticked, on that login's own site only, logged and screenshotted (my call 2026-10-28); nothing else is ticked | workday.sign_in | no test
 
 POSTINGS (postings.py, intern.py)
 - Posting reader (the internship pool, `nuauto intern fetch`): plain GETs without cookies or login, public addresses only (every address a name resolves to), also across redirects and in its hidden browser; one request a second per site; pages over 8 MB refused | postings.allowed_host, check_url, _SafeRedirect, Client, Browser | test_intern (a local server stands in; a private address is refused)

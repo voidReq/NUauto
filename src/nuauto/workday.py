@@ -7,6 +7,10 @@ Rejected NUworks row still counts toward the total until you withdraw it on NUwo
   nuauto workday                 every Workday login, one site after another (a visible browser)
   nuauto workday <text>          only the logins whose site or company contains <text>
   nuauto workday --hidden        no window
+  nuauto workday auto            the homelab's daily run (nuauto-workday.timer): no window, no questions. Clear
+                                 rejections ("Not Selected"...) tied to one sent row are marked Rejected by themselves
+                                 (my call, 2026-10-28); Discord says which, which NUworks rows to withdraw, and any
+                                 closed or unclear status (each once). Sites it can't read: one alert a day.
 
 Read-only on Workday: it fills only the sign-in form, with that site's own saved login, on that site's own address
 (may_sign_in; never on accounts.NEVER), clicks only Sign In and the Inactive tab, never Withdraw. One sign-in try per
@@ -14,13 +18,18 @@ site (no lockouts). A fresh private browser per site: nothing is kept on disk. P
 Log and screenshots: logs/<stamp>_workday/.
 """
 import json
+import os
 import re
 import sys
+from datetime import datetime
 from urllib.parse import urlparse
 
 from nuauto import accounts
+from nuauto import config
 
 HOSTS = ("myworkdayjobs.com", "myworkdaysite.com")
+STATE = os.path.join(config.DATA_DIR, "workday.json")  # the last run's statuses, and the unclear ones already told
+NO_HOME = "no saved job link to find its Candidate Home"
 # What a status says (Workday's words differ per company: "Not Selected", "No longer under consideration", "Inactive")
 DRAFT = re.compile(r"not submitted|draft", re.I)
 WITHDRAWN = re.compile(r"withdr[ae]wn?", re.I)
@@ -213,8 +222,6 @@ def sign_in(page, a, log):
     wait_for(page, lambda: _visible(email) or _visible(page.locator(SIGN_IN_BUTTON)) or bool(counts(page)), 25)
     if counts(page):
         return None  # signed in already
-    if not _visible(email) and TERMS.search(page.locator("body").inner_text()):
-        return "the site asks you to agree to its terms first: do that once by hand, then this works"
     with_email = page.get_by_role("button", name=re.compile(r"^\s*sign in with email\s*$", re.I))
     if not _visible(email) and _visible(with_email):  # "Sign in with Apple / Google / LinkedIn ... OR with email": email
         log.write(f"{a['site']}: choosing Sign in with email")
@@ -235,9 +242,15 @@ def sign_in(page, a, log):
     password = page.locator('input[data-automation-id="password"]')
     wait_for(page, lambda: _visible(email) and _visible(password), 10)
     if not (_visible(email) and _visible(password)):
-        return "no sign-in form found"
+        terms = TERMS.search(page.locator("body").inner_text())
+        return "no sign-in form found" + (" (the page asks you to agree to its terms: see the screenshot)" if terms else "")
     if not may_sign_in(page.url, a):
         return f"the sign-in is on {urlparse(page.url).hostname}, not this login's site: not signing in"
+    consent = page.get_by_role("checkbox", name=TERMS)
+    if _visible(consent) and not consent.first.is_checked():  # the terms you accepted when you applied (2026-10-28)
+        log.write(f"{a['site']}: ticking the sign-in's terms box")
+        consent.first.check(force=True)
+        log.screenshot(page, f"{name}_terms")
     email.first.fill(a["email"])
     browser.pause(page, 0.5, 1.2)
     password.first.fill(a["password"])
@@ -273,7 +286,7 @@ def check_site(p, a, log, headless):
     from nuauto import browser
     res = {"site": a["site"], "company": a.get("company", ""), "apps": []}
     if not a.get("home"):
-        res["error"] = "no saved job link to find its Candidate Home"
+        res["error"] = NO_HOME
         return res
     b = p.firefox.launch(headless=headless)
     try:
@@ -360,21 +373,60 @@ def offers(results, sites, rows_by_tab):
     return out
 
 
+def unclear(results, sites, rows_by_tab):
+    """[(company, title, status, "tab row N" | "")]: what Workday says that might be a no but isn't marked: a closed or
+    unclear status, or a rejection tied to no row (or to two). Rows already Rejected are left out."""
+    out = []
+    by_site = {a["site"]: a for a in sites}
+    for res in results:
+        a = by_site.get(res["site"])
+        apps = res.get("apps") or []
+        for e in apps:
+            if e.get("kind") not in ("rejected", "closed", "unknown") or a is None:
+                continue
+            j = which_job(e, a, apps)
+            tied = [(tab, which_row(j, a, rows)) for tab, rows in rows_by_tab.items()] if j else []
+            tied = [(tab, r) for tab, r in tied if r]
+            if any(r.status == "Rejected" for _, r in tied) or (e["kind"] == "rejected" and len(tied) == 1):
+                continue  # marked already, or offers() marks it
+            where = f"{tied[0][0]} row {tied[0][1].number}" if len(tied) == 1 else ""
+            out.append((res.get("company") or res["site"], e["title"], e["status"], where))
+    return out
+
+
+def save(results, told):
+    os.makedirs(config.DATA_DIR, exist_ok=True)
+    keep = [{k: v for k, v in r.items()} for r in results]
+    with open(STATE, "w") as f:
+        json.dump({"checked": datetime.now().isoformat(timespec="minutes"), "sites": keep, "told": sorted(told)}, f, indent=1)
+
+
+def last():
+    try:
+        with open(STATE) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
 def main(argv):
     from nuauto import browser
     from nuauto import sheet
-    headless = "--hidden" in argv or not browser.has_display()
-    rest = [x for x in argv if x != "--hidden"]
+    auto = argv[:1] == ["auto"]  # the homelab's daily run (nuauto-workday.timer): no window, no questions
+    rest = [x for x in argv[1:] if x != "--hidden"] if auto else [x for x in argv if x != "--hidden"]
+    headless = auto or "--hidden" in argv or not browser.has_display()
     if rest and rest[0].startswith("-"):
         sys.exit(__doc__)
-    ws_main = sheet.open_worksheet()
+    ws_main = sheet.open_worksheet(interactive=not auto)
     tabs = {"NUworks": (ws_main, sheet.read_rows(ws_main))}
     try:
-        ws_other = sheet.open_other()
+        ws_other = sheet.open_other(interactive=not auto)
         tabs["Other jobs"] = (ws_other, sheet.read_rows(ws_other))
     except sheet.SheetError:
         pass
     sites = logins(" ".join(rest), [r for _, rows in tabs.values() for r in rows])
+    if not sites and auto:
+        return print("No Workday logins here (the homelab gets them with remote_assist).")
     if not sites:
         sys.exit("No Workday logins" + (f" matching {' '.join(rest)!r}" if rest else "") + " in accounts.json.")
     from playwright.sync_api import sync_playwright
@@ -396,27 +448,55 @@ def main(argv):
             print(f"  ! {res['error']}")
         for e in res.get("apps") or []:
             print(f"  {e['kind']:9} {e['status'][:40]:40} {e['title'][:60]}")
-    todo = offers(results, sites, {t: rows for t, (_, rows) in tabs.items()})
-    if not todo:
-        return print("\nNothing to mark: no rejection here is tied to one sent row that isn't Rejected yet.")
-    if not sys.stdin.isatty():
-        print("\nRejections tied to a row (mark them Rejected in the GUI, a row's More menu):")
-        for tab, r, e in todo:
-            print(f"  {tab} row {r.number}: {r.company}, {r.title}  (Workday: {e['status']})")
-        return
+    rows_by_tab = {t: rows for t, (_, rows) in tabs.items()}
+    todo = offers(results, sites, rows_by_tab)
+    if auto:  # only clear rejections are marked by themselves (my call, 2026-10-28); closed / unclear ones are told
+        todo = [(tab, r, e) for tab, r, e in todo if e["kind"] == "rejected"]
+    elif not sys.stdin.isatty():
+        todo, shown = [], todo
+        for tab, r, e in shown:
+            print(f"  could mark: {tab} row {r.number}: {r.company}, {r.title}  (Workday: {e['status']})")
     marked = []
     for tab, r, e in todo:
-        ans = input(f"\n{tab} row {r.number}: {r.company}, {r.title}\n  Workday says {e['status']!r} "
-                    f"(as {e['title']!r}). Mark it Rejected? [y/N] ").strip().lower()
-        if ans == "y":
+        if not auto:
+            ans = input(f"\n{tab} row {r.number}: {r.company}, {r.title}\n  Workday says {e['status']!r} "
+                        f"(as {e['title']!r}). Mark it Rejected? [y/N] ").strip().lower()
+            if ans != "y":
+                continue
+        try:
             sheet.set_outcome(tabs[tab][0], r.number, r.url, "Rejected")
-            log.write(f"marked {tab} row {r.number} Rejected (Workday: {e['status']})")
-            marked.append((tab, r))
-    owed = [r for tab, r in marked if tab == "NUworks"]
+        except sheet.SheetError as err:
+            log.write(f"{tab} row {r.number} not marked: {err}")
+            continue
+        log.write(f"marked {tab} row {r.number} Rejected (Workday: {e['status']})")
+        marked.append((tab, r, e))
+    owed = [r for tab, r, _ in marked if tab == "NUworks"]
     if owed:
         print("\nWithdraw these on NUworks (My Job Applications) so they stop counting toward the total:")
         for r in owed:
             print(f"  row {r.number}: {r.company}, {r.title}")
+    if not marked and not auto:
+        print("\nNothing marked.")
+    told = set(last().get("told") or [])
+    news = [u for u in unclear(results, sites, rows_by_tab) if " | ".join(u[:3]) not in told]
+    save(results, told | {" | ".join(u[:3]) for u in news})
+    if auto:
+        tell(marked, owed, news, [r for r in results if r.get("error") and r.get("error") != NO_HOME])
+
+
+def tell(marked, owed, news, failed):
+    """The daily run's Discord message: only when something is new."""
+    from nuauto import daily
+    lines = [f"Rejected (marked): {r.company}, {r.title} ({tab}; Workday: {e['status']})" for tab, r, e in marked]
+    if owed:
+        lines.append("Withdraw on NUworks (they still count toward the total): " +
+                     ", ".join(f"row {r.number} {r.company}" for r in owed))
+    lines += [f"Check: {c}, {t}: Workday says {s!r}" + (f" ({w})" if w else " (no row tied to it)") for c, t, s, w in news]
+    if lines:
+        daily.notify("NUauto: Workday statuses", "\n".join(lines))
+    if failed:
+        daily.alert("NUauto: Workday check couldn't read some sites",
+                    "\n".join(f"{r['company'] or r['site']}: {r['error']}" for r in failed))
 
 
 if __name__ == "__main__":

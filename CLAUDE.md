@@ -183,7 +183,7 @@ BROWSER (Playwright, Firefox)
   2026-10-05 browser.lock_profile refuses a second one): not while apply.py, jobs.py or browser.py are
   running. Use a separate profile dir if in doubt.
   The homelab has its own copy and uses it during its update runs (08:00/18:00 New York; its timers: deploy/systemd/,
-  also weekly, intern every 2 h, assist every 10 min).
+  also weekly, intern every 2 h, assist every 10 min, workday daily).
 
 GUI (`nuauto gui`; details: docs/GUI.md)
 - Agents test with `nuauto gui --demo` (everything fake: sheet, NUworks pages, Claude, temp folder) or `nuauto gui
@@ -270,6 +270,7 @@ nuauto insights        # pay, places, kinds of work in my pool and applications;
 nuauto selftest        # is this install OK? demo mode end to end in a hidden browser (nothing real touched)
 nuauto assist [<row>]  # company-site agent for a Needs Human row; asks me before any Submit
 nuauto workday [<text>] [--hidden]  # your statuses on each company's Workday (read-only, saved logins); y marks a rejection Rejected
+                       # `nuauto workday auto`: the homelab's daily run (nuauto-workday.timer): clear rejections marked by themselves, Discord
 nuauto accounts [export [<file>] [--all]]   # the job-site logins the agent made (no passwords shown); Bitwarden's import file
 nuauto accounts import <file>|- --only <text>   # my own logins from Bitwarden for those sites (bw list items --search ...)
 nuauto accounts export --bitwarden              # NUauto's new logins straight into my vault (bw unlocked by me; no file)
