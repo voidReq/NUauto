@@ -78,6 +78,11 @@ expect(SheetError, lambda: check_limits(rows_with([("Applied", "")]), TODAY))
 # what you heard back (Accepted / Rejected) still counts: those applications went out (the week, and the total)
 R2 = rows_with([("Applied", "2026-09-30"), ("Accepted", "2026-09-30"), ("Rejected", "2026-09-29"), ("Rejected", "2026-09-10")])
 assert check_limits(R2, TODAY, seen={}) == (3, 4)
+# Interview (2026-10-28) is a sent status like Applied: it counts toward the week and the total, and needs its date
+R2i = rows_with([("Applied", "2026-09-30"), ("Interview", "2026-09-30"), ("Interview", "2026-09-10")])
+assert check_limits(R2i, TODAY, seen={}) == (2, 3)
+assert "Interview" in sheet.SENT and "Interview" in sheet.OUTCOMES and "Interview" in sheet.STATUSES
+expect(SheetError, lambda: check_limits(rows_with([("Interview", "")]), TODAY, seen={}))
 expect(SheetError, lambda: check_limits(rows_with([("Rejected", "")]), TODAY, seen={}))  # a sent row needs its date
 # the total counts what NUworks has: a sent row NUworks says it has no application for (a company-site one whose
 # NUworks side never went out) doesn't count, but only while the row is as it was when NUworks was asked
@@ -169,6 +174,40 @@ sheet.set_outcome(ws, 2, "https://x/1", "Applied")
 assert ws.values[1][3] == "Applied" and ws.values[1][5] == "2026-10-01"
 sheet.set_outcome(ws, 2, "https://x/1", "Accepted")
 assert ws.values[1][3] == "Accepted"
+# Interview: from Applied, on to Accepted / Rejected, back to Applied; the date stays, the note says when
+ws = FakeWS([HEADERS, ["https://x/1", "Co", "Job", "Applied", "Applied by hand.", "2026-10-01"]])
+sheet.set_outcome(ws, 2, "https://x/1", "Interview")
+assert ws.values[1][3:6] == ["Interview", f"Interview (marked {date.today():%Y-%m-%d}). Applied by hand.", "2026-10-01"], ws.values[1]
+sheet.set_outcome(ws, 2, "https://x/1", "Interview")   # again: nothing changes
+assert ws.values[1][4].count("Interview (marked") == 1
+sheet.set_outcome(ws, 2, "https://x/1", "Accepted")
+assert ws.values[1][3] == "Accepted" and ws.values[1][5] == "2026-10-01"
+sheet.set_outcome(ws, 2, "https://x/1", "Interview")
+sheet.set_outcome(ws, 2, "https://x/1", "Applied")
+assert ws.values[1][3] == "Applied" and ws.values[1][5] == "2026-10-01"
+sheet.set_outcome(ws, 2, "https://x/1", "Interview")
+expect(SheetError, lambda: sheet.mark_applied_by_hand(ws, 2, "https://x/1"))                   # Interview: sent already
+expect(SheetError, lambda: sheet.set_outcome(fresh(), 2, "https://x/1", "Interview"))         # not sent: Approved
+# the Status dropdown on an older sheet: ensure_dropdown sets the full list again, Interview with its own color
+from nuauto import setup_sheet
+
+
+class DropdownWS:
+    id = 7
+
+    class spreadsheet:
+        sent = []
+
+        @staticmethod
+        def batch_update(body):
+            DropdownWS.spreadsheet.sent.append(body)
+
+
+setup_sheet.ensure_dropdown(DropdownWS)
+vals = [v["userEnteredValue"] for v in DropdownWS.spreadsheet.sent[0]["requests"][0]["setDataValidation"]["rule"]["condition"]["values"]]
+assert vals == sheet.STATUSES and "Interview" in vals, vals
+assert setup_sheet.STATUSES == sheet.STATUSES and set(setup_sheet.STATUS_COLORS) == set(sheet.STATUSES)
+assert len({setup_sheet.STATUS_COLORS[s] for s in sheet.STATUSES}) == len(sheet.STATUSES)  # every status its own color
 expect(SheetError, lambda: sheet.set_outcome(fresh(), 2, "https://x/1", "Rejected"))          # not sent: Approved
 expect(SheetError, lambda: sheet.set_outcome(ws, 2, "https://x/other", "Rejected"))           # another job now
 expect(SheetError, lambda: sheet.set_outcome(ws, 2, "https://x/1", "Failed"))                 # not an outcome

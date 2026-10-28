@@ -524,8 +524,9 @@ def setup(state_names=()):
     applied = 11 if "cap-reached" in state_names else 4
     for k in range(applied):
         day = today - timedelta(days=k % 6)
-        rows.append([_url(f"9002{k:02d}"), f"Earlier Co {k + 1}", "Engineering Co-op", "Applied",
-                     "Submitted via apply.py (confirmed by NUworks page)", day.isoformat()])
+        rows.append([_url(f"9002{k:02d}"), f"Earlier Co {k + 1}", "Engineering Co-op", "Interview" if k == 3 else "Applied",
+                     ("Interview (marked demo). " if k == 3 else "") + "Submitted via apply.py (confirmed by NUworks page)",
+                     day.isoformat()])
     rows.append([_url("900130"), "Willow Devices", "Firmware Co-op", "Applied",
                  f"{sheet.SITE_MARK} (posting: \"you must also apply on our careers site\"). Submitted via apply.py",
                  (today - timedelta(days=1)).isoformat()])

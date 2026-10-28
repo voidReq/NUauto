@@ -19,10 +19,11 @@ from google.auth.exceptions import RefreshError
 from nuauto import config
 
 HEADERS = ["URL", "Company", "Title", "Status", "Notes", "Date"]
-STATUSES = ["Proposed", "Approved", "Applied", "Failed", "Needs Human", "Accepted", "Rejected"]
-# An application went out: Applied, and what you heard back (my request, 2026-10-16). All count toward the limits.
-SENT = ("Applied", "Accepted", "Rejected")
-OUTCOMES = ("Accepted", "Rejected")
+STATUSES = ["Proposed", "Approved", "Applied", "Failed", "Needs Human", "Interview", "Accepted", "Rejected"]
+# An application went out: Applied, and what you heard back (my request, 2026-10-16; Interview 2026-10-28). All count toward
+# the limits.
+SENT = ("Applied", "Interview", "Accepted", "Rejected")
+OUTCOMES = ("Interview", "Accepted", "Rejected")
 MAX_PER_WEEK = 11  # the default weekly cap (raised from 8 on 2026-10-03); local_config "max_per_week" changes it
 MAX_PER_WEEK_CEILING = 30  # the most a setting may ask for
 MAX_TOTAL = 99     # CLAUDE.md says "under 100"
@@ -81,7 +82,7 @@ def counted(r):
 
 
 def applied_dates(rows):
-    """Dates of all sent rows (Applied, Accepted, Rejected; and those being re-applied: reapplying). A missing or odd
+    """Dates of all sent rows (Applied, Interview, Accepted, Rejected; and those being re-applied: reapplying). A missing or odd
     date is an error, not a guess."""
     dates = []
     for r in rows:
@@ -579,13 +580,13 @@ def mark_applied_by_hand(ws, row_number, url, how="by hand"):
 
 
 def set_outcome(ws, row_number, url, outcome):
-    """What you heard back on a sent row: Accepted or Rejected (or back to Applied, a mark undone). Its date stays (the
+    """What you heard back on a sent row: Interview, Accepted or Rejected (or back to Applied, a mark undone). Its date stays (the
     day it went out: it still counts that week); a note says when you marked it. Only a sent row still holding this job."""
     if outcome not in SENT:
         raise SheetError(f"Unknown outcome {outcome!r}.")
     current = _row_for(ws, row_number, url)
     if current.status not in SENT:
-        raise SheetError(f"Row {row_number} is {current.status or 'empty'}: only a sent application is accepted or rejected.")
+        raise SheetError(f"Row {row_number} is {current.status or 'empty'}: only a sent application gets an outcome.")
     if current.status == outcome:
         return
     notes = current.notes if outcome == "Applied" else f"{outcome} (marked {date.today():%Y-%m-%d}). {current.notes}".strip()

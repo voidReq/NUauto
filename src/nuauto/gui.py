@@ -1496,7 +1496,7 @@ def mark(body):
     try:
         if action == "site":
             sheet.mark_site_done(ws, int(row), url)
-        elif action == "outcome":  # what you heard back: Accepted / Rejected (or back to Applied)
+        elif action == "outcome":  # what happened: Interview / Accepted / Rejected (or back to Applied)
             from nuauto import setup_sheet
             if (config.SHEET_ID, other) not in _dropdown_set:  # (a sheet made before these statuses: its dropdown allows them
                 setup_sheet.ensure_dropdown(ws)                 # now; once per start is enough)
@@ -1754,12 +1754,12 @@ def jobs_tab(tab="nuworks", order="default", recheck=False):
     def view(r, **extra):
         more = facts.get(intern.real_url(r.url), {}) if other else {**closing(r), **job_facts(r, data), **on_nuworks(r)}
         return locks(row_view(r, **more, **extra))
-    s = {k: [] for k in ("approved", "agent", "manual", "owed", "ready", "expired", "applied", "accepted", "rejected", "proposed",
+    s = {k: [] for k in ("approved", "agent", "manual", "owed", "ready", "expired", "applied", "interview", "accepted", "rejected", "proposed",
                          "closed", "rest")}
     a = assistants()
     out = {"tab": tab, "name": manage.TABS[tab], "busy": running("apply", "nuworks_side"), **a, "sheet_version": version,
            "queue": queue_info() if REMOTE else _homelab.get("queue") if a["linked"] and config.REMOTE_ASSIST else None}
-    later = {"Applied": "applied", "Accepted": "accepted", "Rejected": "rejected", "Proposed": "proposed", "Failed": "closed"}
+    later = {"Applied": "applied", "Interview": "interview", "Accepted": "accepted", "Rejected": "rejected", "Proposed": "proposed", "Failed": "closed"}
     if other:
         for r in rows:
             if r.status == "Approved":
@@ -1782,7 +1782,7 @@ def jobs_tab(tab="nuworks", order="default", recheck=False):
                 s[later.get(r.status, "rest")].append(view(r))
         out.update(week=run["week"], why_not=run["why_not"], limited=run["limited"], history=run["history"],
                    order=order if known_order(order) else "default", sort=sort_menu())
-    for k in ("applied", "accepted", "rejected", "closed"):
+    for k in ("applied", "interview", "accepted", "rejected", "closed"):
         s[k].sort(key=lambda x: x["date"] or "", reverse=True)  # newest first
     out["sections"] = s
     return out

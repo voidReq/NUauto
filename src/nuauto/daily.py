@@ -242,7 +242,7 @@ def applications():
     try:
         ws = sheet.open_worksheet(interactive=False)
         rows = sheet.read_rows(ws)
-        setup_sheet.ensure_dropdown(ws)  # Accepted / Rejected in the Status dropdown of a sheet made before them
+        setup_sheet.ensure_dropdown(ws)  # Interview / Accepted / Rejected in the Status dropdown of a sheet made before them
     except Exception as e:  # (the morning reminders say so when it is the Google login)
         return log(f"applications check skipped: the sheet can't be read ({type(e).__name__})")
     log("applications on NUworks")

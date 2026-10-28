@@ -177,13 +177,13 @@ STATE ON DISK (STATE_DIR = repo root; app-data folder when packaged; a temp fold
 
 SHEET (columns in sheet.HEADERS, made by setup_sheet.py)
   Columns: URL, Company, Title, Status, Notes, Date. First tab NUworks only; second tab "Other jobs" (sheet.OTHER_TAB).
-  Status values (sheet.STATUSES): Proposed, Approved, Applied, Failed, Needs Human, Accepted, Rejected.
+  Status values (sheet.STATUSES): Proposed, Approved, Applied, Failed, Needs Human, Interview, Accepted, Rejected.
   Who sets what:
     Proposed      jobs.cmd_suggest, manage.add (--proposed), Undo (sheet.unapprove).
     Approved      sheet.approve_proposed / add_proposed(status="Approved") from Review; intern.approve; manage.add; or you.
     Applied       sheet.resolve_submit (apply.py after a confirmed submit); mark_applied_by_hand (assist.run,
                   daily.record_hand_applications, web do_POST, gui.mark); set_outcome back to Applied.
-    Accepted / Rejected   sheet.set_outcome (gui.mark); the Status dropdown.
+    Interview / Accepted / Rejected   sheet.set_outcome (gui.mark); the Status dropdown.
     Failed        sheet.resolve_submit (you said the submit failed); sheet.drop (Notes "Dropped <date>: ...").
     Needs Human   sheet.set_status (apply.py stops, deadline passed); mark_submit_started (the row reads Needs Human
                   between the Submit click and the result, so it can't be sent twice).
@@ -206,7 +206,7 @@ TESTS (`nuauto test` runs every tests/test_*.py, 4 at a time: offline, no sheet,
 use headless Firefox on local pages or demo mode. Run it before pushing; CI runs it on Ubuntu and macOS.)
   test_sync      sync.CODE is complete (a new module or prompt must be in it), absolute imports, rsync options, units
   test_sheet     sheet.py: parsing, week and total limits, max_per_week, not_on_nuworks, maybe_filled, submit safety,
-                 drop, set_outcome, mark_on_laptop, retries, the kept sheet (OPEN)
+                 drop, set_outcome (Interview too), the Status dropdown, mark_on_laptop, retries, the kept sheet (OPEN)
   test_jobs      hard rules, pool, model; sheet.add_proposed / approve_proposed; application_answer (the hiring stage);
                  list_entry, posted_view, the new / Featured bonuses
   test_apply     apply.check_popup, run_rows and its queue, BETWEEN; apply_order's named orders and steps
@@ -217,7 +217,7 @@ use headless Firefox on local pages or demo mode. Run it before pushing; CI runs
   test_web       Mark-done links (signatures; GET never changes the sheet)
   test_deploy    deploy.py on a throwaway git repo
   test_doctor_remote   doctor.check_remote_assist          test_health   health.py's checks
-  test_insights  Insights numbers          test_selftest  `nuauto selftest`          test_setup  the wizard (onboard.py)
+  test_insights  Insights numbers + interview rate         test_selftest  `nuauto selftest`          test_setup  the wizard (onboard.py)
   test_intern    internship pool, postings.py (links, parsing, close dates, the network guard, fetch tries, redate),
                  short links, Review queue
   test_assist    the agent's guard, answer bank, slots, passwords, uploads, by-hand rows
