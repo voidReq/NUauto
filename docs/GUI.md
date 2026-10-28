@@ -90,7 +90,8 @@ A question from a run (an unknown form field, an option to pick, "did it submit?
                  stays. Esc clears the search. A text search shows every match as its own card (8 at a time, "Show
                  more"; the posting cut short), each with its own Approve / Not for me buttons (y / n keys are off there;
                  a decided card turns into one line with Change). The job you were on is left undecided; clearing the
-                 search comes back to it. A kind-of-work choice alone stays one job at a time.
+                 search comes back to it. A kind-of-work choice alone stays one job at a time, and is picked from the
+                 list the page already has (2026-10-28, my request: it took ~10 s): no trip to the server, instant.
   Apply          (2026-10-16, my request: one place per sheet tab; the Sheet screen merged in) three tabs, each with its
                  count, the one you picked remembered for the session: NUworks co-ops (the sheet's NUworks tab: the weekly
                  limit), "<term> internships" ("Other jobs" when internships are off: the sheet's Other jobs tab, no
@@ -255,7 +256,11 @@ A question from a run (an unknown form field, an option to pick, "did it submit?
                  confirmed, the screen when it asked; Approve / Decline with a note), the end question (Yes / No / No: do
                  it on the laptop), a question Claude Code asks in its own terminal (answer it there; the reply box stays
                  off), Reply, End session, End: do it on the laptop. It asks again every 4 s; what you type is kept
-                 (docs/REMOTE.md, AN ASSISTANT'S SCREEN)
+                 (docs/REMOTE.md, AN ASSISTANT'S SCREEN). The screen keeps the session it opened on (its key,
+                 review.key): a session that ended, a slot nobody runs in, or the next session started in that slot
+                 goes back to Apply's Assistants tab with a toast (2026-10-28, my request: it showed "No session there",
+                 or switched to the new session as if it were the same). Its taps carry the key; the server refuses one
+                 for a session no longer in that slot (gui.assistant_post).
 
 SETUP WIZARD (onboard.py + gui_static/setup.js; each step checks itself; a step opens when you click it, the first one
 not done is open at the start; "You're set up" + Go to Today at the end; Settings reuses some steps' bodies)
@@ -298,6 +303,9 @@ SPEED (2026-10-22, my request: "the apply page takes quite a while to load")
   gui.other_rows); opening the screen (recheck=1) reads both again in the background, and a change reloads the lists.
 - Review: the list (pool, taste model, order) is kept until data/, your settings or the sheet's rows change
   (gui.review_lists, keyed by every data/ file's size and time: a few ms); searches and filters only narrow it. The
+  page sends no kind of work: it picks that from the list itself; and it never waits for decisions still being sent (the
+  server keeps every list's jobs decidable, APP.queue; the page leaves out what it decided, app.js pick), so a decision
+  that writes the sheet (an Approve: 3-4 Google calls) never holds up the next list. The
   taste model trains again only when your ratings or a job's text change (jobs.taste_for). The lists are made ahead at
   start and a few seconds after your last decision (warm_review). (2026-10-22, my request: Review still took 0.5-3 s)
   Review asks with quick=1: the list made last comes at once (about 10 ms), never waiting on Google or a rebuild; when

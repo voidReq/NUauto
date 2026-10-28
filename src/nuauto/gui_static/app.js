@@ -699,6 +699,7 @@ screens.review = async (view) => {
   const interns = (S.state && S.state.internships) || { on: false };
   let source = interns.on && sessionStorage.getItem("reviewSource") === "intern" ? "intern" : "nuworks";
   let jobs = [], i = 0, card = null, history = {}, shown = 0, total = 0, resumeId = null, listed = 0, loadSeq = 0;
+  let all = [];  // the list the server sent (every kind of work); jobs: the part of it the kind-of-work menu picks
   let moved = false;  // you went to another job (or decided one) since the list came: a newer list keeps your place
   let q = sessionStorage.getItem("reviewQ") || "", category = sessionStorage.getItem("reviewCat") || "";
   const cards = new Map();  // job id -> promise of its card (the next ones are fetched ahead)
@@ -737,10 +738,22 @@ screens.review = async (view) => {
   function setFilter(newQ, newCat) {
     if (newQ === q && newCat === category) return;
     if (!q && newQ && jobs[i]) resumeId = jobs[i].id;  // the job you were on stays undecided; clearing the search comes back to it
+    const same = newQ === q;
     q = newQ; category = newCat;
     sessionStorage.setItem("reviewQ", q);
     sessionStorage.setItem("reviewCat", category);
-    load();
+    if (!same) return load();
+    // only the kind of work changed: picked from the list already here, with no trip to the server
+    shown++; relist(); moved = false; show();
+  }
+
+  // Decided on this screen in a way that takes the job out of this list (as the server does: gui.review's gone):
+  // in Rate only, any rating; in Approve, a decision made in Approve. A decision still being sent counts already.
+  const decidedHere = (j) => { const h = history[j.id]; return !!h && !h.failed && (mode === "rate" || h.mode === "approve"); };
+  const pick = () => all.filter((j) => (!category || j.category === category) && !decidedHere(j));
+  function relist() {
+    jobs = pick(); i = 0; listed = 0;
+    if (!q && resumeId) { i = Math.max(0, jobs.findIndex((x) => x.id === resumeId)); resumeId = null; }
   }
 
   function drawCategories(list) {
@@ -772,15 +785,16 @@ screens.review = async (view) => {
     const mine = ++loadSeq;  // only the newest load may show its list (an older, slower answer is dropped)
     jobs = []; i = 0; card = null; shown++;  // while it loads, no key decides on the old list (and no card of it comes back)
     const slow = setTimeout(() => { if (mine === loadSeq && body.isConnected) fill(body, el("p", { class: "empty", text: "Loading the review list…" })); }, 150);
-    await queue;  // decisions still being written go first: the server decides on its last list, which this one replaces
-    const params = new URLSearchParams({ mode, q, category, source });
+    // (no waiting for decisions still being sent: the server keeps every list's jobs decidable, and the ones decided
+    // here are left out by pick; the kind of work is picked here too, so the server sends every kind)
+    const params = new URLSearchParams({ mode, q, source });
     let r;
     try { r = await api.get(`/api/review?${params}&quick=1`); }
     catch (e) { clearTimeout(slow); if (mine === loadSeq && body.isConnected) fill(body, el("div", { class: "note fail", text: e.message })); return; }
     clearTimeout(slow);
     if (mine !== loadSeq || !body.isConnected) return;
-    jobs = r.jobs; total = r.total; i = 0; listed = 0; cards.clear(); drawCategories(r.categories);
-    if (!q && resumeId) { i = Math.max(0, jobs.findIndex((x) => x.id === resumeId)); resumeId = null; }
+    all = r.jobs; total = r.total; cards.clear(); drawCategories(r.categories);
+    relist();
     moved = i > 0;
     show();
     if (r.stale) refresh(mine, params);
@@ -791,14 +805,16 @@ screens.review = async (view) => {
   // Not moved yet: the new list from its first job (the quick list's first may no longer come first).
   async function refresh(mine, params) {
     let r;
-    try { await queue; r = await api.get(`/api/review?${params}`); } catch (e) { return; }
+    try { r = await api.get(`/api/review?${params}`); } catch (e) { return; }
     if (mine !== loadSeq || !body.isConnected) return;
     const old = jobs, was = new Map(old.map((j) => [j.id, JSON.stringify({ ...j, rating: null })]));
     const changed = (j) => was.get(j.id) !== JSON.stringify({ ...j, rating: null });  // (a rating made here is not a change)
     total = r.total; drawCategories(r.categories);
-    if (r.jobs.length === old.length && r.jobs.every((j, k) => j.id === old[k].id && !changed(j))) return position();
-    r.jobs.forEach((j) => { if (changed(j)) cards.delete(j.id); });  // (its card may say something new too)
-    jobs = r.jobs;
+    all = r.jobs;
+    const fresh = pick();
+    if (fresh.length === old.length && fresh.every((j, k) => j.id === old[k].id && !changed(j))) return position();
+    fresh.forEach((j) => { if (changed(j)) cards.delete(j.id); });  // (its card may say something new too)
+    jobs = fresh;
     if (listMode()) { const had = listed, y = window.scrollY; showList(true, had); window.scrollTo(0, y); return; }
     const at = new Map(jobs.map((j, k) => [j.id, k]));
     const next = moved ? old.slice(i).find((j) => at.has(j.id)) : jobs[0];
@@ -923,7 +939,7 @@ screens.review = async (view) => {
   function submit(j, decision, onfail) {
     const before = history[j.id], oldRating = j.rating;
     if (before && before.decision === "approve" && decision === "approve") return false;  // already in the sheet
-    const entry = { decision, row: null, tab: null, previous: before ? before.previous : null };
+    const entry = { decision, mode, row: null, tab: null, previous: before ? before.previous : null };
     history[j.id] = entry;
     j.rating = decision === "no" ? 0 : 1;
     let undone = false;
@@ -2019,6 +2035,7 @@ screens.assistant = async (view) => {
   const there = String(S.param || "").startsWith("h"), slot = String(S.param || "").replace(/^h/, "");
   const api_ = there ? "/api/homelab/assistant" : "/api/assistant";
   let d = null, version = null, timer = null, first = true;
+  let who = null;  // the session this screen opened on (its key): the slot is reused by the next one once it ends
   const note = el("input", { type: "text", placeholder: "A note for the agent (when you decline)", "aria-label": "Note", testid: "as-note" });
   const reply = el("textarea", { rows: "4", maxlength: "4000", "aria-label": "Reply", testid: "as-reply" });
   const term = el("pre", { class: "log term", testid: "as-terminal", tabindex: "0", "aria-label": "Its terminal" });
@@ -2030,7 +2047,7 @@ screens.assistant = async (view) => {
   async function send(body, busy) {
     if (busy) { busy.disabled = true; busy.textContent = busy.dataset.busy || "Working…"; }
     try {
-      const r = await api.post(api_, { slot: Number(slot), ...body });
+      const r = await api.post(api_, { slot: Number(slot), key: who, ...body });
       toast(r.message);
       if (body.do === "reply") reply.value = "";
       if (r.closing) { sessionStorage.setItem("applyTab", "assistants"); location.hash = "#/apply"; return; }
@@ -2106,18 +2123,27 @@ screens.assistant = async (view) => {
     }
   }
 
+  // it ended (or never ran in that slot): back to Apply's Assistants tab, where the others are (2026-10-28, my request;
+  // it showed "No session there", or the next session started in the slot, as if it were this one)
+  function ended() {
+    toast(d ? `${d.company || "That assistant"}: the session has ended.` : `No assistant is running in slot ${slot}.`);
+    sessionStorage.setItem("applyTab", "assistants");
+    location.replace("#/apply");
+  }
+
   async function load() {
     clearTimeout(timer);
+    let now;
     try {
-      d = await api.get(`${api_}/${encodeURIComponent(slot)}`);
+      now = await api.get(`${api_}/${encodeURIComponent(slot)}`);
     } catch (e) {
       if (!view.isConnected || S.gone) return;
       if (S.offline) { timer = setTimeout(load, 4000); return; }  // the homelab can't be reached a moment: ask again
-      fill(view, el("div", { class: "card", testid: "as-gone" }, el("h2", { text: "No session there" }),
-        el("p", { class: "muted", text: "It has ended (or it never ran in that slot)." }), el("a", { class: "btn", href: "#/apply", text: "Apply", onclick: () => sessionStorage.setItem("applyTab", "assistants") })));
-      return;
+      return ended();
     }
     if (!view.isConnected) return;
+    if (who && now.key !== who) return ended();
+    d = now; who = d.key;
     if (d.version !== version) { version = d.version; draw(); } else { term.textContent = d.terminal || "(not readable)"; }
     if (d.browser && ["working", "approve", "waiting"].includes(d.status)) live.src = `${api_}/${slot}/shot.png?live=${Date.now()}`;
     timer = setTimeout(load, 4000);

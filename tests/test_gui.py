@@ -194,7 +194,9 @@ try:
     irate = get("/api/review?mode=rate&source=intern")
     assert irate["source"] == "intern" and irate["jobs"] and "Robotics Software Intern" not in [j["title"] for j in irate["jobs"]], irate
     assert get("/api/review?mode=approve")["source"] == "nuworks"  # no source = the co-ops (their list is the server's again)
-    post("/api/decide", {"id": irev["jobs"][0]["id"], "decision": "approve", "mode": "approve"}, expect=409)  # not in this list
+    # a job no review list offered is refused (one from an earlier list stays decidable: a decision sent behind the
+    # screen may arrive after the page asked for another list)
+    post("/api/decide", {"id": "s0notalisting", "decision": "approve", "mode": "approve"}, expect=409)
 
     bank = get("/api/answers")
     entries = bank["entries"]
@@ -1235,8 +1237,11 @@ fetch("{target}", {{method: "POST", credentials: "include", body: {json.dumps(bo
         assert not any(r["url"] == HARBOR and r["row"] != harbor_row for r in get("/api/other")["ready"])
 
         # the one whose posting could not be read: no match to show, no margin math, nothing about it throws; it is last
+        asked = []  # a kind of work is picked from the list the page has: no trip to the server (2026-10-28)
+        page.on("request", lambda r: "/api/review?" in r.url and asked.append(r.url))
         page.select_option("[data-testid=review-category]", "uncategorized")
         page.wait_for_function("() => document.querySelector('[data-testid=job-title]')?.innerText === 'Robotics Software Intern'")
+        assert not asked, asked
         facts = page.inner_text("[data-testid=job-card] .facts")
         assert "not scored (the posting could not be read)" in facts and "Score" not in facts and "needs" not in facts, facts
         assert "Could not read it:" in page.inner_text("[data-testid=job-card] .why") and no_junk(page.inner_text("[data-testid=job-card]"))

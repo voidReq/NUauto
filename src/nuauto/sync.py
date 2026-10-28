@@ -44,7 +44,8 @@ def watch_unit(unit="nuauto-daily.service"):
 PACKAGE = ["__init__.py", "__main__.py", "cli.py", "config.py", "sheet.py", "jobs.py", "fields.py", "daily.py", "browser.py",
            "apply.py", "answers.py", "inspect_form.py", "setup_sheet.py", "sync.py", "web.py", "doctor.py", "assist.py",
            "health.py", "demo.py", "gui.py", "onboard.py", "window.py", "window_gtk.py", "selftest.py", "deploy.py", "insights.py",
-           "manage.py", "intern.py", "postings.py", "accounts.py", "mail.py", "screen.py", "review.py", "remote.py", "link.py", "letter.py"]
+           "manage.py", "intern.py", "postings.py", "accounts.py", "mail.py", "screen.py", "review.py", "remote.py", "link.py", "letter.py",
+           "workday.py"]
 CODE = (["pyproject.toml", "README.md", "local_config.example.json", "CLAUDE.md", "CONTRIBUTING.md",
          "docs/DEPLOY.md", "docs/PIPELINE.md", "docs/ARCHITECTURE.md", "docs/SAFETY.md", "docs/GUI.md",
          "docs/REMOTE.md", "docs/ASSIST.md"]
