@@ -5,7 +5,7 @@
   --accent: #3355d1; --accent-hover: #2846b8; --accent-ink: #ffffff; --accent-soft: #e9edfc;
   --ok: #13703c; --ok-soft: #e2f3e9; --warn: #8a5000; --warn-soft: #fcf0d9; --fail: #c4352b; --fail-soft: #fbe6e3;
   --yellow: #6b5d00; --yellow-soft: #faf4c0;
-  --off: #a5a5ab; --win: #0b7a75; --reject: #8a47b8; --shadow: 0 1px 2px rgba(20, 20, 30, .05), 0 4px 16px rgba(20, 20, 30, .05);
+  --off: #a5a5ab; --win: #0b7a75; --reject: #8a47b8; --interview: #b3217a; --interview-soft: #fbe4f1; --shadow: 0 1px 2px rgba(20, 20, 30, .05), 0 4px 16px rgba(20, 20, 30, .05);
   --radius: 12px; --radius-sm: 8px;
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Cantarell, Ubuntu, "Noto Sans", Roboto, sans-serif;
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", "DejaVu Sans Mono", Menlo, monospace;
@@ -17,7 +17,7 @@
     --accent: #7f9cff; --accent-hover: #9bb2ff; --accent-ink: #0c1024; --accent-soft: #1e2546;
     --ok: #4cc38a; --ok-soft: #15291f; --warn: #f0b354; --warn-soft: #2e2413; --fail: #ff7d70; --fail-soft: #331a18;
     --yellow: #e6d35c; --yellow-soft: #2a2812;
-    --off: #6b6b72; --win: #3cc9bf; --reject: #c79bf2; --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 6px 20px rgba(0, 0, 0, .25);
+    --off: #6b6b72; --win: #3cc9bf; --reject: #c79bf2; --interview: #f08fc8; --interview-soft: #36182a; --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 6px 20px rgba(0, 0, 0, .25);
   }
 }
 
@@ -114,6 +114,7 @@ code, .mono { font-family: var(--mono); font-size: 12.5px; }
 .chip.ok { background: var(--ok-soft); color: var(--ok); }
 .chip.warn { background: var(--warn-soft); color: var(--warn); }
 .chip.fail { background: var(--fail-soft); color: var(--fail); }
+.chip.interview { background: var(--interview-soft); color: var(--interview); }
 .chip.yellow { background: var(--yellow-soft); color: var(--yellow); }  /* a posting 1-2 weeks old (postedChip) */
 
 .note { border-radius: var(--radius-sm); padding: 10px 14px; background: var(--surface-2); color: var(--text); margin: 10px 0; }

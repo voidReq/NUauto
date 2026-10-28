@@ -90,7 +90,8 @@ A question from a run (an unknown form field, an option to pick, "did it submit?
                  stays. Esc clears the search. A text search shows every match as its own card (8 at a time, "Show
                  more"; the posting cut short), each with its own Approve / Not for me buttons (y / n keys are off there;
                  a decided card turns into one line with Change). The job you were on is left undecided; clearing the
-                 search comes back to it. A kind-of-work choice alone stays one job at a time.
+                 search comes back to it. A kind-of-work choice alone stays one job at a time, and is picked from the
+                 list the page already has (2026-10-28, my request: it took ~10 s): no trip to the server, instant.
   Apply          (2026-10-16, my request: one place per sheet tab; the Sheet screen merged in) three tabs, each with its
                  count, the one you picked remembered for the session: NUworks co-ops (the sheet's NUworks tab: the weekly
                  limit), "<term> internships" ("Other jobs" when internships are off: the sheet's Other jobs tab, no
@@ -123,11 +124,11 @@ A question from a run (an unknown form field, an option to pick, "did it submit?
                  interviewing" or "job filled" (sheet.maybe_filled: it may be filled; withdrawing on NUworks frees its
                  place in the total). Until 2026-10-26 an "interviewing (NUworks)" chip showed the job's is_interviewing
                  flag as if it were yours: it is about the job, set also on jobs you never applied to, and NUworks never
-                 shows a student whom an employer picked), Accepted, Rejected, Proposed, Dropped or failed, Other rows;
+                 shows a student whom an employer picked), Interview, Accepted, Rejected, Proposed, Dropped or failed, Other rows;
                  Recent runs here at the end. The
                  other tab: Ready to apply (Approved: the assistant; an internship whose posting has closed leaves it for
                  Closed postings, folded: sections.expired, not changed in the sheet, Drop clears it; the homelab's queue
-                 skips them too, intern.closes_func), Applied, Accepted, Rejected, Proposed, Dropped or
+                 skips them too, intern.closes_func), Applied, Interview, Accepted, Rejected, Proposed, Dropped or
                  failed, Other rows (Sort: score, match %, pay, sheet order, and on the homelab's page the queue's order
                  first; it changes the view only).
                  Every row looks alike: its company (click it: a dropdown, 2026-10-27) with the role under it, score / match % and pay ("score 105 = 75% match + 10 Boston + 20
@@ -154,7 +155,8 @@ A question from a run (an unknown form field, an option to pick, "did it submit?
                  sessions attention; a desktop notification says so too); every slot in use greys it out; one the homelab
                  runs (remote_assist) shows "assistant running on the homelab: open" / "...: waiting for you: open", its
                  screen in the app when linked, else in the browser). Mark the company site done; Submit on NUworks too.
-                 More: on a sent row Mark accepted / Mark rejected (or Back to Applied: sheet.set_outcome); on the NUworks
+                 More: on a sent row Mark interview / Mark accepted / Mark rejected (the one it is now: Back to Applied; sheet.set_outcome;
+                 Interview, 2026-10-28: its own section and a pink "interview" chip); on the NUworks
                  tab Re-apply with the new resume (an Applied row: sheet.mark_reapply; Apply withdraws it on NUworks, then
                  sends it again, first date kept, never counted twice, even past the limit; "re-apply" chip; Undo re-apply
                  while still Approved: sheet.undo_reapply; 2026-10-28), I applied
@@ -186,7 +188,8 @@ A question from a run (an unknown form field, an option to pick, "did it submit?
   Insights       NUworks co-ops / "<term> internships" switch when internships are on (2026-10-16; remembered for the
                  session): each its own pool, applications and sheet tab (insights.collect / collect_intern). Where that
                  sheet tab stands (a status ring: arcs in an order checked for color-blind separation, with a labeled
-                 legend), then for Your pool / Applied: median and usual pay, share in Massachusetts, closing this week
+                 legend; under it "Interviews: N of M sent (P%)": Interview + Accepted rows over every sent row, 2026-10-28,
+                 insights.interview_rate), then for Your pool / Applied: median and usual pay, share in Massachusetts, closing this week
                  (pool) or pay listed (applied); an hourly-pay histogram; by state (top 5 + Other, top cities); kind of
                  work; skills and tags (NUworks' skill labels, top 20; your own tags from the preferences found in the text; an
                  internship list gives no skills), job function, class year asked (jobs.year_asked).
@@ -255,7 +258,11 @@ A question from a run (an unknown form field, an option to pick, "did it submit?
                  confirmed, the screen when it asked; Approve / Decline with a note), the end question (Yes / No / No: do
                  it on the laptop), a question Claude Code asks in its own terminal (answer it there; the reply box stays
                  off), Reply, End session, End: do it on the laptop. It asks again every 4 s; what you type is kept
-                 (docs/REMOTE.md, AN ASSISTANT'S SCREEN)
+                 (docs/REMOTE.md, AN ASSISTANT'S SCREEN). The screen keeps the session it opened on (its key,
+                 review.key): a session that ended, a slot nobody runs in, or the next session started in that slot
+                 goes back to Apply's Assistants tab with a toast (2026-10-28, my request: it showed "No session there",
+                 or switched to the new session as if it were the same). Its taps carry the key; the server refuses one
+                 for a session no longer in that slot (gui.assistant_post).
 
 SETUP WIZARD (onboard.py + gui_static/setup.js; each step checks itself; a step opens when you click it, the first one
 not done is open at the start; "You're set up" + Go to Today at the end; Settings reuses some steps' bodies)
@@ -298,6 +305,9 @@ SPEED (2026-10-22, my request: "the apply page takes quite a while to load")
   gui.other_rows); opening the screen (recheck=1) reads both again in the background, and a change reloads the lists.
 - Review: the list (pool, taste model, order) is kept until data/, your settings or the sheet's rows change
   (gui.review_lists, keyed by every data/ file's size and time: a few ms); searches and filters only narrow it. The
+  page sends no kind of work: it picks that from the list itself; and it never waits for decisions still being sent (the
+  server keeps every list's jobs decidable, APP.queue; the page leaves out what it decided, app.js pick), so a decision
+  that writes the sheet (an Approve: 3-4 Google calls) never holds up the next list. The
   taste model trains again only when your ratings or a job's text change (jobs.taste_for). The lists are made ahead at
   start and a few seconds after your last decision (warm_review). (2026-10-22, my request: Review still took 0.5-3 s)
   Review asks with quick=1: the list made last comes at once (about 10 ms), never waiting on Google or a rebuild; when
@@ -484,7 +494,7 @@ API (JSON; all need the cookie; POSTs need X-NUauto: 1)
                              company, host, since, attention: {kind waiting|approve, since, said} while it waits for you)
                              and slots (how many may); queue (the homelab: review.queue_view, or {"error"}); the laptop's link
                              reads the homelab's. POST /api/mark {"action": applied|site|drop|outcome|reapply|unreapply, "row", "url", "why"
-                             (drop: closed|duplicate|location|other), "outcome" (Applied|Accepted|Rejected), "tab": "other"
+                             (drop: closed|duplicate|location|other), "outcome" (Applied|Interview|Accepted|Rejected), "tab": "other"
                              (Other jobs tab: applied, drop, outcome)}
   GET  /api/other            the Other jobs tab: exists, ready, applied, rest, sessions, slots (/api/jobs has them too)
   POST /api/other/add        {"url", "company", "title"} -> {"row"}: an Approved row there (the tab made if missing)

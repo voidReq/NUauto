@@ -754,7 +754,7 @@ try:
             page.goto(f"{ORIGIN}/#/assistant/1")                   # opened fresh: the same
             page.wait_for_selector("[data-testid=gone]")
             page.wait_for_timeout(1000)
-            assert "not paired" in page.inner_text("#view") and page.locator("[data-testid=as-gone]").count() == 0
+            assert "not paired" in page.inner_text("#view") and page.url.endswith("/#/assistant/1")  # (not sent on to Apply)
             # pairing through the form: GET shows it, the button pairs this browser
             before = device_count()
             page.goto(review.make_pairing("tablet"))
@@ -816,13 +816,29 @@ try:
             page.reload()
             page.wait_for_selector("[data-testid=as-exit]")
             assert page.locator("[data-testid=as-laptop]").count() == 1 and page.locator("[data-testid=as-interrupt]").count() == 1
-            # a slot nobody runs in
+            # a slot nobody runs in (or a session that just ended): back to Apply's Assistants tab, with a toast
             page.goto(f"{ORIGIN}/#/assistant/3")
-            page.wait_for_selector("[data-testid=as-gone]")
+            page.wait_for_selector("[data-testid=tab-assistants][aria-selected=true]")
+            assert page.url.endswith("/#/apply") and "No assistant is running in slot 3" in page.inner_text("[data-testid=toasts]")
             # an old Discord link lands on the screen
             page.goto(f"{ORIGIN}/s/1")
             page.wait_for_selector("[data-testid=as-status]")
             assert page.url.endswith("/#/assistant/1")
+            # the session ends and the next one starts in its slot: the screen does not follow it, it goes back to
+            # Assistants (it had switched to the new one, as if it were the same; 2026-10-28)
+            run2 = os.path.join(config.LOGS_DIR, "20261011-130000_assist_row9")
+            os.makedirs(run2)
+            assist.write_private(os.path.join(run2, "state.json"), {**state, "company": "Next Co"})
+            held1 = holders.pop(0)
+            held1.kill(); held1.wait()
+            hold_slot(1, run2)
+            page.wait_for_selector("[data-testid=tab-assistants][aria-selected=true]", timeout=15000)
+            assert "the session has ended" in page.inner_text("[data-testid=toasts]") and "Next Co" not in page.inner_text("body")
+            held2 = holders.pop()
+            held2.kill(); held2.wait()
+            hold_slot(1, run)
+            page.goto(f"{ORIGIN}/s/1")
+            page.wait_for_selector("[data-testid=as-status]")
             # a page on another origin cannot press the buttons, even with this browser's cookie (the same site to SameSite):
             # a form can't send JSON, and a fetch with the page's headers is stopped by the browser (no CORS answer)
             assist.write_private(os.path.join(run, assist.APPROVAL), approval)

@@ -173,6 +173,10 @@ AN ASSISTANT'S SCREEN (#/assistant/<slot> in the homelab's app; review.view / ac
                     back to Apply > Assistants, and the screen says your answer until the run closes. A session you
                     answered is no longer listed or counted there (gui.assistants), though it holds its slot a few
                     seconds more while it writes the sheet and cleans up (2026-10-23, my request).
+- The screen is for the session it opened on, not the slot (2026-10-28, my request: once one ended, the next session
+  started in its slot showed there as if it were the same one): review.key (its run folder, hashed) comes with the view
+  and goes with every tap; a different key, or none in the slot, sends the screen back to Apply > Assistants with a
+  toast, and gui.assistant_post refuses a tap whose key is not the slot's session now ("That session has ended").
 - Each answer goes in the run's actions.log with the paired device's name.
 - The agent on the homelab never opens your own network: localhost, the LAN, Tailscale addresses (so not this page,
   not the browser view) are refused in its browser and WebFetch (assist.own_network).

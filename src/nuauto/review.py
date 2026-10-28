@@ -392,11 +392,17 @@ def read_answer(s):
     return assist.read_json(os.path.join(s["run"], assist.DECISION))
 
 
+def key(s):
+    """Which session this is (its run folder's, hashed): a slot is reused by the next session once one ends, so the
+    screen keeps this and a tap carrying another one is refused (assistant_post)."""
+    return hashlib.sha256(s["run"].encode()).hexdigest()[:16]
+
+
 def summary(s):
     """One running session, for the lists (Company sites, Today)."""
     word, text = status(s)
     st, info = s["state"], s["info"]
-    return {"slot": s["slot"], "tab": info.get("tab"), "row": info.get("row"),
+    return {"slot": s["slot"], "key": key(s), "tab": info.get("tab"), "row": info.get("row"),
             "company": st.get("company") or info.get("company") or "", "title": st.get("job_title") or "",
             "where": st.get("where") or "", "host": info.get("host") or "", "since": info.get("since"),
             "status": word, "text": text}

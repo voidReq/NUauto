@@ -223,7 +223,7 @@ class App:
         self.first_round_done = False
         self.rows, self.rows_at, self.rows_error, self.rows_try_at = None, 0, None, 0
         self.rows_version = 0      # sheet_version when these rows were read (the Apply screen's answer says it)
-        self.queue = {}            # job id -> pool entry, from the last review queue
+        self.queue = {}            # job id -> pool entry, from every review queue made this session
         self.other_urls = None     # the Other jobs tab's links (not Proposed), as last read: the internship count
         self.other_cache = None    # (when, rows, sheet_version then) of the Other jobs tab (gui.other_rows)
         self.other_last, self.other_exists = None, None  # the tab's rows as last read (kept by other_changed), is there one
@@ -933,7 +933,8 @@ def review(mode, q="", category="", source="nuworks", quick=False):
     todo = [r for r in todo if not gone(r["id"])]
     urgent = [r for r in urgent if not gone(r["id"])]
     ratings = jobs.load("ratings.json", {})
-    APP.queue = {r["id"]: r for r in todo}
+    APP.queue.update((r["id"], r) for r in todo)  # (kept from earlier lists too: a decision sent behind the screen
+    # may arrive after the page asked for a newer list without that job)
     counts = {}
     for r in todo:
         counts[r["category"]] = counts.get(r["category"], 0) + 1
@@ -1495,7 +1496,7 @@ def mark(body):
     try:
         if action == "site":
             sheet.mark_site_done(ws, int(row), url)
-        elif action == "outcome":  # what you heard back: Accepted / Rejected (or back to Applied)
+        elif action == "outcome":  # what happened: Interview / Accepted / Rejected (or back to Applied)
             from nuauto import setup_sheet
             if (config.SHEET_ID, other) not in _dropdown_set:  # (a sheet made before these statuses: its dropdown allows them
                 setup_sheet.ensure_dropdown(ws)                 # now; once per start is enough)
@@ -1753,12 +1754,12 @@ def jobs_tab(tab="nuworks", order="default", recheck=False):
     def view(r, **extra):
         more = facts.get(intern.real_url(r.url), {}) if other else {**closing(r), **job_facts(r, data), **on_nuworks(r)}
         return locks(row_view(r, **more, **extra))
-    s = {k: [] for k in ("approved", "agent", "manual", "owed", "ready", "expired", "applied", "accepted", "rejected", "proposed",
+    s = {k: [] for k in ("approved", "agent", "manual", "owed", "ready", "expired", "applied", "interview", "accepted", "rejected", "proposed",
                          "closed", "rest")}
     a = assistants()
     out = {"tab": tab, "name": manage.TABS[tab], "busy": running("apply", "nuworks_side"), **a, "sheet_version": version,
            "queue": queue_info() if REMOTE else _homelab.get("queue") if a["linked"] and config.REMOTE_ASSIST else None}
-    later = {"Applied": "applied", "Accepted": "accepted", "Rejected": "rejected", "Proposed": "proposed", "Failed": "closed"}
+    later = {"Applied": "applied", "Interview": "interview", "Accepted": "accepted", "Rejected": "rejected", "Proposed": "proposed", "Failed": "closed"}
     if other:
         for r in rows:
             if r.status == "Approved":
@@ -1781,7 +1782,7 @@ def jobs_tab(tab="nuworks", order="default", recheck=False):
                 s[later.get(r.status, "rest")].append(view(r))
         out.update(week=run["week"], why_not=run["why_not"], limited=run["limited"], history=run["history"],
                    order=order if known_order(order) else "default", sort=sort_menu())
-    for k in ("applied", "accepted", "rejected", "closed"):
+    for k in ("applied", "interview", "accepted", "rejected", "closed"):
         s[k].sort(key=lambda x: x["date"] or "", reverse=True)  # newest first
     out["sections"] = s
     return out
@@ -2474,7 +2475,7 @@ def assistant_post(body):
         raise Refused("An assistant on this computer runs in its own terminal window: answer it there.")
     slot = body.get("slot")
     s = review.session(int(slot)) if str(slot).isdigit() else None
-    if not s:
+    if not s or ("key" in body and body["key"] != review.key(s)):  # (key: the page's session; its slot may hold the next)
         raise Refused("That session has ended.")
     return review.act(s, body, device_name())
 

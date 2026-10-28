@@ -652,9 +652,9 @@ function markRow(kind, t, tab) {  // tab "other": a row of the sheet's Other job
   });
 }
 
-// What you heard back on a sent application: Accepted or Rejected (or back to Applied). It still counts toward your
+// What happened to a sent application: an Interview, Accepted or Rejected (or back to Applied). It still counts toward your
 // limits (it went out); the sheet's row says when you marked it.
-const SENT = ["Applied", "Accepted", "Rejected"];
+const SENT = ["Applied", "Interview", "Accepted", "Rejected"];
 async function outcomeRow(t, outcome, tab) {
   try {
     await working("Updating the sheet…", api.post("/api/mark", { action: "outcome", outcome, row: t.row, url: t.url, tab }));
@@ -699,6 +699,7 @@ screens.review = async (view) => {
   const interns = (S.state && S.state.internships) || { on: false };
   let source = interns.on && sessionStorage.getItem("reviewSource") === "intern" ? "intern" : "nuworks";
   let jobs = [], i = 0, card = null, history = {}, shown = 0, total = 0, resumeId = null, listed = 0, loadSeq = 0;
+  let all = [];  // the list the server sent (every kind of work); jobs: the part of it the kind-of-work menu picks
   let moved = false;  // you went to another job (or decided one) since the list came: a newer list keeps your place
   let q = sessionStorage.getItem("reviewQ") || "", category = sessionStorage.getItem("reviewCat") || "";
   const cards = new Map();  // job id -> promise of its card (the next ones are fetched ahead)
@@ -737,10 +738,22 @@ screens.review = async (view) => {
   function setFilter(newQ, newCat) {
     if (newQ === q && newCat === category) return;
     if (!q && newQ && jobs[i]) resumeId = jobs[i].id;  // the job you were on stays undecided; clearing the search comes back to it
+    const same = newQ === q;
     q = newQ; category = newCat;
     sessionStorage.setItem("reviewQ", q);
     sessionStorage.setItem("reviewCat", category);
-    load();
+    if (!same) return load();
+    // only the kind of work changed: picked from the list already here, with no trip to the server
+    shown++; relist(); moved = false; show();
+  }
+
+  // Decided on this screen in a way that takes the job out of this list (as the server does: gui.review's gone):
+  // in Rate only, any rating; in Approve, a decision made in Approve. A decision still being sent counts already.
+  const decidedHere = (j) => { const h = history[j.id]; return !!h && !h.failed && (mode === "rate" || h.mode === "approve"); };
+  const pick = () => all.filter((j) => (!category || j.category === category) && !decidedHere(j));
+  function relist() {
+    jobs = pick(); i = 0; listed = 0;
+    if (!q && resumeId) { i = Math.max(0, jobs.findIndex((x) => x.id === resumeId)); resumeId = null; }
   }
 
   function drawCategories(list) {
@@ -772,15 +785,16 @@ screens.review = async (view) => {
     const mine = ++loadSeq;  // only the newest load may show its list (an older, slower answer is dropped)
     jobs = []; i = 0; card = null; shown++;  // while it loads, no key decides on the old list (and no card of it comes back)
     const slow = setTimeout(() => { if (mine === loadSeq && body.isConnected) fill(body, el("p", { class: "empty", text: "Loading the review list…" })); }, 150);
-    await queue;  // decisions still being written go first: the server decides on its last list, which this one replaces
-    const params = new URLSearchParams({ mode, q, category, source });
+    // (no waiting for decisions still being sent: the server keeps every list's jobs decidable, and the ones decided
+    // here are left out by pick; the kind of work is picked here too, so the server sends every kind)
+    const params = new URLSearchParams({ mode, q, source });
     let r;
     try { r = await api.get(`/api/review?${params}&quick=1`); }
     catch (e) { clearTimeout(slow); if (mine === loadSeq && body.isConnected) fill(body, el("div", { class: "note fail", text: e.message })); return; }
     clearTimeout(slow);
     if (mine !== loadSeq || !body.isConnected) return;
-    jobs = r.jobs; total = r.total; i = 0; listed = 0; cards.clear(); drawCategories(r.categories);
-    if (!q && resumeId) { i = Math.max(0, jobs.findIndex((x) => x.id === resumeId)); resumeId = null; }
+    all = r.jobs; total = r.total; cards.clear(); drawCategories(r.categories);
+    relist();
     moved = i > 0;
     show();
     if (r.stale) refresh(mine, params);
@@ -791,14 +805,16 @@ screens.review = async (view) => {
   // Not moved yet: the new list from its first job (the quick list's first may no longer come first).
   async function refresh(mine, params) {
     let r;
-    try { await queue; r = await api.get(`/api/review?${params}`); } catch (e) { return; }
+    try { r = await api.get(`/api/review?${params}`); } catch (e) { return; }
     if (mine !== loadSeq || !body.isConnected) return;
     const old = jobs, was = new Map(old.map((j) => [j.id, JSON.stringify({ ...j, rating: null })]));
     const changed = (j) => was.get(j.id) !== JSON.stringify({ ...j, rating: null });  // (a rating made here is not a change)
     total = r.total; drawCategories(r.categories);
-    if (r.jobs.length === old.length && r.jobs.every((j, k) => j.id === old[k].id && !changed(j))) return position();
-    r.jobs.forEach((j) => { if (changed(j)) cards.delete(j.id); });  // (its card may say something new too)
-    jobs = r.jobs;
+    all = r.jobs;
+    const fresh = pick();
+    if (fresh.length === old.length && fresh.every((j, k) => j.id === old[k].id && !changed(j))) return position();
+    fresh.forEach((j) => { if (changed(j)) cards.delete(j.id); });  // (its card may say something new too)
+    jobs = fresh;
     if (listMode()) { const had = listed, y = window.scrollY; showList(true, had); window.scrollTo(0, y); return; }
     const at = new Map(jobs.map((j, k) => [j.id, k]));
     const next = moved ? old.slice(i).find((j) => at.has(j.id)) : jobs[0];
@@ -923,7 +939,7 @@ screens.review = async (view) => {
   function submit(j, decision, onfail) {
     const before = history[j.id], oldRating = j.rating;
     if (before && before.decision === "approve" && decision === "approve") return false;  // already in the sheet
-    const entry = { decision, row: null, tab: null, previous: before ? before.previous : null };
+    const entry = { decision, mode, row: null, tab: null, previous: before ? before.previous : null };
     history[j.id] = entry;
     j.rating = decision === "no" ? 0 : 1;
     let undone = false;
@@ -1128,6 +1144,7 @@ const NU_SECTIONS = [
   ["manual", "By hand on NUworks", "NUworks wants something only you can give (a cover letter, a transcript, an answer in your words). The assistant can do these with you on NUworks: it drafts the cover letter for you to approve, uploads it and your transcript, and asks you before it submits."],
   ["owed", "Still owed", "Submitted on one side; the other side still needs doing."],
   ["applied", "Applied", null],
+  ["interview", "Interview", null],
   ["accepted", "Accepted", null],
   ["rejected", "Rejected", null],
   ["proposed", "Proposed", "Waiting for your OK: Review shows them first."],
@@ -1138,6 +1155,7 @@ const OTHER_SECTIONS = [
   ["ready", "Ready to apply", "Apply starts the assistant (Claude) on that job's own site; nothing is submitted without your review."],
   ["expired", "Closed postings", "Approved, but the posting's closing date has passed: the assistant skips them. Drop one (More) to clear it."],
   ["applied", "Applied", null],
+  ["interview", "Interview", null],
   ["accepted", "Accepted", null],
   ["rejected", "Rejected", null],
   ["proposed", "Proposed", "Waiting for your OK: Review shows them first."],
@@ -1348,6 +1366,7 @@ screens.apply = async (view) => {
     } else {
       about = [SENT.includes(r.status) && r.date ? `applied ${r.date}` : null, r.notes ? r.notes.slice(0, 140) : null].filter(Boolean).join(" · ");
       const nu = r.nuworks;  // what NUworks said at the last check (the twice-daily update)
+      if (r.status === "Interview") chips.push(el("span", { class: "chip interview", testid: `interview-${r.row}`, text: "interview" }));
       if (nu && nu.current && nu.applied === false) chips.push(el("span", { class: "chip warn", testid: `not-on-nuworks-${r.row}`,
         text: "not on NUworks", title: `NUworks has no application for this job (checked ${nu.checked}): it doesn't count toward your total.` }));
       // the job's own hiring stage (sheet.maybe_filled, jobs.application_answer), never yours: NUworks doesn't show that
@@ -1393,8 +1412,8 @@ screens.apply = async (view) => {
   function rowMenu(d, key, r, other) {
     const t = other ? "other" : undefined, to = other ? "nuworks" : "other", busy = d.busy ? "A run is using the sheet: wait for it to end" : null;
     const live = r.status === "Approved" || r.status === "Needs Human";
-    // what you heard back, on a sent row: Accepted / Rejected (the one it is now: back to Applied)
-    const heard = !SENT.includes(r.status) ? [] : ["Accepted", "Rejected"].map((o) => r.status === o ?
+    // what happened, on a sent row: Interview / Accepted / Rejected (the one it is now: back to Applied)
+    const heard = !SENT.includes(r.status) ? [] : ["Interview", "Accepted", "Rejected"].map((o) => r.status === o ?
       ["Back to Applied", "applied", () => outcomeRow(r, "Applied", t)] :
       [`Mark ${o.toLowerCase()}`, o.toLowerCase(), () => outcomeRow(r, o, t)]);
     // re-apply (the NUworks tab): Apply withdraws it on NUworks, then sends it again with your new resume
@@ -1436,7 +1455,7 @@ screens.apply = async (view) => {
 
   // The other tab's head, laid out like the week's: no limit here, how many are ready and sent, Run on, how Apply works
   function otherCard(d) {
-    const s = d.sections, sent = s.applied.length + s.accepted.length + s.rejected.length;
+    const s = d.sections, sent = s.applied.length + s.interview.length + s.accepted.length + s.rejected.length;
     const where = onHomelab() ? "in a browser on the homelab, whose screen you watch and answer from here" :
       "in its own terminal window and browser here" + (canRunThere() ? " (Run on: the homelab: on the homelab, you answer it on its screen)" : "");
     return el("div", { class: "card", testid: "apply-other-head" },
@@ -1801,10 +1820,10 @@ function svg(tag, attrs, ...kids) {
 }
 // Status colors (state, not series): each always shown with its label and count in the legend.
 const STATUS_COLOR = { Proposed: "var(--off)", Approved: "var(--accent)", Applied: "var(--ok)", "Needs Human": "var(--warn)", Failed: "var(--fail)",
-  Accepted: "var(--win)", Rejected: "var(--reject)" };
+  Interview: "var(--interview)", Accepted: "var(--win)", Rejected: "var(--reject)" };
 // Ring (and legend) order, chosen with the dataviz palette validator so no two neighbors are the hard-to-tell pairs
 // (red/amber, green/amber next to each other); labels, counts and 2px gaps carry identity too.
-const RING = ["Applied", "Needs Human", "Accepted", "Proposed", "Failed", "Rejected", "Approved"];
+const RING = ["Applied", "Interview", "Needs Human", "Accepted", "Proposed", "Failed", "Rejected", "Approved"];
 const usd = (x) => x === null || x === undefined ? "—" : `$${x >= 100 || Number.isInteger(x) ? Math.round(x) : x.toFixed(2)}`;
 
 function donut(items, total) {
@@ -1886,7 +1905,9 @@ screens.insights = async (view) => {
         d.rows ? el("div", { class: "donut-wrap" }, donut(d.statuses, d.rows),
           el("ul", { class: "legend" }, ...d.statuses.map((s) => el("li", {},
             el("span", { class: "swatch", "data-status": s.label }), el("span", { text: s.label }), el("b", { text: String(s.count) })))))
-          : el("p", { class: "empty", text: "Nothing in your sheet yet." }));
+          : el("p", { class: "empty", text: "Nothing in your sheet yet." }),
+        d.interviews && d.interviews.sent ? el("p", { class: "small muted", testid: "ins-interviews",
+          text: `Interviews: ${d.interviews.interviews} of ${d.interviews.sent} sent (${d.interviews.percent}%). Counts Interview and Accepted.` }) : null);
     const body = !g.count ? [el("p", { class: "empty", testid: "ins-empty", text: which === "applied" ? "Nothing applied yet. Applied rows show up here." :
       intern ? "Your internship pool is empty: the next internship update fills it." : "Your pool is empty. Check for new jobs on Today." })] : [
       el("div", { class: "tiles" },
@@ -2019,6 +2040,7 @@ screens.assistant = async (view) => {
   const there = String(S.param || "").startsWith("h"), slot = String(S.param || "").replace(/^h/, "");
   const api_ = there ? "/api/homelab/assistant" : "/api/assistant";
   let d = null, version = null, timer = null, first = true;
+  let who = null;  // the session this screen opened on (its key): the slot is reused by the next one once it ends
   const note = el("input", { type: "text", placeholder: "A note for the agent (when you decline)", "aria-label": "Note", testid: "as-note" });
   const reply = el("textarea", { rows: "4", maxlength: "4000", "aria-label": "Reply", testid: "as-reply" });
   const term = el("pre", { class: "log term", testid: "as-terminal", tabindex: "0", "aria-label": "Its terminal" });
@@ -2030,7 +2052,7 @@ screens.assistant = async (view) => {
   async function send(body, busy) {
     if (busy) { busy.disabled = true; busy.textContent = busy.dataset.busy || "Working…"; }
     try {
-      const r = await api.post(api_, { slot: Number(slot), ...body });
+      const r = await api.post(api_, { slot: Number(slot), key: who, ...body });
       toast(r.message);
       if (body.do === "reply") reply.value = "";
       if (r.closing) { sessionStorage.setItem("applyTab", "assistants"); location.hash = "#/apply"; return; }
@@ -2106,18 +2128,27 @@ screens.assistant = async (view) => {
     }
   }
 
+  // it ended (or never ran in that slot): back to Apply's Assistants tab, where the others are (2026-10-28, my request;
+  // it showed "No session there", or the next session started in the slot, as if it were this one)
+  function ended() {
+    toast(d ? `${d.company || "That assistant"}: the session has ended.` : `No assistant is running in slot ${slot}.`);
+    sessionStorage.setItem("applyTab", "assistants");
+    location.replace("#/apply");
+  }
+
   async function load() {
     clearTimeout(timer);
+    let now;
     try {
-      d = await api.get(`${api_}/${encodeURIComponent(slot)}`);
+      now = await api.get(`${api_}/${encodeURIComponent(slot)}`);
     } catch (e) {
       if (!view.isConnected || S.gone) return;
       if (S.offline) { timer = setTimeout(load, 4000); return; }  // the homelab can't be reached a moment: ask again
-      fill(view, el("div", { class: "card", testid: "as-gone" }, el("h2", { text: "No session there" }),
-        el("p", { class: "muted", text: "It has ended (or it never ran in that slot)." }), el("a", { class: "btn", href: "#/apply", text: "Apply", onclick: () => sessionStorage.setItem("applyTab", "assistants") })));
-      return;
+      return ended();
     }
     if (!view.isConnected) return;
+    if (who && now.key !== who) return ended();
+    d = now; who = d.key;
     if (d.version !== version) { version = d.version; draw(); } else { term.textContent = d.terminal || "(not readable)"; }
     if (d.browser && ["working", "approve", "waiting"].includes(d.status)) live.src = `${api_}/${slot}/shot.png?live=${Date.now()}`;
     timer = setTimeout(load, 4000);

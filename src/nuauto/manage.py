@@ -113,7 +113,7 @@ def add(tab, url, company="", title="", status="Approved", interactive=True, not
 
 def movable(row, tab="nuworks", action="move"):
     """None if this row of tab may be moved (action "move") or removed ("remove"), else why not.
-    A sent row (Applied, Accepted, Rejected) never leaves the NUworks tab (that would hide it from the limits) and is
+    A sent row (Applied, Interview, Accepted, Rejected) never leaves the NUworks tab (that would hide it from the limits) and is
     never removed; a sent Other job may move to the NUworks tab (it then counts toward the limits there: the safe
     direction)."""
     if sheet.reapplying(row):

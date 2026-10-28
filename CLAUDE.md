@@ -45,7 +45,7 @@ GIT
 
 HARD LIMITS
 - Under 100 applications total.
-- Weekly cap, enforced in code (count sent rows (Applied, Accepted, Rejected) with a date in the current week; refuse to
+- Weekly cap, enforced in code (count sent rows (Applied, Interview, Accepted, Rejected) with a date in the current week; refuse to
   run past the limit). sheet.py: MAX_PER_WEEK = 11 is the default, changeable in the GUI (Settings > Applying > Applications per week, local_config.json "max_per_week", 1-30; sheet.max_per_week()), MAX_TOTAL = 99 (decided 2026-10-03). A week =
   fixed 7-day periods from local_config.json "week_start" (sheet.week_window); without it, the last
   7 days. Mine: week_start 2026-10-06 (reset because I started applying late), then every 7 days.
@@ -134,13 +134,17 @@ ANSWER BANK (answers.json)
 SHEET
 Columns (row 1): URL, Company, Title, Status, Notes, Date. setup_sheet.py made them (one-time,
 never overwrites existing data), with the Status dropdown and row 1 frozen.
-Status values: Proposed, Approved, Applied, Failed, Needs Human, Accepted, Rejected
+Status values: Proposed, Approved, Applied, Failed, Needs Human, Interview, Accepted, Rejected
 - Proposed: job added by me (or suggested), not approved yet.
 - Approved: I approved it. The script only ever acts on these rows.
 - Applied: submitted. Fill in Date.
 - Accepted / Rejected (added 2026-10-16, my request): what I heard back on a sent row (a row's More menu in Apply, or the
   sheet's dropdown; sheet.set_outcome keeps the date, notes when). They still count toward both limits (sheet.SENT).
   The dropdown on an older sheet gets them from the update or the first mark (setup_sheet.ensure_dropdown).
+- Interview (added 2026-10-28, my request): I got an interview for a sent application. Applied -> Interview -> Accepted /
+  Rejected (those may still be set straight from Applied); a row's More menu, same as Accepted / Rejected, back to Applied
+  too. A sent status like them: both limits, never leaves the NUworks tab, never removed, date kept (sheet.SENT). Also on
+  the Other jobs tab. Mine to record: never read from NUworks (its job-level "interviewing" is another thing).
 - Failed / Needs Human: script stopped. Put the reason in Notes.
 - Notes starting "Dropped <date>: <reason>" (sheet.drop, added 2026-10-12, my request): a Failed row I chose not to apply
   to (closed, a duplicate, a bad location): Drop in a row's More menu on the GUI's Apply screen (both machines' pages,
