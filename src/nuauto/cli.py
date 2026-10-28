@@ -19,6 +19,7 @@ Tools (each module's own command line; `nuauto <tool>` with no arguments shows i
   nuauto intern ...      Summer 2027 internships from Simplify's and vanshb03's lists (update, approve, rate, stats, pool,
                          fetch <url>)
   nuauto accounts ...    the logins the assistant made on job sites (list; export: Bitwarden's import file)
+  nuauto workday [<text>] your statuses on each company's Workday (read-only); offers to mark rejections Rejected
   nuauto review ...      NUauto's page on the homelab: pair a phone, list / unpair devices, demo (docs/REMOTE.md)
   nuauto link ...        this laptop's link to that page (pair, status, forget)
   nuauto answers ...     answer bank (init, list)
@@ -43,7 +44,7 @@ from nuauto import config
 TOOLS = {"jobs": "jobs", "answers": "answers", "sheet": "sheet", "setup-sheet": "setup_sheet",
          "inspect": "inspect_form", "daily": "daily", "web": "web", "health": "health", "demo": "demo",
          "onboard": "onboard", "selftest": "selftest", "insights": "insights", "intern": "intern", "accounts": "accounts",
-         "review": "review", "link": "link"}
+         "review": "review", "link": "link", "workday": "workday"}
 COMMANDS = ("approve", "rate", "apply", "status", "update", "login", "test", "doctor", "assist", "gui", "deploy")
 
 

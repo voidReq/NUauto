@@ -269,6 +269,7 @@ nuauto deploy          # homelab: deploy GitHub's main now (laptop: starts it th
 nuauto insights        # pay, places, kinds of work in my pool and applications; sheet statuses (read-only)
 nuauto selftest        # is this install OK? demo mode end to end in a hidden browser (nothing real touched)
 nuauto assist [<row>]  # company-site agent for a Needs Human row; asks me before any Submit
+nuauto workday [<text>] [--hidden]  # your statuses on each company's Workday (read-only, saved logins); y marks a rejection Rejected
 nuauto accounts [export [<file>] [--all]]   # the job-site logins the agent made (no passwords shown); Bitwarden's import file
 nuauto accounts import <file>|- --only <text>   # my own logins from Bitwarden for those sites (bw list items --search ...)
 nuauto accounts export --bitwarden              # NUauto's new logins straight into my vault (bw unlocked by me; no file)

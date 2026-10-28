@@ -2,10 +2,10 @@ ARCHITECTURE: a map of the code (src/nuauto/)
 (Keep this current when you add, rename or re-wire a module. Setup and machines: docs/DEPLOY.md.
 Pool rules and ranking: docs/PIPELINE.md. Safety rules: docs/SAFETY.md.)
 
-MODULES (src/nuauto/: 36 .py files, and gui_static/ for the window's page)
+MODULES (src/nuauto/: 37 .py files, and gui_static/ for the window's page)
 Command line and plumbing
   cli.py          the `nuauto` command. TOOLS (jobs, answers, sheet, setup-sheet, inspect, daily, web, health, demo,
-                  onboard, selftest, insights, intern, accounts, review, link) run a module's own __main__ via run_tool();
+                  onboard, selftest, insights, intern, accounts, review, link, workday) run a module's own __main__ via run_tool();
                   COMMANDS: approve, rate, apply, status, update, login [google|gmail], test, doctor, assist, gui, deploy.
                   A laptop with a homelab pulls data/ first and pushes after approve / rate / status. `nuauto test` runs
                   tests/test_*.py 4 at a time. Internal (packaged app): _assist, _playwright, _window.
@@ -69,6 +69,9 @@ Company-site agent
   accounts.py     the job-site logins the agent makes: site(), password_for() (placeholders), never(), candidates_for(),
                   export() / to_bitwarden(), import_own().
   mail.py         read-only Gmail: lookup() (pick, find_code, find_link), login(), ready() / days_left().
+  workday.py      `nuauto workday`: your statuses on each company's Workday Candidate Home (read-only), with the saved
+                  logins: logins() (home_url, may_sign_in), check_site() (sign_in, read_table, entry, kind), offers()
+                  (which_job, which_row): rejections tied to one sent row, marked Rejected after your y.
   letter.py       a cover letter as a PDF, for the one application it was written for.
 Homelab
   remote.py       the assistant's queue (candidates, plan, auto, start), claims (claim, claimed, claim_on_homelab), the
@@ -223,6 +226,7 @@ use headless Firefox on local pages or demo mode. Run it before pushing; CI runs
   test_assist    the agent's guard, answer bank, slots, passwords, uploads, by-hand rows
   test_accounts  accounts.py: sites, Bitwarden export / import of your own logins
   test_mail      mail.py: Gmail's format, which mail counts, the `email` command
+  test_workday   workday.py: Candidate Home's address, statuses, where a password may go, row matching (no browser)
   test_remote    remote.py: queue, claims, nuworks_turn, assist.run's claim step
   test_review    review.py and the homelab app's handler rules, sessions' backend
   test_screen    screen.py commands, address rules; one real start / stop where Xvfb etc. are installed
