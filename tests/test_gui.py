@@ -575,6 +575,17 @@ try:
     approved_one = get("/api/jobs?tab=nuworks")["sections"]["approved"][0]
     post("/api/mark", {"action": "outcome", "outcome": "Accepted", "row": approved_one["row"], "url": approved_one["url"]}, expect=409)
     post("/api/mark", {"action": "outcome", "outcome": "Failed", "row": sent["row"], "url": sent["url"]}, expect=409)
+    # re-apply with the new resume (sheet.mark_reapply): back to Approved, first date kept, the limits unchanged; Undo
+    state_now = get("/api/state")["week"]
+    post("/api/mark", {"action": "reapply", "row": sent["row"], "url": sent["url"]})
+    again = [r for r in get("/api/jobs?tab=nuworks")["sections"]["approved"] if r["row"] == sent["row"]]
+    assert again and again[0]["reapply"] and again[0]["date"] == sent["date"], again
+    assert get("/api/state")["week"] == state_now
+    post("/api/mark", {"action": "reapply", "row": sent["row"], "url": sent["url"]}, expect=409)       # not Applied now
+    post("/api/mark", {"action": "reapply", "tab": "other", "row": sent["row"], "url": sent["url"]}, expect=409)
+    post("/api/mark", {"action": "unreapply", "row": sent["row"], "url": sent["url"]})
+    assert sent["row"] in [r["row"] for r in get("/api/jobs?tab=nuworks")["sections"]["applied"]]
+    assert get("/api/state")["week"] == state_now
     # the job's hiring stage at the last check (demo.setup's answers; sheet.maybe_filled): the chips on Applied rows
     stage = {r["row"]: (r["nuworks"]["hiring"], r["nuworks"]["done"])
              for r in get("/api/jobs?tab=nuworks")["sections"]["applied"] if r.get("nuworks")}
@@ -743,8 +754,8 @@ try:
         page.click(f"[data-testid=more-nuworks-{applied_row}]")
         page.wait_for_selector("div.menu")
         assert [b.inner_text() for b in page.locator("div.menu button").all()] == \
-            ["Mark accepted", "Mark rejected", "I applied myself", "Drop (not applying)…", "Move to Summer 2027 internships…",
-             "Remove from the sheet…"]  # (what you heard back: only on a sent row)
+            ["Mark accepted", "Mark rejected", "Re-apply with the new resume…", "I applied myself", "Drop (not applying)…",
+             "Move to Summer 2027 internships…", "Remove from the sheet…"]  # (what you heard back, re-apply: on a sent row)
         for key in ("mark", "drop", "move", "remove"):
             assert page.locator(f"[data-testid=more-nuworks-{applied_row}-{key}]").is_disabled(), key  # (with a reason in its title)
         assert page.get_attribute(f"[data-testid=more-nuworks-{applied_row}-remove]", "title")

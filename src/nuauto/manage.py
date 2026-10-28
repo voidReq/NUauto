@@ -1,8 +1,9 @@
-"""Add, move and remove sheet rows by hand (the GUI's Sheet screen, or `nuauto sheet add|move|remove`).
+"""Add, move and remove sheet rows by hand (the GUI's Sheet screen, or `nuauto sheet add|move|remove|reapply`).
 
   nuauto sheet add <nuworks|other> <url> [<company> <title>] [--proposed]
   nuauto sheet move <nuworks|other> <row> [<new url>]     the row goes to the other tab
   nuauto sheet remove <nuworks|other> <row>
+  nuauto sheet reapply <row>... [--undo]                 Apply withdraws these on NUworks, then sends them again
 
 Tabs: nuworks = the main tab (NUworks co-ops: a NUworks job page link), other = the Other jobs tab (an https link
 that is not NUworks). Added rows are Approved (that is the go-ahead, as in Review) unless --proposed.
@@ -12,6 +13,9 @@ title typed, and its Notes say so.
 Rows are never deleted: a removed row's cells are cleared, so every other row keeps its number (a run in progress,
 a Mark link or an open GUI list can never land on a different job). Applied rows are never removed or moved (they
 count toward the weekly and total limits), nor a row whose Submit click is still unresolved.
+Re-apply (sheet.mark_reapply): Apply withdraws the application on NUworks (My Job Applications), makes sure it is
+gone, then sends it again with the resume in profile.json. The row keeps its first date: it counts as the one application it was, never twice, and goes even past
+the weekly limit. --undo puts a row not yet sent again back as it was.
 """
 import re
 import sys
@@ -112,6 +116,8 @@ def movable(row, tab="nuworks", action="move"):
     A sent row (Applied, Accepted, Rejected) never leaves the NUworks tab (that would hide it from the limits) and is
     never removed; a sent Other job may move to the NUworks tab (it then counts toward the limits there: the safe
     direction)."""
+    if sheet.reapplying(row):
+        return "it is being re-applied (it counts toward your weekly and total limits)"
     if row.status in sheet.SENT:
         if tab == "other" and action == "move":
             return None
@@ -172,7 +178,37 @@ def move(tab, number, url, new_url=None, interactive=True):
 USAGE = "\n\n".join(__doc__.split("\n\n")[:2])
 
 
+def reapply(numbers, undo=False):
+    """`nuauto sheet reapply <row>... [--undo]`: mark Applied rows of the NUworks tab to be sent again (or undo that)."""
+    ws = open_tab("nuworks")
+    rows = {r.number: r for r in sheet.read_rows(ws)}
+    picked = [rows.get(n) for n in numbers]
+    if None in picked:
+        sys.exit(f"Row {numbers[picked.index(None)]} is empty.")
+    for r in picked:
+        print(f"  row {r.number}: {r.company} | {r.title} ({r.status}, first sent {r.date or '?'})")
+    ask = ("Put these back as Applied, not re-applied? [y/N]: " if undo else
+           "Re-apply to these with your new resume? Apply withdraws each on NUworks, then sends it again "
+           "(same applications: they don't count twice). [y/N]: ")
+    if input(ask).strip().lower() != "y":
+        return print("Nothing changed.")
+    for r in picked:
+        try:
+            (sheet.undo_reapply if undo else sheet.mark_reapply)(ws, r.number, r.url)
+            print(f"  row {r.number}: " + ("Applied again" if undo else "Approved, to be re-applied"))
+        except sheet.SheetError as e:
+            print(f"  row {r.number}: not changed: {e}")
+
+
 def main(argv):
+    if argv[:1] == ["reapply"]:
+        nums = [a for a in argv[1:] if a != "--undo"]
+        if not nums or not all(a.isdigit() for a in nums):
+            sys.exit(USAGE)
+        try:
+            return reapply([int(a) for a in nums], undo="--undo" in argv)
+        except (KeyboardInterrupt, EOFError):
+            sys.exit("\nNothing changed.")
     proposed = "--proposed" in argv
     argv = [a for a in argv if a != "--proposed"]
     if len(argv) < 3 or argv[0] not in ("add", "move", "remove") or argv[1] not in TABS:

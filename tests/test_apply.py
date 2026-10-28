@@ -92,6 +92,42 @@ assert run([7], n=1) == [2, 7]                                # Start (-n 1): it
 assert run([], n=2) == [2, 3]
 assert apply.BETWEEN == (10, 20)
 
+# past a limit only rows being re-applied go (sheet.reapplying: the same applications); none of those: refused as before
+def run_limited(reapply_rows, row=None):
+    rows = [sheet.Row(k, f"u{k}", f"C{k}", "T", "Approved",
+                      f"{sheet.REAPPLY_MARK} (first sent 2026-10-03)." if k in reapply_rows else "", "2026-10-03" if k in reapply_rows else "")
+            for k in range(2, 6)]
+    done = []
+
+    def one(r, *a):
+        done.append(r.number)
+        r.status = "Applied"
+        return "next"
+
+    def full(rs):
+        raise sheet.LimitReached("Weekly limit reached.")
+    patch = {"read_rows": lambda ws: rows, "check_limits": full, "check_limits_safe": lambda rs: (11, 40),
+             "week_window": lambda: (None, "this week")}
+    saved = {k: getattr(sheet, k) for k in patch} | {"apply_one": apply.apply_one, "sleep": apply.time.sleep}
+    for k, v in patch.items():
+        setattr(sheet, k, v)
+    apply.apply_one, apply.time.sleep = one, lambda s: None
+    try:
+        io = types.SimpleNamespace(event=lambda *a, **k: None)
+        apply.run_rows(types.SimpleNamespace(row=row, n=None, order="closes", queue=None), None, "", [], io)
+    except SystemExit as e:
+        return str(e)
+    finally:
+        apply.apply_one, apply.time.sleep = saved.pop("apply_one"), saved.pop("sleep")
+        for k, v in saved.items():
+            setattr(sheet, k, v)
+    return done
+
+assert run_limited({3, 5}) == [3, 5]
+assert run_limited(set()).startswith("Refusing to run: Weekly limit")
+assert run_limited({3}, row=2).startswith("Refusing to run: Weekly limit")  # that row is a new application
+assert run_limited({3}, row=3) == [3]
+
 # the NUworks side when another process has the NUworks browser: no crash, nothing opened, "NOT submitted" in Notes
 # (so the row is on the GUI's retry list) and a retry still allowed
 import subprocess, sys
@@ -155,3 +191,54 @@ for bad in ("", "nope", "score,score", "custom", "default,score"):
 assert apply.order_steps("default") == ["urgent", "score"] and set(apply.order_steps(",".join(apply.STEPS))) == set(apply.STEPS)
 
 print("All checks passed.")
+
+# re-apply: the first application is withdrawn on My Job Applications (only this job's item, through NUworks' own
+# confirm), then NUworks must no longer have it; a different question, or the job not listed once: nothing withdrawn
+from playwright.sync_api import sync_playwright  # noqa: E402
+
+LIST = """<html><body><p>1-2 of 2 results</p><ul class="list_job_applications">
+<li><div class="list-item-title"><a href="https://northeastern-csm.symplicity.com/students/app/jobs/detail/{other}">B</a></div>
+  <a href="javascript:;" onclick="confirmWithdraw('b2')">Withdraw</a></li>
+<li><div class="list-item-title"><a href="https://northeastern-csm.symplicity.com/students/app/jobs/detail/abc">A</a></div>
+  <a href="javascript:;" style="display:none" onclick="confirmWithdraw('a1')">Withdraw</a>
+  <a href="javascript:;" onclick="confirmWithdraw('a1')">Withdraw</a></li></ul>
+<script>function confirmWithdraw(id) { if (confirm({question})) self.location.href = '/students/index.php?rm=' + id + '&'; }</script>
+</body></html>"""
+
+
+def withdraw_case(question=apply.WITHDRAW_CONFIRM, other="zzz"):
+    hits, state = [], {"applied": True}
+    row = sheet.Row(9, "https://northeastern-csm.symplicity.com/students/app/jobs/detail/abc", "Co", "T", "Approved",
+                    f"{sheet.REAPPLY_MARK} (first sent 2026-10-03).", "2026-10-03")
+
+    def serve(route):
+        u = route.request.url
+        if "rm=" in u:
+            hits.append(u.split("rm=")[1].rstrip("&"))
+            state["applied"] = False
+            return route.fulfill(content_type="text/html", body="<p>withdrawn</p>")
+        return route.fulfill(content_type="text/html", body=LIST.replace("{other}", other).replace("{question}", json.dumps(question)))
+    log = types.SimpleNamespace(write=lambda *a: None, screenshot=lambda *a: None)
+    asked = apply.still_applied  # (page.request skips page.route: NUworks' job record is faked here, never fetched)
+    apply.still_applied = lambda page, r: state["applied"]
+    with sync_playwright() as p:
+        b = p.firefox.launch(headless=True)
+        page = b.new_page()
+        page.route("**/*", serve)
+        try:
+            apply.withdraw_first(page, row, log)
+            out = "withdrawn"
+        except apply.NotWithdrawn as e:
+            out = str(e)
+        finally:
+            b.close()
+            apply.still_applied = asked
+    return out, hits
+
+config.DEMO_PACE = 0.01  # (browser.pause)
+r = withdraw_case(); assert r == ("withdrawn", ["a1"]), r                          # this job's item only
+out, hits = withdraw_case(question="Delete your account?")
+assert hits == [] and "not withdrawn" in out, (out, hits)                          # not NUworks' withdraw question
+out, hits = withdraw_case(other="abc")
+assert hits == [] and "lists this job 2 times" in out, (out, hits)                  # the job twice: never a guess
+print("Re-apply withdraw checks passed.")

@@ -509,7 +509,7 @@ def record_hand_applications(before, rows):
     from nuauto import sheet
     listed = set(jobs.load("list.json", {}))
     by_id = {jobs.job_id(r.url): r for r in rows}
-    applied = {i for i, r in by_id.items() if r.status in sheet.SENT}
+    applied = {i for i, r in by_id.items() if sheet.counted(r)}  # (a row being re-applied: NUworks has it until you withdraw)
     candidates = (set(before) | {i for i, r in by_id.items() if r.status not in sheet.SENT}) - listed - applied
     ok, found = step(jobs.check_applied, sorted(candidates))
     if not ok or not found:

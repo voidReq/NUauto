@@ -545,7 +545,8 @@ def week_info(rows):
 def row_view(r, **extra):
     from nuauto import assist
     return {"row": r.number, "company": r.company, "title": r.title, "url": r.url, "status": r.status,
-            "notes": r.notes, "date": r.date, "on_laptop": assist.LAPTOP_MARK in (r.notes or ""), **extra}
+            "notes": r.notes, "date": r.date, "on_laptop": assist.LAPTOP_MARK in (r.notes or ""),
+            "reapply": sheet.reapplying(r), **extra}
 
 
 def closing(r):
@@ -1167,16 +1168,19 @@ def apply_list(order="default"):
         d = apply.row_details(r)
         hint = jobs.external_hint(d)  # the posting may want the company's own site too
         out.append(row_view(r, **closing(r), company_site=hint, **job_facts(r, data, d)))
-    why = None
+    why, limited = None, None
+    if week["applied"] >= week["max"]:
+        limited = f"Weekly limit reached ({week['applied']}/{week['max']} {week['label']}). Approved rows wait for next week."
+    elif week["total"] >= week["max_total"]:
+        limited = f"Total limit reached ({week['total']}/{week['max_total']})."
     if not out:
         why = "Nothing is Approved. Approve jobs in Review first."
-    elif week["applied"] >= week["max"]:
-        why = f"Weekly limit reached ({week['applied']}/{week['max']} {week['label']}). Approved rows wait for next week."
-    elif week["total"] >= week["max_total"]:
-        why = f"Total limit reached ({week['total']}/{week['max_total']})."
+    elif limited and not any(v["reapply"] for v in out):  # rows being re-applied go even past the limits
+        why = limited                                       # (apply.run_rows: the same applications, nothing added)
     elif not health.resume_label():
         why = "The NUworks resume label is not set (Settings)."
-    return {"rows": out, "week": week, "why_not": why, "history": [t.view(t.total()) for t in APP.history[:5]]}
+    return {"rows": out, "week": week, "why_not": why, "limited": limited,
+            "history": [t.view(t.total()) for t in APP.history[:5]]}
 
 
 # ---------------------------------------------------------------- actions (buttons that start something)
@@ -1206,16 +1210,18 @@ def act(body):
         return {"queue": cur.queue if cur else [], "message": "Taken out of the queue."}
     if kind == "apply":
         from nuauto import apply
-        why = apply_list()["why_not"]
-        if why:
-            raise Refused(why)
+        listed = apply_list()
+        if listed["why_not"]:
+            raise Refused(listed["why_not"])
         n, row, order = args.get("n"), args.get("row"), known_order(args.get("order") or "default")
         if not order:
             raise Refused("Unknown order (reload the page).")
         cmd = config.self_cmd("apply", "--ui", "json", "--order", order)
         if row not in (None, ""):  # just this one Approved row (its Apply button)
-            if not str(row).isdigit() or int(row) not in {r["row"] for r in apply_list()["rows"]}:
+            if not str(row).isdigit() or int(row) not in {r["row"] for r in listed["rows"]}:
                 raise Refused("That row is not Approved (reload the list).")
+            if listed["limited"] and not any(r["row"] == int(row) and r["reapply"] for r in listed["rows"]):
+                raise Refused(listed["limited"])  # past a limit only rows being re-applied go
             cur = apply_run()
             if cur:  # a run is going: this row waits in its queue (done next, in the order you clicked)
                 return queue_row(cur, int(row))
@@ -1469,7 +1475,8 @@ def remote_assist_start(args):
 def mark(body):
     action, row, url = body.get("action"), body.get("row"), str(body.get("url", ""))
     other = body.get("tab") == "other"  # a row of the Other jobs tab (only "applied", "outcome" and "drop" there)
-    if action not in ("applied", "site", "drop", "outcome") or not str(row).isdigit() or (other and action == "site"):
+    if action not in ("applied", "site", "drop", "outcome", "reapply", "unreapply") or not str(row).isdigit() or (
+            other and action in ("site", "reapply", "unreapply")):
         raise Refused("Unknown action.")
     if action == "outcome" and body.get("outcome") not in sheet.SENT:
         raise Refused("Unknown outcome.")
@@ -1496,6 +1503,10 @@ def mark(body):
             sheet.set_outcome(ws, int(row), url, body["outcome"])
         elif action == "drop":
             sheet.drop(ws, int(row), url, body["why"])
+        elif action == "reapply":  # you withdraw it on NUworks; Apply sends it again with the new resume
+            sheet.mark_reapply(ws, int(row), url)
+        elif action == "unreapply":
+            sheet.undo_reapply(ws, int(row), url)
         else:
             sheet.mark_applied_by_hand(ws, int(row), url, how="by hand (marked in NUauto)")
     except sheet.SheetError as e:
@@ -1768,7 +1779,7 @@ def jobs_tab(tab="nuworks", order="default", recheck=False):
         for r in rows:
             if r.number not in listed and r.status not in ("Approved", "Needs Human"):  # (those are all listed above)
                 s[later.get(r.status, "rest")].append(view(r))
-        out.update(week=run["week"], why_not=run["why_not"], history=run["history"],
+        out.update(week=run["week"], why_not=run["why_not"], limited=run["limited"], history=run["history"],
                    order=order if known_order(order) else "default", sort=sort_menu())
     for k in ("applied", "accepted", "rejected", "closed"):
         s[k].sort(key=lambda x: x["date"] or "", reverse=True)  # newest first

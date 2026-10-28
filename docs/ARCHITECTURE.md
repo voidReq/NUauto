@@ -27,10 +27,12 @@ Command line and plumbing
 Sheet and NUworks
   sheet.py        the Google Sheet. open_worksheet() / open_other() (kept OPEN_FOR s: OPEN, forget(), HTTPClient retries),
                   read_rows(); limits: max_per_week(), week_window(), applied_dates(), total_count() (not_on_nuworks,
-                  rejected_not_withdrawn, maybe_filled), check_limits(); writers: set_status, mark_submit_started /
-                  resolve_submit, mark_applied_by_hand, mark_site_done, set_outcome, drop, approve_proposed, unapprove,
+                  rejected_not_withdrawn, maybe_filled; reapplying() rows count as sent), check_limits(); writers: set_status,
+                  mark_submit_started / resolve_submit, mark_applied_by_hand, mark_site_done, set_outcome, drop,
+                  mark_reapply / undo_reapply, approve_proposed, unapprove,
                   mark_on_laptop, append_note, add_proposed; create_sheet(), google_login().
-  manage.py       rows by hand: add(), move(), remove() (cells cleared, never deleted), lookup(), check_url(), movable().
+  manage.py       rows by hand: add(), move(), remove() (cells cleared, never deleted), lookup(), check_url(), movable(),
+                  reapply() (`nuauto sheet reapply <row>... [--undo]`).
   setup_sheet.py  one-time setup (refuses a sheet with data: HasData); format_sheet(); ensure_dropdown().
   browser.py      Playwright Firefox. launch() (lock_profile(): one process on the profile), install_domain_lock(),
                   goto_logged_in() / relogin() (one click, never credentials), RunLog (logs/ dir + screenshots),

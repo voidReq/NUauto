@@ -11,6 +11,8 @@ Hidden dev flags: --dry-run (fill and screenshot, never submit), --row N.
 A row becomes Applied after NUworks confirms. If the script has to stop (external
 site, unknown field, ...) the row becomes Needs Human with the reason in Notes and
 the run moves on. Unexpected errors, an expired session or an unclear submit stop the run.
+A row being re-applied with the new resume (sheet.mark_reapply): its first application is withdrawn on NUworks (My Job
+Applications), then it is sent again; it keeps its first date and goes even past the limits.
 """
 import argparse
 import contextlib
@@ -54,6 +56,92 @@ class NeedsHuman(Exception):
 
 class SessionExpired(Exception):
     """NUworks is showing the sign-in page. Not the row's fault: leave the sheet alone."""
+
+
+class NotWithdrawn(Exception):
+    """A row being re-applied (sheet.reapplying) whose first application NUworks still has (withdrawing it didn't work, or
+    a dry run): skip it, the row stays."""
+
+
+def still_applied(page, row):
+    """NUworks still has your application to this row's job (its job record, read-only): not withdrawn yet."""
+    i = jobs.job_id(row.url)
+    resp = page.request.get(f"{jobs.HOST}/api/v3/jobs/{i}")
+    try:
+        raw = resp.json() if resp.ok else None
+    except Exception:
+        raw = None
+    if not raw or raw.get("job_id") != i:
+        raise NotWithdrawn("Couldn't ask NUworks whether you withdrew it; try again later.")
+    return bool(raw.get("applied"))
+
+
+APPLICATIONS_URL = f"{jobs.HOST}/students/index.php?s=jobs&ss=applied&mode=list&subtab=nocr"  # My Job Applications
+APPLICATION_ITEMS = "ul.list_job_applications > li"
+WITHDRAW_CONFIRM = "Are you sure you want to withdraw this application?"  # NUworks' own confirm() (its confirmWithdraw)
+# The application ids of the items whose job link is this job (each item has its Withdraw link twice: phone and desktop).
+WITHDRAW_IDS_JS = r"""(id) => [...document.querySelectorAll('ul.list_job_applications > li')]
+  .filter(li => { const a = li.querySelector('.list-item-title a');
+                  return a && (a.getAttribute('href') || '').replace(/\/+$/, '').endsWith('/jobs/detail/' + id); })
+  .map(li => [...new Set([...li.querySelectorAll('a[onclick*="confirmWithdraw"]')]
+                .map(a => ((a.getAttribute('onclick') || '').match(/confirmWithdraw\('([0-9a-f]+)'\)/) || [])[1]).filter(Boolean))])"""
+
+
+def find_application(page, row, log):
+    """This row's application on My Job Applications (its pages, 20 a page): its id for NUworks' Withdraw. NotWithdrawn
+    unless exactly one item is this job and it has exactly one Withdraw."""
+    page.goto(APPLICATIONS_URL, wait_until="domcontentloaded")
+    page.wait_for_selector(APPLICATION_ITEMS, timeout=30000)
+    key = re.search(r"_so_list_from([0-9a-f]{32})", page.content())
+    total = re.search(r"of (\d+) results", page.inner_text("body"))
+    starts = range(0, int(total.group(1)), 20) if key and total else [None]
+    found = []
+    for start in starts:
+        if start is not None:  # (the list remembers its page per session: every page is asked for by number)
+            page.goto(f"{APPLICATIONS_URL}&_so_list_from{key.group(1)}={start}"
+                      f"&_so_list_from{key.group(1)}_page={start // 20 + 1}", wait_until="domcontentloaded")
+            page.wait_for_selector(APPLICATION_ITEMS, timeout=30000)
+        found += page.evaluate(WITHDRAW_IDS_JS, jobs.job_id(row.url))
+        if found:
+            break
+        browser.pause(page, 1, 2)
+    if len(found) != 1:
+        raise NotWithdrawn(f"My Job Applications lists this job {len(found)} times: not withdrawn.")
+    if len(found[0]) != 1:
+        raise NotWithdrawn("Its application on NUworks has no Withdraw (the posting may have closed): not withdrawn.")
+    log.write(f"Found the application on My Job Applications (id {found[0][0]}).")
+    return found[0][0]
+
+
+def withdraw_first(page, row, log):
+    """A row being re-applied: withdraw its first application on NUworks (My Job Applications: its Withdraw link and
+    NUworks' own confirm), then make sure NUworks no longer has it. Only in a real run (you there, a terminal or the
+    GUI); never on a row whose application isn't found exactly once."""
+    app_id = find_application(page, row, log)
+    link = page.locator(f"a[onclick*=\"confirmWithdraw('{app_id}')\"]:visible").first
+    said = []
+
+    def on_dialog(d):
+        said.append(d.message)
+        d.accept() if d.message.strip() == WITHDRAW_CONFIRM else d.dismiss()
+    page.once("dialog", on_dialog)
+    log.screenshot(page, "before_withdraw")
+    log.write(f"Withdrawing the first application (re-apply with the new resume): {row.company} | {row.title}")
+    try:
+        with page.expect_navigation(timeout=20000):
+            link.click(timeout=10000)
+    except PlaywrightTimeout:
+        pass  # no page load (the confirm was dismissed?): what NUworks has is checked below
+    browser.pause(page, 2, 3)
+    log.screenshot(page, "after_withdraw")
+    if said and said[0].strip() != WITHDRAW_CONFIRM:
+        raise NotWithdrawn(f"NUworks asked {said[0]!r}, not its usual withdraw question: not withdrawn.")
+    for _ in range(3):
+        if not still_applied(page, row):
+            log.write("NUworks no longer has the first application: withdrawn.")
+            return
+        browser.pause(page, 2, 4)
+    raise NotWithdrawn("Clicked Withdraw, but NUworks still has the application: check My Job Applications.")
 
 
 def load_resume_label():
@@ -285,8 +373,9 @@ def pick_row(rows, row_number, order="default"):
 SUBMIT_RESULT = [("u", "Not sure"), ("y", "Yes, NUworks confirmed it"), ("n", "No, it failed")]  # first = safest
 
 
-def fill_popup(page, context, row, resume_label, entries, io, log, blocked, company_site_done=False):
-    """Open the Apply popup and select the resume. Returns the dialog locator."""
+def fill_popup(page, context, row, resume_label, entries, io, log, blocked, company_site_done=False, withdraw=False):
+    """Open the Apply popup and select the resume. Returns the dialog locator. withdraw: a row being re-applied whose
+    first application NUworks still has is withdrawn first (a real run; else it is skipped)."""
     if not browser.host_allowed(row.url) or "/jobs/detail/" not in row.url:
         raise NeedsHuman("URL is not a NUworks job page on an allowed host.")
     log.write(f"Row {row.number}: {row.company} | {row.title}")
@@ -298,6 +387,14 @@ def fill_popup(page, context, row, resume_label, entries, io, log, blocked, comp
     if browser.on_login_page(page):
         if not browser.goto_logged_in(page, context, row.url, log):
             raise SessionExpired("NUworks is showing the sign-in page. Run `nuauto login` again.")
+    if sheet.reapplying(row) and still_applied(page, row):
+        if not withdraw:
+            raise NotWithdrawn("NUworks still has your first application (a dry run never withdraws).")
+        withdraw_first(page, row, log)
+        if blocked:
+            raise NeedsHuman(f"Withdrawing led off the allowed domain: {blocked}")
+        page.goto(row.url, wait_until="domcontentloaded")
+        browser.pause(page)
 
     btn = apply_button(page)
     if btn.count() != 1:
@@ -366,7 +463,7 @@ def submit_flow(page, dialog, ws, row, resume_label, log, state, io):
     else:
         result = io.menu("Did NUworks confirm the submission? [y = yes / n = it failed / u = unsure]: ", SUBMIT_RESULT, "u")
     if result == "y":
-        hint = jobs.external_hint(row_details(row))
+        hint = None if sheet.reapplying(row) else jobs.external_hint(row_details(row))  # (re-applied: done the first time)
         note = "Submitted via apply.py" + (" (confirmed by NUworks page)" if confirmed else " (confirmed by you)")
         if hint:
             note = f"{sheet.SITE_MARK} (posting: \"" + hint[:150].replace("). ", ") ") + "\"). " + note
@@ -457,7 +554,7 @@ def apply_one(row, ws, args, resume_label, entries, io):
         try:
             browser.install_domain_lock(context, log, blocked)
             page = context.pages[0] if context.pages else context.new_page()
-            dialog = fill_popup(page, context, row, resume_label, entries, io, log, blocked)
+            dialog = fill_popup(page, context, row, resume_label, entries, io, log, blocked, withdraw=args.submit)
             if args.submit:
                 submit_flow(page, dialog, ws, row, resume_label, log, state, io)
                 if state.get("unresolved"):
@@ -466,6 +563,8 @@ def apply_one(row, ws, args, resume_label, entries, io):
                 log.write("DRY RUN: stopped before Submit. Row stays Approved.")
         except NeedsHuman as e:
             reason = str(e)
+        except NotWithdrawn as e:
+            log.write(f"SKIP: {e} Row {row.number} stays Approved (to be re-applied).")
         except SessionExpired as e:
             log.write(f"STOP: {e} Sheet left unchanged (row stays Approved).")
             outcome = "stop"
@@ -551,29 +650,34 @@ def main(argv=None):
 
 
 def run_rows(args, ws, resume_label, entries, io):
-    """The run: Approved rows in order (or just --row), the limits checked again before each one."""
+    """The run: Approved rows in order (or just --row), the limits checked again before each one. Past a limit only rows
+    being re-applied go on (sheet.reapplying: the same applications, sending them again adds nothing)."""
     seen = set()  # rows already handled in this run (a row you answered "n" to stays Approved)
     first = True
     while True:
         rows = sheet.read_rows(ws)
         try:
             week, total = sheet.check_limits(rows)
+            limit = None
         except sheet.LimitReached as e:
-            if first:
-                sys.exit(f"Refusing to run: {e}")
-            print(f"Stopping: {e}")
-            break
+            week, total = sheet.check_limits_safe(rows)
+            limit = e
+        pool = rows if limit is None else [r for r in rows if sheet.reapplying(r)]
         print(f"Applied {sheet.week_window()[1]}: {week}/{sheet.max_per_week()}. Total: {total}/{sheet.MAX_TOTAL}.")
         if first:
-            row = pick_row(rows, args.row, args.order)
+            if limit is not None and not [r for r in sheet.approved(pool) if args.row in (None, r.number)]:
+                sys.exit(f"Refusing to run: {limit}")
+            if limit is not None:
+                print(f"{limit} Only rows being re-applied go.")
+            row = pick_row(pool, args.row, args.order)
         else:
-            approved = {r.number: r for r in sheet.approved(rows) if r.number not in seen}
-            ahead = more_queued(args, rows, seen)  # queued rows first, in the order you queued them
+            approved = {r.number: r for r in sheet.approved(pool) if r.number not in seen}
+            ahead = more_queued(args, pool, seen)  # queued rows first, in the order you queued them
             rest = [] if args.row is not None or (args.n and len(seen) >= args.n) else apply_order(
                 [r for n, r in approved.items() if n not in ahead], args.order)
             left = [approved[n] for n in ahead] + rest
             if not left:
-                print("No more Approved rows.")
+                print(f"Stopping: {limit}" if limit is not None else "No more Approved rows.")
                 break
             row = left[0]
         first = False

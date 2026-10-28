@@ -154,7 +154,10 @@ A question from a run (an unknown form field, an option to pick, "did it submit?
                  sessions attention; a desktop notification says so too); every slot in use greys it out; one the homelab
                  runs (remote_assist) shows "assistant running on the homelab: open" / "...: waiting for you: open", its
                  screen in the app when linked, else in the browser). Mark the company site done; Submit on NUworks too.
-                 More: on a sent row Mark accepted / Mark rejected (or Back to Applied: sheet.set_outcome), I applied
+                 More: on a sent row Mark accepted / Mark rejected (or Back to Applied: sheet.set_outcome); on the NUworks
+                 tab Re-apply with the new resume (an Applied row: sheet.mark_reapply; Apply withdraws it on NUworks, then
+                 sends it again, first date kept, never counted twice, even past the limit; "re-apply" chip; Undo re-apply
+                 while still Approved: sheet.undo_reapply; 2026-10-28), I applied
                  myself, Drop (closed, a duplicate, a bad location, other; sheet.drop: Failed, "Dropped <date>: <reason>"
                  in Notes; only Approved / Needs Human rows, never while an assistant is on the row), Move to the other tab
                  (asks for the link there), Remove from the sheet (clears the row's cells: no row is renumbered). What a row
@@ -480,7 +483,7 @@ API (JSON; all need the cookie; POSTs need X-NUauto: 1)
   GET  /api/company          agent / other / site / retry rows, sessions (the assistants running now: slot, row, tab,
                              company, host, since, attention: {kind waiting|approve, since, said} while it waits for you)
                              and slots (how many may); queue (the homelab: review.queue_view, or {"error"}); the laptop's link
-                             reads the homelab's. POST /api/mark {"action": applied|site|drop|outcome, "row", "url", "why"
+                             reads the homelab's. POST /api/mark {"action": applied|site|drop|outcome|reapply|unreapply, "row", "url", "why"
                              (drop: closed|duplicate|location|other), "outcome" (Applied|Accepted|Rejected), "tab": "other"
                              (Other jobs tab: applied, drop, outcome)}
   GET  /api/other            the Other jobs tab: exists, ready, applied, rest, sessions, slots (/api/jobs has them too)

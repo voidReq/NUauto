@@ -664,6 +664,18 @@ async function outcomeRow(t, outcome, tab) {
   } catch (e) { fail(e); }
 }
 
+// Re-apply (NUworks tab): Apply withdraws an Applied application on NUworks, then sends it again with your new resume
+// (sheet.mark_reapply, apply.withdraw_first). It stays one application: its first date, never counted twice, sent even past the weekly limit.
+function reapplyRow(t, undo) {
+  const send = async () => {
+    try { await working("Updating the sheet…", api.post("/api/mark", { action: undo ? "unreapply" : "reapply", row: t.row, url: t.url })); toast(undo ? "Back to Applied." : "Approved, to be re-applied."); pollState(); if (S.screen && S.screen.reload) S.screen.reload(); }
+    catch (e) { fail(e); }
+  };
+  if (undo) return send();
+  confirmBox("Re-apply with the new resume?", `${t.company} · ${t.title || ""} (row ${t.row}) goes back to Approved. When Apply gets to it, it withdraws your application on NUworks, makes sure it's gone, then applies again with your current resume. It stays one application, dated ${t.date || "as before"}, so it doesn't count again.`,
+    "Re-apply", send);
+}
+
 // Drop: you won't apply (closed, a duplicate, a bad location): the row becomes Failed with the reason in its Notes,
 // leaves every queue and stays in the sheet as your record (sheet.drop), so Review never offers the job again.
 const DROP_REASONS = [["closed", "It has closed"], ["duplicate", "A duplicate"], ["location", "Bad location"], ["other", "Other reason"]];
@@ -1305,6 +1317,8 @@ screens.apply = async (view) => {
     let chips = [], next = null, open = linkOut(r.url, "Open"), about = null;
     if (key === "approved") {
       chips = [dueChip(r), postedChip(r), featuredChip(r)];  // (a job that sends you to the company's own site lands in Company site needed by itself)
+      if (r.reapply) chips.push(el("span", { class: "chip", testid: `reapply-${r.row}`, text: "re-apply",
+        title: `Sent ${r.date}. Apply withdraws it on NUworks, then sends it again with your new resume. It doesn't count again.` }));
       next = applyButton(d, r);
     } else if (key === "agent") {
       chips = [dueChip(r)];
@@ -1375,7 +1389,7 @@ screens.apply = async (view) => {
     return li;
   }
 
-  // More: the same four for every row (each greyed out with the reason when it can't be done to this one)
+  // More: the same items for every row (each greyed out with the reason when it can't be done to this one)
   function rowMenu(d, key, r, other) {
     const t = other ? "other" : undefined, to = other ? "nuworks" : "other", busy = d.busy ? "A run is using the sheet: wait for it to end" : null;
     const live = r.status === "Approved" || r.status === "Needs Human";
@@ -1383,8 +1397,12 @@ screens.apply = async (view) => {
     const heard = !SENT.includes(r.status) ? [] : ["Accepted", "Rejected"].map((o) => r.status === o ?
       ["Back to Applied", "applied", () => outcomeRow(r, "Applied", t)] :
       [`Mark ${o.toLowerCase()}`, o.toLowerCase(), () => outcomeRow(r, o, t)]);
+    // re-apply (the NUworks tab): Apply withdraws it on NUworks, then sends it again with your new resume
+    const again = other ? [] : r.reapply && r.status === "Approved" ? [["Undo re-apply", "unreapply", () => reapplyRow(r, true), busy]] :
+      [["Re-apply with the new resume…", "reapply", () => reapplyRow(r, false), r.status === "Applied" ? busy : "Only an Applied application is re-applied"]];
     return menuButton(`More for ${r.company}`, `more-${tab}-${r.row}`, [
       ...heard,
+      ...again,
       ["I applied myself", "mark", () => markRow("applied", r, t), live ? null : "Only for rows still to do (Approved or Needs Human)"],
       ["Drop (not applying)…", "drop", () => dropRow(r, t), live ? null : "Only Approved or Needs Human rows are dropped"],
       [`Move to ${names()[to]}…`, "move", () => moveRow(names(), other ? "other" : "nuworks", r, reload), r.locked || busy],
@@ -1482,7 +1500,7 @@ screens.apply = async (view) => {
     if (live && t.row && t.row.row === r.row && !t.done_rows.some((x) => x.row === r.row)) return el("button", { class: "btn small", testid, disabled: true, text: "Applying…" });
     if (at >= 0) return el("button", { class: "btn small", testid, text: `Queued #${at + 1}`, title: "Take it out of the queue",
       onclick: () => queueRow(r, false) });
-    return el("button", { class: "btn small", testid, disabled: !!d.why_not || !!(S.task && S.task.state === "running" && !live),
+    return el("button", { class: "btn small", testid, disabled: !!d.why_not || !!(d.limited && !r.reapply) || !!(S.task && S.task.state === "running" && !live),
       text: live ? "Add to queue" : "Apply", title: live ? "Apply to it next in this run" : "Apply to just this job now",
       onclick: () => live ? queueRow(r, true) : applyRow(r) });
   }
