@@ -391,6 +391,8 @@ def check_prefs(p):
         raise Refused("Home state: two letters (MA), or empty.")
     out["home_state"], out["home_label"] = state, (str(p.get("home_label", "")).strip() or state)[:30]
     out["home_bonus"] = num("home_bonus", 0, 50)
+    for key in ("featured_bonus", "new_bonus"):  # (preferences saved before 2026-10-28 have neither: the defaults)
+        out[key] = num(key, 0, 50) if str(p.get(key, "")).strip() not in ("", "None") else jobs.DEFAULTS[key]
     field = p.get("field") or "engineering"
     if field not in fields.FIELDS:
         raise Refused(f"What you study: one of {', '.join(f['label'] for f in fields.FIELDS.values())}.")

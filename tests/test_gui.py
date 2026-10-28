@@ -134,6 +134,9 @@ try:
     assert all(isinstance(r["match"], int) for r in applying) and any(r["pay"] for r in applying), applying
     post("/api/action", {"kind": "apply", "args": {"row": 1}}, expect=409)       # the header row: not an Approved row
     post("/api/action", {"kind": "apply", "args": {"row": "2; rm"}}, expect=409)
+    for bad in ("score,nope", "score; rm -rf", "--dry-run"):  # an order: a named one, steps with commas, or "custom"
+        post("/api/action", {"kind": "apply", "args": {"order": bad}}, expect=409)
+    assert all({"posted", "posted_days", "posted_text", "featured"} <= set(r) for r in applying), applying
     checks = {c["id"]: c for c in get("/api/health")["checks"]}
     assert checks["google"]["status"] == "ok" and checks["files"]["status"] == "ok", checks
     rev = get("/api/review?mode=approve")
@@ -815,6 +818,39 @@ try:
         assert [c for c in closes if c] == sorted(c for c in closes if c) and closes[:len([c for c in closes if c])] == [c for c in closes if c], closes
         page.select_option("[data-testid=apply-sort]", "default")
         page.wait_for_function("ids => [...document.querySelectorAll('[data-testid=approved-list] li')].map(l => l.dataset.testid).join() === ids.join()", arg=start_order)
+        # each Ready to apply row: when its posting went up (green under a week, yellow under two, grey under three) and
+        # NUworks' Featured tag, from the update's job list (demo.POSTED_AGO, demo.FEATURED)
+        by_co = {r["company"]: r for r in jobs["sections"]["approved"]}
+        assert by_co["Harbor Embedded"]["posted_days"] == 3 and by_co["Harbor Embedded"]["featured"], by_co["Harbor Embedded"]
+        row_of = lambda co: page.locator("[data-testid=approved-list] li", has_text=co)  # noqa: E731
+        for co, cls in (("Harbor Embedded", "chip ok"), ("Lumen Security", "chip yellow"), ("Quarry Hardware", "chip")):
+            assert row_of(co).locator("[data-testid=posted-on]").get_attribute("class") == cls, co
+        assert row_of("Harbor Embedded").locator("[data-testid=featured]").count() == 1
+        assert row_of("Lumen Security").locator("[data-testid=featured]").count() == 0
+        # Sort: your order: the steps you pick (saved in local_config.json, both machines); Start goes by them. Picking a
+        # step another place has swaps the two; × takes one out; "then" adds one
+        same = "ids => [...document.querySelectorAll('[data-testid=approved-list] li')].map(l => l.dataset.testid).join() === ids.join()"
+        ids = lambda o: ["job-nuworks-%d" % r["row"] for r in get(f"/api/apply?order={o}")["rows"]]  # noqa: E731
+        page.select_option("[data-testid=apply-sort]", "custom")
+        page.wait_for_selector("[data-testid=apply-order-edit]")
+        assert [page.input_value(f"[data-testid=order-step-{k}]") for k in range(4)] == ["urgent", "featured", "age", "score"]
+        page.wait_for_function(same, arg=ids("urgent,featured,age,score"))
+        assert ids("custom") == ids("urgent,featured,age,score")
+        page.select_option("[data-testid=order-step-0]", "featured")
+        page.wait_for_function("() => document.querySelector('[data-testid=order-step-1]')?.value === 'urgent'")
+        assert get("/api/jobs?tab=nuworks&order=custom")["sort"]["custom"] == ["featured", "urgent", "age", "score"]
+        page.wait_for_function(same, arg=ids("featured,urgent,age,score"))
+        page.click("[data-testid=order-remove-2]")
+        page.wait_for_function("() => !document.querySelector('[data-testid=order-step-3]')")
+        page.select_option("[data-testid=order-add]", "pay")
+        page.wait_for_function("() => document.querySelector('[data-testid=order-step-3]')?.value === 'pay'")
+        assert get("/api/jobs?tab=nuworks&order=custom")["sort"]["custom"] == ["featured", "urgent", "score", "pay"]
+        post("/api/settings", {"apply_order": ["score", "score"]}, expect=409)
+        post("/api/settings", {"apply_order": []}, expect=409)
+        assert get("/api/jobs?tab=nuworks&order=nope")["order"] == "default"
+        page.select_option("[data-testid=apply-sort]", "default")
+        page.wait_for_selector("[data-testid=apply-order-edit]", state="detached")
+        page.wait_for_function(same, arg=start_order)
         # one kind of work: only those rows show (Start still goes through all of them); "All" brings the rest back
         kinds = page.locator("[data-testid=apply-kind] option").evaluate_all("os => os.map(o => [o.value, o.textContent])")
         assert kinds[0] == ["", "All kinds of work"] and all(re.search(r"\(\d+\)$", k[1]) for k in kinds[1:]), kinds  # (counts: every row of the tab)
@@ -1276,7 +1312,12 @@ fetch("{target}", {{method: "POST", credentials: "include", body: {json.dumps(bo
         page.wait_for_selector("[data-testid=job-card]")
         assert page.inner_text("[data-testid=btn-open]").startswith("Open on NUworks")
         facts = page.inner_text("[data-testid=job-card] .facts")
-        assert "Posted" not in facts and "Who can apply" not in facts and "needs" in facts, facts
+        assert "Who can apply" not in facts and "needs" in facts, facts
+        # (a co-op's Posted line: when it went up, colored like Apply's chips, and NUworks' Featured tag; 2026-10-28)
+        card = get("/api/job/" + page.get_attribute("[data-testid=job-card]", "data-job"))
+        assert ("Posted" in facts) == bool(card["posted_text"] or card["featured"]) and card.get("source") != "simplify", (facts, card)
+        if card["featured"]:
+            assert page.locator("[data-testid=job-card] [data-testid=featured]").count() == 1
         page.click("h1, #page-title")  # ...and when their list is done: their own wording and link, not the internships'
         for _ in range(coops + 2):
             page.keyboard.press("s")

@@ -68,7 +68,10 @@ A question from a run (an unknown form field, an option to pick, "did it submit?
                  Each card shows Match (and the bar it needed), Score (+ your taste once the model has 5 yes and 5 no),
                  Order (why it sits there: closing within a week, your Proposed row, half score / half taste, a kind
                  of work set to come last, or "rating order" in Rate only), Closes, Pay, Flags, Skills, and "Also on
-                 the company site?" when the posting says so; the terminal viewer shows the Score.
+                 the company site?" when the posting says so; the terminal viewer shows the Score. Posted (2026-10-28,
+                 an advisor's tip; co-ops from the update's job list): how long ago, colored like Apply's chips, and
+                 "featured" when NUworks features it; both add a small bonus to the Score ("+ 5 featured + 5 new":
+                 preferences featured_bonus, new_bonus, Settings > Jobs > Fine-tuning), so Review shows them a bit sooner.
                  Keys as in the CLI viewer: y n s u o, plus j/k scroll, space/b page, g/G top/bottom. Decisions are
                  sent behind the screen (the next job shows at once; a failed write brings you back to that job).
                  Undo (in the toast) puts the row back to Proposed; Not for me (n) rates it no; Skip (s); Back (u);
@@ -102,8 +105,15 @@ A question from a run (an unknown form field, an option to pick, "did it submit?
                  the session; a search opens every section with a match).
                  NUworks sections: Ready to apply (Approved, numbered in the order Start goes: the Sort menu IS that
                  order: closing within a week first, then score (default), score, match %, closing soonest, pay per hour
-                 (insights.hourly; unclear pay last); the server sorts, apply.apply_order, GET /api/jobs?tab=nuworks&order=,
-                 and Start runs `nuauto apply --order <it>`; filtered, "Start still goes through all N"), Company site
+                 (insights.hourly; unclear pay last), Featured first then score, newest posting first, and your order
+                 (2026-10-28, my request: "as customizable as we can"): a row under the toolbar of steps, each a menu
+                 (closing within a week first, Featured first, by posting week, newest posting first, best score, best
+                 match %, closing soonest, best pay), "then" between them, × takes one out, "+ then…" adds one; picking
+                 a step another place has swaps the two; each change is saved at once (local_config.json "apply_order",
+                 both machines; gui.my_order, starting as closing within a week, Featured, posting week, score). The
+                 server sorts, apply.apply_order, GET /api/jobs?tab=nuworks&order= (custom = your order), and Start runs
+                 `nuauto apply --order <it>` (your order: its steps with commas; Run on the homelab sends the steps too);
+                 filtered, "Start still goes through all N"), Company site
                  needed (Needs Human rows stopped at an external application: the assistant), By hand on NUworks (Needs
                  Human rows only you can finish there: a cover letter, a transcript; the assistant can work them on NUworks
                  with you, or a chip says why not), Still owed (submitted on NUworks, the company site still wants you:
@@ -122,7 +132,10 @@ A question from a run (an unknown form field, an option to pick, "did it submit?
                  first; it changes the view only).
                  Every row looks alike: its company (click it: a dropdown, 2026-10-27) with the role under it, score / match % and pay ("score 105 = 75% match + 10 Boston + 20
                  security" when bonuses add to it: Start goes by score), a line about it (site, notes), chips (when it
-                 closes, amber within a week, red once past; an internship's from its posting (gui.intern_facts), else
+                 closes, amber within a week, red once past; on Ready to apply also when the posting went up: "posted
+                 Oct 21", green under a week, yellow under two, grey under three, older the date alone, and "featured"
+                 when NUworks tags it Featured Posting at the last update (jobs.posted_view, from data/list.json; 2026-10-28,
+                 my request); an internship's from its posting (gui.intern_facts), else
                  "no close date · posted N days ago"; "asks for juniors+" (jobs.year_asked: the class year a posting asks for,
                  when above yours; from NUworks' class levels, the scorer's class_req, an internship's year_req); the queue's
                  place; "do it on the laptop" when the homelab's browser was refused), what to do next, Open, and More (⋯;
@@ -192,7 +205,8 @@ A question from a run (an unknown form field, an option to pick, "did it submit?
                  Status: every health check (Run all checks now); Logins (Google, NUworks with Check now, Claude Code, and
                  Gmail: the read-only login for the assistant's email codes, with a link to turn the Gmail API on).
                  Jobs: What you're looking for (Setup's preferences step, the same form and save: term, year, match bars,
-                 kinds of work with their bonuses and lower bars, tags; saving rebuilds the pool); Summer internships
+                 kinds of work with their bonuses and lower bars, new / Featured posting bonuses, tags; saving rebuilds
+                 the pool); Summer internships
                  (optional; local_config "internships", docs/PIPELINE.md): on / off, the term as the lists name it (a new
                  year's term moves the lists' addresses with it), the match % to enter the pool (empty: the co-ops' bar),
                  each list's address (empty: not read).
@@ -261,7 +275,8 @@ not done is open at the start; "You're set up" + Go to Today at the end; Setting
                      description of you, the roles to keep / drop, major words, and the kinds of work (name, what counts,
                      ranking bonus, lower bar, always last; add / remove; Other always there, last). Then term (NUworks' own
                      list: "Read the list from NUworks"; onboard.find_terms), year, graduation year, match needed (and for
-                     the year above yours), home state and its bonus, tags -> local_config.json "preferences"
+                     the year above yours), home state and its bonus, the bonuses for a posting under a week old and
+                     one NUworks features (Fine-tuning; 2026-10-28), tags -> local_config.json "preferences"
                      (docs/PIPELINE.md). onboard.check_prefs checks it all. A first setup has no field picked and Save asks
                      for one. Saving rebuilds the pool (homelab mode: pushes). The resume-label read (nuworks step) tries
                      up to 4 jobs (onboard.a_job_urls), so it works before the pool has anything for you.

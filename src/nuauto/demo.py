@@ -290,6 +290,19 @@ JOBS = [
          "Test automation and C fit.", "plain", sheet_only=True),
 ]
 # In the sheet from the start (not in the pool): Approved ones for Apply, one external Needs Human for Company sites
+# When each pool job went up (days ago: the Apply rows' green / yellow / grey "posted" chips) and the ones NUworks features
+POSTED_AGO = {"900101": 3, "900102": 10, "900103": 30, "900104": 5, "900105": 17, "900106": 12, "900107": 2, "900108": 25,
+              "900109": 1, "900110": 0}
+FEATURED = {"900101", "900104", "900109"}
+
+
+def listed_entry(j, today):
+    """A job as the update's job list keeps it (jobs.list_entry)."""
+    return {"id": j["id"], "title": j["title"], "company": j["company"], "location": j["location"], "snippet": "",
+            "source": "spring", "posted": (today - timedelta(days=POSTED_AGO.get(j["id"], 20))).isoformat(),
+            "featured": j["id"] in FEATURED}
+
+
 SHEET_JOBS = {
     "900101": "Approved", "900102": "Approved", "900105": "Approved",
 }
@@ -491,8 +504,7 @@ def setup(state_names=()):
             continue
         with open(os.path.join(config.DATA_DIR, "details", f"{j['id']}.json"), "w") as f:
             json.dump(details(j, today), f, indent=1)
-        listed[j["id"]] = {"id": j["id"], "title": j["title"], "company": j["company"], "location": j["location"],
-                           "snippet": "", "source": "spring"}
+        listed[j["id"]] = listed_entry(j, today)
         scores[j["id"]], cats[j["id"]] = score(j, today), j["category"]
     jobs.save("list.json", listed)
     jobs.save("triage.json", {i: {"keep": True, "why": "demo"} for i in listed})
@@ -564,8 +576,7 @@ def update():
     for j in new:
         with open(os.path.join(config.DATA_DIR, "details", f"{j['id']}.json"), "w") as f:
             json.dump(details(j, today), f, indent=1)
-        listed[j["id"]] = {"id": j["id"], "title": j["title"], "company": j["company"], "location": j["location"],
-                           "snippet": "", "source": "spring"}
+        listed[j["id"]] = listed_entry(j, today)
         scores[j["id"]], cats[j["id"]] = score(j, today), j["category"]
     jobs.save("list.json", listed)
     jobs.save("scores.json", scores)

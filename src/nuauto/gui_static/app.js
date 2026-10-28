@@ -595,6 +595,22 @@ screens.home = (view) => {
   return { update: draw, health: () => draw(S.state) };
 };
 
+// How long ago a posting went up, as a chip's class: green under a week, yellow under two, grey under three; older, no chip.
+const ageClass = (n) => n == null ? "" : n < 7 ? "chip ok" : n < 14 ? "chip yellow" : n < 21 ? "chip" : "";
+
+// When a NUworks posting went up (the job list at the last update), colored by ageClass; older than 3 weeks, the date alone.
+function postedChip(t) {
+  if (t.posted_days == null) return null;
+  const day = new Date(t.posted + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return el("span", { class: ageClass(t.posted_days) || "small muted", testid: "posted-on", text: `posted ${day}`, title: t.posted_text });
+}
+
+// NUworks' "Featured Posting" tag (read at every update: employers add it after posting, and it ends on a date).
+function featuredChip(t) {
+  return t.featured ? el("span", { class: "chip accent", testid: "featured", text: "featured",
+    title: "NUworks tags this posting Featured (as of the last update): the employer is still looking, so your chances may be better." }) : null;
+}
+
 // When the posting closes (NUworks', or an internship's own): a chip (red once past, amber within a week), or "no deadline listed".
 function dueChip(t) {
   if (!t.closes) return el("span", { class: "chip", text: "no deadline listed", testid: "due" });
@@ -1003,7 +1019,8 @@ function jobCard(c, j, mine, compact) {  // compact: the posting is cut short, w
     unscored ? null : ["Score", el("span", {}, c.score, c.taste !== null && c.taste !== undefined ?
       el("span", { class: "muted", text: ` · your taste ${Math.round(c.taste * 100)}%` }) : null)],
     j.order ? ["Order", el("span", { class: "muted", testid: "job-order", text: j.order })] : null,
-    c.posted_text ? ["Posted", c.posted_text.replace(/^(posted|posting) /i, "")] : null,  // "posted 5 days ago" reads "5 days ago" there
+    c.posted_text || c.featured ? ["Posted", el("span", { class: "row" }, c.posted_text ? el("span", { class: ageClass(c.posted_days), testid: "job-posted",
+      text: c.posted_text.replace(/^(posted|posting) /i, "") }) : null, featuredChip(c))] : null,  // "posted 5 days ago" reads "5 days ago" there
     ["Closes", el("span", { class: c.soon ? "chip warn" : "", text: c.closes_text })],
     c.year_text ? ["Who can apply", c.year_text] : null,  // the posting's own words about class year / degree
     ["Pay", c.pay || "not listed"],
@@ -1067,6 +1084,9 @@ async function jobDetailBody(tab, r) {
 // Rows missing the value go last, ties keep the list's own order.
 const SORTS = {
   default: ["closing within a week first, then score", null],
+  featured: ["Featured first, then score", null],
+  newest: ["newest posting first", null],
+  custom: ["your order", null],  // (its steps: the editor under the toolbar; the server sorts)
   sheet: ["sheet order", null],
   score: ["score (match + bonuses)", (r) => r.score == null ? null : -r.score],
   match: ["match %", (r) => r.match == null ? null : -r.match],
@@ -1128,7 +1148,7 @@ screens.apply = async (view) => {
   if (S.focus) { tab = S.focus === "other" ? "other" : "nuworks"; S.focus = null; }  // Today's buttons, #/company, #/other
   const data = { nuworks: null, other: null };
   const openRows = new Set();  // rows whose dropdown is open (a redraw keeps them open)
-  const SORT_OPTS = { nuworks: ["default", "score", "match", "closes", "pay"],
+  const SORT_OPTS = { nuworks: ["default", "score", "match", "closes", "pay", "featured", "newest", "custom"],
     other: (onHomelab() ? ["queue"] : []).concat(["score", "match", "pay", "sheet"]) };
   const sortOf = (k) => { const v = sessionStorage.getItem("applySort:" + k); return SORT_OPTS[k].includes(v) ? v : SORT_OPTS[k][0]; };
   let kind = sessionStorage.getItem("applyKind") || "";  // one kind of work, or "" = all (shared by the tabs)
@@ -1206,7 +1226,30 @@ screens.apply = async (view) => {
       onchange: (e) => { sessionStorage.setItem("applySort:" + tab, e.target.value); if (tab === "nuworks") reload(); else drawPane(); } },
       ...SORT_OPTS[tab].map((k) => el("option", { value: k, text: "Sort: " + SORTS[k][0], selected: k === how })));
     fill(bar, el("div", { class: "row toolbar", testid: "apply-toolbar" }, find, cat, sel,
-      el("button", { class: "btn", testid: "add-job", text: "Add a job", onclick: () => addJob(tab === "other" ? "other" : "nuworks", (t) => { tab = t; sessionStorage.setItem("applyTab", t); reload(); }) })));
+      el("button", { class: "btn", testid: "add-job", text: "Add a job", onclick: () => addJob(tab === "other" ? "other" : "nuworks", (t) => { tab = t; sessionStorage.setItem("applyTab", t); reload(); }) })),
+      tab === "nuworks" && how === "custom" && d && d.sort ? orderEditor(d.sort) : null);
+  }
+
+  // Your order (Sort: your order): the steps Start sorts Ready to apply by. A tie on one step goes to the next; rows
+  // missing a step's value come after the rest there. Each change is saved at once (local_config.json "apply_order",
+  // both machines) and the list sorts again. Picking a step another place has swaps the two.
+  function orderEditor(sort) {
+    const steps = sort.custom.slice(), names = sort.steps;
+    const save = async (next) => { try { await api.post("/api/settings", { apply_order: next }); reload(); } catch (e) { fail(e); } };
+    const pick = (k) => el("select", { "aria-label": `Step ${k + 1}`, testid: `order-step-${k}`, onchange: (e) => {
+      const next = steps.slice(), was = next.indexOf(e.target.value);
+      if (was >= 0) next[was] = next[k];
+      next[k] = e.target.value;
+      save(next);
+    } }, ...Object.keys(names).map((x) => el("option", { value: x, text: names[x], selected: x === steps[k] })));
+    const unused = Object.keys(names).filter((x) => !steps.includes(x));
+    return el("div", { class: "row order-edit", testid: "apply-order-edit" }, el("span", { class: "small muted", text: "Your order:" }),
+      ...steps.map((x, k) => el("span", { class: "order-step" }, k ? el("span", { class: "small muted", text: "then" }) : null, pick(k),
+        steps.length > 1 ? el("button", { class: "btn small ghost", text: "×", title: "Take this step out", "aria-label": `Take out ${names[x]}`,
+          testid: `order-remove-${k}`, onclick: () => save(steps.filter((_, j) => j !== k)) }) : null)),
+      unused.length ? el("select", { "aria-label": "Add a step", testid: "order-add", onchange: (e) => e.target.value && save([...steps, e.target.value]) },
+        el("option", { value: "", text: "+ then…" }), ...unused.map((x) => el("option", { value: x, text: names[x] }))) : null,
+      el("span", { class: "small muted", text: "A tie on one step goes to the next." }));
   }
 
   function drawPane() {
@@ -1261,7 +1304,7 @@ screens.apply = async (view) => {
     const other = tab === "other";
     let chips = [], next = null, open = linkOut(r.url, "Open"), about = null;
     if (key === "approved") {
-      chips = [dueChip(r)];  // (a job that sends you to the company's own site lands in Company site needed by itself)
+      chips = [dueChip(r), postedChip(r), featuredChip(r)];  // (a job that sends you to the company's own site lands in Company site needed by itself)
       next = applyButton(d, r);
     } else if (key === "agent") {
       chips = [dueChip(r)];

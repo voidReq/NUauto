@@ -115,4 +115,43 @@ finally:
 assert notes == [(9, note)] and "probe.py" in note and "nuauto assist nuworks 9" in note, notes
 assert note.startswith(gui.NUWORKS_SIDE_NOT_SENT[0]) and assist.nuworks_side_blocked(note) is None, note
 
+# Start's order (apply.apply_order: `--order`, the GUI's Sort menu): a named order or your own steps. A tie on one step
+# goes to the next, a row missing a step's value comes after the rest there, the last ties in sheet order
+from datetime import date, timedelta
+from nuauto import jobs
+config.DATA_DIR = tempfile.mkdtemp()
+os.makedirs(os.path.join(config.DATA_DIR, "details"))
+today = date.today()
+J = {  # row: (id, score, match, posted days ago, featured, closes in, pay)
+    2: ("a", 90, 80, 20, False, 30, "20-25 per hour"),
+    3: ("b", 70, 70, 2, True, 30, "30-40 per hour"),
+    4: ("c", 80, 75, 10, False, 3, ""),
+    5: ("d", 60, 90, 1, True, None, "18-22 per hour"),
+    6: ("e", None, None, None, False, 40, ""),  # not in the pool, not scored, not in the job list
+}
+jobs.save("pool.json", [{"id": i, "rank": rk} for i, rk, *_ in J.values() if rk is not None])
+jobs.save("scores.json", {i: {"match": m} for i, _, m, *_ in J.values() if m is not None})
+jobs.save("list.json", {i: {"id": i, "posted": (today - timedelta(days=ago)).isoformat(), "featured": f}
+                        for i, _, _, ago, f, *_ in J.values() if ago is not None})
+for i, _, _, _, _, closes, pay in J.values():
+    with open(os.path.join(config.DATA_DIR, "details", f"{i}.json"), "w") as f:
+        json.dump({"deadline": (today + timedelta(days=closes)).isoformat() if closes else None, "posting_end": None, "pay": pay}, f)
+ROWS = [sheet.Row(n, f"https://northeastern-csm.symplicity.com/students/app/jobs/detail/{v[0]}", "C", "T", "Approved", "", "")
+        for n, v in reversed(J.items())]  # (sheet order is the last tie, not the list's)
+order = lambda o: "".join(J[r.number][0] for r in apply.apply_order(ROWS, o))  # noqa: E731
+assert order("default") == "cabde"                    # closing within a week, then score; not in the pool last
+assert order("score") == "acbde" and order("match") == "dacbe" and order("closes") == "cabed" and order("pay") == "badce"
+assert order("featured") == "bdace"                   # Featured first, then score
+assert order("newest") == "dbcae"                     # newest posting first; no posting day last
+assert order("age,score") == "bdcae"                  # under 1 week (by score), under 2, under 3; none last
+assert order("urgent,featured,age,score") == "cbdae"  # the GUI's "your order" to start with
+assert order(" featured , pay ") == "bdace"            # (spaces are fine)
+for bad in ("", "nope", "score,score", "custom", "default,score"):
+    try:
+        apply.order_steps(bad)
+        raise AssertionError(f"took {bad!r}")
+    except ValueError:
+        pass
+assert apply.order_steps("default") == ["urgent", "score"] and set(apply.order_steps(",".join(apply.STEPS))) == set(apply.STEPS)
+
 print("All checks passed.")

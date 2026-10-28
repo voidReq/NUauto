@@ -2,8 +2,9 @@
 there is no per-job prompt. Run it through the `nuauto` command:
 
   nuauto apply          # every Approved row, up to the weekly limit: closing within 7 days
-                         # first (soonest first), then best match first
+                         # first (soonest first), then best score first
   nuauto apply -n 3     # at most 3 this run
+  nuauto apply --order featured,age,score   # another order (--help lists them and the steps)
 
 Hidden dev flags: --dry-run (fill and screenshot, never submit), --row N.
 
@@ -188,48 +189,69 @@ def row_closes(row):
 
 
 # The orders a run can go in (`--order`, the GUI's Sort menu on the NUworks tab): the list there IS the run's order.
-ORDERS = {"default": "closing within a week first, then score", "score": "score (match + bonuses)",
-          "match": "match %", "closes": "closing soonest", "pay": "pay per hour"}
+# An order is a list of steps: rows are compared on the first step, a tie goes to the next, and so on (a row missing a
+# step's value comes after those that have it; the last ties stay in sheet order). Steps:
+STEPS = {"urgent": "closing within a week first", "featured": "Featured first", "age": "by posting week",
+         "newest": "newest posting first", "score": "best score", "match": "best match %", "closes": "closing soonest",
+         "pay": "best pay per hour"}
+# Named orders (the Sort menu; `--order <name>`); any other order is its steps with commas: `--order featured,age,score`.
+ORDERS = {"default": ("closing within a week first, then score", ["urgent", "score"]),
+          "score": ("score (match + bonuses)", ["score"]), "match": ("match %", ["match"]),
+          "closes": ("closing soonest", ["closes"]), "pay": ("pay per hour", ["pay"]),
+          "featured": ("Featured first, then score", ["featured", "score"]),
+          "newest": ("newest posting first", ["newest", "score"])}
+AGE_WEEKS = (7, 14, 21)  # "age": under 1 week, under 2, under 3, older (the Apply rows' green / yellow / grey chips)
+
+
+def order_steps(order):
+    """An order's steps: a named one (ORDERS) or steps with commas. ValueError for anything else."""
+    if order in ORDERS:
+        return list(ORDERS[order][1])
+    steps = [x.strip() for x in str(order or "").split(",") if x.strip()]
+    bad = [x for x in steps if x not in STEPS]
+    if not steps or bad or len(set(steps)) != len(steps):
+        raise ValueError(f"Unknown order {order!r}: one of {', '.join(ORDERS)}, or steps with commas "
+                         f"({', '.join(STEPS)}), each once.")
+    return steps
 
 
 def apply_order(rows, order="default"):
-    """default: jobs closing within jobs.URGENT_DAYS go first, soonest first. The rest go best score first
-    (pool rank: match + bonuses), since real postings often close early once they find someone.
-    score / match / closes / pay: by that alone (best first; closes soonest first; pay = the top of the hourly range,
-    insights.hourly). Rows missing the value (not in the pool, not scored, no deadline, pay unclear) go last; ties
-    in sheet order."""
-    if order not in ORDERS:
-        raise ValueError(f"Unknown order {order!r} (one of {', '.join(ORDERS)}).")
+    """The rows in this order (order_steps). urgent: closing within jobs.URGENT_DAYS first, soonest first (real postings
+    often close early once they find someone). featured: NUworks' Featured Posting tag at the last update (data/list.json).
+    age: under 1, 2, 3 weeks since posting, then older. newest: by posting day. score: pool rank (match + bonuses).
+    pay: the top of the hourly range (insights.hourly). A row missing the value (not in the pool, not scored, no
+    deadline, no posting day, pay unclear) comes after the rest at that step; ties in sheet order."""
+    steps = order_steps(order)
     rank = {r["id"]: r["rank"] for r in jobs.load("pool.json", [])}
+    scores = jobs.load("scores.json", {}) if "match" in steps else {}
+    listed = jobs.load("list.json", {}) if {"featured", "age", "newest"} & set(steps) else {}
     today = date.today()
-    if order == "default":
-        def key(r):
+    from nuauto import insights
+
+    def step(x, r):  # (0, value) sorts before (1, 0): the value, smaller first; (1, 0) = missing
+        i = jobs.job_id(r.url)
+        if x == "urgent":
             day = row_closes(r)
-            if day is not None and (day - today).days <= jobs.URGENT_DAYS:
-                return (0, day, 0, r.number)
-            rk = rank.get(jobs.job_id(r.url))
-            return (1, date.max, -rk, r.number) if rk is not None else (2, date.max, 0, r.number)
-        return sorted(rows, key=key)
-    if order == "score":
-        value = lambda r: rank.get(jobs.job_id(r.url))  # noqa: E731
-    elif order == "match":
-        scores = jobs.load("scores.json", {})
-        value = lambda r: (scores.get(jobs.job_id(r.url)) or {}).get("match")  # noqa: E731
-    elif order == "closes":
-        value = lambda r: row_closes(r)  # noqa: E731
-    else:
-        from nuauto import insights
-
-        def value(r):
+            return (0, day.toordinal()) if day is not None and (day - today).days <= jobs.URGENT_DAYS else (1, 0)
+        if x == "featured":
+            return (0, 0) if (listed.get(i) or {}).get("featured") else (1, 0)
+        if x in ("age", "newest"):
+            day = jobs.posted(listed.get(i))
+            if day is None:
+                return (1, 0)
+            return (0, -day.toordinal()) if x == "newest" else (0, sum((today - day).days >= w for w in AGE_WEEKS))
+        if x == "closes":
+            day = row_closes(r)
+            return (0, day.toordinal()) if day is not None else (1, 0)
+        if x == "score":
+            v = rank.get(i)
+        elif x == "match":
+            v = (scores.get(i) or {}).get("match")
+        else:  # pay
             hour = insights.hourly(row_details(r).get("pay"))
-            return hour[1] if hour else None
-
-    def key(r):
-        v = value(r)
-        if v is None:
-            return (1, 0, r.number)
-        return (0, v.toordinal() if order == "closes" else -v, r.number)  # soonest first; else best first
-    return sorted(rows, key=key)
+            v = hour[1] if hour else None
+        return (0, -v) if v is not None else (1, 0)  # best first
+    return sorted(rows, key=lambda r: tuple(step(x, r) for x in steps) + (r.number,))
 
 
 def queued(path):
@@ -488,11 +510,21 @@ def refuse_unattended(ui):
         sys.exit("apply submits real applications; run it yourself in a terminal.")
 
 
+def order_arg(value):
+    try:
+        order_steps(value)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(str(e))
+    return value
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("-n", type=int, metavar="N", help="apply to at most N jobs this run")
-    ap.add_argument("--order", choices=list(ORDERS), default="default",
-                    help="the order to go in: " + "; ".join(f"{k} = {v}" for k, v in ORDERS.items()).replace("%", "%%"))
+    ap.add_argument("--order", type=order_arg, default="default", metavar="ORDER",
+                    help=("the order to go in: " + "; ".join(f"{k} = {v[0]}" for k, v in ORDERS.items()) +
+                          ". Or your own, steps with commas (featured,age,score): " +
+                          "; ".join(f"{k} = {v}" for k, v in STEPS.items())).replace("%", "%%"))
     ap.add_argument("--row", type=int, help=argparse.SUPPRESS)
     ap.add_argument("--dry-run", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--ui", choices=["json"], help=argparse.SUPPRESS)  # questions as JSON lines, for nuauto gui

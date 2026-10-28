@@ -8,7 +8,11 @@ PIPELINE
 Data comes from NUworks' own search/job data, not page text.
 1. list (jobs.cmd_list): two server searches, both Co-op, Available, 4 or 6 month, not applied. One adds your term
    (preferences "term" / "term_id"); the other has no term filter: what it finds beyond the first the hard
-   rules sort out.
+   rules sort out. A third (2026-10-28, an advisor's tip: new and featured postings are the ones still looking) is the
+   second with NUworks' "Featured Posting" tag (student_search_tags=3, RULES featured_tag; about 130 of 2400, 2 pages):
+   employers add the tag after posting and it ends on a date (the job's clear_featured_tag_on), so it is read again
+   every update. list.json keeps per job (jobs.list_entry) "posted" (the day it went up: jobs_iso_times.job_start, the
+   search's postdate) and "featured".
 2. Claude triage (Sonnet, prompts/TRIAGE_PROMPT.md, 250 jobs a batch): title, company, place and a snippet;
    drops only clearly unrelated roles.
 3. details + hard rules (script; one NUworks job page each).
@@ -31,6 +35,7 @@ the values below, used for any key not set. TRIAGE_PROMPT.md's student / keep / 
 preferences ({{student}}, {{keep_roles}}, {{drop_roles}}, filled into work/ by jobs.render_prompt).
 onboard.check_prefs validates them.)
 Keys and defaults: term "2027 - Spring" + term_id; class_year sophomore; threshold 65; threshold_above 90;
+featured_bonus 5; new_bonus 5;
 category_threshold {security: 60}; major_words ["college of engineering", "electrical"]; home_state MA, home_label
 Boston, home_bonus 10; category_bonus; categories; rank_last; tags; grad_year 2029; field; student, keep_roles,
 drop_roles. (Defaults for the kinds, bonuses and bars come from the field: fields.py.)
@@ -69,7 +74,9 @@ WHAT YOU STUDY (fields.py; preferences "field" and "categories")
   bonus red, other bonuses green, rank_last dim) come from the list.
 
 RANKING (jobs.pool_entry, pool_sort_key)
-- rank = raw match + home bonus + category bonus + tag bonus. Defaults for engineering: security +20, embedded +15,
+- rank = raw match + home bonus + category bonus + tag bonus + featured_bonus (NUworks features it at the last update)
+  + new_bonus (posted under jobs.NEW_DAYS = 7 days ago; jobs.pool_entry, from list.json; co-ops only). Defaults for
+  engineering: security +20, embedded +15,
   hardware / systems / robotics-test +10, front-end / UI -20 (and always last: rank_last). Full-stack and web
   back-end rank like any software job. Other fields: no bonuses.
 - Tags (preferences "tags"; name, phrases, points; up to 20): a phrase matches whole words, any case, a space or
@@ -83,8 +90,12 @@ RANKING (jobs.pool_entry, pool_sort_key)
   sheet rows (even below the pool bar, flagged; ones with no stored details are listed, not shown; y turns that row
   Approved, no new row), then pool jobs not in the sheet and not rated no. Review's search box (jobs.search_match)
   takes words or "quoted phrases".
-- `nuauto apply --order`: default = closing within 7 days first, then best rank | score (rank) | match | closes | pay
-  (top of the hourly range); the GUI's sort menu. Rows without the value go last. Past-deadline rows -> Needs Human.
+- `nuauto apply --order` (the GUI's Sort menu; apply.ORDERS, STEPS): default = closing within 7 days first, then best
+  rank | score (rank) | match | closes | pay (top of the hourly range) | featured (Featured first, then score) | newest
+  (newest posting first, then score) | your own: steps with commas, e.g. `--order urgent,featured,age,score` (urgent,
+  featured, age = posting week: under 1 / 2 / 3 weeks, then older; newest, score, match, closes, pay). A tie on one
+  step goes to the next; rows without a step's value come after the rest there; last ties in sheet order.
+  Past-deadline rows -> Needs Human.
   The daily run notifies about pool jobs closing within 3 days that aren't in the sheet and not rated no.
 - `nuauto jobs suggest N`: the top N pool jobs (not in the sheet, not rated no) as Proposed rows, after you say y.
 
