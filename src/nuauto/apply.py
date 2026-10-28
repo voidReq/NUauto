@@ -12,7 +12,8 @@ A row becomes Applied after NUworks confirms. If the script has to stop (externa
 site, unknown field, ...) the row becomes Needs Human with the reason in Notes and
 the run moves on. Unexpected errors, an expired session or an unclear submit stop the run.
 A row being re-applied with the new resume (sheet.mark_reapply): its first application is withdrawn on NUworks (My Job
-Applications), then it is sent again; it keeps its first date and goes even past the limits.
+Applications), then it is sent again; it keeps its first date and goes even past the limits. Read live right before the
+withdraw, a job that has moved on (closed, interviewing, not Available: keep_first) keeps its first application instead.
 """
 import argparse
 import contextlib
@@ -63,8 +64,13 @@ class NotWithdrawn(Exception):
     a dry run): skip it, the row stays."""
 
 
-def still_applied(page, row):
-    """NUworks still has your application to this row's job (its job record, read-only): not withdrawn yet."""
+class KeepFirst(Exception):
+    """A row being re-applied whose job has moved on (keep_first): its first application stays as it is, the row goes
+    back to Applied."""
+
+
+def job_record(page, row):
+    """NUworks' job record for this row's job, read now (read-only)."""
     i = jobs.job_id(row.url)
     resp = page.request.get(f"{jobs.HOST}/api/v3/jobs/{i}")
     try:
@@ -73,7 +79,41 @@ def still_applied(page, row):
         raw = None
     if not raw or raw.get("job_id") != i:
         raise NotWithdrawn("Couldn't ask NUworks whether you withdrew it; try again later.")
-    return bool(raw.get("applied"))
+    return raw
+
+
+def still_applied(page, row):
+    """NUworks still has your application to this row's job (its job record, read-only): not withdrawn yet."""
+    return bool(job_record(page, row).get("applied"))
+
+
+def keep_first(raw, today=None):
+    """Why NUworks' job record, read right before a withdraw, says to leave the first application alone (None: go on).
+    Re-apply only where nothing has started (your call, 2026-10-28): the posting is open (not expired, its deadline and
+    end not passed) and the employer hasn't moved on: its Hiring Status is Available and its hidden interviewing flag is
+    off (jobs.application_answer). NUworks shows students nothing about their own application (whether it was viewed
+    or downloaded: checked 2026-10-28), so these are all there is to go on."""
+    today = today or date.today()
+    stage = raw.get("internal_status")
+    hiring = (stage.get("_label") if isinstance(stage, dict) else stage) or None
+    day = jobs.closes({"deadline": raw.get("application_deadline"),
+                       "posting_end": (raw.get("job_dates") or {}).get("end") or raw.get("job_end")})
+    if raw.get("expired"):
+        return "the posting has closed"
+    if day is not None and day < today:
+        return f"its deadline passed ({day})"
+    if str(raw.get("is_interviewing")) == "1" or hiring == "Interviewing":
+        return "the employer is interviewing"
+    if hiring != "Available":
+        return f"its Hiring Status is {hiring or 'not shown'}"
+    return None
+
+
+def keep_first_application(ws, row, why, log=None):
+    """Not re-applied after all: the row goes back to Applied as it was (sheet.undo_reapply), with a note saying why."""
+    sheet.undo_reapply(ws, row.number, row.url)
+    sheet.append_note(ws, row.number, row.url, f"Not re-applied {date.today():%Y-%m-%d}: {why}; the first application stays.")
+    (log.write if log else print)(f"Row {row.number}: not re-applied ({why}): back to Applied, the first application stays.")
 
 
 APPLICATIONS_URL = f"{jobs.HOST}/students/index.php?s=jobs&ss=applied&mode=list&subtab=nocr"  # My Job Applications
@@ -387,7 +427,11 @@ def fill_popup(page, context, row, resume_label, entries, io, log, blocked, comp
     if browser.on_login_page(page):
         if not browser.goto_logged_in(page, context, row.url, log):
             raise SessionExpired("NUworks is showing the sign-in page. Run `nuauto login` again.")
-    if sheet.reapplying(row) and still_applied(page, row):
+    raw = job_record(page, row) if sheet.reapplying(row) else {}
+    if raw.get("applied"):  # (once NUworks no longer has it, the only way back is to send it again)
+        why = keep_first(raw)
+        if why:
+            raise KeepFirst(why)
         if not withdraw:
             raise NotWithdrawn("NUworks still has your first application (a dry run never withdraws).")
         withdraw_first(page, row, log)
@@ -565,6 +609,11 @@ def apply_one(row, ws, args, resume_label, entries, io):
             reason = str(e)
         except NotWithdrawn as e:
             log.write(f"SKIP: {e} Row {row.number} stays Approved (to be re-applied).")
+        except KeepFirst as e:
+            if args.submit:
+                keep_first_application(ws, row, str(e), log)
+            else:
+                log.write(f"DRY RUN: would not re-apply ({e}); row stays Approved.")
         except SessionExpired as e:
             log.write(f"STOP: {e} Sheet left unchanged (row stays Approved).")
             outcome = "stop"
@@ -683,7 +732,9 @@ def run_rows(args, ws, resume_label, entries, io):
         first = False
         seen.add(row.number)
         day = row_closes(row)
-        if day is not None and day < date.today():
+        # (a row being re-applied: NUworks' live job record decides, apply.keep_first; saved dates go stale when an
+        # employer extends a posting)
+        if day is not None and day < date.today() and not sheet.reapplying(row):
             print(f"--- Row {row.number}: {row.company} | {row.title}: deadline passed ({day}). Needs Human.")
             io.event("row_done", row=row.number, outcome="deadline")
             sheet.set_status(ws, row.number, "Needs Human", notes=f"deadline passed ({day}); not attempted")

@@ -210,6 +210,20 @@ expect(SheetError, lambda: sheet.mark_reapply(FakeWS([HEADERS, [NU, "Co", "Job",
 other = FakeWS([HEADERS, [NU, "Co", "Job", "Applied", "", "2026-10-03"]])
 other.title = sheet.OTHER_TAB
 expect(SheetError, lambda: sheet.mark_reapply(other, 2, NU))             # the Other jobs tab has no NUworks applications
+# not re-applied where the last NUworks check says the job has moved on (sheet.reapply_refused): marking refuses it
+seen = {"abc": {"applied": True, "expired": False, "interviewing": True, "hiring": "Available"}}
+row = sheet.Row(2, NU, "Co", "Job", "Applied", "", "2026-10-03")
+assert sheet.reapply_refused(row, seen) == "the employer is interviewing"
+assert sheet.reapply_refused(row, {"abc": {**seen["abc"], "interviewing": False}}) is None
+assert sheet.reapply_refused(row, {"abc": {**seen["abc"], "interviewing": False, "hiring": "Filled"}}) == "its Hiring Status is Filled"
+assert sheet.reapply_refused(row, {"abc": {**seen["abc"], "interviewing": False, "expired": True}}) == "its posting has closed"
+assert sheet.reapply_refused(row, {}) is None                              # never asked: Apply checks it live anyway
+saved_seen = sheet.nuworks_seen
+sheet.nuworks_seen = lambda: seen
+try:
+    expect(SheetError, lambda: sheet.mark_reapply(FakeWS([HEADERS, [NU, "Co", "Job", "Applied", "", "2026-10-03"]]), 2, NU))
+finally:
+    sheet.nuworks_seen = saved_seen
 from nuauto import manage  # noqa: E402
 assert manage.movable(sheet.Row(2, NU, "Co", "Job", "Approved", f"{sheet.REAPPLY_MARK} (first sent 2026-10-03).", "2026-10-03"))
 

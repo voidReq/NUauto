@@ -576,7 +576,13 @@ try:
     post("/api/mark", {"action": "outcome", "outcome": "Accepted", "row": approved_one["row"], "url": approved_one["url"]}, expect=409)
     post("/api/mark", {"action": "outcome", "outcome": "Failed", "row": sent["row"], "url": sent["url"]}, expect=409)
     # re-apply with the new resume (sheet.mark_reapply): back to Approved, first date kept, the limits unchanged; Undo
+    # (only where nothing has started: a job NUworks saw interviewing is refused, sheet.reapply_refused)
     state_now = get("/api/state")["week"]
+    applied_now = get("/api/jobs?tab=nuworks")["sections"]["applied"]
+    busy = next(r for r in applied_now if (r.get("nuworks") or {}).get("hiring") == "Interviewing")
+    post("/api/mark", {"action": "reapply", "row": busy["row"], "url": busy["url"]}, expect=409)
+    sent = next(r for r in applied_now if not r.get("nuworks") or (r["nuworks"].get("hiring") == "Available"
+                                                                     and not r["nuworks"].get("interviewing")))
     post("/api/mark", {"action": "reapply", "row": sent["row"], "url": sent["url"]})
     again = [r for r in get("/api/jobs?tab=nuworks")["sections"]["approved"] if r["row"] == sent["row"]]
     assert again and again[0]["reapply"] and again[0]["date"] == sent["date"], again

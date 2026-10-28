@@ -29,7 +29,7 @@ Sheet and NUworks
                   read_rows(); limits: max_per_week(), week_window(), applied_dates(), total_count() (not_on_nuworks,
                   rejected_not_withdrawn, maybe_filled; reapplying() rows count as sent), check_limits(); writers: set_status,
                   mark_submit_started / resolve_submit, mark_applied_by_hand, mark_site_done, set_outcome, drop,
-                  mark_reapply / undo_reapply, approve_proposed, unapprove,
+                  mark_reapply (reapply_refused) / undo_reapply, approve_proposed, unapprove,
                   mark_on_laptop, append_note, add_proposed; create_sheet(), google_login().
   manage.py       rows by hand: add(), move(), remove() (cells cleared, never deleted), lookup(), check_url(), movable(),
                   reapply() (`nuauto sheet reapply <row>... [--undo]`).

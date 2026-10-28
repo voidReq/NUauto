@@ -242,3 +242,87 @@ assert hits == [] and "not withdrawn" in out, (out, hits)                       
 out, hits = withdraw_case(other="abc")
 assert hits == [] and "lists this job 2 times" in out, (out, hits)                  # the job twice: never a guess
 print("Re-apply withdraw checks passed.")
+
+# re-apply only where nothing has started (2026-10-28): NUworks' job record, read right before the withdraw (keep_first)
+from datetime import date as _date, timedelta as _td  # noqa: E402
+OPEN = {"job_id": "abc", "applied": True, "expired": False, "internal_status": {"_label": "Available"},
+        "is_interviewing": "0", "application_deadline": None, "job_dates": None, "job_end": None}
+yesterday, today_s = (_date.today() - _td(days=1)).isoformat(), _date.today().isoformat()
+assert apply.keep_first(OPEN) is None
+assert apply.keep_first({**OPEN, "is_interviewing": None}) is None
+assert apply.keep_first({**OPEN, "application_deadline": today_s}) is None                      # closes today: still open
+assert apply.keep_first({**OPEN, "expired": True}) == "the posting has closed"
+assert apply.keep_first({**OPEN, "is_interviewing": "1"}) == "the employer is interviewing"
+assert apply.keep_first({**OPEN, "internal_status": {"_label": "Interviewing"}}) == "the employer is interviewing"
+assert apply.keep_first({**OPEN, "internal_status": "Filled"}) == "its Hiring Status is Filled"
+assert apply.keep_first({**OPEN, "internal_status": None}) == "its Hiring Status is not shown"
+assert apply.keep_first({**OPEN, "application_deadline": yesterday}).startswith("its deadline passed")
+assert apply.keep_first({**OPEN, "job_dates": {"end": yesterday}}).startswith("its deadline passed")
+
+# ...and fill_popup stops before any withdraw when it says so; a job record that can't be read: skipped, never a guess
+REROW = sheet.Row(9, "https://northeastern-csm.symplicity.com/students/app/jobs/detail/abc", "Co", "T", "Approved",
+                  f"{sheet.REAPPLY_MARK} (first sent 2026-10-03).", "2026-10-03")
+fake_page = types.SimpleNamespace(goto=lambda *a, **k: None, wait_for_timeout=lambda ms: None)
+fake_log = types.SimpleNamespace(write=lambda *a: None, screenshot=lambda *a: None)
+saved = apply.job_record, apply.withdraw_first, browser.on_login_page
+apply.withdraw_first = lambda *a: (_ for _ in ()).throw(AssertionError("withdrew"))
+browser.on_login_page = lambda page: False
+
+
+def popup_with(record):
+    apply.job_record = record
+    try:
+        apply.fill_popup(fake_page, None, REROW, "", [], None, fake_log, [], withdraw=True)
+    except (apply.KeepFirst, apply.NotWithdrawn) as e:
+        return type(e).__name__, str(e)
+
+
+def unreadable(page, row):
+    raise apply.NotWithdrawn("Couldn't ask NUworks whether you withdrew it; try again later.")
+try:
+    assert popup_with(lambda page, row: {**OPEN, "is_interviewing": "1"}) == ("KeepFirst", "the employer is interviewing")
+    assert popup_with(lambda page, row: {**OPEN, "expired": True}) == ("KeepFirst", "the posting has closed")
+    assert popup_with(unreadable)[0] == "NotWithdrawn"
+finally:
+    apply.job_record, apply.withdraw_first, browser.on_login_page = saved
+
+# a KeepFirst row goes back to Applied with the reason (apply_one: a real run; a dry run changes nothing)
+calls = []
+saved = (apply.fill_popup, apply.sync_playwright, browser.launch, browser.install_domain_lock, sheet.undo_reapply,
+         sheet.append_note)
+apply.fill_popup = lambda *a, **k: (_ for _ in ()).throw(apply.KeepFirst("the employer is interviewing"))
+apply.sync_playwright = lambda: __import__("contextlib").nullcontext(None)
+browser.launch = lambda p: types.SimpleNamespace(pages=[object()], close=lambda: None)
+browser.install_domain_lock = lambda *a: None
+sheet.undo_reapply = lambda ws, n, url: calls.append(("undo", n))
+sheet.append_note = lambda ws, n, url, text: calls.append(("note", n, text))
+try:
+    assert apply.apply_one(REROW, None, types.SimpleNamespace(submit=False), "", [], None) == "next" and calls == []
+    assert apply.apply_one(REROW, None, types.SimpleNamespace(submit=True), "", [], None) == "next"
+    assert calls[0] == ("undo", 9) and calls[1][:2] == ("note", 9) and "the employer is interviewing" in calls[1][2], calls
+finally:
+    (apply.fill_popup, apply.sync_playwright, browser.launch, browser.install_domain_lock, sheet.undo_reapply,
+     sheet.append_note) = saved
+
+# a re-apply row whose SAVED deadline passed: NUworks' live record decides (employers extend postings), never Needs Human
+calls = []
+rows = [sheet.Row(2, "https://northeastern-csm.symplicity.com/students/app/jobs/detail/abc", "Co", "T", "Approved",
+                  f"{sheet.REAPPLY_MARK} (first sent 2026-10-03).", "2026-10-03")]
+saved = {k: getattr(sheet, k) for k in ("read_rows", "check_limits", "week_window", "undo_reapply", "append_note", "set_status")}
+saved_closes, saved_one = apply.row_closes, apply.apply_one
+sheet.read_rows = lambda ws: rows
+sheet.check_limits, sheet.week_window = (lambda rs: (0, 0)), (lambda: (None, "this week"))
+sheet.undo_reapply = lambda ws, n, url: (calls.append(("undo", n)), setattr(rows[0], "status", "Applied"))
+sheet.append_note = lambda ws, n, url, text: calls.append(("note", n))
+sheet.set_status = lambda *a, **k: calls.append(("set_status",))
+apply.row_closes = lambda r: _date.today() - _td(days=1)
+apply.apply_one = lambda *a: calls.append(("opened",)) or "next"
+try:
+    apply.run_rows(types.SimpleNamespace(row=None, n=None, order="closes", queue=None), None, "", [],
+                   types.SimpleNamespace(event=lambda *a, **k: None))
+    assert calls == [("opened",)], calls
+finally:
+    for k, v in saved.items():
+        setattr(sheet, k, v)
+    apply.row_closes, apply.apply_one = saved_closes, saved_one
+print("Re-apply keep-first checks passed.")

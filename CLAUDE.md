@@ -52,7 +52,8 @@ HARD LIMITS
   Approved rows beyond the cap just wait for the next week.
   Re-applies (my call, 2026-10-28): an Applied NUworks row I mark to send again with a new resume (More > Re-apply, or
   `nuauto sheet reapply`; Apply withdraws it on NUworks first, apply.withdraw_first) is the same application: it keeps its first date,
-  never counts twice, and Apply sends it even past either limit (docs/SAFETY.md).
+  never counts twice, and Apply sends it even past either limit (docs/SAFETY.md). Only where nothing has started: the job
+  open, Available, not interviewing, read live on NUworks right before the withdraw; else it stays Applied (apply.keep_first).
   The total (my request, 2026-10-16: NUworks showed 32, NUauto 40) counts what NUworks has: every update asks NUworks
   about each sent row (jobs.check_applications -> data/applications.json); a row NUworks says it has no application
   for (a company-site one whose NUworks side never went out) doesn't count, but only while the row is as it was when
