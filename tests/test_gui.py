@@ -123,7 +123,9 @@ try:
     assert all(t["closes_text"] == "no deadline listed" for t in st["todo"] if not t["closes"])
     ins = get("/api/insights")  # the demo: 8 pool jobs, one paid yearly (made hourly), one with no pay
     assert ins["pool"]["count"] == 8 and ins["pool"]["pay"]["listed"] == 7 and ins["rows"] == sum(x["count"] for x in ins["statuses"])
-    assert ins["applied"]["count"] == {x["label"]: x["count"] for x in ins["statuses"]}["Applied"]
+    by_status = {x["label"]: x["count"] for x in ins["statuses"]}
+    assert ins["applied"]["count"] == sum(by_status.get(s, 0) for s in ("Applied", "Interview", "Accepted", "Rejected"))
+    assert by_status["Interview"] == 1 and ins["interviews"]["interviews"] == 1 and ins["interviews"]["sent"] == ins["applied"]["count"]
     assert {"skills", "functions", "tags"} <= set(ins["pool"]) and ins["pool"]["skills"], ins["pool"]  # the demo's jobs list skills
     applying = get("/api/apply")["rows"]
     detail = get("/api/job?tab=nuworks&url=" + urllib.parse.quote(applying[0]["url"]))  # an Apply row's dropdown: its saved posting
@@ -572,7 +574,16 @@ try:
     assert get("/api/state")["week"] == week_now and secs["rejected"][0]["notes"].startswith("Rejected (marked ")
     post("/api/mark", {"action": "outcome", "outcome": "Applied", "row": sent["row"], "url": sent["url"]})
     assert sent["row"] in [r["row"] for r in get("/api/jobs?tab=nuworks")["sections"]["applied"]]
+    # Interview (2026-10-28): its own section (the demo has one already), on to Accepted, back to Applied; limits unchanged
+    assert get("/api/jobs?tab=nuworks")["sections"]["interview"], "the demo has an Interview row"
+    post("/api/mark", {"action": "outcome", "outcome": "Interview", "row": sent["row"], "url": sent["url"]})
+    secs = get("/api/jobs?tab=nuworks")["sections"]
+    assert sent["row"] in [r["row"] for r in secs["interview"]] and sent["row"] not in [r["row"] for r in secs["applied"]]
+    assert get("/api/state")["week"] == week_now and [r for r in secs["interview"] if r["row"] == sent["row"]][0]["notes"].startswith("Interview (marked ")
+    post("/api/mark", {"action": "outcome", "outcome": "Applied", "row": sent["row"], "url": sent["url"]})
+    assert sent["row"] in [r["row"] for r in get("/api/jobs?tab=nuworks")["sections"]["applied"]]
     approved_one = get("/api/jobs?tab=nuworks")["sections"]["approved"][0]
+    post("/api/mark", {"action": "outcome", "outcome": "Interview", "row": approved_one["row"], "url": approved_one["url"]}, expect=409)
     post("/api/mark", {"action": "outcome", "outcome": "Accepted", "row": approved_one["row"], "url": approved_one["url"]}, expect=409)
     post("/api/mark", {"action": "outcome", "outcome": "Failed", "row": sent["row"], "url": sent["url"]}, expect=409)
     # re-apply with the new resume (sheet.mark_reapply): back to Approved, first date kept, the limits unchanged; Undo
@@ -760,14 +771,27 @@ try:
         page.click(f"[data-testid=more-nuworks-{applied_row}]")
         page.wait_for_selector("div.menu")
         assert [b.inner_text() for b in page.locator("div.menu button").all()] == \
-            ["Mark accepted", "Mark rejected", "Re-apply with the new resume…", "I applied myself", "Drop (not applying)…",
+            ["Mark interview", "Mark accepted", "Mark rejected", "Re-apply with the new resume…", "I applied myself", "Drop (not applying)…",
              "Move to Summer 2027 internships…", "Remove from the sheet…"]  # (what you heard back, re-apply: on a sent row)
         for key in ("mark", "drop", "move", "remove"):
             assert page.locator(f"[data-testid=more-nuworks-{applied_row}-{key}]").is_disabled(), key  # (with a reason in its title)
         assert page.get_attribute(f"[data-testid=more-nuworks-{applied_row}-remove]", "title")
         assert page.locator(f"[data-testid=more-nuworks-{applied_row}-rejected]").is_enabled()
+        assert page.locator(f"[data-testid=more-nuworks-{applied_row}-interview]").is_enabled()
         page.keyboard.press("Escape")
         page.wait_for_selector("div.menu", state="detached")
+        # an Interview row (2026-10-28): its own section and chip; its menu: back to Applied, accepted, rejected
+        interview = page.locator("[data-testid=section-nuworks-interview]")
+        assert interview.count() == 1 and interview.get_attribute("open") is None
+        interview.locator("summary").click()
+        iv_row = interview.locator("li").first.get_attribute("data-testid").split("-")[-1]
+        assert page.locator(f"[data-testid=interview-{iv_row}]").inner_text() == "interview"
+        page.click(f"[data-testid=more-nuworks-{iv_row}]")
+        page.wait_for_selector("div.menu")
+        assert [b.inner_text() for b in page.locator("div.menu button").all()][:3] == ["Back to Applied", "Mark accepted", "Mark rejected"]
+        page.keyboard.press("Escape")
+        page.wait_for_selector("div.menu", state="detached")
+        interview.locator("summary").click()
         applied.locator("summary").click()
         page.click("[data-testid=tab-other]")
         page.wait_for_selector("[data-testid=section-other-ready]")  # the Other jobs tab is the second tab of Apply
@@ -807,7 +831,7 @@ try:
         # /api/jobs: the same Approved rows, in Start's order, as /api/apply; every section is there for both tabs
         jobs = get("/api/jobs?tab=nuworks")
         assert [r["row"] for r in jobs["sections"]["approved"]] == [r["row"] for r in get("/api/apply")["rows"]]
-        every = {"approved", "agent", "manual", "owed", "ready", "expired", "applied", "accepted", "rejected", "proposed", "closed", "rest"}  # (both tabs: the other tab's stay empty)
+        every = {"approved", "agent", "manual", "owed", "ready", "expired", "applied", "interview", "accepted", "rejected", "proposed", "closed", "rest"}  # (both tabs: the other tab's stay empty)
         assert set(jobs["sections"]) == every and jobs["sections"]["ready"] == [], list(jobs["sections"])
         assert jobs["tab"] == "nuworks" and jobs["order"] == "default" and jobs["week"] == get("/api/apply")["week"] and "history" in jobs
         assert [r["company"] for r in jobs["sections"]["agent"]] == ["Iron Valley Medical"], jobs["sections"]["agent"]
@@ -990,6 +1014,7 @@ fetch("{target}", {{method: "POST", credentials: "include", body: {json.dumps(bo
         assert page.locator("[data-testid=ins-status] .legend li").count() == len(ins["statuses"])
         arcs = page.eval_on_selector_all("[data-testid=ins-status] svg circle", "cs => cs.map(c => getComputedStyle(c).stroke)")
         assert len(set(arcs)) == len(arcs) and "none" not in arcs, arcs  # every status its own color (Proposed and Rejected were both grey)
+        assert page.inner_text("[data-testid=ins-interviews]").startswith(f"Interviews: {ins['interviews']['interviews']} of {ins['interviews']['sent']} sent")
         assert page.locator("[data-testid=tags-skills] .chip").count() == len(ins["pool"]["skills"])
         assert page.locator("[data-testid=ins-function]").count() == (1 if ins["pool"]["functions"] else 0)
         assert page.locator("[data-testid=pay-bars] .vb").count() == 6

@@ -53,7 +53,7 @@ Unit files live in this repo (deploy/systemd/) and are installed in ~/.config/sy
   - the scan (docs/PIPELINE.md): list -> Claude triage -> details -> Claude score -> Claude category -> pool; counts
     and the best new job go to data/scans.json.
   - the applications check: NUworks is asked about every sent row (jobs.check_applications -> data/applications.json), so
-    the total limit counts what NUworks has; the Status dropdown is set again (Accepted / Rejected reach an older
+    the total limit counts what NUworks has; the Status dropdown is set again (Interview / Accepted / Rejected reach an older
     sheet). Rejected rows NUworks still has and Applied rows whose job looks filled (its Hiring Status turned Filled, or
     it was interviewing and stopped: sheet.maybe_filled) are in the log, and in the morning message until you withdraw
     them there.

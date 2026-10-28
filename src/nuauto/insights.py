@@ -124,6 +124,14 @@ def group(entries, today):
     }
 
 
+def interview_rate(statuses):
+    """{interviews, sent, percent} from a Counter of sheet statuses: Interview and Accepted rows over every sent row."""
+    from nuauto import sheet
+    sent = sum(statuses[s] for s in sheet.SENT)
+    n = statuses["Interview"] + statuses["Accepted"]
+    return {"interviews": n, "sent": sent, "percent": round(100 * n / sent) if sent else None}
+
+
 def summarize(pool, details, rows, categories=None, today=None, id_of=None, scores=None):
     """Everything the Insights screen and `nuauto insights` show. pool: data/pool.json entries; details: {id: job
     data}; rows: sheet.Row list (or None when the sheet can't be read); categories: {id: category} for jobs the pool
@@ -147,6 +155,8 @@ def summarize(pool, details, rows, categories=None, today=None, id_of=None, scor
         "applied": group(applied, today),
         "statuses": None if rows is None else counted(statuses, order=sheet.STATUSES),
         "rows": None if rows is None else sum(statuses.values()),
+        # interviews: Interview and Accepted rows (an accepted one is counted as having had one) over all sent rows
+        "interviews": None if rows is None else interview_rate(statuses),
     }
 
 
@@ -182,6 +192,9 @@ def text(s):
     if s["statuses"] is not None:
         out.append(f"Your sheet: {s['rows']} rows")
         out += bar_lines(s["statuses"])
+        iv = s["interviews"]
+        if iv and iv["sent"]:
+            out.append(f"  Interviews: {iv['interviews']} of {iv['sent']} sent ({iv['percent']}%)")
         out.append("")
     for key, name in (("pool", "Your pool"), ("applied", "Applied")):
         g = s[key]

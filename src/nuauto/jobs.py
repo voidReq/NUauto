@@ -751,7 +751,7 @@ def application_answer(raw, prev, now):
 
 
 def check_applications(rows):
-    """Ask NUworks about every sent row of the NUworks tab (Applied, Accepted, Rejected; its job's own data, see
+    """Ask NUworks about every sent row of the NUworks tab (Applied, Interview, Accepted, Rejected; its job's own data, see
     application_answer) and keep its answers in data/applications.json, each with the row's
     fingerprint (sheet.not_on_nuworks: an answer counts only for the row as it was then). So the total limit counts what
     NUworks has: a company-site application whose NUworks side never went out doesn't. Returns {job id: answer}.
@@ -1070,7 +1070,7 @@ def train(details, labels_):
 
 def my_labels(details, ratings, rows):
     """Sheet rows you approved count as yes; your explicit ratings override."""
-    out = {job_id(r.url): 1 for r in rows if r.status in {"Approved", "Applied", "Accepted", "Rejected", "Needs Human", "Failed"} and job_id(r.url) in details}
+    out = {job_id(r.url): 1 for r in rows if r.status in {"Approved", "Applied", "Interview", "Accepted", "Rejected", "Needs Human", "Failed"} and job_id(r.url) in details}
     out.update({i: v["label"] for i, v in ratings.items() if i in details})
     return out
 

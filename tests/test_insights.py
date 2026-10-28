@@ -93,6 +93,14 @@ s3 = insights.summarize(pool, details, [row(2, "1", "Applied"), row(3, "6", "Rej
 assert s3["applied"]["count"] == 3, s3["applied"]
 assert [x["label"] for x in s3["statuses"]] == ["Applied", "Accepted", "Rejected"], s3["statuses"]
 
+# interviews (Interview, and Accepted over it) of all sent rows; the ring lists Interview in the sheet's order
+s4 = insights.summarize(pool, details, [row(2, "1", "Applied"), row(3, "6", "Interview"), row(4, "2", "Accepted"), row(5, "3", "Rejected")], today=TODAY)
+assert [x["label"] for x in s4["statuses"]] == ["Applied", "Interview", "Accepted", "Rejected"], s4["statuses"]
+assert s4["applied"]["count"] == 4 and s4["interviews"] == {"interviews": 2, "sent": 4, "percent": 50}, s4["interviews"]
+assert "Interviews: 2 of 4 sent (50%)" in insights.text(s4)
+assert insights.summarize(pool, details, [], today=TODAY)["interviews"] == {"interviews": 0, "sent": 0, "percent": None}
+assert insights.summarize(pool, details, None, today=TODAY)["interviews"] is None
+
 # empty everything: no crash, nothing made up
 e = insights.summarize([], {}, [], today=TODAY)
 assert e["pool"]["count"] == 0 and e["pool"]["pay"]["median"] is None and e["statuses"] == [] and e["rows"] == 0

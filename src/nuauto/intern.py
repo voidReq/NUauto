@@ -851,7 +851,7 @@ def ranked_pool(ratings, other_rows, nuworks_rows=()):
     by_url = {d.get("url"): i for i, d in details.items()}
     for r in other_rows or []:
         i = by_url.get(real_url(r.url))
-        if i and r.status in ("Approved", "Applied", "Accepted", "Rejected", "Needs Human", "Failed") and i not in ratings:
+        if i and r.status in ("Approved", "Applied", "Interview", "Accepted", "Rejected", "Needs Human", "Failed") and i not in ratings:
             labels[i] = 1
     taste = jobs.taste_for(every, labels, [r["id"] for r in pool])
     if taste:

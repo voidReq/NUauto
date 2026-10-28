@@ -13,12 +13,12 @@ BATCH CLAUDE (daily.run_claude: triage, score, category for NUworks and internsh
 APPLYING (apply.py, sheet.py)
 - Only Approved rows are acted on (the exceptions are listed under THE COMPANY-SITE AGENT and SHEET WRITES) | apply.pick_row, sheet.approved; set_status refuses a row that is not Approved | test_sheet (approved filter, refusals)
 - Weekly cap (fixed weeks from local_config week_start, else the last 7 days) | sheet.max_per_week() (default MAX_PER_WEEK = 11; local_config "max_per_week" 1-30, anything else = 11; Settings in the GUI), sheet.week_window, sheet.check_limits; apply.run_rows checks before every row, gui.apply_list turns Start off, assist.run checks once at start (NUworks rows), remote.plan holds the queue's NUworks rows back | test_sheet (7-day edge, limit refuses, the setting's bounds), test_gui (settings refuse bad values), test_demo (a run refuses up front), test_remote (plan)
-- Total cap | sheet.MAX_TOTAL = 99, same check_limits: the sent rows (Applied, Accepted, Rejected) NUworks has
+- Total cap | sheet.MAX_TOTAL = 99, same check_limits: the sent rows (Applied, Interview, Accepted, Rejected) NUworks has
   (2026-10-16: a row NUworks says it has no application for doesn't count, only while the row is as it was when asked:
   sheet.not_on_nuworks, fingerprint; never asked = counts; jobs.check_applications asks NUworks about every sent row at each
   update, daily.applications lists Rejected rows NUworks still has: sheet.rejected_not_withdrawn) | test_sheet (the counts, the
   refusal, the NUworks answers)
-- Weekly count: every sent row dated this week, Accepted / Rejected too (they went out) | sheet.applied_dates, SENT | test_sheet
+- Weekly count: every sent row dated this week, Interview / Accepted / Rejected too (they went out) | sheet.applied_dates, SENT | test_sheet
 - Applied row with no/odd date is an error, never guessed | sheet.applied_dates | test_sheet
 - Re-apply with the new resume (2026-10-28, my call: re-applies don't count): an Applied NUworks row I mark (More >
   Re-apply, `nuauto sheet reapply`) goes back to Approved with REAPPLY_MARK in Notes and its first Date kept; while being re-applied (Approved, or Needs Human
@@ -233,8 +233,8 @@ SHEET WRITES (sheet.py, manage.py)
 - Every change to an existing row re-reads it first and refuses unless the row still holds the same job (and the status that change expects) | sheet._row_for, set_status, resolve_submit, approve_proposed, unapprove, drop, set_outcome, mark_*, append_note | test_sheet, test_jobs, test_demo
 - Only approve_proposed turns a Proposed row into Approved (nothing else in the row changes); the GUI's Undo moves only a still-Approved row with the same job back to Proposed | sheet.approve_proposed, unapprove | test_jobs, test_demo, test_gui
 - add_proposed never overwrites and skips links already there; by hand a NUworks-tab row takes a NUworks job link only, an Other jobs row an https link that is not NUworks, and only as Approved or Proposed | sheet.add_proposed, manage.check_url, manage.add | test_jobs, test_gui
-- Rows are never deleted: remove clears the cells, so no row number shifts. Sent rows (Applied, Accepted, Rejected) are never removed and never leave the NUworks tab (they count toward the limits); a sent Other job may move there; a row whose Submit click is unresolved is never moved or removed | manage.movable, clear | test_gui (add, move, remove)
-- Accepted / Rejected only on a sent row, its date kept (it still counts that week); drop (Failed, "Dropped <date>: ...") only on an Approved or Needs Human row, never an unresolved Submit | sheet.set_outcome, drop | test_sheet
+- Rows are never deleted: remove clears the cells, so no row number shifts. Sent rows (Applied, Interview, Accepted, Rejected) are never removed and never leave the NUworks tab (they count toward the limits); a sent Other job may move there; a row whose Submit click is unresolved is never moved or removed | manage.movable, clear | test_gui (add, move, remove)
+- Interview / Accepted / Rejected only on a sent row, its date kept (it still counts that week); drop (Failed, "Dropped <date>: ...") only on an Approved or Needs Human row, never an unresolved Submit | sheet.set_outcome, drop | test_sheet
 - The GUI refuses to move or remove rows during a run, and to drop a row an assistant works | gui.sheet_change, gui.mark | test_homelab_app, test_review (the assistant case)
 - Sent rows are also written without being Approved, with no cap check (the application has already gone out): you marking one (GUI, Mark-done page), the assistant after your y, and the homelab's morning run for applications NUworks shows you made by hand (it can also add the row) | sheet.mark_applied_by_hand, daily.record_hand_applications, web.Handler.do_POST, gui.mark | test_sheet (refuses a sent row), test_web; the daily one: no test
 
