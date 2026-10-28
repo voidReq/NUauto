@@ -188,9 +188,13 @@ def wait_for(page, check, seconds):
 
 
 def counts(page):
-    """{"active": n, "inactive": n} from My Applications' tabs ({} until they show)."""
+    """{"active": n, "inactive": n} from My Applications' tabs ({} until they show, or while the page reloads)."""
     out = {}
-    for t in page.get_by_role("tab").all_inner_texts():
+    try:
+        texts = page.get_by_role("tab").all_inner_texts()
+    except Exception:  # "Execution context was destroyed": the page moved on; the next check reads the new one
+        return {}
+    for t in texts:
         m = TABS.match(t)
         if m:
             out[m.group(1).lower()] = int(m.group(2))
@@ -211,6 +215,11 @@ def sign_in(page, a, log):
         return None  # signed in already
     if not _visible(email) and TERMS.search(page.locator("body").inner_text()):
         return "the site asks you to agree to its terms first: do that once by hand, then this works"
+    with_email = page.get_by_role("button", name=re.compile(r"^\s*sign in with email\s*$", re.I))
+    if not _visible(email) and _visible(with_email):  # "Sign in with Apple / Google / LinkedIn ... OR with email": email
+        log.write(f"{a['site']}: choosing Sign in with email")
+        with_email.first.click()
+        wait_for(page, lambda: _visible(email), 10)
     if not _visible(email):
         for sel in ('[data-automation-id="signInLink"]', SIGN_IN_BUTTON):
             if _visible(page.locator(sel)):
