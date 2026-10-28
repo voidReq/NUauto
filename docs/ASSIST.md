@@ -139,6 +139,9 @@ ACCOUNTS (added 2026-10-10, my call; accounts.py)
   with it and refuses both a sign-in and a new account; the agent runs `link-login <site>`, which asks me first
   (terminal / its screen on the homelab page); then that login works there too ("also" in accounts.json). Never a login
   chosen by the agent alone (2026-10-11).
+- (2026-10-28, my request) `nuauto workday` signs in with the Workday logins here (NUauto's and my own) to read my
+  statuses on Candidate Home, read-only; no agent involved, the password typed by code on that login's own site only
+  (docs/SAFETY.md, WORKDAY STATUSES).
 
 EMAIL CODES AND LINKS (2026-10-11, my call; mail.py)
 - The agent runs `email --want code|link`. mail.py (not the agent) reads my Gmail with its own read-only login

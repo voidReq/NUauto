@@ -786,7 +786,7 @@ def homelab_link():
 HOMELAB_DIR = "projects/auto"  # under the homelab user's home: the units in deploy/systemd/ run from %h/projects/auto
 SSH_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$")   # an ~/.ssh/config alias, a host, or user@host
 HOMELAB_UNITS = ("nuauto-daily.timer", "nuauto-weekly.timer", "nuauto-intern.timer", "nuauto-web.service",
-                 "nuauto-deploy.timer", "nuauto-assist.timer")
+                 "nuauto-deploy.timer", "nuauto-assist.timer", "nuauto-workday.timer")
 # What homelab_probe asks the homelab (read-only): one key=value per line. $1: the project folder (under $HOME).
 PROBE = r'''d="$HOME/$1"
 echo "hostname=$(hostname)"
@@ -940,7 +940,7 @@ def homelab_setup():
     elif not os.path.exists(config.COOKIES_PATH):
         print("\n6. No NUworks session on this computer yet: run `nuauto login` once, then this again.")
     units = ["nuauto-daily.timer", "nuauto-weekly.timer", "nuauto-intern.timer", "nuauto-web.service"] + \
-        (["nuauto-deploy.timer"] if config.DEPLOY_FROM_GIT else []) + (["nuauto-assist.timer"] if config.REMOTE_ASSIST else [])
+        (["nuauto-deploy.timer"] if config.DEPLOY_FROM_GIT else []) + (["nuauto-assist.timer", "nuauto-workday.timer"] if config.REMOTE_ASSIST else [])
     if _ask("7. Its timers and web page (systemd user units), running even when nobody is logged in there "
             "(loginctl enable-linger: sudo asks for the homelab's password here). Turns on: " + ", ".join(units)):
         sync.remote("mkdir -p .config/systemd/user", "make the units folder")
