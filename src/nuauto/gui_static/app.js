@@ -259,8 +259,8 @@ async function pollTask() {
     S.lastTaskState[t.id] = t.state;
     if (was === "running" && t.state !== "running") taskFinished(t);
   }
+  renderTaskbar();
   renderQuestion();
-  renderTaskbar();  // (after: it shows a question renderQuestion held back)
   if (S.screen && S.screen.task) S.screen.task(S.task, S.taskLog);
   if (t && t.state === "running") S.taskTimer = setTimeout(pollTask, 700);
 }
@@ -426,12 +426,9 @@ function renderTaskbar() {
   const bar = $("#taskbar");
   const t = S.task;
   const onApply = S.route === "apply" && t && t.kind === "apply";
-  const q = t && t.state === "running" ? t.question : null;
-  const held = !!q && S.openQuestion !== `${t.id}:${q.id}`;  // a question renderQuestion held back: Answer opens it
-  if (!t || t.state !== "running" || ((t.background || onApply) && !held)) { bar.hidden = true; return; }
+  if (!t || t.state !== "running" || t.background || onApply) { bar.hidden = true; return; }
   bar.hidden = false;
   fill(bar, el("span", { class: "spinner" }), el("span", { text: `${t.label}${S.taskWhere === "homelab" ? " (on the homelab)" : ""}…`, testid: "taskbar-label" }),
-    held ? el("button", { class: "btn small primary", text: "Answer its question", testid: "taskbar-answer", onclick: () => answerNow(t, q) }) : null,
     el("button", { class: "btn small ghost", text: "Log", onclick: () => showLog(t) }),
     t.kind === "apply" ? el("a", { class: "btn small ghost", href: "#/apply", text: "View" }) : null,
     el("button", { class: "btn small danger", text: "Stop", testid: "taskbar-stop", onclick: () => stopTask(t) }));
@@ -456,34 +453,11 @@ function showLog(t) {
 
 // ------------------------------------------------------------------ questions from a run (answer bank, "did it submit?")
 
-// A run's question opens over the screen at once, except over an assistant's chat or while you type in a box: there it
-// would cover what you are doing with no warning (2026-10-28, my request). Then a toast and the bar at the bottom say it
-// waits (Answer opens it); it opens by itself once you leave that screen or the box.
-function holdQuestion(key) {
-  if (S.answerNow === key) return false;
-  const a = document.activeElement;
-  return S.route === "assistant" || !!(a && a.matches && a.matches("textarea, input:not([type]), input[type=text], input[type=search]"));
-}
-
-function answerNow(t, q) {
-  S.answerNow = `${t.id}:${q.id}`;
-  renderQuestion();
-  renderTaskbar();
-}
-
 function renderQuestion() {
   const t = S.task;
   const q = t && t.state === "running" ? t.question : null;
   if (!q) { if (S.closeQuestion) { S.closeQuestion(); S.closeQuestion = null; S.openQuestion = null; } return; }
-  const key = `${t.id}:${q.id}`;
-  if (S.openQuestion === key) return;
-  if (holdQuestion(key)) {
-    if (S.heldQuestion !== key) {
-      S.heldQuestion = key;
-      toast(`${t.label}: it has a question for you.`, { action: "Answer", onaction: () => answerNow(t, q), ms: 15000 });
-    }
-    return;
-  }
+  if (S.openQuestion === `${t.id}:${q.id}`) return;
   if (S.closeQuestion) S.closeQuestion();
   S.openQuestion = `${t.id}:${q.id}`;
   const reply = async (r) => {
@@ -2061,6 +2035,7 @@ screens.assistant = async (view) => {
   const there = String(S.param || "").startsWith("h"), slot = String(S.param || "").replace(/^h/, "");
   const api_ = there ? "/api/homelab/assistant" : "/api/assistant";
   let d = null, version = null, timer = null, first = true;
+  let who = null;  // the session this screen opened on (its key): the slot is reused by the next one once it ends
   const note = el("input", { type: "text", placeholder: "A note for the agent (when you decline)", "aria-label": "Note", testid: "as-note" });
   const reply = el("textarea", { rows: "4", maxlength: "4000", "aria-label": "Reply", testid: "as-reply" });
   const term = el("pre", { class: "log term", testid: "as-terminal", tabindex: "0", "aria-label": "Its terminal" });
@@ -2072,7 +2047,7 @@ screens.assistant = async (view) => {
   async function send(body, busy) {
     if (busy) { busy.disabled = true; busy.textContent = busy.dataset.busy || "Working…"; }
     try {
-      const r = await api.post(api_, { slot: Number(slot), ...body });
+      const r = await api.post(api_, { slot: Number(slot), key: who, ...body });
       toast(r.message);
       if (body.do === "reply") reply.value = "";
       if (r.closing) { sessionStorage.setItem("applyTab", "assistants"); location.hash = "#/apply"; return; }
@@ -2148,20 +2123,27 @@ screens.assistant = async (view) => {
     }
   }
 
+  // it ended (or never ran in that slot): back to Apply's Assistants tab, where the others are (2026-10-28, my request;
+  // it showed "No session there", or the next session started in the slot, as if it were this one)
+  function ended() {
+    toast(d ? `${d.company || "That assistant"}: the session has ended.` : `No assistant is running in slot ${slot}.`);
+    sessionStorage.setItem("applyTab", "assistants");
+    location.replace("#/apply");
+  }
+
   async function load() {
     clearTimeout(timer);
+    let now;
     try {
-      d = await api.get(`${api_}/${encodeURIComponent(slot)}`);
+      now = await api.get(`${api_}/${encodeURIComponent(slot)}`);
     } catch (e) {
       if (!view.isConnected || S.gone) return;
       if (S.offline) { timer = setTimeout(load, 4000); return; }  // the homelab can't be reached a moment: ask again
-      // it ended (or never ran in that slot): back to Apply's Assistants tab, where the others are (2026-10-28, my request)
-      toast(d ? `${d.company || "That assistant"}: the session has ended.` : `No assistant is running in slot ${slot}.`);
-      sessionStorage.setItem("applyTab", "assistants");
-      location.replace("#/apply");
-      return;
+      return ended();
     }
     if (!view.isConnected) return;
+    if (who && now.key !== who) return ended();
+    d = now; who = d.key;
     if (d.version !== version) { version = d.version; draw(); } else { term.textContent = d.terminal || "(not readable)"; }
     if (d.browser && ["working", "approve", "waiting"].includes(d.status)) live.src = `${api_}/${slot}/shot.png?live=${Date.now()}`;
     timer = setTimeout(load, 4000);

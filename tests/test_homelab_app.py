@@ -129,6 +129,11 @@ try:
     assert request("GET", "/api/assistant/1/shot.png", cookie=KEY)[0] == 404                    # no screen in the demo
     r = post("/api/assistant", {"slot": 2, "do": "reply", "text": "OK"})
     assert "Could not do that" in r["message"]                                                 # (no tmux in the demo)
+    # a tap carries the screen's session (key): one meant for a session that ended, its slot now another's, is refused
+    a2 = get("/api/assistant/2")
+    assert a2["key"] and a2["key"] != a1["key"]
+    assert "Could not do that" in post("/api/assistant", {"slot": 2, "key": a2["key"], "do": "reply", "text": "OK"})["message"]
+    assert "ended" in post("/api/assistant", {"slot": 2, "key": a1["key"], "do": "reply", "text": "OK"}, expect=409)["error"]
     assert "ended" in post("/api/assistant", {"slot": 4, "do": "exit"}, expect=409)["error"]
 
     # ---- its queue (Company sites): every slot is taken by the made-up sessions, so rows wait; Start now says why

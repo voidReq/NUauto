@@ -891,14 +891,7 @@ try:
         with page.expect_request(lambda r: r.url.endswith("/api/action") and r.method == "POST") as started:
             page.click("[data-testid=btn-start-apply]")
         assert started.value.post_data_json["args"]["order"] == "default", started.value.post_data_json  # Start sends the order shown
-        # typing in a box when the question comes: it waits (a toast and the bar's Answer say so), Answer opens it
-        page.focus("[data-testid=apply-search]")
-        page.wait_for_selector("[data-testid=taskbar-answer]", timeout=90000)
-        assert page.locator("[data-testid=question]").count() == 0
-        assert "it has a question for you" in page.inner_text("[data-testid=toasts]")
-        page.click("[data-testid=taskbar-answer]")
-        page.wait_for_selector("[data-testid=question]", timeout=5000)
-        assert page.locator("#taskbar[hidden]").count() == 1  # (on Apply, its own run: no bar once the question is open)
+        page.wait_for_selector("[data-testid=question]", timeout=90000)
         assert "18 years old" in page.inner_text("[data-testid=q-label]")
         assert "Select" not in page.locator("[data-testid=question] .choices").inner_text()  # placeholder hidden
         page.get_by_role("button", name="Yes", exact=True).click()

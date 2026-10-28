@@ -2475,7 +2475,7 @@ def assistant_post(body):
         raise Refused("An assistant on this computer runs in its own terminal window: answer it there.")
     slot = body.get("slot")
     s = review.session(int(slot)) if str(slot).isdigit() else None
-    if not s:
+    if not s or ("key" in body and body["key"] != review.key(s)):  # (key: the page's session; its slot may hold the next)
         raise Refused("That session has ended.")
     return review.act(s, body, device_name())
 

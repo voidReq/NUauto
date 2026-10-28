@@ -256,8 +256,11 @@ A question from a run (an unknown form field, an option to pick, "did it submit?
                  confirmed, the screen when it asked; Approve / Decline with a note), the end question (Yes / No / No: do
                  it on the laptop), a question Claude Code asks in its own terminal (answer it there; the reply box stays
                  off), Reply, End session, End: do it on the laptop. It asks again every 4 s; what you type is kept
-                 (docs/REMOTE.md, AN ASSISTANT'S SCREEN). A session that ended (or a slot nobody runs in) goes back to
-                 Apply's Assistants tab with a toast (2026-10-28, my request; it showed "No session there").
+                 (docs/REMOTE.md, AN ASSISTANT'S SCREEN). The screen keeps the session it opened on (its key,
+                 review.key): a session that ended, a slot nobody runs in, or the next session started in that slot
+                 goes back to Apply's Assistants tab with a toast (2026-10-28, my request: it showed "No session there",
+                 or switched to the new session as if it were the same). Its taps carry the key; the server refuses one
+                 for a session no longer in that slot (gui.assistant_post).
 
 SETUP WIZARD (onboard.py + gui_static/setup.js; each step checks itself; a step opens when you click it, the first one
 not done is open at the start; "You're set up" + Go to Today at the end; Settings reuses some steps' bodies)
@@ -363,10 +366,7 @@ SAFETY MODEL (details and tests: docs/SAFETY.md)
   a visible browser (gui.VISIBLE: AUTO_HEADLESS cleared). Approved in the sheet stays the only go-ahead; caps unchanged.
 - Questions (answers.JsonIO): one JSON line per question on the child's stdout ("::nuauto:: " + JSON), the answer as
   one JSON line on its stdin. The same rules as typing: an option must be one of the choices, blank = stop (Skip this
-  job = Needs Human), always-ask answers are never saved. The page opens each question over the screen at once, except
-  on an assistant's screen or while you type in a box (2026-10-28, my request: it covered the chat with no warning):
-  then a toast and the bar at the bottom say it waits ("Answer its question" opens it); it opens by itself once you
-  leave that screen or box (app.js holdQuestion).
+  job = Needs Human), always-ask answers are never saved.
 - Stop: SIGINT to the run (the KeyboardInterrupt path Ctrl+C takes: nothing submitted = row stays Approved,
   Submit already clicked = Needs Human). Force stop: SIGKILL to the whole process group. If the GUI dies, the
   child's stdin closes and it stops the same way.
