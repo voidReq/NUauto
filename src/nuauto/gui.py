@@ -567,18 +567,20 @@ NUWORKS_SIDE_NOT_SENT = ("NUworks side NOT submitted", "before Submit; not submi
 
 
 def facts_data():
-    """What job_facts reads, loaded once per list: the scores, the pool by job id, the kinds of work."""
+    """What job_facts reads, loaded once per list: the scores, the pool by job id, the kinds of work, the job list (each
+    posting's day and Featured tag at the last update)."""
     cats, sets = jobs.load("categories.json", {}), jobs.load("category_sets.json", {})
     known = {i: c for i, c in cats.items() if jobs.categorized(cats, sets, i)}  # sorted into your current kinds
-    return jobs.load("scores.json", {}), {p["id"]: p for p in jobs.load("pool.json", [])}, known
+    return jobs.load("scores.json", {}), {p["id"]: p for p in jobs.load("pool.json", [])}, known, jobs.load("list.json", {})
 
 
 def job_facts(r, data, d=None):
     """The match %, score, pay and kind of work the Apply lists show (and sort / filter by) for a NUworks row (None
     when not scored / not in the pool / not listed). score is the pool rank Start orders by (match + bonuses);
-    pay_hour the top of the hourly range, only when the pay reads as one (insights.hourly)."""
+    pay_hour the top of the hourly range, only when the pay reads as one (insights.hourly); when the posting went up
+    and whether NUworks features it (jobs.posted_view; not in the job list: none)."""
     from nuauto import apply, insights
-    scores, pool, categories = data
+    scores, pool, categories, listed = data
     d = apply.row_details(r) if d is None else d
     i = jobs.job_id(r.url)
     p = pool.get(i)
@@ -588,7 +590,7 @@ def job_facts(r, data, d=None):
     cat = cat if cat in jobs.CATEGORIES else None  # not sorted into your current kinds yet
     return {"match": (scores.get(i) or {}).get("match"), "pay": pay, "year_asked": jobs.year_asked(d, scores.get(i)), "pay_hour": hour[1] if hour else None,
             "score": p["rank"] if p else None, "score_text": jobs.rank_text(p) if p else None,
-            "category": cat, "category_label": jobs.category_label(cat) if cat else None}
+            "category": cat, "category_label": jobs.category_label(cat) if cat else None, **jobs.posted_view(listed.get(i))}
 
 
 def company_rows(rows, facts=False):
@@ -1123,11 +1125,41 @@ def job_detail(tab, url):
             "description": jobs.text_blocks(d.get("description")), "qualifications": jobs.text_blocks(d.get("qualifications"))}
 
 
-def apply_list(order="default"):
-    """The Approved rows in the order a run goes (order: apply.ORDERS, the Sort menu), the week, why Start can't run."""
+MY_ORDER = ["urgent", "featured", "age", "score"]  # Your order until you change it (an advisor's tip, 2026-10-28)
+
+
+def my_order():
+    """Your order's steps (the Sort menu's "your order"): local_config.json "apply_order", shared by both machines."""
     from nuauto import apply
-    if order not in apply.ORDERS:
-        order = "default"
+    mine = read_local().get("apply_order")
+    ok = isinstance(mine, list) and mine and all(x in apply.STEPS for x in mine) and len(set(mine)) == len(mine)
+    return list(mine) if ok else list(MY_ORDER)
+
+
+def known_order(order):
+    """The order as `nuauto apply --order` takes it: a named one (apply.ORDERS), steps with commas, or "custom" (your
+    order: my_order's steps); None for anything else."""
+    from nuauto import apply
+    if order == "custom":
+        return ",".join(my_order())
+    try:
+        apply.order_steps(order)
+    except ValueError:
+        return None
+    return order
+
+
+def sort_menu():
+    """What the NUworks tab's Sort menu offers besides its named orders: the steps your order is made of, and yours."""
+    from nuauto import apply
+    return {"steps": apply.STEPS, "custom": my_order()}
+
+
+def apply_list(order="default"):
+    """The Approved rows in the order a run goes (order: apply.ORDERS or steps with commas, the Sort menu), the week,
+    why Start can't run."""
+    from nuauto import apply
+    order = known_order(order) or "default"  # (custom: its steps)
     rows = need_rows()
     week = week_info(rows)
     out = []
@@ -1166,6 +1198,8 @@ def act(body):
     if REMOTE and kind in LAPTOP_ONLY:
         raise Refused(LAPTOP_ONLY[kind])
     if kind in ("apply", "apply_unqueue") and args.get("on") == "homelab":  # (laptop) Run on the homelab: its page runs it
+        if args.get("order") == "custom":  # your order as this machine has it (the homelab's copy may not have it yet)
+            args = {**args, "order": known_order("custom")}
         r = homelab("POST", "/api/action", {"kind": kind, "args": {k: args[k] for k in ("n", "row", "order") if k in args}})
         homelab_soon()
         return homelab_task_view(r)
@@ -1179,8 +1213,8 @@ def act(body):
         listed = apply_list()
         if listed["why_not"]:
             raise Refused(listed["why_not"])
-        n, row, order = args.get("n"), args.get("row"), args.get("order") or "default"
-        if order not in apply.ORDERS:
+        n, row, order = args.get("n"), args.get("row"), known_order(args.get("order") or "default")
+        if not order:
             raise Refused("Unknown order (reload the page).")
         cmd = config.self_cmd("apply", "--ui", "json", "--order", order)
         if row not in (None, ""):  # just this one Approved row (its Apply button)
@@ -1746,7 +1780,7 @@ def jobs_tab(tab="nuworks", order="default", recheck=False):
             if r.number not in listed and r.status not in ("Approved", "Needs Human"):  # (those are all listed above)
                 s[later.get(r.status, "rest")].append(view(r))
         out.update(week=run["week"], why_not=run["why_not"], limited=run["limited"], history=run["history"],
-                   order=order if order in apply.ORDERS else "default")
+                   order=order if known_order(order) else "default", sort=sort_menu())
     for k in ("applied", "accepted", "rejected", "closed"):
         s[k].sort(key=lambda x: x["date"] or "", reverse=True)  # newest first
     out["sections"] = s
@@ -2102,6 +2136,13 @@ def settings_put(body):
         if email and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
             raise Refused("The account email doesn't look like an email address.")
         updates["accounts_email"] = email
+    if "apply_order" in body:  # the NUworks tab's Sort menu: your order (my_order)
+        from nuauto import apply
+        steps = body["apply_order"]
+        if not isinstance(steps, list) or not steps or not all(isinstance(x, str) and x in apply.STEPS for x in steps) \
+                or len(set(steps)) != len(steps):
+            raise Refused("Your order: at least one step, each once.")
+        updates["apply_order"] = steps
     if "assist_effort" in body:
         if body["assist_effort"] not in EFFORTS:
             raise Refused(f"The assistant's effort is one of {', '.join(EFFORTS)}.")

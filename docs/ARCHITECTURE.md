@@ -39,7 +39,7 @@ Sheet and NUworks
                   cmd_login(), cmd_open().
   apply.py        the NUworks runner. main() (refuse_unattended, nuworks_turn), run_rows() (limits before each row,
                   queue), apply_one(), fill_popup(), check_popup(), fill_extra_fields(), submit_flow(),
-                  submit_nuworks_side(), apply_order().
+                  submit_nuworks_side(), apply_order() (ORDERS / STEPS, order_steps: a named order or steps with commas).
   answers.py      answer bank. load() / save(), find() (exact match after norm()), resolve_answer(), forget() (deleted
                   questions, for the homelab's copy), TerminalIO / NoTerminalIO / JsonIO (the GUI's channel),
                   json_ui_allowed(), Stop.
@@ -152,7 +152,8 @@ MAIN FLOWS
   nuauto deploy (homelab timer, every 5 min): deploy.Deploy.run. Laptop: sync.deploy_now starts it there.
 
 STATE ON DISK (STATE_DIR = repo root; app-data folder when packaged; a temp folder in demo mode and tests)
-  data/   the pool, owned by the homelab (the laptop pulls a copy): list.json, triage.json, scores.json, categories.json,
+  data/   the pool, owned by the homelab (the laptop pulls a copy): list.json (each job's posting day and Featured tag,
+          read again every update), triage.json, scores.json, categories.json,
           category_sets.json, pool.json, details/<id>.json (jobs.py); scans.json, last_run.json, later.json, told.json
           (daily.py);
           applications.json (jobs.check_applications); ratings.json (jobs.set_rating, merged between machines);
@@ -206,8 +207,9 @@ use headless Firefox on local pages or demo mode. Run it before pushing; CI runs
   test_sync      sync.CODE is complete (a new module or prompt must be in it), absolute imports, rsync options, units
   test_sheet     sheet.py: parsing, week and total limits, max_per_week, not_on_nuworks, maybe_filled, submit safety,
                  drop, set_outcome, mark_on_laptop, retries, the kept sheet (OPEN)
-  test_jobs      hard rules, pool, model; sheet.add_proposed / approve_proposed; application_answer (the hiring stage)
-  test_apply     apply.check_popup, run_rows and its queue, BETWEEN
+  test_jobs      hard rules, pool, model; sheet.add_proposed / approve_proposed; application_answer (the hiring stage);
+                 list_entry, posted_view, the new / Featured bonuses
+  test_apply     apply.check_popup, run_rows and its queue, BETWEEN; apply_order's named orders and steps
   test_answers   answers.py, apply.fill_extra_fields (a local form), JsonIO, json_ui_allowed
   test_browser   domain lock, goto retry, profile lock
   test_demo      the real apply.py on demo mode's fake pages (stops, cap, Ctrl+C, GUI gone, CLAUDECODE refusals)

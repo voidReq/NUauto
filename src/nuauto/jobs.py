@@ -50,6 +50,9 @@ DEFAULTS = {
     "category_threshold": _ENG["category_threshold"],  # a lower bar for roles you care most about (not "above your year")
     "major_words": _ENG["major_words"],  # a targeted major without these words: flagged
     "home_state": "MA", "home_label": "Boston", "home_bonus": 10,  # ranking only (not for getting into the pool)
+    # ranking only: NUworks tags the posting "Featured Posting" now; it went up within NEW_DAYS (an advisor's tip,
+    # 2026-10-28: new and featured postings are the ones still looking)
+    "featured_bonus": 5, "new_bonus": 5,
     "category_bonus": _ENG["category_bonus"],  # ranking (may be negative: engineering's front-end -20)
     # the kinds of work Claude sorts jobs into (prompts/CATEGORY_PROMPT.md): key, label, description; "other" always
     "categories": _ENG["categories"],
@@ -95,6 +98,7 @@ RULES = {
     # server-side search filters (ids from /api/v2/jobs/filters/students)
     "query_term": f"job_type=5&el_work_term={PREFS['term_id']}&internal_status=1&job_length_ms=4,3&exclude_applied_jobs=1",
     "query_no_term": "job_type=5&internal_status=1&job_length_ms=4,3&exclude_applied_jobs=1",  # minus the above = term unclear
+    "featured_tag": "3",  # student_search_tags "Featured Posting": the list's third search, every update (it comes and goes)
     "position_types": {"Co-op", "Internship"},  # Internship only if explicitly your term
     "term": PREFS["term"],
     "lengths": {"4 Month", "6 Month"},
@@ -317,6 +321,25 @@ def external_hint(d):
 
 
 URGENT_DAYS = 7  # approve shows jobs closing within this many days first
+NEW_DAYS = 7  # a posting this new gets PREFS["new_bonus"] (the Apply rows' "posted" chip: green, then yellow to 14, grey to 21)
+
+
+def posted(listed):
+    """The day a listed job's posting went up (list.json's "posted": NUworks' job_start), or None."""
+    try:
+        return date.fromisoformat(str((listed or {}).get("posted") or "")[:10])
+    except ValueError:
+        return None
+
+
+def posted_view(listed, today=None):
+    """What the GUI shows about a listed job's posting: posted (the day), posted_days (how long ago: the chip's color),
+    posted_text, featured (NUworks' Featured Posting tag at the last update). All None / False for a job not listed."""
+    day = posted(listed)
+    n = (((today or date.today()) - day).days if day else None)
+    text = None if n is None else "posted today" if n <= 0 else "posted yesterday" if n == 1 else f"posted {n} days ago"
+    return {"posted": day.isoformat() if day else None, "posted_days": n, "posted_text": text,
+            "featured": bool((listed or {}).get("featured"))}
 
 
 def strip_html(s):
@@ -392,6 +415,19 @@ def search_pages(browser, page, context, log, query):
 
 # ---------------------------------------------------------------- 1. list
 
+def list_entry(m, source, featured):
+    """One search result as list.json keeps it. posted: the day the posting went up (jobs_iso_times.job_start, the
+    search's "postdate"); featured: in the Featured Posting search (featured_tag) this time."""
+    start = str((m.get("jobs_iso_times") or {}).get("job_start") or "")[:10]
+    try:
+        day = date.fromisoformat(start).isoformat()
+    except ValueError:
+        day = None
+    return {"id": m["job_id"], "title": (m.get("job_title") or "").strip(), "company": (m.get("name") or "").strip(),
+            "location": m.get("job_location") or "", "snippet": strip_html(m.get("job_desc"))[:300], "source": source,
+            "posted": day, "featured": m["job_id"] in featured}
+
+
 def cmd_list():
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
@@ -400,6 +436,9 @@ def cmd_list():
             spring = search_pages(browser, page, context, log, RULES["query_term"])
             browser.pause(page, 2, 4)
             any_term = search_pages(browser, page, context, log, RULES["query_no_term"])
+            browser.pause(page, 2, 4)
+            featured = {m["job_id"] for m in search_pages(browser, page, context, log,
+                                                          f"{RULES['query_no_term']}&student_search_tags={RULES['featured_tag']}")}
         except KeyboardInterrupt:
             log.write("Ctrl+C: stopping; nothing saved.")
             return
@@ -410,16 +449,10 @@ def cmd_list():
     spring_ids = {m["job_id"] for m in spring}
     jobs = {}
     for m, source in [(m, "spring") for m in spring] + [(m, "no_term") for m in any_term if m["job_id"] not in spring_ids]:
-        jobs[m["job_id"]] = {
-            "id": m["job_id"],
-            "title": (m.get("job_title") or "").strip(),
-            "company": (m.get("name") or "").strip(),
-            "location": m.get("job_location") or "",
-            "snippet": strip_html(m.get("job_desc"))[:300],
-            "source": source,
-        }
+        jobs[m["job_id"]] = list_entry(m, source, featured)
     save("list.json", jobs)
-    print(f"Saved {len(jobs)} jobs: {len(spring_ids)} {PREFS['term']}, {len(jobs) - len(spring_ids)} with no/other term.")
+    print(f"Saved {len(jobs)} jobs: {len(spring_ids)} {PREFS['term']}, {len(jobs) - len(spring_ids)} with no/other term; "
+          f"{sum(j['featured'] for j in jobs.values())} featured.")
 
 
 # ---------------------------------------------------------------- batch exchange with subagents
@@ -898,7 +931,8 @@ def pool_sort_key(r):
 def score_parts(r):
     """What the job's ranking score (rank) is made of, as [(points, label)]: match first, then each bonus."""
     parts = [(r["match"], "% match"), (r["bonus"], " " + PREFS["home_label"]),
-             (category_bonus(r["category"]), " " + r["category"].replace("_", " ")), (tag_bonus(r.get("tag")), f" {r.get('tag')}")]
+             (category_bonus(r["category"]), " " + r["category"].replace("_", " ")), (tag_bonus(r.get("tag")), f" {r.get('tag')}"),
+             (r.get("featured_bonus", 0), " featured"), (r.get("new_bonus", 0), " new")]
     return [p for k, p in enumerate(parts) if k == 0 or p[0]]
 
 
@@ -927,14 +961,19 @@ def order_text(r, why):
     return "by score (taste counts once you have 5 yes and 5 no)"
 
 
-def pool_entry(i, d, score, cat, threshold, flags):
-    """One job as a pool row (what pool.json holds and the viewers show)."""
+def pool_entry(i, d, score, cat, threshold, flags, listed=None, today=None):
+    """One job as a pool row (what pool.json holds and the viewers show). listed: its list.json entry (a co-op's posting
+    day and Featured tag: featured_bonus, new_bonus; an internship has none)."""
     bonus = PREFS["home_bonus"] if in_home_state(d) else 0
     match = score["match"]
     tag = job_tag(d)
+    seen = posted_view(listed, today) if listed else {"posted": None, "posted_days": None, "featured": False}
+    featured = PREFS["featured_bonus"] if seen["featured"] else 0
+    new = PREFS["new_bonus"] if seen["posted_days"] is not None and seen["posted_days"] < NEW_DAYS else 0
     return {"id": i, "title": d["title"], "company": d["company"], "location": d["location"],
             "category": cat, "match": match, "bonus": bonus, "effective": match + bonus,
-            "rank": match + bonus + category_bonus(cat) + tag_bonus(tag), "tag": tag,
+            "rank": match + bonus + category_bonus(cat) + tag_bonus(tag) + featured + new, "tag": tag,
+            "featured": seen["featured"], "posted": seen["posted"], "featured_bonus": featured, "new_bonus": new,
             "threshold": threshold, "closes": (closes(d) or "") and closes(d).isoformat(),
             "flags": flags + (["uncategorized"] if cat == "uncategorized" else [])
                      + (["apply on company site too?"] if external_hint(d) else []),
@@ -958,7 +997,7 @@ def build_pool():
             flags = flags + ["kept: rated yes"]
             threshold = match
         if match >= threshold:  # entry on the real resume match; the home-state bonus only affects ranking
-            pool.append(pool_entry(i, d, scores[i], cat, threshold, flags))
+            pool.append(pool_entry(i, d, scores[i], cat, threshold, flags, still_listed[i]))
     pool.sort(key=pool_sort_key)
     return pool
 
@@ -967,6 +1006,7 @@ def proposed_entries(rows, details):
     """Proposed sheet rows as pool-shaped entries (with "row"), for the approve queue: you put them there on purpose,
     so they show even below the pool bar (the flags say so). Returns (entries, rows_without_details_or_score)."""
     scores, cats, sets = load("scores.json", {}), load("categories.json", {}), load("category_sets.json", {})
+    listed = load("list.json", {})
     entries, missing = [], []
     for r in rows:
         if r.status != "Proposed":
@@ -982,7 +1022,7 @@ def proposed_entries(rows, details):
             flags = flags + ["outside your pool rules"]
         if scores[i]["match"] < threshold:
             flags = flags + [f"below the pool bar ({threshold}%)"]
-        entry = pool_entry(i, d, scores[i], cat, threshold, flags + [f"already Proposed (sheet row {r.number})"])
+        entry = pool_entry(i, d, scores[i], cat, threshold, flags + [f"already Proposed (sheet row {r.number})"], listed.get(i))
         entry["row"] = r.number
         entries.append(entry)
     return entries, missing
@@ -1381,7 +1421,8 @@ def job_view(r, d, today=None):
             "soon": day is not None and (day - (today or date.today())).days <= URGENT_DAYS,
             "external": external_hint(d), "flags": [f for f in r["flags"] if f != "apply on company site too?"],
             "why": r["why"], "skills": d["skills"], "description": text_blocks(d["description"]),
-            "qualifications": text_blocks(d["qualifications"])}
+            "qualifications": text_blocks(d["qualifications"]),
+            **posted_view(r, today)}  # (a pool row keeps its posting's day and Featured tag)
 
 
 def sheet_item(r):

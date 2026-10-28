@@ -101,6 +101,12 @@ for bad, needle in (({"threshold_above": 50}, "can't be lower"), ({"class_year":
                     ({"tags": [{"name": "cars", "bonus": 1, "phrases": "EV"}] * 2}, "twice")):
     refused(lambda: onboard.check_prefs({**jobs.DEFAULTS, **bad}), needle)
 assert onboard.check_prefs({**jobs.DEFAULTS, "major_words": "Computer Science, , Khoury"})["major_words"] == ["computer science", "khoury"]
+# the new / Featured posting bonuses: 0-50; preferences saved before them get the defaults
+assert (clean["featured_bonus"], clean["new_bonus"]) == (5, 5)
+assert onboard.check_prefs({**jobs.DEFAULTS, "featured_bonus": "12", "new_bonus": "0"})["featured_bonus"] == 12
+old = {k: v for k, v in jobs.DEFAULTS.items() if k not in ("featured_bonus", "new_bonus")}
+assert (onboard.check_prefs(old)["featured_bonus"], onboard.check_prefs(old)["new_bonus"]) == (5, 5)
+refused(lambda: onboard.check_prefs({**jobs.DEFAULTS, "new_bonus": 60}), "between 0 and 50")
 assert onboard.check_prefs({**jobs.DEFAULTS, "tags": [{"name": " cars ", "bonus": "7", "phrases": "automotive, , EV"},
                                                     {"name": "", "bonus": "", "phrases": ""}]})["tags"] == \
     [{"name": "cars", "bonus": 7, "phrases": ["automotive", "EV"]}]

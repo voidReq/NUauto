@@ -114,6 +114,29 @@ assert jobs.order_text(R, "pool").startswith("by score")
 assert jobs.order_text(dict(R, category="frontend"), "pool").endswith("always after the rest")
 assert jobs.order_text(dict(R, category="fullstack_web"), "pool").startswith("by score")
 assert jobs.order_text(R, "urgent").startswith("closing within") and jobs.order_text(R, "proposed").startswith("your Proposed")
+# a new or Featured co-op posting (list.json: the update's job list, read again every update): a small ranking bonus
+# each (PREFS featured_bonus, new_bonus: posted under NEW_DAYS ago), shown in the Score line
+from datetime import timedelta  # noqa: E402
+T0 = date(2026, 10, 28)
+M = {"job_id": "x1", "job_title": " Co-op ", "name": "Acme", "job_location": "Boston", "job_desc": "<p>hi</p>",
+     "jobs_iso_times": {"job_start": "2026-10-22T00:00:00-04:00", "job_end": "2026-11-30T23:59:59-05:00"}}
+L = jobs.list_entry(M, "spring", {"x1"})
+assert L["posted"] == "2026-10-22" and L["featured"] is True and L["title"] == "Co-op" and L["source"] == "spring", L
+E = jobs.list_entry({**M, "jobs_iso_times": None}, "no_term", set())
+assert E["posted"] is None and E["featured"] is False and E["source"] == "no_term"
+assert jobs.posted_view(L, T0) == {"posted": "2026-10-22", "posted_days": 6, "posted_text": "posted 6 days ago", "featured": True}
+assert jobs.posted_view(None, T0) == {"posted": None, "posted_days": None, "posted_text": None, "featured": False}
+assert jobs.posted_view({"posted": "2026-10-28"}, T0)["posted_text"] == "posted today"
+plain = jobs.pool_entry("x1", d(), {"match": 70}, "other", 65, [])
+new = jobs.pool_entry("x1", d(), {"match": 70}, "other", 65, [], L, T0)
+assert new["rank"] == plain["rank"] + 10 and (new["featured_bonus"], new["new_bonus"]) == (5, 5), new
+assert new["featured"] and new["posted"] == "2026-10-22" and jobs.rank_text(new) == "80 = 70% match + 5 featured + 5 new"
+week = jobs.pool_entry("x1", d(), {"match": 70}, "other", 65, [], {**L, "featured": False}, T0 + timedelta(days=1))
+assert week["rank"] == plain["rank"] == 70 and jobs.rank_text(week) == "70"  # 7 days old: not new any more
+jobs.set_prefs({"featured_bonus": 0, "new_bonus": 8})
+assert jobs.pool_entry("x1", d(), {"match": 70}, "other", 65, [], L, T0)["rank"] == 78
+jobs.set_prefs(None)
+assert jobs.job_view(new, d(), T0)["posted_days"] == 6 and jobs.job_view(new, d(), T0)["featured"]
 # description headers and bullets
 assert jobs.is_header("Responsibilities:") and jobs.is_header("WHAT YOU'LL DO") and jobs.is_header("What You'll Bring")
 assert not jobs.is_header("Boston, MA") and not jobs.is_header("- Write firmware.") and not jobs.is_header("We build robots.")

@@ -254,7 +254,8 @@ nuauto gui             # the window (setup, review, apply, health); --demo: ever
 nuauto approve         # viewer: my Proposed rows first, then best unrated jobs: y = Approved in the sheet, n = no, s skip
 nuauto apply [-n 3] [--order match]  # submit every Approved row (10-20s between); real terminal (or the GUI) only
                        # (the GUI's per-row Apply uses the hidden --row N; rows Applied during a run go in --queue FILE)
-                       # --order: default (closing within a week, then score) | score | match | closes | pay
+                       # --order: default (closing within a week, then score) | score | match | closes | pay | featured | newest
+                       #   | steps with commas (urgent,featured,age,newest,score,match,closes,pay), e.g. featured,age,score
 nuauto rate            # taste training viewer (keys in docs/PIPELINE.md)
 nuauto update          # check NUworks for new jobs now (runs on the homelab, then syncs)
 nuauto status          # Approved rows + weekly count (also pushes code to the homelab, unless deploy_from_git)
