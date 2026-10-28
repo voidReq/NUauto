@@ -223,7 +223,7 @@ class App:
         self.first_round_done = False
         self.rows, self.rows_at, self.rows_error, self.rows_try_at = None, 0, None, 0
         self.rows_version = 0      # sheet_version when these rows were read (the Apply screen's answer says it)
-        self.queue = {}            # job id -> pool entry, from the last review queue
+        self.queue = {}            # job id -> pool entry, from every review queue made this session
         self.other_urls = None     # the Other jobs tab's links (not Proposed), as last read: the internship count
         self.other_cache = None    # (when, rows, sheet_version then) of the Other jobs tab (gui.other_rows)
         self.other_last, self.other_exists = None, None  # the tab's rows as last read (kept by other_changed), is there one
@@ -933,7 +933,8 @@ def review(mode, q="", category="", source="nuworks", quick=False):
     todo = [r for r in todo if not gone(r["id"])]
     urgent = [r for r in urgent if not gone(r["id"])]
     ratings = jobs.load("ratings.json", {})
-    APP.queue = {r["id"]: r for r in todo}
+    APP.queue.update((r["id"], r) for r in todo)  # (kept from earlier lists too: a decision sent behind the screen
+    # may arrive after the page asked for a newer list without that job)
     counts = {}
     for r in todo:
         counts[r["category"]] = counts.get(r["category"], 0) + 1

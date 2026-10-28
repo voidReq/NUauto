@@ -259,8 +259,8 @@ async function pollTask() {
     S.lastTaskState[t.id] = t.state;
     if (was === "running" && t.state !== "running") taskFinished(t);
   }
-  renderTaskbar();
   renderQuestion();
+  renderTaskbar();  // (after: it shows a question renderQuestion held back)
   if (S.screen && S.screen.task) S.screen.task(S.task, S.taskLog);
   if (t && t.state === "running") S.taskTimer = setTimeout(pollTask, 700);
 }
@@ -426,9 +426,12 @@ function renderTaskbar() {
   const bar = $("#taskbar");
   const t = S.task;
   const onApply = S.route === "apply" && t && t.kind === "apply";
-  if (!t || t.state !== "running" || t.background || onApply) { bar.hidden = true; return; }
+  const q = t && t.state === "running" ? t.question : null;
+  const held = !!q && S.openQuestion !== `${t.id}:${q.id}`;  // a question renderQuestion held back: Answer opens it
+  if (!t || t.state !== "running" || ((t.background || onApply) && !held)) { bar.hidden = true; return; }
   bar.hidden = false;
   fill(bar, el("span", { class: "spinner" }), el("span", { text: `${t.label}${S.taskWhere === "homelab" ? " (on the homelab)" : ""}…`, testid: "taskbar-label" }),
+    held ? el("button", { class: "btn small primary", text: "Answer its question", testid: "taskbar-answer", onclick: () => answerNow(t, q) }) : null,
     el("button", { class: "btn small ghost", text: "Log", onclick: () => showLog(t) }),
     t.kind === "apply" ? el("a", { class: "btn small ghost", href: "#/apply", text: "View" }) : null,
     el("button", { class: "btn small danger", text: "Stop", testid: "taskbar-stop", onclick: () => stopTask(t) }));
@@ -453,11 +456,34 @@ function showLog(t) {
 
 // ------------------------------------------------------------------ questions from a run (answer bank, "did it submit?")
 
+// A run's question opens over the screen at once, except over an assistant's chat or while you type in a box: there it
+// would cover what you are doing with no warning (2026-10-28, my request). Then a toast and the bar at the bottom say it
+// waits (Answer opens it); it opens by itself once you leave that screen or the box.
+function holdQuestion(key) {
+  if (S.answerNow === key) return false;
+  const a = document.activeElement;
+  return S.route === "assistant" || !!(a && a.matches && a.matches("textarea, input:not([type]), input[type=text], input[type=search]"));
+}
+
+function answerNow(t, q) {
+  S.answerNow = `${t.id}:${q.id}`;
+  renderQuestion();
+  renderTaskbar();
+}
+
 function renderQuestion() {
   const t = S.task;
   const q = t && t.state === "running" ? t.question : null;
   if (!q) { if (S.closeQuestion) { S.closeQuestion(); S.closeQuestion = null; S.openQuestion = null; } return; }
-  if (S.openQuestion === `${t.id}:${q.id}`) return;
+  const key = `${t.id}:${q.id}`;
+  if (S.openQuestion === key) return;
+  if (holdQuestion(key)) {
+    if (S.heldQuestion !== key) {
+      S.heldQuestion = key;
+      toast(`${t.label}: it has a question for you.`, { action: "Answer", onaction: () => answerNow(t, q), ms: 15000 });
+    }
+    return;
+  }
   if (S.closeQuestion) S.closeQuestion();
   S.openQuestion = `${t.id}:${q.id}`;
   const reply = async (r) => {
@@ -699,6 +725,7 @@ screens.review = async (view) => {
   const interns = (S.state && S.state.internships) || { on: false };
   let source = interns.on && sessionStorage.getItem("reviewSource") === "intern" ? "intern" : "nuworks";
   let jobs = [], i = 0, card = null, history = {}, shown = 0, total = 0, resumeId = null, listed = 0, loadSeq = 0;
+  let all = [];  // the list the server sent (every kind of work); jobs: the part of it the kind-of-work menu picks
   let moved = false;  // you went to another job (or decided one) since the list came: a newer list keeps your place
   let q = sessionStorage.getItem("reviewQ") || "", category = sessionStorage.getItem("reviewCat") || "";
   const cards = new Map();  // job id -> promise of its card (the next ones are fetched ahead)
@@ -737,10 +764,22 @@ screens.review = async (view) => {
   function setFilter(newQ, newCat) {
     if (newQ === q && newCat === category) return;
     if (!q && newQ && jobs[i]) resumeId = jobs[i].id;  // the job you were on stays undecided; clearing the search comes back to it
+    const same = newQ === q;
     q = newQ; category = newCat;
     sessionStorage.setItem("reviewQ", q);
     sessionStorage.setItem("reviewCat", category);
-    load();
+    if (!same) return load();
+    // only the kind of work changed: picked from the list already here, with no trip to the server
+    shown++; relist(); moved = false; show();
+  }
+
+  // Decided on this screen in a way that takes the job out of this list (as the server does: gui.review's gone):
+  // in Rate only, any rating; in Approve, a decision made in Approve. A decision still being sent counts already.
+  const decidedHere = (j) => { const h = history[j.id]; return !!h && !h.failed && (mode === "rate" || h.mode === "approve"); };
+  const pick = () => all.filter((j) => (!category || j.category === category) && !decidedHere(j));
+  function relist() {
+    jobs = pick(); i = 0; listed = 0;
+    if (!q && resumeId) { i = Math.max(0, jobs.findIndex((x) => x.id === resumeId)); resumeId = null; }
   }
 
   function drawCategories(list) {
@@ -772,15 +811,16 @@ screens.review = async (view) => {
     const mine = ++loadSeq;  // only the newest load may show its list (an older, slower answer is dropped)
     jobs = []; i = 0; card = null; shown++;  // while it loads, no key decides on the old list (and no card of it comes back)
     const slow = setTimeout(() => { if (mine === loadSeq && body.isConnected) fill(body, el("p", { class: "empty", text: "Loading the review list…" })); }, 150);
-    await queue;  // decisions still being written go first: the server decides on its last list, which this one replaces
-    const params = new URLSearchParams({ mode, q, category, source });
+    // (no waiting for decisions still being sent: the server keeps every list's jobs decidable, and the ones decided
+    // here are left out by pick; the kind of work is picked here too, so the server sends every kind)
+    const params = new URLSearchParams({ mode, q, source });
     let r;
     try { r = await api.get(`/api/review?${params}&quick=1`); }
     catch (e) { clearTimeout(slow); if (mine === loadSeq && body.isConnected) fill(body, el("div", { class: "note fail", text: e.message })); return; }
     clearTimeout(slow);
     if (mine !== loadSeq || !body.isConnected) return;
-    jobs = r.jobs; total = r.total; i = 0; listed = 0; cards.clear(); drawCategories(r.categories);
-    if (!q && resumeId) { i = Math.max(0, jobs.findIndex((x) => x.id === resumeId)); resumeId = null; }
+    all = r.jobs; total = r.total; cards.clear(); drawCategories(r.categories);
+    relist();
     moved = i > 0;
     show();
     if (r.stale) refresh(mine, params);
@@ -791,14 +831,16 @@ screens.review = async (view) => {
   // Not moved yet: the new list from its first job (the quick list's first may no longer come first).
   async function refresh(mine, params) {
     let r;
-    try { await queue; r = await api.get(`/api/review?${params}`); } catch (e) { return; }
+    try { r = await api.get(`/api/review?${params}`); } catch (e) { return; }
     if (mine !== loadSeq || !body.isConnected) return;
     const old = jobs, was = new Map(old.map((j) => [j.id, JSON.stringify({ ...j, rating: null })]));
     const changed = (j) => was.get(j.id) !== JSON.stringify({ ...j, rating: null });  // (a rating made here is not a change)
     total = r.total; drawCategories(r.categories);
-    if (r.jobs.length === old.length && r.jobs.every((j, k) => j.id === old[k].id && !changed(j))) return position();
-    r.jobs.forEach((j) => { if (changed(j)) cards.delete(j.id); });  // (its card may say something new too)
-    jobs = r.jobs;
+    all = r.jobs;
+    const fresh = pick();
+    if (fresh.length === old.length && fresh.every((j, k) => j.id === old[k].id && !changed(j))) return position();
+    fresh.forEach((j) => { if (changed(j)) cards.delete(j.id); });  // (its card may say something new too)
+    jobs = fresh;
     if (listMode()) { const had = listed, y = window.scrollY; showList(true, had); window.scrollTo(0, y); return; }
     const at = new Map(jobs.map((j, k) => [j.id, k]));
     const next = moved ? old.slice(i).find((j) => at.has(j.id)) : jobs[0];
@@ -923,7 +965,7 @@ screens.review = async (view) => {
   function submit(j, decision, onfail) {
     const before = history[j.id], oldRating = j.rating;
     if (before && before.decision === "approve" && decision === "approve") return false;  // already in the sheet
-    const entry = { decision, row: null, tab: null, previous: before ? before.previous : null };
+    const entry = { decision, mode, row: null, tab: null, previous: before ? before.previous : null };
     history[j.id] = entry;
     j.rating = decision === "no" ? 0 : 1;
     let undone = false;
@@ -2113,8 +2155,10 @@ screens.assistant = async (view) => {
     } catch (e) {
       if (!view.isConnected || S.gone) return;
       if (S.offline) { timer = setTimeout(load, 4000); return; }  // the homelab can't be reached a moment: ask again
-      fill(view, el("div", { class: "card", testid: "as-gone" }, el("h2", { text: "No session there" }),
-        el("p", { class: "muted", text: "It has ended (or it never ran in that slot)." }), el("a", { class: "btn", href: "#/apply", text: "Apply", onclick: () => sessionStorage.setItem("applyTab", "assistants") })));
+      // it ended (or never ran in that slot): back to Apply's Assistants tab, where the others are (2026-10-28, my request)
+      toast(d ? `${d.company || "That assistant"}: the session has ended.` : `No assistant is running in slot ${slot}.`);
+      sessionStorage.setItem("applyTab", "assistants");
+      location.replace("#/apply");
       return;
     }
     if (!view.isConnected) return;
