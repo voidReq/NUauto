@@ -1855,7 +1855,8 @@ def run(number, url_override, other=False):
         where = f"{sheet.OTHER_TAB} row {number}"
     else:
         rows, row, url, hand = find_row(number, url_override)
-        sheet.check_limits(rows)
+        if not sheet.reapplying(row):  # (one being re-applied is the same application: it adds nothing)
+            sheet.check_limits(rows)
         where = f"row {number}"
     hand = not other and hand
     if hand:  # one application at a time on NUworks: not while an Apply run submits there

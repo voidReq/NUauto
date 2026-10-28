@@ -20,6 +20,17 @@ APPLYING (apply.py, sheet.py)
   refusal, the NUworks answers)
 - Weekly count: every sent row dated this week, Accepted / Rejected too (they went out) | sheet.applied_dates, SENT | test_sheet
 - Applied row with no/odd date is an error, never guessed | sheet.applied_dates | test_sheet
+- Re-apply with the new resume (2026-10-28, my call: re-applies don't count): an Applied NUworks row I mark (More >
+  Re-apply, `nuauto sheet reapply`) goes back to Approved with REAPPLY_MARK in Notes and its first Date kept; while being re-applied (Approved, or Needs Human
+  on the way) it counts toward both limits exactly as before (sheet.reapplying, counted), Apply sends it even past a limit
+  (only those rows: apply.run_rows, gui.apply_list "limited", gui.action refuses a per-row Apply of any other; assist.run
+  skips its check for one). Withdraw (my request): in a real run only (never a dry run), Apply finds the row's job on My Job
+  Applications (exactly one item, one Withdraw id, else skipped), clicks its Withdraw, accepts only NUworks' own question
+  (apply.WITHDRAW_CONFIRM), screenshots before / after, then sends it only once NUworks no longer has the application
+  (apply.still_applied; else skipped, row unchanged; a run stopped in between finds it withdrawn and goes on); it ends Applied with the first date (resolve_submit, mark_applied_by_hand); the twice-daily update
+  never marks it Applied while NUworks still has it (daily.record_hand_applications); never moved or removed
+  (manage.movable) | test_sheet (counts, dates, refusals), test_apply (past the limit; withdraw: this job only, another
+  question, listed twice), test_gui (mark, undo)
 - One application at a time, 10-20 s apart; rows queued from the GUI go through the same loop and limit checks; one NUworks browser per machine, and no Apply run beside an assistant working a NUworks row | apply.run_rows loop, time.sleep(random.uniform(*apply.BETWEEN)), browser.lock_profile, assist.nuworks_session, assist.run | test_apply (the queue, BETWEEN), test_browser (profile lock)
 - One machine submits on NUworks at a time (with NUauto's page on the homelab, both can run Apply; each counts the
   weekly cap before each submit): the homelab's runs take the turn there (it lasts while that process lives), the

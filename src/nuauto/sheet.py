@@ -11,6 +11,7 @@ import threading
 import time
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from urllib.parse import urlparse
 
 import gspread
 from google.auth.exceptions import RefreshError
@@ -65,11 +66,26 @@ def parse_rows(values):
     return rows
 
 
+REAPPLY_MARK = "Re-apply with the new resume"  # in the Notes of a sent row you withdrew on NUworks to send it again
+
+
+def reapplying(r):
+    """A sent row on its way to being sent again with the new resume (mark_reapply): Approved (or stopped on the way,
+    Needs Human), its Date still the day it first went out. It is the same application, so it still counts toward both
+    limits as it did, and sending it again never adds to them (decided 2026-10-28)."""
+    return r.status in ("Approved", "Needs Human") and REAPPLY_MARK in r.notes
+
+
+def counted(r):
+    return r.status in SENT or reapplying(r)
+
+
 def applied_dates(rows):
-    """Dates of all sent rows (Applied, Accepted, Rejected). A missing or odd date is an error, not a guess."""
+    """Dates of all sent rows (Applied, Accepted, Rejected; and those being re-applied: reapplying). A missing or odd
+    date is an error, not a guess."""
     dates = []
     for r in rows:
-        if r.status not in SENT:
+        if not counted(r):
             continue
         try:
             dates.append(datetime.strptime(r.date, DATE_FMT).date())
@@ -172,8 +188,8 @@ def maybe_filled(rows, seen=None):
 def total_count(rows, seen=None):
     """What counts toward the total limit: the sent rows NUworks has (or hasn't been asked about yet). The NUworks tab's
     rows only (the Other jobs tab has no limits). Until 2026-10-16 every Applied row counted, also those never sent
-    on NUworks."""
-    return sum(1 for r in rows if r.status in SENT) - len(not_on_nuworks(rows, seen))
+    on NUworks. A row being re-applied (reapplying) counts as it did when it was sent."""
+    return sum(1 for r in rows if counted(r)) - len(not_on_nuworks(rows, seen))
 
 
 def check_limits(rows, today=None, seen=None):
@@ -395,7 +411,8 @@ def set_status(ws, row_number, status, notes=None, applied_date=None):
     """Move an Approved row to Applied / Failed / Needs Human.
 
     Re-reads the row first so we only ever change a row that is still Approved.
-    Setting Applied re-checks the limits and always stamps today's date.
+    Setting Applied re-checks the limits and always stamps today's date. A row being re-applied (reapplying) keeps its
+    first date and needs no limit check; new notes keep its re-apply mark (reapply_tail).
     """
     if status not in ("Applied", "Failed", "Needs Human"):
         raise SheetError(f"set_status only moves rows to Applied, Failed or Needs Human, not {status!r}.")
@@ -403,7 +420,11 @@ def set_status(ws, row_number, status, notes=None, applied_date=None):
     current = next((r for r in rows if r.number == row_number), None)
     if current is None or current.status != "Approved":
         raise SheetError(f"Row {row_number} is not Approved. Refusing to change it.")
-    if status == "Applied":
+    if reapplying(current):
+        applied_date = None  # the Date cell keeps the day it first went out
+        if notes is not None and status != "Applied":
+            notes = reapply_tail(current, notes)
+    elif status == "Applied":
         check_limits(rows)
         applied_date = applied_date or date.today()
     ws.update(
@@ -434,11 +455,51 @@ def resolve_submit(ws, row_number, status, notes=""):
     current = next((r for r in read_rows(ws) if r.number == row_number), None)
     if current is None or current.status != "Needs Human" or not current.notes.startswith(SUBMIT_MARK):
         raise SheetError(f"Row {row_number} is not waiting on a submit result. Refusing to change it.")
+    day = date.today().strftime(DATE_FMT) if status == "Applied" else ""
+    if reapplying(current):  # sent again: the same application, dated the day it first went out
+        day = current.date
+        notes = f"{reapplied(current)} {notes}".strip() if status == "Applied" else reapply_tail(current, notes)
     ws.update(
         range_name=f"D{row_number}:F{row_number}",
-        values=[[status, notes, date.today().strftime(DATE_FMT) if status == "Applied" else ""]],
+        values=[[status, notes, day]],
         value_input_option="RAW",
     )
+
+
+def reapply_tail(current, notes):
+    """New notes for a row being re-applied (reapplying) that stopped on the way: they keep its mark, so it still counts
+    as the application it was and its first date stays."""
+    return f"{notes} | {REAPPLY_MARK} (first sent {current.date})."
+
+
+def reapplied(current):
+    return f"Re-applied {date.today():%Y-%m-%d} with the new resume (first sent {current.date})."
+
+
+def mark_reapply(ws, row_number, url):
+    """Send this application again with your new resume (Apply withdraws it on NUworks first: apply.withdraw_first): the
+    Applied row goes back to Approved with REAPPLY_MARK in front of its Notes. Its Date stays the day it first went out, so it keeps
+    counting toward both limits as before, and Apply sends it even past the weekly limit (reapplying). Only an Applied
+    row of the NUworks tab (a NUworks job link) still holding this job. Undo: undo_reapply."""
+    current = _row_for(ws, row_number, url)
+    if getattr(ws, "title", None) == OTHER_TAB or urlparse(url).hostname not in config.ALLOWED_HOSTS:
+        raise SheetError("Only a NUworks application can be re-applied.")
+    if current.status != "Applied":
+        raise SheetError(f"Row {row_number} is {current.status or 'empty'}: only an Applied row can be re-applied.")
+    applied_dates([current])  # a sent row without a proper date would stop counting: refuse it
+    ws.update(range_name=f"D{row_number}:F{row_number}",
+              values=[["Approved", f"{REAPPLY_MARK} (first sent {current.date}). {current.notes}".strip(), current.date]],
+              value_input_option="RAW")
+
+
+def undo_reapply(ws, row_number, url):
+    """Undo mark_reapply before it was sent again: back to Applied, its notes and date as they were."""
+    current = _row_for(ws, row_number, url)
+    if current.status != "Approved" or not current.notes.startswith(REAPPLY_MARK):
+        raise SheetError(f"Row {row_number} is not waiting to be re-applied.")
+    rest = current.notes.split("). ", 1)[1] if "). " in current.notes else ""
+    ws.update(range_name=f"D{row_number}:F{row_number}", values=[["Applied", rest, current.date]],
+              value_input_option="RAW")
 
 
 SITE_MARK = "ALSO APPLY ON COMPANY SITE"   # Notes prefix on Applied rows whose company site still needs an application
@@ -485,13 +546,15 @@ def mark_site_done(ws, row_number, url):
 
 
 def mark_applied_by_hand(ws, row_number, url, how="by hand"):
-    """You applied yourself (e.g. an external job that went to Needs Human): Applied, dated today.
-    No limit check: the application has already gone out."""
+    """You applied yourself (e.g. an external job that went to Needs Human): Applied, dated today (a row being
+    re-applied: the day it first went out). No limit check: the application has already gone out."""
     current = _row_for(ws, row_number, url)
     if current.status in SENT:
         raise SheetError(f"Row {row_number} is already {current.status}.")
+    again = reapplying(current)
+    notes = f"{reapplied(current)} Applied {how}." if again else f"Applied {how}. {current.notes}".strip()
     ws.update(range_name=f"D{row_number}:F{row_number}",
-              values=[["Applied", f"Applied {how}. {current.notes}".strip(), date.today().strftime(DATE_FMT)]],
+              values=[["Applied", notes, current.date if again else date.today().strftime(DATE_FMT)]],
               value_input_option="RAW")
 
 
@@ -567,11 +630,11 @@ def add_proposed(ws, items, status="Proposed"):
 
 
 def main():
-    if sys.argv[1:2] in (["add"], ["move"], ["remove"]):
+    if sys.argv[1:2] in (["add"], ["move"], ["remove"], ["reapply"]):
         from nuauto import manage
         return manage.main(sys.argv[1:])
     if sys.argv[1:] != ["status"]:
-        sys.exit("Usage: nuauto sheet status | add | move | remove (nuauto sheet add for details)")
+        sys.exit("Usage: nuauto sheet status | add | move | remove | reapply (nuauto sheet add for details)")
     rows = read_rows(open_worksheet())
     week, total = check_limits_safe(rows)
     print(f"Applied {week_window()[1]}: {week}/{max_per_week()}. Total applied: {total}/{MAX_TOTAL}.")

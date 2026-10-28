@@ -174,6 +174,45 @@ expect(SheetError, lambda: sheet.set_outcome(ws, 2, "https://x/other", "Rejected
 expect(SheetError, lambda: sheet.set_outcome(ws, 2, "https://x/1", "Failed"))                 # not an outcome
 expect(SheetError, lambda: sheet.mark_applied_by_hand(ws, 2, "https://x/1"))                   # Accepted: sent already
 
+# re-apply with the new resume (sheet.mark_reapply, decided 2026-10-28): an Applied NUworks row goes back to Approved, its
+# first date kept; it still counts toward both limits exactly once (also while stopped on the way: Needs Human), Apply
+# sends it even past the limits and it ends Applied with its first date; Undo puts it back as it was
+NU = "https://northeastern-csm.symplicity.com/students/app/jobs/detail/abc"
+today = date.today().strftime("%Y-%m-%d")
+ws = FakeWS([HEADERS, [NU, "Co", "Job", "Applied", "Submitted via apply.py", "2026-10-03"]])
+before = (sheet.applied_dates(sheet.read_rows(ws)), sheet.total_count(sheet.read_rows(ws), seen={}))
+sheet.mark_reapply(ws, 2, NU)
+assert ws.values[1][3:6] == ["Approved", f"{sheet.REAPPLY_MARK} (first sent 2026-10-03). Submitted via apply.py", "2026-10-03"]
+r = sheet.read_rows(ws)
+assert sheet.reapplying(r[0]) and sheet.approved(r) == r
+assert (sheet.applied_dates(r), sheet.total_count(r, seen={})) == before
+expect(SheetError, lambda: sheet.mark_reapply(ws, 2, NU))                # not Applied any more
+sheet.undo_reapply(ws, 2, NU)
+assert ws.values[1][3:6] == ["Applied", "Submitted via apply.py", "2026-10-03"], ws.values[1]
+expect(SheetError, lambda: sheet.undo_reapply(ws, 2, NU))                # nothing to undo
+sheet.mark_reapply(ws, 2, NU)
+sheet.mark_submit_started(ws, 2)                                         # sent again: the mark and the date stay...
+assert ws.values[1][3] == "Needs Human" and ws.values[1][5] == "2026-10-03" and sheet.reapplying(sheet.read_rows(ws)[0])
+assert sheet.total_count(sheet.read_rows(ws), seen={}) == 1
+sheet.resolve_submit(ws, 2, "Applied", "confirmed")                      # ...and it ends Applied, first date kept
+assert ws.values[1][3:6] == ["Applied", f"Re-applied {today} with the new resume (first sent 2026-10-03). confirmed",
+                             "2026-10-03"], ws.values[1]
+sheet.mark_reapply(ws, 2, NU)
+sheet.set_status(ws, 2, "Needs Human", notes="Free-text field 'Why us?': needs you.")  # stopped on the way: still counted
+assert sheet.reapplying(sheet.read_rows(ws)[0]) and ws.values[1][5] == "2026-10-03"
+assert ws.values[1][4].startswith("Free-text field") and sheet.applied_dates(sheet.read_rows(ws)) == before[0]
+sheet.mark_applied_by_hand(ws, 2, NU, how="by hand (marked in NUauto)")  # you sent it yourself: still its first date
+assert ws.values[1][3] == "Applied" and ws.values[1][5] == "2026-10-03" and ws.values[1][4].startswith("Re-applied ")
+expect(SheetError, lambda: sheet.mark_reapply(FakeWS([HEADERS, ["https://jobs.example.net/1", "Co", "Job", "Applied", "",
+                                                                "2026-10-03"]]), 2, "https://jobs.example.net/1"))  # not NUworks
+expect(SheetError, lambda: sheet.mark_reapply(FakeWS([HEADERS, [NU, "Co", "Job", "Rejected", "", "2026-10-03"]]), 2, NU))
+expect(SheetError, lambda: sheet.mark_reapply(FakeWS([HEADERS, [NU, "Co", "Job", "Applied", "", "soon"]]), 2, NU))  # no date
+other = FakeWS([HEADERS, [NU, "Co", "Job", "Applied", "", "2026-10-03"]])
+other.title = sheet.OTHER_TAB
+expect(SheetError, lambda: sheet.mark_reapply(other, 2, NU))             # the Other jobs tab has no NUworks applications
+from nuauto import manage  # noqa: E402
+assert manage.movable(sheet.Row(2, NU, "Co", "Job", "Approved", f"{sheet.REAPPLY_MARK} (first sent 2026-10-03).", "2026-10-03"))
+
 # mark_on_laptop: the mark goes at the END of Notes (NUworks "External application" notes must keep starting the cell),
 # only on Approved / Needs Human rows, once, and only on the row that still holds the job
 from nuauto import assist  # noqa: E402
