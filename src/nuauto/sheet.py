@@ -487,9 +487,29 @@ def mark_reapply(ws, row_number, url):
     if current.status != "Applied":
         raise SheetError(f"Row {row_number} is {current.status or 'empty'}: only an Applied row can be re-applied.")
     applied_dates([current])  # a sent row without a proper date would stop counting: refuse it
+    why = reapply_refused(current)
+    if why:
+        raise SheetError(f"Row {row_number}: not re-applied, {why} (NUworks, the last check): your first application stays.")
     ws.update(range_name=f"D{row_number}:F{row_number}",
               values=[["Approved", f"{REAPPLY_MARK} (first sent {current.date}). {current.notes}".strip(), current.date]],
               value_input_option="RAW")
+
+
+def reapply_refused(row, seen=None):
+    """Why the last NUworks check (data/applications.json, the twice-daily update) says not to re-apply this row's job, or
+    None: re-apply only where nothing has started (your call, 2026-10-28). Apply reads the job again right before it
+    withdraws (apply.keep_first); this catches what is known already, when you mark it."""
+    from nuauto import jobs
+    s = (nuworks_seen() if seen is None else seen).get(jobs.job_id(row.url))
+    if not s:
+        return None
+    if s.get("expired"):
+        return "its posting has closed"
+    if s.get("interviewing") or s.get("hiring") == "Interviewing":
+        return "the employer is interviewing"
+    if s.get("hiring") not in (None, "Available"):
+        return f"its Hiring Status is {s['hiring']}"
+    return None
 
 
 def undo_reapply(ws, row_number, url):

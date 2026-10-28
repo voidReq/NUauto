@@ -27,10 +27,16 @@ APPLYING (apply.py, sheet.py)
   skips its check for one). Withdraw (my request): in a real run only (never a dry run), Apply finds the row's job on My Job
   Applications (exactly one item, one Withdraw id, else skipped), clicks its Withdraw, accepts only NUworks' own question
   (apply.WITHDRAW_CONFIRM), screenshots before / after, then sends it only once NUworks no longer has the application
-  (apply.still_applied; else skipped, row unchanged; a run stopped in between finds it withdrawn and goes on); it ends Applied with the first date (resolve_submit, mark_applied_by_hand); the twice-daily update
+  (apply.still_applied; else skipped, row unchanged; a run stopped in between finds it withdrawn and goes on). Only where
+  nothing has started (my call, 2026-10-28): NUworks' job record, read live right before the withdraw, must say open (not
+  expired, deadline / posting end not passed), Hiring Status Available and the interviewing flag off (apply.keep_first;
+  NUworks shows students nothing about their own application, e.g. viewed / downloaded), else the row goes back to Applied
+  with a note (keep_first_application); for these rows the live record, not the saved deadline, decides (postings get
+  extended); marking refuses a job the last check saw closed / interviewing / not Available (sheet.reapply_refused); it ends Applied with the first date (resolve_submit, mark_applied_by_hand); the twice-daily update
   never marks it Applied while NUworks still has it (daily.record_hand_applications); never moved or removed
   (manage.movable) | test_sheet (counts, dates, refusals), test_apply (past the limit; withdraw: this job only, another
-  question, listed twice), test_gui (mark, undo)
+  question, listed twice; keep_first: every stop, before any withdraw, back to Applied, a dry run changes nothing),
+  test_gui (mark, undo)
 - One application at a time, 10-20 s apart; rows queued from the GUI go through the same loop and limit checks; one NUworks browser per machine, and no Apply run beside an assistant working a NUworks row | apply.run_rows loop, time.sleep(random.uniform(*apply.BETWEEN)), browser.lock_profile, assist.nuworks_session, assist.run | test_apply (the queue, BETWEEN), test_browser (profile lock)
 - One machine submits on NUworks at a time (with NUauto's page on the homelab, both can run Apply; each counts the
   weekly cap before each submit): the homelab's runs take the turn there (it lasts while that process lives), the
