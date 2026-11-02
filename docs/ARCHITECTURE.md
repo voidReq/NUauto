@@ -191,7 +191,7 @@ SHEET (columns in sheet.HEADERS, made by setup_sheet.py)
     Needs Human   sheet.set_status (apply.py stops, deadline passed); mark_submit_started (the row reads Needs Human
                   between the Submit click and the result, so it can't be sent twice).
   set_status only changes rows still Approved. Notes starting sheet.SITE_MARK are written by apply.submit_flow and cleared
-  by sheet.mark_site_done. The weekly cap counts sent rows (sheet.SENT) dated in the current week (sheet.week_window); the
+  by sheet.mark_site_done (Mark the company site done, or a y after the assistant's session on that row). The weekly cap counts sent rows (sheet.SENT) dated in the current week (sheet.week_window); the
   total counts those NUworks has (sheet.total_count). The Other jobs tab has neither.
 
 REPO LAYOUT (what is not a module)

@@ -1348,10 +1348,13 @@ screens.apply = async (view) => {
       about = r.notes || r.why;
       next = r.hand ? assistantStart(d, r, "jobs", `assist-${r.row}`, { body: { row: r.row } }) :
         el("span", { class: "chip", testid: `assist-${r.row}-why`, text: `no assistant: ${r.hand_why}` });
-    } else if (key === "owed" && r.owed === "site") {
+    } else if (key === "owed" && r.owed === "site") {  // the assistant applies on the company site (its link from the posting)
       chips = [dueChip(r)];
       about = (r.notes || "").slice(0, 160);
-      next = el("button", { class: "btn small primary", testid: `site-btn-${r.row}`, text: "Mark the company site done", onclick: () => markRow("site", r) });
+      const done = el("button", { class: "btn small" + (r.target ? "" : " primary"), testid: `site-btn-${r.row}`, text: "Mark the company site done", onclick: () => markRow("site", r) });
+      next = el("span", { class: "row" }, r.target ? assistantStart(d, r, "jobs", `assist-${r.row}`, { body: { row: r.row } }) :
+        el("span", { class: "chip", testid: `assist-${r.row}-why`, text: "no assistant", title: r.why || "" }), done);
+      if (r.target) open = linkOut(r.target, "Open");
     } else if (key === "owed") {
       about = (r.notes || "").slice(-160);
       next = el("button", { class: "btn small primary", text: "Submit on NUworks too", testid: `retry-btn-${r.row}`,

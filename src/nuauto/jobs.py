@@ -320,6 +320,61 @@ def external_hint(d):
     return " ".join(text[(starts[-1] if starts else 0):end].split())[:220]
 
 
+NUWORKS_LINK = re.compile(r"(^|\.)symplicity\.com$|(^|\.)northeastern\.edu$|(^|\.)neu\.edu$")
+PLAIN_URL = re.compile(r"https://[^\s<>\"')\]]+")
+
+
+def page_links(*htmls):
+    """The https links a posting's HTML (description, qualifications) holds, in order, once each: [{"url", "text",
+    "near"}]. text: what the link shows ("HERE"; a plain address in the text: itself); near: the posting's text up to
+    and including it (the last 120 characters, spaces squeezed): site_link reads which sentence it is in. Links to
+    NUworks and Northeastern are left out (Outlook safelinks are unwrapped first)."""
+    from nuauto import apply  # unwrap
+    out, seen = [], set()
+
+    def add(url, text, before):
+        url = apply.unwrap(html.unescape(url).strip().rstrip(".,;:"))
+        h = (urlparse(url).hostname or "").lower()
+        if urlparse(url).scheme != "https" or not h or NUWORKS_LINK.search(h) or url in seen:
+            return
+        seen.add(url)
+        near = " ".join((strip_html(before) + " " + text).split())[-120:]
+        out.append({"url": url, "text": " ".join(text.split())[:80], "near": near})
+
+    for h_ in htmls:
+        h_ = h_ or ""
+        for m in re.finditer(r"(?is)<a\b[^>]*\bhref\s*=\s*[\"']([^\"']+)[\"'][^>]*>(.*?)</a\s*>", h_):
+            add(m.group(1), strip_html(m.group(2)), h_[:m.start()])
+        bare = re.sub(r"(?is)<a\b.*?</a\s*>", " ", h_)  # addresses written out in the text (not inside a link)
+        for m in PLAIN_URL.finditer(html.unescape(re.sub(r"<[^>]+>", " ", bare))):
+            text = m.group(0).rstrip(".,;:")
+            add(text, text, html.unescape(re.sub(r"<[^>]+>", " ", bare))[:m.start()])
+    return out
+
+
+def site_link(d):
+    """(url, None): the company-site link of a posting that asks for an application there too (external_hint), or
+    (None, why). Only a link the posting itself gives, never a guess: the one inside that sentence ("... on the company
+    website HERE."), else the posting's only link; several and none in that sentence: None (pass --url)."""
+    if "links" not in (d or {}):
+        return None, "NUauto read this posting before it kept its links: they are read at the next update"
+    links = d["links"]
+    if not links:
+        return None, "the posting gives no link to the company site: open it on NUworks and follow what it says"
+    hint = " ".join((external_hint(d) or "").split()).lower()
+    inside = []
+    for x in links:
+        tail = x["near"][-40:].rsplit(". ", 1)[-1]  # the words right before it, in its own sentence
+        if hint and tail.lower() in hint:
+            inside.append(x["url"])
+    if len(inside) == 1:
+        return inside[0], None
+    if len(links) == 1 and not inside:
+        return links[0]["url"], None
+    return None, (f"the posting has {len(links)} links and NUauto can't tell which is the application: "
+                  "nuauto assist <row> --url <link>")
+
+
 URGENT_DAYS = 7  # approve shows jobs closing within this many days first
 NEW_DAYS = 7  # a posting this new gets PREFS["new_bonus"] (the Apply rows' "posted" chip: green, then yellow to 14, grey to 21)
 
@@ -601,6 +656,7 @@ def slim(raw):
         "applied": bool(raw.get("applied")),
         "description": strip_html(raw.get("job_desc")),
         "qualifications": strip_html(raw.get("qualifications")),
+        "links": page_links(raw.get("job_desc"), raw.get("qualifications")),  # (site_link: the company site's)
         "fetched": date.today().isoformat(),
     }
 
@@ -750,6 +806,22 @@ def application_answer(raw, prev, now):
             "filled_since": (prev.get("filled_since") or now) if hiring == "Filled" else None, "checked": now}
 
 
+def keep_links(i, raw):
+    """A sent job's saved details get its posting's links (page_links), if they have none yet: details read before
+    links were kept (2026-11-02) get them from the next check, so a Still owed row's company site is known."""
+    p = path("details", f"{i}.json")
+    try:
+        with open(p) as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return
+    if "links" in d:
+        return
+    d["links"] = page_links(raw.get("job_desc"), raw.get("qualifications"))
+    with open(p, "w") as f:
+        json.dump(d, f, indent=1)
+
+
 def check_applications(rows):
     """Ask NUworks about every sent row of the NUworks tab (Applied, Interview, Accepted, Rejected; its job's own data, see
     application_answer) and keep its answers in data/applications.json, each with the row's
@@ -778,6 +850,7 @@ def check_applications(rows):
                 if raw and raw.get("job_id") == i:
                     seen[i] = {**application_answer(raw, seen.get(i), now), "row": r.number,
                                "fingerprint": sheet.fingerprint(r)}
+                    keep_links(i, raw)
                 browser.pause(page, 1.5, 3)
             log.write(f"asked NUworks about {len(sent)} sent rows: "
                       f"{sum(1 for r in sent if (seen.get(job_id(r.url)) or {}).get('applied'))} it has")

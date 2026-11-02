@@ -15,7 +15,10 @@ Data comes from NUworks' own search/job data, not page text.
    search's postdate) and "featured".
 2. Claude triage (Sonnet, prompts/TRIAGE_PROMPT.md, 250 jobs a batch): title, company, place and a snippet;
    drops only clearly unrelated roles.
-3. details + hard rules (script; one NUworks job page each).
+3. details + hard rules (script; one NUworks job page each). Each also keeps the posting's https links (jobs.page_links:
+   address, what it shows, the text before it; not NUworks / Northeastern ones), so a posting that asks for the company
+   site too has its link there (jobs.site_link, the assistant's Still owed rows). Details read before 2026-11-02 have
+   none: every update's check of the sent rows adds them (jobs.keep_links).
 4. Claude match % vs your resume (Sonnet, prompts/SCORE_PROMPT.md, 20 jobs a batch). The formula is fixed in the
    prompt: 4-8 key requirements, each required or preferred, each met / partial / missing in the resume;
    match = 100 * (2 * required met + required partial + preferred met + 0.5 * preferred partial) /

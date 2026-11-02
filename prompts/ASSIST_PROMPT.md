@@ -145,7 +145,8 @@ THE USER'S (ask right away: these can't wait for the end list)
 
 When the application is submitted (the user approved Submit and the site confirms), tell the user to type
 /exit; the terminal then asks whether it was submitted and updates the sheet (for a company-site job of the NUworks
-tab it also submits the job on NUworks; an Other jobs row is not on NUworks; a NUworks row was NUworks itself).
+tab it also submits the job on NUworks, unless THIS RUN says that went out already; an Other jobs row is not on
+NUworks; a NUworks row was NUworks itself).
 
 Enforced by code (a blocked action comes back as an error; don't look for a way around it, tell the user):
 asking before Submit-type clicks and Enter (with every unanswered guess shown to the user); no touching captchas; password boxes take

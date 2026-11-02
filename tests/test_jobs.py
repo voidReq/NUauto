@@ -189,6 +189,26 @@ assert jobs.external_hint(d(description="For this co-op position, you are asked 
 assert jobs.external_hint(d(description="Please apply on our careers page."))
 assert jobs.external_hint(d(description="Apply machine learning to telematics.")) is None
 
+# the posting's links (page_links) and which one is the company site's (site_link: the one in that sentence, else the
+# only one; never a guess)
+html_ = ('<p>To be considered for this position, please apply on both NUworks and on the company website '
+         '<a href="https://careers.example.com/job/123">HERE</a>.&nbsp;</p><p>About Us. See <a href="https://www.example.com">'
+         'example.com</a>, <a href="https://northeastern-csm.symplicity.com/x">NUworks</a> and https://example.org/privacy.</p>')
+links = jobs.page_links(html_, None)
+assert [x["url"] for x in links] == ["https://careers.example.com/job/123", "https://www.example.com", "https://example.org/privacy"], links
+assert links[0]["text"] == "HERE" and links[0]["near"].endswith("on the company website HERE")
+assert jobs.page_links(None, "") == []
+safe_ = "https://eur01.safelinks.protection.outlook.com/?url=https%3A%2F%2Fjobs.example.net%2F9&amp;data=x"
+assert [x["url"] for x in jobs.page_links(f'<a href="{safe_}">apply</a>')] == ["https://jobs.example.net/9"]
+desc = jobs.strip_html(html_)
+assert jobs.site_link(d(description=desc, links=links)) == ("https://careers.example.com/job/123", None)
+one = [{"url": "https://jobs.example.net/9", "text": "apply", "near": "Read our values apply"}]
+assert jobs.site_link(d(description="You must also apply on our careers site.", links=one)) == ("https://jobs.example.net/9", None)
+two = [{**one[0], "url": "https://a.example/1"}, {**one[0], "url": "https://b.example/2"}]
+assert jobs.site_link(d(description="You must also apply on our careers site.", links=two))[0] is None
+assert jobs.site_link(d(description="x", links=[]))[0] is None
+assert "next update" in jobs.site_link(d(description="x"))[1]   # read before links were kept
+
 ws = FakeWS([HEADERS, ["https://a", "A", "T", "Applied", "", "2026-10-01"]])
 n = sheet.add_proposed(ws, [{"url": "https://a", "company": "A", "title": "T", "notes": ""},
                             {"url": "https://b", "company": "B", "title": "U", "notes": "suggested"}])

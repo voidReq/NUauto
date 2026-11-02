@@ -181,6 +181,34 @@ def by_hand_target(row):
     return row.url, None
 
 
+def site_target(row, url_override=None):
+    """(url, None) if this Applied NUworks-tab row still owes its company-site application (Notes start
+    sheet.SITE_MARK: the posting asked for both) and the posting's own link to that site is known (jobs.site_link;
+    --url: yours instead), else (None, reason). The NUworks side has gone out already: the agent works only that
+    site, and a y at the end clears the mark (sheet.mark_site_done); nothing is sent on NUworks again."""
+    from nuauto import jobs
+    from nuauto import sheet
+    if row.status != "Applied" or not (row.notes or "").startswith(sheet.SITE_MARK):
+        return None, "not an Applied row whose company site is still owed"
+    if url_override:
+        return check_link(url_override)
+    try:
+        with open(jobs.path("details", f"{jobs.job_id(row.url)}.json")) as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return None, "NUauto has no saved copy of this posting: open it on NUworks and follow its link"
+    url, why = jobs.site_link(d)
+    return check_link(url) if url else (None, why)
+
+
+def site_note(row):
+    """THIS RUN's lines for a Still owed row (site_target): the NUworks side went out; what the posting said."""
+    from nuauto import sheet
+    said = (row.notes or "")[len(sheet.SITE_MARK):].split("). ", 1)[0].strip(" (")
+    return ("This job was already submitted on NUworks. Its posting also asks for an application on the company's own "
+            f"site, which is this run: {said[:200]}\nApply there only; never open NUworks.\n")
+
+
 NUWORKS_BUSY = "Not now: an assistant is applying on NUworks (a by-hand row): one application at a time there. Finish it first."
 
 
@@ -442,6 +470,8 @@ def review_lines(state):
                      f"{cut(letter_['paragraphs'][0])!r}), uploaded as {os.path.basename(letter_['pdf'])}.")
     if state.get("hand"):
         lines.append("This is a NUworks application: it counts toward your weekly limit.")
+    if state.get("site"):
+        lines.append("This job is already Applied on NUworks: this is its company-site application (it counts toward no limit).")
     return lines
 
 
@@ -1574,14 +1604,20 @@ def attention_main(kind):
 # ---------- launcher (nuauto assist) ----------
 
 def find_row(number, url_override):
-    """The NUworks tab's row: a company-site application (assist_target), or one that stopped on NUworks for something
-    only you can give (by_hand_target: the agent works it on NUworks itself). (rows, row, url, by_hand)."""
+    """The NUworks tab's row: a company-site application (assist_target), one that stopped on NUworks for something
+    only you can give (by_hand_target: the agent works it on NUworks itself), or an Applied one whose company site is
+    still owed (site_target). (rows, row, url, kind): kind "site", "hand" or "" (a company-site application)."""
     from nuauto import sheet
     ws = sheet.open_worksheet()
     rows = sheet.read_rows(ws)
     row = next((r for r in rows if r.number == number), None)
+    if row is not None and row.status == "Applied" and (row.notes or "").startswith(sheet.SITE_MARK):
+        url, why = site_target(row, url_override)
+        if why:
+            sys.exit(f"Row {number} ({row.company}): {why}.")
+        return rows, row, url, "site"
     if row is None or row.status != "Needs Human":
-        sys.exit(f"Row {number} is not a Needs Human row.")
+        sys.exit(f"Row {number} is not a Needs Human row (or an Applied one whose company site is still owed).")
     if (row.notes or "").startswith("External application"):
         url, why = assist_target(row.notes, url_override)
         hand = False
@@ -1592,7 +1628,7 @@ def find_row(number, url_override):
         hand = True
     if why:
         sys.exit(f"Row {number} ({row.company}): {why}.")
-    return rows, row, url, hand
+    return rows, row, url, "hand" if hand else ""
 
 
 def find_other_row(number, url_override):
@@ -1773,12 +1809,13 @@ def rules_text(answer_cmd):
 
 
 def context_text(where, row, url, other, resume, read_roots, answer_cmd, writeups=(), view_url=None, transcript=None,
-                 hand=False):
+                 hand=False, site=False):
     email = accounts.account_email()
     own = accounts.own_login(url)  # one of your own logins (imported from Bitwarden) for this site
     return (f"\n\nTHIS RUN\n{where.capitalize()}: {row.company} | {row.title}\nPosting: {url}\n"
             + (OTHER_NOTE if other else "")
             + (hand_note(row) if hand else "")
+            + (site_note(row) if site else "")
             + ("This browser runs on the user's homelab, not in front of them. They read your messages and answer on "
                "their phone (a review page), and they see and use this browser there too (for a captcha: say there is "
                "one and wait for them). A Submit-type action waits for their approval on that page: if it comes back "
@@ -1853,12 +1890,15 @@ def run(number, url_override, other=False):
     if other:
         rows, row, url = find_other_row(number, url_override)
         where = f"{sheet.OTHER_TAB} row {number}"
+        kind = ""
     else:
-        rows, row, url, hand = find_row(number, url_override)
-        if not sheet.reapplying(row):  # (one being re-applied is the same application: it adds nothing)
+        rows, row, url, kind = find_row(number, url_override)
+        # (one being re-applied is the same application: it adds nothing; a Still owed row's went out already)
+        if not sheet.reapplying(row) and kind != "site":
             sheet.check_limits(rows)
         where = f"row {number}"
-    hand = not other and hand
+    hand = not other and kind == "hand"
+    site = not other and kind == "site"
     if hand:  # one application at a time on NUworks: not while an Apply run submits there
         from nuauto import browser
         holder = browser.profile_holder() or {}
@@ -1902,7 +1942,7 @@ def run(number, url_override, other=False):
                 print(f"(Note: {note}.)")
         try:
             if not hand:
-                return run_locked(number, other, row, url, where, tab, slot, slot_lock)
+                return run_locked(number, other, row, url, where, tab, slot, slot_lock, site=site)
             from nuauto import remote
             try:  # one machine submits on NUworks at a time (with NUauto on the homelab, both can apply there)
                 with remote.nuworks_turn():
@@ -1917,9 +1957,10 @@ def run(number, url_override, other=False):
             lock.close()
 
 
-def run_locked(number, other, row, url, where, tab, slot, slot_lock, hand=False):
+def run_locked(number, other, row, url, where, tab, slot, slot_lock, hand=False, site=False):
     """The session itself, once run() holds this row, a slot and the job site (and, from the laptop, the homelab's
-    claim): the agent in this terminal, then "Did you press Submit?". hand: a by-hand row, worked on NUworks itself."""
+    claim): the agent in this terminal, then "Did you press Submit?". hand: a by-hand row, worked on NUworks itself;
+    site: an Applied row whose company site is still owed (site_target)."""
     from nuauto import browser
     from nuauto import sheet
     log_ = browser.RunLog(f"assist_{'other_' if other else ''}row{number}")
@@ -1949,7 +1990,7 @@ def run_locked(number, other, row, url, where, tab, slot, slot_lock, hand=False)
              "transcript_src": os.path.realpath(transcript_src) if transcript else None, "transcript": transcript,
              "company": row.company, "job_title": row.title, "job_url": url, "row_url": row.url, "password_sites": [],
              "guesses": {}, "typed": {}, "account_email": accounts.account_email() or "", "where": where,
-             "slot": slot, "view_url": view.url if view else None, "tmux": tmux_session() if view else None, "hand": hand,
+             "slot": slot, "view_url": view.url if view else None, "tmux": tmux_session() if view else None, "hand": hand, "site": site,
              # the pane this runs in: the review page types only there (never another window of that tmux session)
              "tmux_pane": os.environ.get("TMUX_PANE") if view and re.fullmatch(r"%\d+", os.environ.get("TMUX_PANE", "")) else None}
     with open(os.path.join(d, "state.json"), "w") as f:
@@ -1959,7 +2000,8 @@ def run_locked(number, other, row, url, where, tab, slot, slot_lock, hand=False)
     if hand and not config.DEMO:
         seed_nuworks(profile, d, log_)
     cmd = session(d, answer_cmd, read_roots, profile, rules_text(answer_cmd) + context_text(
-        where, row, url, other, resume, read_roots, answer_cmd, writeups, view.url if view else None, transcript, hand), where,
+        where, row, url, other, resume, read_roots, answer_cmd, writeups, view.url if view else None, transcript, hand,
+        site), where,
         view.display if view else None)
     log_.write(f"{where.capitalize()}: {row.company} | {row.title} -> {host(url)} (assistant slot {slot} of {slots()})")
     if view:  # the password only here, on your screen: never in a log or a Discord message
@@ -2007,6 +2049,10 @@ def run_locked(number, other, row, url, where, tab, slot, slot_lock, hand=False)
             log_.write(f"Not submitted; {where} stays {row.status}.")
         return
     ws = sheet.open_other() if other else sheet.open_worksheet()
+    if site:  # the NUworks side went out before: the company site was the part still owed
+        sheet.mark_site_done(ws, row.number, row.url)
+        log_.write(f"{where.capitalize()}: company site marked done (it stays Applied; nothing sent on NUworks again).")
+        return
     sheet.mark_applied_by_hand(ws, row.number, row.url, how="on NUworks (nuauto assist; you pressed Submit)" if hand else
                                "on the company site (nuauto assist; you pressed Submit)")
     log_.write(f"{where.capitalize()} marked Applied (dated today).")

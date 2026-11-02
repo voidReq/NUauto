@@ -203,7 +203,8 @@ GUI (`nuauto gui`; details: docs/GUI.md)
   `python -m` or file paths.
 
 COMPANY-SITE AGENT (`nuauto assist`; every rule: docs/ASSIST.md, read it before changing the agent)
-- Only Needs Human rows stopped at an external application, Approved Other jobs rows, and (2026-10-16, my call) Needs
+- Only Needs Human rows stopped at an external application, Approved Other jobs rows, Applied rows still owing their
+  company site (SITE_MARK, the posting's own link: assist.site_target; 2026-11-02), and (2026-10-16, my call) Needs
   Human rows stopped on NUworks itself (anything but an external application, e.g. a cover letter, transcript, an answer
   in my words; a NUworks job link, deadline not passed, no unresolved Submit click: assist.by_hand_target): on
   those it works NUworks itself (their own job page only: a prompt rule; code checks only the starting link), one at a time on NUworks (not beside an Apply run).

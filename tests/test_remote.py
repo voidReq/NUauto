@@ -99,7 +99,8 @@ assert ("other", 2) not in [(c["tab"], c["row"]) for c in gone] and ("other", 3)
 c3 = dict(cands[0])
 assert c3.pop("row_url") == next(r.url for r in main_rows if r.number == 3)  # the sheet row's own link (Drop checks it)
 assert c3 == {"tab": "jobs", "row": 3, "url": "https://beta.icims.com/job/1", "host": "beta.icims.com", "company": "Co3",
-              "title": "Intern", "closes": TODAY + timedelta(days=2), "match": 50, "laptop": False, "hand": False}
+              "title": "Intern", "closes": TODAY + timedelta(days=2), "match": 50, "laptop": False, "hand": False,
+              "site": False}
 # the laptop mark in a row's Notes (assist.LAPTOP_MARK) shows as "laptop" on that candidate, on either tab
 laptop_notes = ext("acme.wd5.myworkdayjobs.com") + " | match 80% | " + assist.LAPTOP_MARK + " (why)"
 lc = remote.candidates([row(2, "Needs Human", notes=laptop_notes), row(3, "Needs Human", notes=ext("b.example") + " | match 70%")],
@@ -123,6 +124,21 @@ go, rest = remote.plan(hc, [], [], {}, 3, manual=True)
 assert go == [(hc[0], None)] and rest == []
 go, rest = remote.plan(hc, [], [], {}, 3, jobs_left=0, manual=True)                       # it counts toward the limit
 assert go == [] and "used up" in rest[0][1]
+# an Applied row whose company site is still owed (sheet.SITE_MARK, the posting's link known: assist.site_target):
+# a candidate marked site, which never starts by itself, and counts toward no limit (its NUworks side went out already)
+os.makedirs(jobs.path("details"), exist_ok=True)
+with open(jobs.path("details", "owed1.json"), "w") as f:
+    json.dump({"id": "owed1", "description": "Please apply on both NUworks and on the company website HERE.", "qualifications": "",
+               "links": [{"url": "https://careers.example.com/j/1", "text": "HERE",
+                          "near": "Please apply on both NUworks and on the company website HERE"}]}, f)
+owed = sheet.SITE_MARK + ' (posting: "apply on the company website HERE."). Submitted via apply.py'
+sc = remote.candidates([row(8, "Applied", nu[:-3] + "owed1", owed), row(9, "Applied", nu[:-3] + "nodetails", owed),
+                        row(10, "Applied", nu[:-3] + "owed1", "Submitted via apply.py")], [], None, TODAY)
+assert [(c["row"], c["site"], c["hand"], c["url"]) for c in sc] == [(8, True, False, "https://careers.example.com/j/1")], sc
+go, rest = remote.plan(sc, [], [], {}, 3)
+assert go == [] and rest == [(sc[0], remote.SITE_WHY)]
+go, rest = remote.plan(sc, [], [], {}, 3, jobs_left=0, manual=True)
+assert go == [(sc[0], None)] and rest == []
 assert remote.tab_word("other") == "other" and remote.tab_word("jobs") == "nuworks"
 assert jobs.URGENT_DAYS == 7   # the order test above assumes it
 
@@ -868,7 +884,7 @@ assist.find_other_row = lambda n, u: ([], row(n, "Approved", URL, company="Acme"
 remote.unclaim_on_homelab = lambda tab, rown: unclaims.append((tab, rown))
 
 
-def locked(*a):
+def locked(*a, **k):
     ran.append(a)
     if len(ran) == 99:
         raise AssertionError
@@ -880,7 +896,7 @@ def run_step(number, server=False, remote_on=True, claim=(True, None), fail=Fals
         claims.append((tab, rown, host))
         return claim
     remote.claim_on_homelab = claim_fn
-    assist.run_locked = (lambda *a: (_ for _ in ()).throw(RuntimeError("session crashed"))) if fail else locked
+    assist.run_locked = (lambda *a, **k: (_ for _ in ()).throw(RuntimeError("session crashed"))) if fail else locked
     config.IS_SERVER, config.REMOTE_ASSIST = server, remote_on
     real_stdin, sys.stdin = sys.stdin, TTY()
     out, sys.stdout = sys.stdout, io.StringIO()
@@ -1271,6 +1287,34 @@ finally:
     remote.record_outcome, daily.discord, review.page_url = patched["outcome"], patched["discord"], patched["page_url"]
     sheet.open_other, sheet.open_worksheet = patched["open_other"], patched["open_worksheet"]
     config.IS_SERVER = REAL_FLAGS[0]
+
+# a Still owed row (site: its NUworks side went out already): y clears the mark (sheet.mark_site_done) and nothing more:
+# not marked Applied again, no NUworks side; the session is told so (THIS RUN, assist.site_note)
+calls = []
+real_site_done, real_by_hand, real_nuworks_side = sheet.mark_site_done, sheet.mark_applied_by_hand, assist.nuworks_side
+try:
+    screen.Screen = FakeScreen
+    prompts = []
+    assist.session = lambda d, a, r, p, prompt, *x, **k: prompts.append(prompt) or [sys.executable, "-c", "pass"]
+    assist.ask_line = lambda prompt, timeout=None: "y"
+    sheet.open_worksheet = lambda *a, **k: "WS"
+    sheet.mark_site_done = lambda ws, n, url: calls.append(("site_done", ws, n, url))
+    sheet.mark_applied_by_hand = lambda *a, **k: calls.append(("applied",))
+    assist.nuworks_side = lambda *a, **k: calls.append(("nuworks_side",))
+    owed_row = sheet.Row(8, nu[:-3] + "owed1", "OwedCo", "Intern", "Applied", sheet.SITE_MARK + ' (posting: "apply HERE."). Submitted', "")
+    slot, lock = assist.take_slot({"row": 8, "tab": "jobs"})
+    out, sys.stdout = sys.stdout, io.StringIO()
+    try:
+        assist.run_locked(8, False, owed_row, "https://careers.example.com/j/1", "row 8", "jobs", slot, lock, site=True)
+    finally:
+        sys.stdout = out
+        lock.close()
+    assert calls == [("site_done", "WS", 8, owed_row.url)], calls
+    assert "already submitted on NUworks" in prompts[0] and "apply HERE." in prompts[0], prompts[0][-600:]
+finally:
+    sheet.mark_site_done, sheet.mark_applied_by_hand, assist.nuworks_side = real_site_done, real_by_hand, real_nuworks_side
+    screen.Screen, assist.session, assist.ask_line = patched["screen.Screen"], patched["session"], patched["ask_line"]
+    sheet.open_worksheet = patched["open_worksheet"]
 
 # its hours are New York time whatever clock the process runs on (a shell over ssh is often UTC)
 from datetime import timezone  # noqa: E402
