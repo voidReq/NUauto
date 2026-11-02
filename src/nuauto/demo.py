@@ -506,6 +506,12 @@ def setup(state_names=()):
             json.dump(details(j, today), f, indent=1)
         listed[j["id"]] = listed_entry(j, today)
         scores[j["id"]], cats[j["id"]] = score(j, today), j["category"]
+    # the Still owed row's posting (Willow Devices, row 900130): its link to the company site (jobs.site_link)
+    jobs.save("details/900130.json", {**details(JOBS[0], today), "id": "900130", "title": "Firmware Co-op",
+                                      "company": "Willow Devices", "applied": True,
+                                      "description": "Firmware work. You must also apply on our careers site HERE.",
+                                      "links": [{"url": "https://careers.willow.example/jobs/130", "text": "HERE",
+                                                 "near": "You must also apply on our careers site HERE"}]})
     jobs.save("list.json", listed)
     jobs.save("triage.json", {i: {"keep": True, "why": "demo"} for i in listed})
     jobs.save("scores.json", scores)

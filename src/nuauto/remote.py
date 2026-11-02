@@ -96,8 +96,9 @@ def match_of(notes):
 
 def candidates(main_rows, other_rows, closes=None, today=None, other_closes=None):
     """The rows the queue may start, best first: [{"tab", "row", "url", "row_url", "host", "company", "title", "closes",
-    "match", "laptop", "hand"}] (host: its job site, assist.site_key; row_url: the sheet row's own link; hand: a row
-    worked on NUworks itself (assist.by_hand_target), which only you start: it needs you there).
+    "match", "laptop", "hand", "site"}] (host: its job site, assist.site_key; row_url: the sheet row's own link; hand: a
+    row worked on NUworks itself (assist.by_hand_target), which only you start: it needs you there; site: an Applied
+    row whose company site is still owed (assist.site_target): only you start it, and it counts toward no limit).
     closes(row) -> its closing date or None (NUworks rows; apply.row_closes); other_closes: the same for the Other jobs
     tab's rows (intern.closes_func). A row past its deadline is never a candidate. Pure apart from those."""
     from nuauto import assist
@@ -105,20 +106,25 @@ def candidates(main_rows, other_rows, closes=None, today=None, other_closes=None
     today = today or date.today()
     out = []
     for r in main_rows or []:
-        if r.status != "Needs Human":
+        site = False
+        if r.status == "Applied":  # its company site still owed (assist.site_target): yours to start
+            url, _ = assist.site_target(r)
+            site, hand = bool(url), False
+        elif r.status != "Needs Human":
             continue
-        url, _ = assist.assist_target(r.notes)
-        hand = False
-        if not url:
-            url, _ = assist.by_hand_target(r)
-            hand = bool(url)
+        else:
+            url, _ = assist.assist_target(r.notes)
+            hand = False
+            if not url:
+                url, _ = assist.by_hand_target(r)
+                hand = bool(url)
         if url:
             day = closes(r) if closes else None
             if day and day < today:
                 continue  # past its deadline
             out.append({"tab": "jobs", "row": r.number, "url": url, "row_url": r.url, "host": assist.site_key(url), "company": r.company,
                         "title": r.title, "closes": day, "match": match_of(r.notes), "laptop": assist.LAPTOP_MARK in r.notes,
-                        "hand": hand})
+                        "hand": hand, "site": site})
     for r in other_rows or []:
         url, _ = assist.other_target(r)
         if url:
@@ -137,6 +143,7 @@ OUTCOME_UNKNOWN = ("a Submit was approved in its last session and nobody said wh
 
 
 LAPTOP_WHY = "marked: do it on the laptop (the homelab's browser was refused there)"
+SITE_WHY = "Applied on NUworks, its company site still owed: yours to start"
 HAND_WHY = "by hand on NUworks: yours to start (it needs you there: the NUworks login, your cover letter)"
 AUTO_OFF = {"jobs": "NUworks rows don't start by itself (off in Settings): yours to start",
             "other": "Other jobs rows don't start by itself (off in Settings): yours to start"}
@@ -163,11 +170,13 @@ when manual). Pure (tests/test_remote.py)."""
             why = OUTCOME_UNKNOWN
         elif c.get("hand") and not manual:  # never by itself: it needs you there
             why = HAND_WHY
+        elif c.get("site") and not manual:  # (Still owed) never by itself either: you start it
+            why = SITE_WHY
         elif same and not manual:  # any earlier session (yours or the queue's): never again by itself
             why = "had a session already: yours to start now"
         elif not manual and tabs is not None and c["tab"] not in tabs:
             why = AUTO_OFF[c["tab"]]
-        elif c["tab"] == "jobs" and jobs_left is not None and jobs_left <= 0:
+        elif c["tab"] == "jobs" and not c.get("site") and jobs_left is not None and jobs_left <= 0:
             why = "this week's (or the total) NUworks applications are used up"
         elif c["host"] in busy_hosts:
             why = f"another session is on {c['host']}"
@@ -176,7 +185,7 @@ when manual). Pure (tests/test_remote.py)."""
         else:
             go.append((c, None))
             busy_hosts.add(c["host"])
-            if c["tab"] == "jobs" and jobs_left is not None:
+            if c["tab"] == "jobs" and not c.get("site") and jobs_left is not None:
                 jobs_left -= 1
             continue
         rest.append((c, why))

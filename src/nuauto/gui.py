@@ -612,7 +612,8 @@ def company_rows(rows, facts=False):
                 hand, hand_why = assist.by_hand_target(r)  # the assistant may work it on NUworks itself
                 other.append(view(r, why=why, hand=bool(hand), hand_why=hand_why))
         elif r.status == "Applied" and r.notes.startswith(sheet.SITE_MARK):
-            site.append(view(r))
+            url, why = assist.site_target(r)  # the posting's link to the company site: the assistant can apply there
+            site.append(view(r, target=url, host=urlparse(url).hostname if url else None, why=why))
         elif r.status == "Applied" and any(m in r.notes for m in NUWORKS_SIDE_NOT_SENT) \
                 and assist.nuworks_side_blocked(r.notes) is None:
             retry.append(view(r))

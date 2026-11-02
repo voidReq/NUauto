@@ -12,6 +12,12 @@ WHICH ROWS (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`; added 2
   exact resume label (assist.hand_note; the rules' NUWORKS ROWS): it clicks the job's Apply, fills the popup, uploads
   the transcript or the cover letter, and its Submit asks me like any other. After y: Applied ("on NUworks"), no
   NUworks side after. The weekly cap is checked at its start and the Submit question says it counts.
+- (2026-11-02, my request) Still owed rows: Applied NUworks-tab rows whose Notes start sheet.SITE_MARK (the posting
+  wanted the company site too; NUworks gave no external link): assist.site_target. The link is the posting's own
+  (jobs.site_link: the link inside the sentence that asks, else the posting's only link; several and none there: no
+  start, `nuauto assist <row> --url <link>`); never NUworks. No weekly / total check (it went out on NUworks already);
+  the session is told so (assist.site_note), and the Submit question says it counts toward no limit. After y:
+  sheet.mark_site_done (stays Applied, date kept), nothing sent on NUworks. The homelab's queue never starts it by itself.
 - Other jobs (added 2026-10-07): `nuauto assist other <row>`: an Approved row of the Other jobs tab (https, never
   NUworks: assist.other_target), same agent, rules and hooks, with the layered answer bank (CLAUDE.md, ANSWER BANK).
   After y: Applied (dated today, no cap), nothing sent to NUworks; n = stays Approved. `nuauto assist other add <url>

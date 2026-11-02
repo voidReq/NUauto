@@ -94,6 +94,8 @@ THE QUEUE (remote.py; nuauto-assist.timer every 10 minutes runs `nuauto assist a
   next run. When it starts sessions, Discord says which.
 - By-hand NUworks rows (stopped on NUworks for a cover letter, a transcript...: docs/ASSIST.md) are listed too but never
   start by themselves (they need you there: NUworks' sign-in in its browser view, your letter): Start now.
+- Still owed rows (Applied, the company site still wanted: docs/ASSIST.md, WHICH ROWS; added 2026-11-02) are listed too,
+  never start by themselves (remote.SITE_WHY): Start now. They count toward no limit (their NUworks side went out).
 - What it starts: Approved rows of the Other jobs tab and Needs Human rows stopped at a company site (not past their
   deadline), best first: closing within 7 days (jobs.URGENT_DAYS, soonest first), then match % (the "match NN%" in
   Notes), then NUworks rows before Other jobs, then sheet order. Into free slots (assist_slots, 1-3, the same setting

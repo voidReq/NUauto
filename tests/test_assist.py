@@ -338,6 +338,25 @@ assert "deadline" in assist.by_hand_target(hand_row("deadline passed (2026-10-01
 assert "not a NUworks job page" in assist.by_hand_target(hand_row("Popup requires Cover Letter", url=f"https://{H}/jobs/detail/1"))[1]
 assert "not a NUworks job page" in assist.by_hand_target(hand_row("Popup requires Cover Letter", url="https://northeastern-csm.symplicity.com/students/app/home"))[1]
 assert "not Needs Human" in assist.by_hand_target(hand_row("x", status="Approved"))[1]
+# an Applied row whose company site is still owed (sheet.SITE_MARK): the posting's own link (jobs.site_link), or --url;
+# never NUworks, never a row without the mark
+from nuauto import jobs as jobs_  # noqa: E402
+_data = config.DATA_DIR
+config.DATA_DIR = os.path.join(tmp, "data")
+os.makedirs(jobs_.path("details"), exist_ok=True)
+with open(jobs_.path("details", "abc123.json"), "w") as f:
+    json.dump({"id": "abc123", "description": "Please apply on both NUworks and on the company website HERE.",
+               "qualifications": "", "links": [{"url": f"https://{H}/careers/job/7", "text": "HERE",
+                                                "near": "on both NUworks and on the company website HERE"}]}, f)
+owed = sheet_.SITE_MARK + ' (posting: "Please apply on both NUworks and on the company website HERE."). Submitted via apply.py'
+assert assist.site_target(hand_row(owed, status="Applied")) == (f"https://{H}/careers/job/7", None)
+assert assist.site_target(hand_row(owed, status="Applied"), f"https://{H}/other") == (f"https://{H}/other", None)
+assert "NUworks itself" in assist.site_target(hand_row(owed, status="Applied"), NUJOB)[1]
+assert "still owed" in assist.site_target(hand_row("Submitted via apply.py", status="Applied"))[1]
+assert "still owed" in assist.site_target(hand_row(owed, status="Needs Human"))[1]
+assert "no saved copy" in assist.site_target(hand_row(owed, url=NUJOB + "x", status="Applied"))[1]
+assert "company website HERE" in assist.site_note(hand_row(owed, status="Applied"))
+config.DATA_DIR = _data
 
 # links in Notes
 assert assist.link_from_notes(f"External application: {H} -> https://{H}/careers/job/X_1") == f"https://{H}/careers/job/X_1"

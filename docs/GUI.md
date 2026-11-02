@@ -118,7 +118,8 @@ A question from a run (an unknown form field, an option to pick, "did it submit?
                  needed (Needs Human rows stopped at an external application: the assistant), By hand on NUworks (Needs
                  Human rows only you can finish there: a cover letter, a transcript; the assistant can work them on NUworks
                  with you, or a chip says why not), Still owed (submitted on NUworks, the company site still wants you:
-                 Mark the company site done; the NUworks side to send again: Submit on NUworks too), Applied ("not on
+                 the assistant's Apply when the posting's link to that site is known (assist.site_target; else a "no
+                 assistant" chip says why), and Mark the company site done; the NUworks side to send again: Submit on NUworks too), Applied ("not on
                  NUworks" chip when NUworks has no application for it: it doesn't count toward the total; the job's own
                  hiring stage at the last check (jobs.application_answer): "job interviewing", then amber "job stopped
                  interviewing" or "job filled" (sheet.maybe_filled: it may be filled; withdrawing on NUworks frees its
