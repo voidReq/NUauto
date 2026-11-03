@@ -21,6 +21,11 @@ for text, want in [("Boston, MA, USA", ("Boston", "MA")), ("Bethpage, NY, USA", 
                    ("", ("Not listed", None)), (None, ("Not listed", None))]:
     assert insights.place(text) == want, (text, insights.place(text))
 
+# what the Apply search matches a place on: the text plus each state's full name (several places split on ";")
+assert insights.place_text("Richmond, VA") == "Richmond, VA Virginia"
+assert insights.place_text("Fargo, ND, USA; Austin, TX") == "Fargo, ND, USA; Austin, TX North Dakota Texas"
+assert insights.place_text("Remote, USA") == "Remote, USA" and insights.place_text(None) == ""
+
 
 def job(i, pay, location, closes_in=30):
     return {"id": i, "pay": pay, "location": location, "deadline": (TODAY + timedelta(days=closes_in)).isoformat()}

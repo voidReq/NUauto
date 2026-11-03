@@ -842,6 +842,9 @@ try:
         assert oj["tab"] == "other" and oj["exists"] and set(oj["sections"]) == every, list(oj["sections"])
         assert not any(oj["sections"][k] for k in ("approved", "agent", "manual", "owed"))
         assert [(x["row"], x["company"]) for x in oj["sections"]["ready"]] == [(x["row"], x["company"]) for x in get("/api/other")["ready"]]
+        # each row's place, for the search: the posting's text plus the state's full name ("massachusetts" finds "MA")
+        placed = [x["place"] for x in jobs["sections"]["approved"]]
+        assert placed and any("Massachusetts" in p and ", MA" in p for p in placed), placed
         assert get("/api/jobs?tab=elsewhere")["tab"] == "nuworks"  # anything but "other" is the NUworks tab
         # the order menu IS the order Start goes: the server sorts (apply.apply_order), the numbers follow it
         start_order = page.locator("[data-testid=approved-list] li").evaluate_all("ls => ls.map(l => l.dataset.testid)")

@@ -67,6 +67,14 @@ def place(location):
     return (", ".join(parts) or "United States"), None
 
 
+def place_text(location):
+    """What a search matches a job's place on: the posting's own text plus each US state's full name ("Richmond, VA"
+    also finds "virginia"); several places split on ";" (the internship lists)."""
+    text = str(location or "").strip()
+    states = {STATES[s] for _, s in (place(p) for p in text.split(";")) if s}
+    return " ".join([text, *sorted(states)]).strip()
+
+
 def tag_of(d):
     """The name of your interest tag (jobs.job_tag) a saved posting matches, or None. A posting may lack parts: an
     internship's has no skills, a job NUauto holds nothing on is {}."""

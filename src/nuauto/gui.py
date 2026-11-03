@@ -590,7 +590,8 @@ def job_facts(r, data, d=None):
     cat = cat if cat in jobs.CATEGORIES else None  # not sorted into your current kinds yet
     return {"match": (scores.get(i) or {}).get("match"), "pay": pay, "year_asked": jobs.year_asked(d, scores.get(i)), "pay_hour": hour[1] if hour else None,
             "score": p["rank"] if p else None, "score_text": jobs.rank_text(p) if p else None,
-            "category": cat, "category_label": jobs.category_label(cat) if cat else None, **jobs.posted_view(listed.get(i))}
+            "category": cat, "category_label": jobs.category_label(cat) if cat else None, **jobs.posted_view(listed.get(i)),
+            "place": insights.place_text(d.get("location"))}
 
 
 def company_rows(rows, facts=False):
@@ -1655,7 +1656,7 @@ def intern_facts(urls):
         cat = cat if cat in jobs.CATEGORIES else None  # (the Apply tab's kind-of-work filter)
         out[x["url"]] = {"match": s["match"], "score": p["rank"] if p else None, "score_text": jobs.rank_text(p) if p else None,
                          "pay": pay, "pay_hour": hour[1] if hour else None, "posted_text": intern.posted_text(x),
-                         "year_asked": jobs.year_asked(d, s),
+                         "year_asked": jobs.year_asked(d, s), "place": insights.place_text(d.get("location")),
                          "category": cat, "category_label": jobs.category_label(cat) if cat else None,
                          **closing_of(jobs.closes(d) if d else None)}
     return out
