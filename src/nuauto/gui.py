@@ -2002,7 +2002,7 @@ def settings_get():
             "tools": {name: config.tool_path(name) for name in ("claude", "npx")},
             "paths": {"state": config.STATE_DIR, "logs": config.LOGS_DIR}, "demo": config.DEMO,
             "efforts": list(EFFORTS), "logins": logins_summary(),
-            "files": {kind: onboard.document_info(kind) for kind in onboard.DOCUMENTS},
+            "files": {kind: onboard.document_info(kind) for kind in onboard.DOCUMENTS}, "files_push": files_push(),
             "password_manager": onboard.password_manager({c.id: c for c in APP.checks()}),
             "homelab_assistant": onboard.homelab_assistant(here=REMOTE),
             "where": "homelab" if REMOTE else "laptop", "homelab": onboard.homelab_link() if not REMOTE else None,
@@ -2067,8 +2067,27 @@ def files_post(body):
     APP.run_now(["quick"])
     if config.HAS_SERVER and not config.IS_SERVER and not config.DEMO:
         from nuauto import sync
-        threading.Thread(target=sync.push_documents, args=(bool(body.get("remove")),), daemon=True).start()
+        DOC_PUSH.update(state="copying", at=time.strftime("%Y-%m-%dT%H:%M"))
+
+        def push(removed=bool(body.get("remove"))):
+            try:
+                ok = sync.push_documents(removed)
+            except Exception:
+                ok = False
+            DOC_PUSH.update(state="done" if ok else "failed", at=time.strftime("%Y-%m-%dT%H:%M"))
+        threading.Thread(target=push, daemon=True).start()
     return settings_get()
+
+
+DOC_PUSH = {}  # the last copy of your files to the homelab from this window: {state: copying | done | failed, at}
+
+
+def files_push():
+    """Settings > Applying > Your files, on the laptop with a homelab: how the last copy there went (DOC_PUSH; {} = none
+    since this window started) and whether the transcript goes there (only its assistant uses it). None elsewhere."""
+    if REMOTE or not config.HAS_SERVER:
+        return None
+    return {**DOC_PUSH, "transcript": config.REMOTE_ASSIST}
 
 
 def remote_changed(old, restart=False):

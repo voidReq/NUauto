@@ -531,8 +531,13 @@ YOUR FILES (2026-10-20, my request: "a way to upload a resume and a transcript i
   local/resume.pdf / local/transcript.pdf (mode 600; onboard.save_document: a PDF, up to 10 MB, the resume with text
   Claude can read), and points resume_path / transcript_path at it. So changing the PDF you had elsewhere changes
   nothing: give NUauto the new one. An older resume_path / transcript_path anywhere on the laptop still works.
-- With a homelab the laptop pushes the copies there at once (sync.push_documents; a removed transcript is deleted
-  there too), not at the next push. The homelab's page shows the copies it has (name, size, when) and can't change them.
+- With a homelab the laptop pushes the copies there at once (sync.push_documents, in the background: a few seconds; a
+  removed transcript is deleted there too), not at the next push. The transcript goes only with remote_assist (only the
+  assistant there uses it). Both pages show each file's name, size and when it changed (rsync keeps that time).
+  The homelab's page shows the copies it has and can't change them.
+- (2026-11-03, my request) The laptop's card says how the last copy went (gui.files_push / DOC_PUSH, since this window
+  started): copying (the page asks again every 2 s), copied N min ago, or couldn't reach the homelab (then the next
+  sync, e.g. `nuauto status`, sends it), and that the transcript stays on the laptop without remote_assist.
 
 FILES IT WRITES (all under local/, mode 700, except as noted)
   gui.lock          pid, port and a secret that only lets a second start ask for a window (removed on exit); on the
