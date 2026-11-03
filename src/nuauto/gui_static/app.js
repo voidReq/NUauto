@@ -1163,7 +1163,7 @@ const OTHER_SECTIONS = [
   ["rest", "Other rows", null],
 ];
 const TODO = new Set(["approved", "agent", "manual", "owed", "ready"]);  // open unless you fold them; the rest start folded
-const findText = (r) => [r.company, r.title, r.notes, r.host, r.category_label, r.status, r.pay].join(" ").toLowerCase();
+const findText = (r) => [r.company, r.title, r.notes, r.host, r.category_label, r.status, r.pay, r.place].join(" ").toLowerCase();
 
 // The Other jobs tab's name here: what it holds when Summer internships are on (state.internships).
 function otherTabLabel() {
