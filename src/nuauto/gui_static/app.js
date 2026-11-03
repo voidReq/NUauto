@@ -2349,10 +2349,41 @@ screens.settings = async (view) => {
       el("span", { class: "muted small", text: help }),
       here ? null : pdfDrop(`file-${kind}-drop`, d.files[kind] ? "Drop a new PDF here, or" : "Drop the PDF here, or", give(kind, done)));
     return el("div", { class: "card stack", testid: "files-settings" }, el("h2", { text: "Your files" }),
-      el("p", { class: "small muted", text: here ? "Copies from your laptop. Give NUauto there a new one (Settings > Applying > Your files): it copies it here at once." :
-        "NUauto keeps its own copy of each (in its private folder, readable only by you; your homelab, if you use one, gets a copy at once). To change one, drop the new PDF here." }),
+      el("p", { class: "small muted", text: here ? "Copies from your laptop. Give NUauto there a new one (Settings > Applying > Your files): it copies it here within a few seconds." :
+        "NUauto keeps its own copy of each (in its private folder, readable only by you). To change one, drop the new PDF here." }),
+      pushLine(),
       part("resume", "Resume", "The PDF you use on NUworks: Claude compares each posting with it, and the assistant uploads it on company sites.", "Resume saved."),
       part("transcript", "Transcript (optional)", "Your unofficial transcript: the assistant uploads it only where an application asks for one.", "Transcript saved."));
+  }
+
+  // On the laptop with a homelab: how the copy there went (gui.files_push), asked again every 2 s while it copies
+  function pushText(p) {
+    const t = { copying: "Copying it to your homelab now (usually a few seconds)…",
+      done: `Your homelab has it: copied ${ago(p.at)}.`,
+      failed: "Couldn't reach your homelab: it gets the new copy the next time this laptop syncs (`nuauto status` does that now)." }[p.state]
+      || "Your homelab gets a copy a few seconds after you give NUauto a new one.";
+    return p.transcript ? t : `${t} The transcript stays on this laptop: only the assistant on your homelab would upload it, and it is off.`;
+  }
+  let pushTimer = null;
+  function pushLine() {
+    const p = d.files_push;
+    if (!p) return null;
+    const line = el("p", { class: p.state === "failed" ? "note warn small" : "small muted", testid: "files-push", text: pushText(p) });
+    clearTimeout(pushTimer);
+    if (p.state === "copying") {
+      let tries = 0;
+      const ask = async () => {
+        if (!line.isConnected || ++tries > 150) return;
+        try {
+          const now = (await api.get("/api/settings")).files_push;
+          if (now) { d.files_push = now; line.textContent = pushText(now); line.className = now.state === "failed" ? "note warn small" : "small muted"; }
+          if (now && now.state !== "copying") return;
+        } catch (e) { /* asked again below */ }
+        pushTimer = setTimeout(ask, 2000);
+      };
+      pushTimer = setTimeout(ask, 2000);
+    }
+    return line;
   }
 
   function assistantCard() {

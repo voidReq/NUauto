@@ -190,6 +190,29 @@ refused({"bitwarden_import": ["a;b"]}, "site text")
 refused({"bitwarden_import": ["$(id)"]}, "site text")
 refused({"bitwarden_import": ["a b"]}, "site text")
 
+# ---- your files: with a homelab, Settings shows how the copy there went (copying, then done or failed)
+from nuauto import demo  # noqa: E402
+import base64  # noqa: E402
+pdf = base64.b64encode(demo.tiny_pdf(["Transcript"])).decode()
+assert gui.settings_get()["files_push"] is None  # no homelab: nothing to show
+homelab(True)
+config.REMOTE_ASSIST = False
+assert gui.settings_get()["files_push"] == {"transcript": False}  # none copied since this window started
+gate, results = __import__("threading").Event(), [True, False]
+sync.push_documents = lambda removed=False: gate.wait(5) and results.pop(0)
+for want in ("done", "failed"):
+    gate.clear()
+    assert gui.files_post({"kind": "transcript", "data": pdf})["files_push"]["state"] == "copying"
+    gate.set()
+    end = time.time() + 5
+    while gui.settings_get()["files_push"]["state"] == "copying" and time.time() < end:
+        time.sleep(0.02)
+    assert gui.settings_get()["files_push"]["state"] == want, gui.DOC_PUSH
+gui.REMOTE = True  # the homelab's own page: nothing to copy
+assert gui.settings_get()["files_push"] is None
+gui.REMOTE = False
+homelab(False)
+
 # the page's answers are JSON a browser can read: a NaN or infinity (a taste score, say) becomes null
 nan, inf = float("nan"), float("inf")
 assert gui.to_json({"a": nan, "b": [inf, -inf, 1.5], "c": {"d": nan}}) == '{"a": null, "b": [null, null, 1.5], "c": {"d": null}}'
