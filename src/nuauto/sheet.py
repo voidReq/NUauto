@@ -595,17 +595,27 @@ def set_outcome(ws, row_number, url, outcome):
 
 DROP_MARK = "Dropped"   # Notes prefix of a row you chose not to apply to (drop)
 DROP_REASONS = {"closed": "the posting has closed", "duplicate": "a duplicate of another row",
-                "location": "the location doesn't work", "other": "not applying"}
+                "location": "the location doesn't work", "other": "not applying",
+                "withdrawn": "you withdrew the application"}  # (only this one on a sent row: drop)
+WITHDRAWN_FROM = ("Applied", "Interview")  # sent rows a withdrawn application is dropped from
 
 
 def drop(ws, row_number, url, why="other"):
     """You won't apply to this one (closed, a duplicate, a bad location...): Failed, Notes "Dropped <date>: <reason>."
     in front. It leaves every queue (they take Approved and Needs Human rows only) and stays as your record, so Review
     never offers the job again. Only an Approved or Needs Human row still holding this job, never one whose Submit
-    click is unresolved. why: a DROP_REASONS key."""
+    click is unresolved. why: a DROP_REASONS key.
+    why "withdrawn" (my call, 2026-11-04: "i applied ... then withdrew"): only an Applied or Interview row, the
+    application you withdrew. It becomes Failed like any drop, so it stops counting toward the weekly cap and the total
+    (they count sent rows only); its date stays as the record of when it went out."""
     current = _row_for(ws, row_number, url)
-    if current.status not in ("Approved", "Needs Human"):
-        raise SheetError(f"Row {row_number} is {current.status or 'empty'}: only Approved or Needs Human rows are dropped.")
+    if why == "withdrawn":
+        if current.status not in WITHDRAWN_FROM:
+            raise SheetError(f"Row {row_number} is {current.status or 'empty'}: only a sent application (Applied or "
+                             "Interview) is dropped as withdrawn.")
+    elif current.status not in ("Approved", "Needs Human"):
+        raise SheetError(f"Row {row_number} is {current.status or 'empty'}: only Approved or Needs Human rows are dropped"
+                         + (" (one you withdrew: Drop > I withdrew it)." if current.status in WITHDRAWN_FROM else "."))
     if current.notes.startswith(SUBMIT_MARK):
         raise SheetError(f"Row {row_number}'s Submit click is still unresolved: check the site first.")
     text = f"{DROP_MARK} {date.today():%Y-%m-%d}: {DROP_REASONS.get(why, DROP_REASONS['other'])}. {current.notes}"

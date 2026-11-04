@@ -435,6 +435,15 @@ try:
     assert row[3] == "Failed" and row[4].startswith("Dropped ") and "duplicate" in row[4], row
     assert [x["company"] for x in get("/api/other")["ready"]] == ["Granite Robotics"]
     assert get("/api/state")["week"] == week_before  # the Other jobs tab has no weekly / total cap
+    # an application you withdrew (2026-11-04): only "withdrawn" on a sent row, and only on a sent row; Failed, its date kept
+    wd = post("/api/other/add", {"url": "https://jobs.example.net/3", "company": "Basalt Co", "title": "Gone Intern"})
+    post("/api/mark", {"action": "drop", "why": "withdrawn", "tab": "other", "row": wd["row"], "url": "https://jobs.example.net/3"}, expect=409)
+    post("/api/mark", {"action": "applied", "tab": "other", "row": wd["row"], "url": "https://jobs.example.net/3"})
+    post("/api/mark", {"action": "drop", "why": "closed", "tab": "other", "row": wd["row"], "url": "https://jobs.example.net/3"}, expect=409)
+    post("/api/mark", {"action": "drop", "why": "withdrawn", "tab": "other", "row": wd["row"], "url": "https://jobs.example.net/3"})
+    row = json.load(open(other_file))["rows"][wd["row"] - 1]
+    assert row[3] == "Failed" and "you withdrew the application" in row[4] and row[5], row
+    assert "Basalt Co" not in [x["company"] for x in get("/api/other")["applied"]]
     r = post("/api/action", {"kind": "assist", "args": {"row": 2, "tab": "other"}})
     assert r["demo"] and r["command"].endswith("assist other 2"), r
     # a row marked "do it on the laptop" (assist.LAPTOP_MARK at the end of its Notes) says so on every list that shows rows
@@ -773,10 +782,18 @@ try:
         page.click(f"[data-testid=more-nuworks-{applied_row}]")
         page.wait_for_selector("div.menu")
         assert [b.inner_text() for b in page.locator("div.menu button").all()] == \
-            ["Mark interview", "Mark accepted", "Mark rejected", "Re-apply with the new resume…", "I applied myself", "Drop (not applying)…",
-             "Move to Summer 2027 internships…", "Remove from the sheet…"]  # (what you heard back, re-apply: on a sent row)
-        for key in ("mark", "drop", "move", "remove"):
+            ["Mark interview", "Mark accepted", "Mark rejected", "Re-apply with the new resume…", "I applied myself", "Drop (I withdrew it)…",
+             "Move to Summer 2027 internships…", "Remove from the sheet…"]  # (what you heard back, re-apply, withdrew: on a sent row)
+        for key in ("mark", "move", "remove"):
             assert page.locator(f"[data-testid=more-nuworks-{applied_row}-{key}]").is_disabled(), key  # (with a reason in its title)
+        # Drop on a sent row: the one reason "I withdrew it", and the dialog says it stops counting (Cancel: nothing changes)
+        page.click(f"[data-testid=more-nuworks-{applied_row}-drop]")
+        page.wait_for_selector("[data-testid=drop-withdrawn]")
+        assert page.locator("[data-testid^=drop-]").count() == 1 and "no longer counts" in page.locator(".backdrop").inner_text()
+        page.locator(".backdrop button", has_text="Cancel").click()
+        page.wait_for_selector("[data-testid=drop-withdrawn]", state="detached")
+        page.click(f"[data-testid=more-nuworks-{applied_row}]")
+        page.wait_for_selector("div.menu")
         assert page.get_attribute(f"[data-testid=more-nuworks-{applied_row}-remove]", "title")
         assert page.locator(f"[data-testid=more-nuworks-{applied_row}-rejected]").is_enabled()
         assert page.locator(f"[data-testid=more-nuworks-{applied_row}-interview]").is_enabled()

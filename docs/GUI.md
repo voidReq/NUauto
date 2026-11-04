@@ -162,7 +162,9 @@ A question from a run (an unknown form field, an option to pick, "did it submit?
                  sends it again, first date kept, never counted twice, even past the limit; "re-apply" chip; Undo re-apply
                  while still Approved: sheet.undo_reapply; 2026-10-28), I applied
                  myself, Drop (closed, a duplicate, a bad location, other; sheet.drop: Failed, "Dropped <date>: <reason>"
-                 in Notes; only Approved / Needs Human rows, never while an assistant is on the row), Move to the other tab
+                 in Notes; only Approved / Needs Human rows, never while an assistant is on the row; on an Applied or
+                 Interview row: Drop (I withdrew it), the one reason "withdrawn": Failed, date kept, no longer counted
+                 toward either limit; 2026-11-04), Move to the other tab
                  (asks for the link there), Remove from the sheet (clears the row's cells: no row is renumbered). What a row
                  can't do is greyed out with why: Applied rows are never removed and never leave the NUworks tab (an
                  Applied Other job may move to NUworks: there it counts toward the limits); unresolved Submit clicks are

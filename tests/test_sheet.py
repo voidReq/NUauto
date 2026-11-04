@@ -164,6 +164,19 @@ expect(SheetError, lambda: sheet.drop(fresh(), 2, "https://x/other"))
 ws = fresh()
 sheet.mark_submit_started(ws, 2)
 expect(SheetError, lambda: sheet.drop(ws, 2, "https://x/1"))
+# withdrawn (my call, 2026-11-04): only an Applied or Interview row; Failed with its date kept, so it no longer counts
+# toward the weekly cap or the total; never on a row still to do, nor on Accepted / Rejected
+for st in ("Applied", "Interview"):
+    ws = FakeWS([HEADERS, ["https://x/1", "Co", "Job", st, "Applied by hand.", "2026-10-01"]])
+    assert len(sheet.applied_dates(sheet.read_rows(ws))) == 1 and sheet.total_count(sheet.read_rows(ws)) == 1
+    sheet.drop(ws, 2, "https://x/1", "withdrawn")
+    assert ws.values[1][3:6] == ["Failed", f"Dropped {date.today():%Y-%m-%d}: you withdrew the application. Applied by hand.",
+                                 "2026-10-01"], ws.values[1]
+    assert sheet.applied_dates(sheet.read_rows(ws)) == [] and sheet.total_count(sheet.read_rows(ws)) == 0
+for st in ("Approved", "Needs Human", "Accepted", "Rejected", "Proposed"):
+    expect(SheetError, lambda: sheet.drop(fresh(st), 2, "https://x/1", "withdrawn"))
+expect(SheetError, lambda: sheet.drop(FakeWS([HEADERS, ["https://x/1", "Co", "Job", "Applied", "", "2026-10-01"]]), 2,
+                                      "https://x/other", "withdrawn"))
 
 # set_outcome: Accepted / Rejected (or back to Applied) on a sent row only; the date stays (it went out that day), a
 # note says when it was marked; mark_applied_by_hand refuses a sent row
