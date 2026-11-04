@@ -293,3 +293,28 @@ assert [jobs.year_asked({}, {"year_req": y}) for y in ("ok", "one_year_up", "two
     [None, "Juniors+", "Seniors+", "Grad students"]
 
 print("All job-pool checks passed.")
+
+# the search box (Review here; Apply's app.js has the same rules): words / "phrases" anywhere, skill: and tag: exact
+# names (each part of "C/C++" too, never "CAD"), featured (2026-11-04)
+T = jobs.search_terms
+assert T('skill:C  "Machine Learning" featured robots') == [("skill", "c"), ("text", "machine learning"), ("featured", ""), ("text", "robots")]
+assert T('skill:"machine learning" tag:AR/XR is:featured') == [("skill", "machine learning"), ("tag", "ar/xr"), ("featured", "")]
+assert T("c++ http://x.example skill:") == [("text", "c++"), ("text", "http://x.example"), ("text", "skill:")], T("c++ http://x.example skill:")
+assert T("") == [] and T(None) == []
+assert jobs.name_parts(["C/C++", " PCB design ", "R&D, Testing", ""]) == {"c/c++", "c", "c++", "pcb design", "r&d, testing", "r", "d", "testing"}
+job = {"title": "Firmware Co-op", "company": "Acme", "category": "embedded_systems", "tag": "wearables"}
+det = {"location": "Boston, MA", "skills": ["C/C++", "RTOS"], "function": ["Engineering"], "description": "Write drivers.",
+       "qualifications": "Know CAD."}
+fits = lambda q, featured=False: jobs.search_match(job, det, T(q), featured)  # noqa: E731
+assert fits("skill:c") and fits("skill:C++") and fits("skill:c/c++") and fits("skill:rtos")
+assert not fits("skill:cad") and fits("cad")                                 # CAD is in the text, not a skill
+assert not fits("skill:python") and not fits("skill:c skill:python")
+assert fits("tag:wearables") and fits("tag:engineering") and not fits("tag:robotics")
+assert fits("featured", featured=True) and not fits("featured") and fits("skill:c featured drivers", featured=True)
+assert fits('"write drivers" boston embedded') and not fits("zzqx")
+assert jobs.search_match(job, {}, T("skill:c")) is False and jobs.search_match(job, {}, []) is True
+v = jobs.search_view({"skills": ["C"], "function": ["Eng"], "description": "<p>Write   <b>Drivers</b></p>", "qualifications": None}, "wearables")
+assert v == {"skills": ["C"], "function": ["Eng"], "tag": "wearables", "find": "write drivers"}, v
+assert len(jobs.search_view({"description": "x" * 99999})["find"]) == jobs.SEARCH_TEXT
+assert jobs.search_view({}) == {"skills": [], "function": [], "tag": None, "find": ""}
+print("All search checks passed.")

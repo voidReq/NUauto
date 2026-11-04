@@ -1452,20 +1452,69 @@ def review_queue(mode, details, ratings, rows, today=None):
     return urgent + [r for r in todo if r not in urgent], urgent
 
 
+# The search box (Review, and Apply in app.js: searchTerms / searchFits, the same rules; my request, 2026-11-04):
+#   words / "a phrase"   anywhere in the job (title, company, place, kind of work, tag, function, skills, the posting)
+#   skill:c, skill:"machine learning"   a skill NUworks lists, exactly (any case): skill:c finds "C" and "C/C++"
+#                        (each part of a skill split at / , & counts), never "CAD"
+#   tag:x                your interest tag (job_tag) or a job function NUworks lists, exactly, the same way
+#   featured             NUworks' Featured Posting tag at the last update (is:featured too)
+SEARCH_KEYS = ("skill", "tag")
+
+
 def search_terms(q):
-    """Review's search box as lowercase terms: words, or "quoted phrases" kept whole."""
-    return [(a or b).lower() for a, b in re.findall(r'"([^"]+)"|(\S+)', str(q or "")) if (a or b).strip()]
+    """The search box as [(kind, value)]: ("text", words or a "quoted phrase"), ("skill" | "tag", a name), ("featured",
+    "")."""
+    out = []
+    for key, kq, kw, phrase, word in re.findall(r'(\w+):(?:"([^"]+)"|(\S+))|"([^"]+)"|(\S+)', str(q or "")):
+        if key and key.lower() in SEARCH_KEYS and (kq or kw).strip():
+            out.append((key.lower(), (kq or kw).strip().lower()))
+        elif key and key.lower() == "is" and (kq or kw).lower() == "featured":
+            out.append(("featured", ""))
+        elif key:
+            out.append(("text", f"{key}:{kq or kw}".lower()))
+        elif word.lower() == "featured":
+            out.append(("featured", ""))
+        elif (phrase or word).strip():
+            out.append(("text", (phrase or word).strip().lower()))
+    return out
 
 
-def search_match(r, d, terms):
-    """True if every term appears (any case) in the job's title, company, place, kind of work, tag, skills,
-    description or qualifications."""
+def name_parts(names):
+    """Skill / function names as the lowercase names a skill: or tag: term matches: each whole, and each part split at
+    / , & ("C/C++" -> c/c++, c, c++)."""
+    out = set()
+    for n in names or []:
+        n = str(n or "").strip().lower()
+        if n:
+            out.add(n)
+            out.update(x.strip() for x in re.split(r"[/,&]", n) if x.strip())
+    return out
+
+
+def search_match(r, d, terms, featured=False):
+    """True if the job fits every term (search_terms): the text ones appear (any case) in the job's title, company, place,
+    kind of work, tag, function, skills, description or qualifications; skill: / tag: name one exactly (name_parts);
+    featured: NUworks features it."""
     if not terms:
         return True
     text = " ".join(str(x or "") for x in (r["title"], r["company"], d.get("location"), r["category"].replace("_", " "),
-                                           r.get("tag"), " ".join(d.get("skills") or []), d.get("description"),
-                                           d.get("qualifications"))).lower()
-    return all(t in text for t in terms)
+                                           r.get("tag"), " ".join(d.get("function") or []), " ".join(d.get("skills") or []),
+                                           d.get("description"), d.get("qualifications"))).lower()
+    skills = name_parts(d.get("skills"))
+    tags = name_parts((d.get("function") or []) + ([r["tag"]] if r.get("tag") else []))
+    return all(v in text if k == "text" else v in skills if k == "skill" else v in tags if k == "tag" else featured
+               for k, v in terms)
+
+
+def search_view(d, tag=None):
+    """What the Apply screen's search reads of a row's saved posting (it searches in the page): the skills, the job
+    functions, your interest tag, and the posting's text (lowercase, at most SEARCH_TEXT characters)."""
+    text = " ".join(strip_html(str(d.get(k) or "")) for k in ("description", "qualifications"))
+    return {"skills": list(d.get("skills") or []), "function": list(d.get("function") or []), "tag": tag,
+            "find": " ".join(text.split()).lower()[:SEARCH_TEXT]}
+
+
+SEARCH_TEXT = 6000
 
 
 def text_blocks(text):

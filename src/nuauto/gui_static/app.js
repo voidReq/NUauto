@@ -721,8 +721,8 @@ screens.review = async (view) => {
   const sourceSeg = interns.on ? el("div", { class: "seg wrap", role: "group", "aria-label": "Source" },
     el("button", { "aria-pressed": String(source === "nuworks"), testid: "source-nuworks", text: "NUworks co-ops", onclick: () => setSource("nuworks") }),
     el("button", { "aria-pressed": String(source === "intern"), testid: "source-intern", text: `${interns.term} internships`, onclick: () => setSource("intern") })) : null;
-  // search: words or "quoted phrases" (all must appear in the posting), and/or one kind of work
-  const search = el("input", { type: "search", class: "grow", testid: "review-search", value: q, placeholder: 'Search: words or "a phrase" (Ctrl+F)', "data-find": true,
+  // search: words or "quoted phrases" (all must appear in the posting), skill:, tag:, featured (searchTerms), and/or one kind of work
+  const search = el("input", { type: "search", class: "grow", testid: "review-search", value: q, placeholder: SEARCH_HINT, "data-find": true,
     "aria-label": "Search the jobs to review" });
   const cat = el("select", { testid: "review-category", "aria-label": "Kind of work" });
   let timer = null;
@@ -1163,7 +1163,40 @@ const OTHER_SECTIONS = [
   ["rest", "Other rows", null],
 ];
 const TODO = new Set(["approved", "agent", "manual", "owed", "ready"]);  // open unless you fold them; the rest start folded
-const findText = (r) => [r.company, r.title, r.notes, r.host, r.category_label, r.status, r.pay, r.place].join(" ").toLowerCase();
+const findText = (r) => [r.company, r.title, r.notes, r.host, r.category_label, r.status, r.pay, r.place, r.tag,
+  (r.function || []).join(" "), (r.skills || []).join(" "), r.find].join(" ").toLowerCase();
+
+// The search box's words, the same rules as Review's (jobs.search_terms, search_match; 2026-11-04, my request):
+// words / "a phrase" anywhere in the job (its posting too); skill:c (or skill:"machine learning") a skill NUworks lists,
+// exactly: "C" and "C/C++" yes, "CAD" no; tag:x your interest tag or a job function; featured: NUworks features it.
+const SEARCH_HINT = 'Search: words, skill:c, tag:x, featured (Ctrl+F)';
+function searchTerms(q) {
+  const out = [], re = /(\w+):(?:"([^"]+)"|(\S+))|"([^"]+)"|(\S+)/g;
+  for (const [, key, kq, kw, phrase, word] of String(q || "").matchAll(re)) {
+    const k = (key || "").toLowerCase(), v = (kq || kw || "").trim().toLowerCase();
+    if (k === "skill" || k === "tag") { if (v) out.push([k, v]); }
+    else if (k === "is" && v === "featured") out.push(["featured", ""]);
+    else if (key) out.push(["text", `${key}:${kq || kw}`.toLowerCase()]);
+    else if (word && word.toLowerCase() === "featured") out.push(["featured", ""]);
+    else if ((phrase || word || "").trim()) out.push(["text", (phrase || word).trim().toLowerCase()]);
+  }
+  return out;
+}
+function nameParts(names) {  // "C/C++" -> c/c++, c, c++ (jobs.name_parts)
+  const out = new Set();
+  for (const n of names || []) {
+    const x = String(n || "").trim().toLowerCase();
+    if (!x) continue;
+    out.add(x);
+    x.split(/[\/,&]/).map((p) => p.trim()).filter(Boolean).forEach((p) => out.add(p));
+  }
+  return out;
+}
+function searchFits(r, terms) {
+  if (!terms.length) return true;
+  const text = findText(r), skills = nameParts(r.skills), tags = nameParts([...(r.function || []), ...(r.tag ? [r.tag] : [])]);
+  return terms.every(([k, v]) => k === "text" ? text.includes(v) : k === "skill" ? skills.has(v) : k === "tag" ? tags.has(v) : !!r.featured);
+}
 
 // The Other jobs tab's name here: what it holds when Summer internships are on (state.internships).
 function otherTabLabel() {
@@ -1182,16 +1215,16 @@ screens.apply = async (view) => {
     other: (onHomelab() ? ["queue"] : []).concat(["score", "match", "pay", "sheet"]) };
   const sortOf = (k) => { const v = sessionStorage.getItem("applySort:" + k); return SORT_OPTS[k].includes(v) ? v : SORT_OPTS[k][0]; };
   let kind = sessionStorage.getItem("applyKind") || "";  // one kind of work, or "" = all (shared by the tabs)
-  let words = [];  // the search box's words: a row shows when it has every one
+  let terms = [];  // the search box's terms (searchTerms): a row shows when it fits every one
   let folded = {};  // the sections you opened or folded, "tab:section" -> open
   try { folded = JSON.parse(sessionStorage.getItem("applyOpen") || "{}"); } catch (e) { folded = {}; }
   let drawnRunning = null, drawnHomelab = "", drawnQueue = "";
   // Made once and moved into each redraw, so what you typed (and the focus) is never lost.
   const atMost = el("input", { type: "number", min: "1", id: "apply-n", testid: "apply-n", "aria-label": "At most this many", placeholder: "all" });
   const find = el("input", { type: "search", class: "grow", testid: "apply-search", "data-find": true,
-    placeholder: "Search this tab (Ctrl+F)", "aria-label": "Search the jobs in this tab" });
-  find.addEventListener("input", () => { words = find.value.toLowerCase().split(/\s+/).filter(Boolean); drawPane(); });
-  find.addEventListener("keydown", (e) => { if (e.key === "Escape") { find.value = ""; words = []; drawPane(); } });
+    placeholder: SEARCH_HINT.replace("Search:", "Search this tab:"), "aria-label": "Search the jobs in this tab" });
+  find.addEventListener("input", () => { terms = searchTerms(find.value); drawPane(); });
+  find.addEventListener("keydown", (e) => { if (e.key === "Escape") { find.value = ""; terms = []; drawPane(); } });
   // the pane: the tab's head (the week, Start), the toolbar (stays put while you type in its search), the sections
   const runBox = el("div"), tabs = el("div", { class: "tabs", role: "tablist", "aria-label": "Apply" }),
     headBox = el("div"), bar = el("div"), listBox = el("div"),
@@ -1291,8 +1324,8 @@ screens.apply = async (view) => {
     if (tab === "assistants") return fill(listBox, assistantsPane(sessions()));
     if (!d) return fill(listBox, el("p", {}, el("span", { class: "spinner" })));
     if (d.error) return fill(listBox, el("div", { class: "note fail", text: d.error }));
-    const filtering = !!(words.length || kind);
-    const fits = (r) => (!kind || kindOf(r) === kind) && words.every((w) => findText(r).includes(w));
+    const filtering = !!(terms.length || kind);
+    const fits = (r) => (!kind || kindOf(r) === kind) && searchFits(r, terms);
     let found = 0;
     const cards = (tab === "nuworks" ? NU_SECTIONS : OTHER_SECTIONS).map(([key, title, note]) => {
       let all = d.sections[key];
@@ -1306,7 +1339,7 @@ screens.apply = async (view) => {
     });
     fill(listBox, filtering && !found ? el("div", { class: "card", testid: "apply-nothing" }, el("p", { class: "empty", text: "Nothing in this tab matches." }),
         el("div", { class: "row center" }, el("button", { class: "btn", text: "Clear the search", onclick: () => {
-          find.value = ""; words = []; kind = ""; sessionStorage.setItem("applyKind", ""); drawBar(); drawPane(); } }))) : null,
+          find.value = ""; terms = []; kind = ""; sessionStorage.setItem("applyKind", ""); drawBar(); drawPane(); } }))) : null,
       ...cards, tab === "nuworks" ? pastCard(d) : null);
   }
 

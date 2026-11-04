@@ -591,7 +591,7 @@ def job_facts(r, data, d=None):
     return {"match": (scores.get(i) or {}).get("match"), "pay": pay, "year_asked": jobs.year_asked(d, scores.get(i)), "pay_hour": hour[1] if hour else None,
             "score": p["rank"] if p else None, "score_text": jobs.rank_text(p) if p else None,
             "category": cat, "category_label": jobs.category_label(cat) if cat else None, **jobs.posted_view(listed.get(i)),
-            "place": insights.place_text(d.get("location"))}
+            "place": insights.place_text(d.get("location")), **jobs.search_view(d, insights.tag_of(d) if d else None)}
 
 
 def company_rows(rows, facts=False):
@@ -941,8 +941,9 @@ def review(mode, q="", category="", source="nuworks", quick=False):
     for r in todo:
         counts[r["category"]] = counts.get(r["category"], 0) + 1
     terms = jobs.search_terms(q)
+    listed = jobs.load("list.json", {}) if any(k == "featured" for k, _ in terms) else {}  # (an internship: never featured)
     shown = [r for r in todo if (not category or r["category"] == category)
-             and jobs.search_match(r, details[r["id"]], terms)]
+             and jobs.search_match(r, details[r["id"]], terms, featured=bool((listed.get(r["id"]) or {}).get("featured")))]
     out, urgent_ids = [], {r["id"] for r in urgent}
     for r in shown:
         d = details[r["id"]]
@@ -1658,6 +1659,7 @@ def intern_facts(urls):
                          "pay": pay, "pay_hour": hour[1] if hour else None, "posted_text": intern.posted_text(x),
                          "year_asked": jobs.year_asked(d, s), "place": insights.place_text(d.get("location")),
                          "category": cat, "category_label": jobs.category_label(cat) if cat else None,
+                         **jobs.search_view(d, insights.tag_of(d) if d else None),
                          **closing_of(jobs.closes(d) if d else None)}
     return out
 

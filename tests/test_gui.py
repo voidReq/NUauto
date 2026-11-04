@@ -151,6 +151,15 @@ try:
     hit = get("/api/review?mode=approve&q=" + urllib.parse.quote(f'"{one["company"].upper()}"'))["jobs"]
     assert one["id"] in [j["id"] for j in hit] and len(hit) < len(rev["jobs"]), hit
     assert get("/api/review?mode=approve&q=zzqxnotaword")["jobs"] == []
+    # skill: is an exact skill (demo: Harbor Embedded lists "C"; "CAD" or "C++" alone is not C), featured NUworks' tag
+    def review_q(q):
+        return {j["company"] for j in get("/api/review?mode=approve&q=" + urllib.parse.quote(q))["jobs"]}
+    from nuauto import demo as demo_data  # (demo.FEATURED: the job ids NUworks features in the demo's job list)
+    with_c = {j["company"] for j in rev["jobs"] if {"C", "C/C++"} & set(get(f"/api/job/{j['id']}")["skills"])}
+    assert with_c and review_q("skill:c") == with_c and review_q("skill:C") == with_c, (with_c, review_q("skill:c"))
+    assert review_q("featured") == {j["company"] for j in rev["jobs"] if j["id"] in demo_data.FEATURED}
+    assert review_q("featured") and review_q("featured") < {j["company"] for j in rev["jobs"]}
+    assert review_q("featured skill:c") == review_q("featured") & with_c
     first = rev["jobs"][0]["id"]
     card = get(f"/api/job/{first}")
     assert card["id"] == first and card["description"]
@@ -851,7 +860,29 @@ try:
         assert start_order == [f"job-nuworks-{r['row']}" for r in jobs["sections"]["approved"]], start_order
         assert page.locator("[data-testid=apply-sort] option[value=default]").inner_text().startswith("Sort: closing within a week")
         assert page.get_attribute("[data-testid=apply-sort]", "aria-label") == "Apply in this order"
-        assert page.get_attribute("[data-testid=apply-search]", "placeholder") == "Search this tab (Ctrl+F)"
+        assert page.get_attribute("[data-testid=apply-search]", "placeholder") == "Search this tab: words, skill:c, tag:x, featured (Ctrl+F)"
+        # the search box: skill: (exact; each row carries its skills), featured, words in the posting; Escape clears it
+        approved_now = jobs["sections"]["approved"]
+        assert all({"skills", "function", "tag", "find"} <= set(r) for r in approved_now), approved_now[0]
+        def shown_rows():
+            return set(page.locator("[data-testid=approved-list] li").evaluate_all("ls => ls.map(l => l.dataset.testid)"))
+        for q, keep in (("skill:c", lambda r: bool({"c", "c/c++"} & {x.lower() for x in r["skills"]})),
+                        ("featured", lambda r: r["featured"]),
+                        ("featured skill:c", lambda r: r["featured"] and "C" in r["skills"])):
+            want = {f"job-nuworks-{r['row']}" for r in approved_now if keep(r)}
+            page.fill("[data-testid=apply-search]", q)
+            if want:
+                page.wait_for_function("n => document.querySelectorAll('[data-testid=approved-list] li').length === n", arg=len(want))
+                assert shown_rows() == want, (q, shown_rows(), want)
+            else:
+                page.wait_for_selector("[data-testid=approved-list] li", state="detached")
+        assert any("C" in r["skills"] for r in approved_now) and any(r["featured"] for r in approved_now)
+        word = next(w for w in approved_now[0]["find"].split() if len(w) > 6)
+        page.fill("[data-testid=apply-search]", word)
+        page.wait_for_selector(f"[data-testid=job-nuworks-{approved_now[0]['row']}]")
+        page.fill("[data-testid=apply-search]", "")
+        page.wait_for_function("n => document.querySelectorAll('[data-testid=approved-list] li').length === n", arg=len(approved_now))
+        page.locator("[data-testid=apply-search]").blur()  # (the toolbar doesn't redraw while you type in its search)
         page.select_option("[data-testid=apply-sort]", "match")
         by_match = ["job-nuworks-%d" % r["row"] for r in get("/api/apply?order=match")["rows"]]
         page.wait_for_function("ids => [...document.querySelectorAll('[data-testid=approved-list] li')].map(l => l.dataset.testid).join() === ids.join()", arg=by_match)
