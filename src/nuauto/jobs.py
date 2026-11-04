@@ -1507,11 +1507,16 @@ def search_match(r, d, terms, featured=False):
 
 
 def search_view(d, tag=None):
-    """What the Apply screen's search reads of a row's saved posting (it searches in the page): the skills, the job
-    functions, your interest tag, and the posting's text (lowercase, at most SEARCH_TEXT characters)."""
+    """What each Apply row carries for its search (it searches in the page): the skills, the job functions, your interest
+    tag. The posting's text is not in the rows (it made the NUworks list ~4x bigger): the page asks for it the first
+    time the search has words in it (posting_text, gui.job_texts)."""
+    return {"skills": list(d.get("skills") or []), "function": list(d.get("function") or []), "tag": tag}
+
+
+def posting_text(d):
+    """A saved posting's description and qualifications as one lowercase line, at most SEARCH_TEXT characters."""
     text = " ".join(strip_html(str(d.get(k) or "")) for k in ("description", "qualifications"))
-    return {"skills": list(d.get("skills") or []), "function": list(d.get("function") or []), "tag": tag,
-            "find": " ".join(text.split()).lower()[:SEARCH_TEXT]}
+    return " ".join(text.split()).lower()[:SEARCH_TEXT]
 
 
 SEARCH_TEXT = 6000

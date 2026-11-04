@@ -104,8 +104,9 @@ A question from a run (an unknown form field, an option to pick, "did it submit?
                  buttons, same subtext") no limit, how many are ready and applied, Run on, How Apply works folded. Then one
                  toolbar: Search this tab (words, all must appear, any case, in company, title, notes, site, kind of work,
                  status, pay, place (a state's name finds its code: "virginia" finds "Richmond, VA"; 2026-11-03), and
-                 (2026-11-04) the saved posting: its skills, functions, tag and text (jobs.search_view, the first 6000
-                 characters); skill:, tag:, featured as in Review (app.js searchTerms, the same rules); Ctrl+F; Esc clears), a kind-of-work menu (with counts), Sort, Add a job. Then the rows in
+                 (2026-11-04) the saved posting: its skills, functions, tag (in each row: jobs.search_view) and text (the
+                 first 6000 characters, jobs.posting_text: /api/jobs/text, asked for once the search has words, not in
+                 the lists: 4x their size); skill:, tag:, featured as in Review (app.js searchTerms, the same rules); Ctrl+F; Esc clears), a kind-of-work menu (with counts), Sort, Add a job. Then the rows in
                  sections (<details>: what is left to do open, the rest folded, each with its count; your choice kept for
                  the session; a search opens every section with a match).
                  NUworks sections: Ready to apply (Approved, numbered in the order Start goes: the Sort menu IS that

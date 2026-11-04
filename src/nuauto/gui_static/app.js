@@ -1216,6 +1216,16 @@ screens.apply = async (view) => {
   const sortOf = (k) => { const v = sessionStorage.getItem("applySort:" + k); return SORT_OPTS[k].includes(v) ? v : SORT_OPTS[k][0]; };
   let kind = sessionStorage.getItem("applyKind") || "";  // one kind of work, or "" = all (shared by the tabs)
   let terms = [];  // the search box's terms (searchTerms): a row shows when it fits every one
+  // each tab's posting texts ({url: text}, /api/jobs/text): asked for the first time the search has words in it (the
+  // lists don't carry them: 4x the size), then kept for this screen; a row's r.find is its text
+  const texts = { nuworks: null, other: null }, asking = {};
+  const giveTexts = (t) => { if (texts[t] && ok(data[t])) Object.values(data[t].sections).flat().forEach((r) => { r.find = texts[t][r.url] || ""; }); };
+  function needTexts() {
+    const t = tab === "other" ? "other" : "nuworks";
+    if (texts[t] || asking[t] || !terms.some(([k]) => k === "text")) return;
+    asking[t] = api.get(`/api/jobs/text?tab=${t}`).then((r) => { texts[t] = r.texts || {}; giveTexts(t); drawPane(); })
+      .catch(() => {}).finally(() => { asking[t] = null; });
+  }
   let folded = {};  // the sections you opened or folded, "tab:section" -> open
   try { folded = JSON.parse(sessionStorage.getItem("applyOpen") || "{}"); } catch (e) { folded = {}; }
   let drawnRunning = null, drawnHomelab = "", drawnQueue = "";
@@ -1242,6 +1252,7 @@ screens.apply = async (view) => {
       if (ok(d) && d.sheet_version !== undefined) S.sheetVersion = Math.max(S.sheetVersion || 0, d.sheet_version);
       if (ok(d)) Object.values(d.sections).flat().forEach((r) => { r.qkey = `${t === "other" ? "other" : "jobs"}-${r.row}`; });  // its key in the homelab's queue
       data[t] = d;
+      giveTexts(t);  // (a reload: the texts asked for already go on its rows)
       S.queue = (data.nuworks && data.nuworks.queue) || (data.other && data.other.queue) || null;  // (the homelab's queue) each company-site row's place in it
       draw();
     });
@@ -1316,6 +1327,7 @@ screens.apply = async (view) => {
   }
 
   function drawPane() {
+    needTexts();  // (words in the search, on a tab whose texts haven't come yet: ask for them)
     drawnRunning = running();
     drawnQueue = queueKey();
     drawBar();

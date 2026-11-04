@@ -863,7 +863,10 @@ try:
         assert page.get_attribute("[data-testid=apply-search]", "placeholder") == "Search this tab: words, skill:c, tag:x, featured (Ctrl+F)"
         # the search box: skill: (exact; each row carries its skills), featured, words in the posting; Escape clears it
         approved_now = jobs["sections"]["approved"]
-        assert all({"skills", "function", "tag", "find"} <= set(r) for r in approved_now), approved_now[0]
+        assert all({"skills", "function", "tag"} <= set(r) and "find" not in r for r in approved_now), approved_now[0]
+        texts = get("/api/jobs/text?tab=nuworks")["texts"]  # (the posting texts: asked for once the search has words)
+        assert texts and all(r["url"] in texts for r in approved_now), (len(texts), [r["url"] for r in approved_now])
+        assert texts[approved_now[0]["url"]] == texts[approved_now[0]["url"]].lower()
         def shown_rows():
             return set(page.locator("[data-testid=approved-list] li").evaluate_all("ls => ls.map(l => l.dataset.testid)"))
         for q, keep in (("skill:c", lambda r: bool({"c", "c/c++"} & {x.lower() for x in r["skills"]})),
@@ -877,7 +880,8 @@ try:
             else:
                 page.wait_for_selector("[data-testid=approved-list] li", state="detached")
         assert any("C" in r["skills"] for r in approved_now) and any(r["featured"] for r in approved_now)
-        word = next(w for w in approved_now[0]["find"].split() if len(w) > 6)
+        word = next(w for w in texts[approved_now[0]["url"]].split()
+                    if len(w) > 6 and w not in " ".join(str(v) for v in approved_now[0].values()).lower())  # (only in the posting)
         page.fill("[data-testid=apply-search]", word)
         page.wait_for_selector(f"[data-testid=job-nuworks-{approved_now[0]['row']}]")
         page.fill("[data-testid=apply-search]", "")

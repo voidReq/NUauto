@@ -314,7 +314,8 @@ assert fits("featured", featured=True) and not fits("featured") and fits("skill:
 assert fits('"write drivers" boston embedded') and not fits("zzqx")
 assert jobs.search_match(job, {}, T("skill:c")) is False and jobs.search_match(job, {}, []) is True
 v = jobs.search_view({"skills": ["C"], "function": ["Eng"], "description": "<p>Write   <b>Drivers</b></p>", "qualifications": None}, "wearables")
-assert v == {"skills": ["C"], "function": ["Eng"], "tag": "wearables", "find": "write drivers"}, v
-assert len(jobs.search_view({"description": "x" * 99999})["find"]) == jobs.SEARCH_TEXT
-assert jobs.search_view({}) == {"skills": [], "function": [], "tag": None, "find": ""}
+assert v == {"skills": ["C"], "function": ["Eng"], "tag": "wearables"}, v
+assert jobs.search_view({}) == {"skills": [], "function": [], "tag": None}
+assert jobs.posting_text({"description": "<p>Write   <b>Drivers</b></p>", "qualifications": "Know CAD"}) == "write drivers know cad"
+assert len(jobs.posting_text({"description": "x" * 99999})) == jobs.SEARCH_TEXT and jobs.posting_text({}) == ""
 print("All search checks passed.")

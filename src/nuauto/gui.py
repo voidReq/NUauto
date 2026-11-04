@@ -1718,6 +1718,31 @@ def sheet_get():
     return {"tabs": out, "names": manage.TABS, "busy": running("apply", "nuworks_side")}
 
 
+def job_texts(tab="nuworks"):
+    """The posting text of every row of an Apply tab, {url: text} (jobs.posting_text), for its search box: asked for
+    the first time the search has words in it, not carried in every list (2026-11-04)."""
+    from nuauto import apply
+    from nuauto import intern
+    if tab == "other":
+        rows, _ = other_rows_v(fresh=False)
+        ids = {x["url"]: i for i, x in intern.load("listings.json", {}).items()} if intern.ENABLED else {}
+        def details(r):
+            i = ids.get(intern.real_url(r.url))
+            return (intern.load(f"details/{i}.json", None) if i else None) or {}
+    else:
+        need_rows()
+        with APP.lock:
+            rows = APP.rows
+        details = apply.row_details
+    out = {}
+    for r in rows:
+        if r.url and r.url not in out:
+            text = jobs.posting_text(details(r))
+            if text:
+                out[r.url] = text
+    return {"texts": out}
+
+
 def jobs_tab(tab="nuworks", order="default", recheck=False):
     """One tab of the Apply screen: every row of that sheet tab in sections, what is left to do first, each row with
     why it can't be moved / removed (None = it can). nuworks: approved (in the order Start goes), agent (the company's
@@ -2617,6 +2642,7 @@ GET_ROUTES = {
     "/api/apply": lambda q: apply_list(q.get("order", "default")),
     "/api/jobs": lambda q: jobs_tab("other" if q.get("tab") == "other" else "nuworks", q.get("order", "default"),
                                     q.get("recheck") == "1"),
+    "/api/jobs/text": lambda q: job_texts("other" if q.get("tab") == "other" else "nuworks"),
     "/api/insights": lambda q: insights_get(q.get("source", "nuworks")),
     "/api/company": lambda q: company(),
     "/api/task": lambda q: {"task": APP.task.view(int(q.get("after", 0) or 0)) if APP.task else None},
