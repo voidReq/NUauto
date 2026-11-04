@@ -2020,18 +2020,21 @@ def run_locked(number, other, row, url, where, tab, slot, slot_lock, hand=False,
         if view:
             view.stop()
     laptop = view and os.path.exists(os.path.join(d, LAPTOP_FILE))
+    dropped = view and not laptop and os.path.exists(os.path.join(d, DROP_FILE))
     if laptop:  # you chose "do it on the laptop" on the review page: nothing went out here, the row is marked
         log_.write(f"{where.capitalize()}: left for the laptop (marked in the sheet); not submitted here.")
-    if view and not laptop:  # the review page asks too: its Yes / No types your answer here (review.py)
+    if dropped:  # you chose "End: drop it" on the review page: the row is Failed already (review.drop_and_end)
+        log_.write(f"{where.capitalize()}: dropped on the review page (marked Failed in the sheet); not submitted.")
+    if view and not laptop and not dropped:  # the review page asks too: its Yes / No types your answer here (review.py)
         import time as t_
         write_private(os.path.join(d, ATTENTION), {"kind": "finish", "since": t_.time(), "time": t_.time(), "said": ""})
         from nuauto import daily
         from nuauto import review
         daily.discord_assistant(f"**NUauto: {row.company}**\nSession ended ({where}). Did it go through? Answer on the review page: "
                       f"{review.page_url(slot)}")
-    reply = "laptop" if laptop else None
+    reply = "laptop" if laptop else "n" if dropped else None
     try:
-        while not laptop:
+        while not laptop and not dropped:
             reply = ask_line(f"\nDid you press Submit for {where} ({row.company}) and see the confirmation? "
                              "[y = yes / n = no]: ", FINISH_WAIT if view else None)
             if reply is None:
@@ -2045,7 +2048,7 @@ def run_locked(number, other, row, url, where, tab, slot, slot_lock, hand=False,
         from nuauto import remote
         remote.record_outcome(tab, number, url, approved=approved_submit(d), answer=reply)
     if reply != "y":
-        if reply == "n":
+        if reply == "n" and not dropped:
             log_.write(f"Not submitted; {where} stays {row.status}.")
         return
     ws = sheet.open_other() if other else sheet.open_worksheet()
@@ -2076,6 +2079,7 @@ def run_locked(number, other, row, url, where, tab, slot, slot_lock, hand=False,
 # a sign-in page with no way in): the homelab never starts it again; you do it on the laptop (sheet.mark_on_laptop).
 LAPTOP_MARK = "DO ON THE LAPTOP: the homelab's browser was refused"
 LAPTOP_FILE = "laptop.json"  # in a homelab run folder: you chose "do it on the laptop" (no "Did it go through?" then)
+DROP_FILE = "dropped.json"  # in a homelab run folder: you chose "End: drop it" (the row is Failed; no "Did it go through?")
 
 BROWSER_DIR = "browser"  # in the run folder: the browser tool's own output (downloads, snapshots) and the resume copy
 

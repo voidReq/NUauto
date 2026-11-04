@@ -171,6 +171,11 @@ AN ASSISTANT'S SCREEN (#/assistant/<slot> in the homelab's app; review.view / ac
   Reply             typed into its terminal (tmux send-keys; a newline = Ctrl+J, so several lines go as one message), as
                     if you typed it there. Only into the pane the session started in, and never when that pane shows a
                     shell (the assistant ended). End session (/exit) and End: do it on the laptop.
+                    End: drop it (a posting that has closed, a duplicate, a bad location; 2026-11-04, my request): the
+                    row becomes Failed through sheet.drop with the reason (like Drop in Apply), dropped.json
+                    (assist.DROP_FILE) keeps the run from asking "Did it go through?", then /exit; back to the list.
+                    Nothing ends if the row can't be dropped, nor after a Submit approved in that run
+                    (review.drop_and_end).
   Ended             Did it go through? Yes / No / No: do it on the laptop (typed into the launcher's question). One tap:
                     back to Apply > Assistants, and the screen says your answer until the run closes. A session you
                     answered is no longer listed or counted there (gui.assistants), though it holds its slot a few
