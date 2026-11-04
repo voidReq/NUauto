@@ -149,6 +149,8 @@ Status values: Proposed, Approved, Applied, Failed, Needs Human, Interview, Acce
 - Notes starting "Dropped <date>: <reason>" (sheet.drop, added 2026-10-12, my request): a Failed row I chose not to apply
   to (closed, a duplicate, a bad location): Drop in a row's More menu on the GUI's Apply screen (both machines' pages,
   every tab). Only Approved / Needs Human rows; the row stays as a record, so Review never re-offers it.
+  Withdrawn (my call, 2026-11-04): an Applied or Interview row I withdrew on the site: Drop > I withdrew it (the one
+  reason on a sent row). Failed like any drop, its date kept: it stops counting toward the weekly cap and the total.
 - Notes starting "ALSO APPLY ON COMPANY SITE" (SITE_MARK): submitted on NUworks, but the
   company also wants its own site; I do that part.
 - The first tab is NUworks only (sheet.open_worksheet refuses if "Other jobs" is first). A second tab,

@@ -678,13 +678,18 @@ function reapplyRow(t, undo) {
 
 // Drop: you won't apply (closed, a duplicate, a bad location): the row becomes Failed with the reason in its Notes,
 // leaves every queue and stays in the sheet as your record (sheet.drop), so Review never offers the job again.
+// An application you withdrew (Applied or Interview; my call, 2026-11-04): Drop > I withdrew it, the one reason there.
+// Failed like any drop, so it stops counting toward the weekly cap and the total (sheet.drop, WITHDRAWN_FROM).
 const DROP_REASONS = [["closed", "It has closed"], ["duplicate", "A duplicate"], ["location", "Bad location"], ["other", "Other reason"]];
+const WITHDRAWN_FROM = ["Applied", "Interview"];
 function dropRow(t, tab) {  // tab "other": a row of the sheet's Other jobs tab
+  const sent = WITHDRAWN_FROM.includes(t.status), where = `${t.company} · ${t.title || ""} (${tab === "other" ? "Other jobs " : ""}row ${t.row})`;
   modal((box, close) => box.append(
-    el("h2", { text: "Not applying?" }),
-    el("p", { class: "muted", text: `${t.company} · ${t.title || ""} (${tab === "other" ? "Other jobs " : ""}row ${t.row}) leaves the queue. The sheet keeps it as Failed, with the reason in its Notes.` }),
+    el("h2", { text: sent ? "Withdrew this application?" : "Not applying?" }),
+    el("p", { class: "muted", text: sent ? `${where} becomes Failed, with "you withdrew the application" in its Notes and its date kept. It no longer counts toward your weekly limit or your total. Withdraw it on the site first: this only changes your sheet.` :
+      `${where} leaves the queue. The sheet keeps it as Failed, with the reason in its Notes.` }),
     el("div", { class: "foot" }, el("button", { class: "btn", text: "Cancel", onclick: close }),
-      el("div", { class: "row" }, ...DROP_REASONS.map(([why, label]) => el("button", { class: "btn danger", text: label, testid: `drop-${why}`,
+      el("div", { class: "row" }, ...(sent ? [["withdrawn", "I withdrew it"]] : DROP_REASONS).map(([why, label]) => el("button", { class: "btn danger", text: label, testid: `drop-${why}`,
         onclick: async () => {
           close();
           try { await working("Dropping it…", api.post("/api/mark", { action: "drop", why, row: t.row, url: t.url, tab })); toast("Dropped."); pollState(); if (S.screen && S.screen.reload) S.screen.reload(); }
@@ -1426,7 +1431,8 @@ screens.apply = async (view) => {
       ...heard,
       ...again,
       ["I applied myself", "mark", () => markRow("applied", r, t), live ? null : "Only for rows still to do (Approved or Needs Human)"],
-      ["Drop (not applying)…", "drop", () => dropRow(r, t), live ? null : "Only Approved or Needs Human rows are dropped"],
+      WITHDRAWN_FROM.includes(r.status) ? ["Drop (I withdrew it)…", "drop", () => dropRow(r, t), null] :
+        ["Drop (not applying)…", "drop", () => dropRow(r, t), live ? null : "Only rows still to do, or an application you withdrew"],
       [`Move to ${names()[to]}…`, "move", () => moveRow(names(), other ? "other" : "nuworks", r, reload), r.locked || busy],
       ["Remove from the sheet…", "remove", () => removeRow(names(), other ? "other" : "nuworks", r, reload), r.remove_locked || busy, true],
     ]);
