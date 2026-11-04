@@ -258,7 +258,7 @@ A question from a run (an unknown form field, an option to pick, "did it submit?
                  its terminal (Interrupt), its latest message, Ready to submit (what, on which page, what you haven't
                  confirmed, the screen when it asked; Approve / Decline with a note), the end question (Yes / No / No: do
                  it on the laptop), a question Claude Code asks in its own terminal (answer it there; the reply box stays
-                 off), Reply, End session, End: do it on the laptop. It asks again every 4 s; what you type is kept
+                 off), Reply, End session, End: do it on the laptop, End: drop it (the row Failed with a reason, then /exit). It asks again every 4 s; what you type is kept
                  (docs/REMOTE.md, AN ASSISTANT'S SCREEN). The screen keeps the session it opened on (its key,
                  review.key): a session that ended, a slot nobody runs in, or the next session started in that slot
                  goes back to Apply's Assistants tab with a toast (2026-10-28, my request: it showed "No session there",

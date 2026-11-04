@@ -2065,6 +2065,16 @@ screens.assistant = async (view) => {
   }
   const btn = (text, cls, body, busy, testid) => el("button", { class: cls, text, testid, "data-busy": busy,
     onclick: (e) => send(typeof body === "function" ? body() : body, e.currentTarget) });
+  // End: drop it (a posting that has closed, say): the row becomes Failed with the reason, then the session ends
+  // (review.drop_and_end; no "Did it go through?" after). Same reasons as a row's Drop in Apply.
+  function dropIt() {
+    modal((box, close) => box.append(
+      el("h2", { text: "Drop it and end the session?" }),
+      el("p", { class: "muted", text: `${d.company || "This job"}${d.title ? " · " + d.title : ""} (${d.tab === "other" ? "Other jobs " : ""}row ${d.row}) leaves the queue: the sheet keeps it as Failed, with the reason in its Notes. Then the session ends.` }),
+      el("div", { class: "foot" }, el("button", { class: "btn", text: "Cancel", onclick: close }),
+        el("div", { class: "row" }, ...DROP_REASONS.map(([why, label]) => el("button", { class: "btn danger", text: label, testid: `as-drop-${why}`,
+          onclick: () => { close(); send({ do: "drop", why }); } }))))));
+  }
 
   function draw() {
     const a = d.approval;
@@ -2117,9 +2127,10 @@ screens.assistant = async (view) => {
         el("label", { class: "field" }, "Reply", el("span", { class: "muted small", text: "Typed into its terminal, as if you typed it there. Several lines go as one message." }), reply),
         el("div", { class: "row" }, btn("Send", "btn primary", () => ({ do: "reply", text: reply.value }), "Sending…", "as-send")),
         el("hr", { class: "sep" }),
-        el("p", { class: "small muted", text: "Done (it submitted, or you stop here)? End the session; then it asks whether it went through. A site that refuses the homelab's browser (a sign-in page with no way in): End: do it on the laptop. The row is marked in your sheet, and the homelab never starts it again." }),
+        el("p", { class: "small muted", text: "Done (it submitted, or you stop here)? End the session; then it asks whether it went through. A site that refuses the homelab's browser (a sign-in page with no way in): End: do it on the laptop. The row is marked in your sheet, and the homelab never starts it again. A posting that has closed (or one you won't apply to): End: drop it." }),
         el("div", { class: "row" }, btn("End session", "btn", { do: "exit" }, "Ending…", "as-exit"),
-          btn("End: do it on the laptop", "btn", { do: "laptop" }, "Ending…", "as-laptop"))));
+          btn("End: do it on the laptop", "btn", { do: "laptop" }, "Ending…", "as-laptop"),
+          d.row ? el("button", { class: "btn danger", text: "End: drop it…", testid: "as-drop", onclick: dropIt }) : null)));
     }
     fill(view, ...parts);
     term.textContent = d.terminal || "(not readable)";

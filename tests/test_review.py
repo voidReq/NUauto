@@ -514,9 +514,11 @@ try:
         def get_all_values(self):
             return [list(r) for r in self.values]
 
-        def update(self, range_name, values, value_input_option=None):
+        def update(self, range_name, values, value_input_option=None):  # (a range like D7:F7 writes its row left to right)
             self.calls.append(range_name)
-            self.values[int(range_name[1:]) - 1][ord(range_name[0]) - ord("A")] = values[0][0]
+            start = range_name.split(":")[0]
+            for i, v in enumerate(values[0]):
+                self.values[int(start[1:]) - 1][ord(start[0]) - ord("A") + i] = v
 
     ROW_URL = "https://jobs.example.org/the-row"
 
@@ -542,7 +544,7 @@ try:
         typed_laptop.append((sess["slot"], text_, os.path.exists(laptop_file)))
 
     def reset(attention, approval_on=False, **state_over):
-        for name in (assist.LAPTOP_FILE,):
+        for name in (assist.LAPTOP_FILE, assist.DROP_FILE):
             if os.path.exists(os.path.join(run, name)):
                 os.remove(os.path.join(run, name))
         assist.write_private(os.path.join(run, "state.json"), {**state, "tab": "other", "row_url": ROW_URL, **state_over})
@@ -672,11 +674,63 @@ try:
         r = tap({"do": "laptop"})
         assert r[0] == 200 and "could not be marked" in J(r)["message"] and typed_laptop == [(1, "/exit", True)]
         assert "Google" not in r[2].decode()
+
+        # End: drop it (a posting that has closed): the row becomes Failed through the real sheet.drop, dropped.json is
+        # written (so the run asks no "Did it go through?"), then /exit; the screen goes back to the list
+        drop_file = os.path.join(run, assist.DROP_FILE)
+        reset("waiting")
+        r = tap({"do": "drop", "why": "closed"})
+        assert r[0] == 200 and J(r)["closing"] is True, r[2]
+        assert J(r)["message"] == "Dropped: Acme <b>Robotics</b> is marked Failed (the posting has closed).", J(r)
+        assert typed_laptop == [(1, "/exit", False)] and ws_now[0].calls == ["D7:F7"] and opened == [("other", False)]
+        assert ws_now[0].values[6][3] == "Failed" and ws_now[0].values[6][4].startswith(sheet.DROP_MARK)
+        assert "the posting has closed. match 90%" in ws_now[0].values[6][4], ws_now[0].values[6]
+        assert oct(os.stat(drop_file).st_mode & 0o777) == "0o600" and assist.read_json(drop_file)["why"] == "closed"
+        assert "dropped (closed) and ended the session (by Phone)" in open(os.path.join(run, "actions.log")).read()
+        # the NUworks tab's session drops on the NUworks tab; a Submit waiting for approval doesn't stop it
+        reset("approve", approval_on=True, tab="jobs")
+        r = J(tap({"do": "drop", "why": "location"}))
+        assert r.get("closing") is True and opened[0] == ("jobs", False), (r, opened)  # (then the list reads it again)
+        # nothing changed, nothing typed: an unknown reason, Claude Code's own question, the finish question, an answered one
+        for kind, body in (("waiting", {"why": "bored"}), ("waiting", {}), ("approve", {"why": "closed"}),
+                           ("finish", {"why": "closed"}), ("answered", {"why": "closed"})):
+            reset(kind)
+            msg = J(tap({"do": "drop", **body}))["message"]
+            assert msg in ("Unknown reason.", "Nothing to do."), (kind, msg)
+            assert typed_laptop == [] and ws_now[0].calls == [] and not os.path.exists(drop_file), kind
+        # the row can't be dropped (another job there now, Applied, a sheet that can't be read, no row_url): a message,
+        # the session keeps running
+        for sheet_now, over, says in ((fresh_sheet(url="https://jobs.example.org/another"), {}, "no longer holds that job"),
+                                      (fresh_sheet(status="Applied"), {}, "only Approved or Needs Human"),
+                                      (RuntimeError("Google is down"), {}, "could not be changed (RuntimeError)"),
+                                      (fresh_sheet(), {"row_url": ""}, "doesn't know its sheet row")):
+            reset("waiting", **over)
+            ws_now[0] = sheet_now
+            r = tap({"do": "drop", "why": "closed"})
+            assert r[0] == 200 and says in J(r)["message"] and "closing" not in J(r), (says, J(r))
+            assert typed_laptop == [] and not os.path.exists(drop_file) and "Google" not in r[2].decode(), says
+            if not isinstance(sheet_now, Exception):
+                assert sheet_now.calls == [], says
+        # a Submit you approved in this run: it needs its answer, never a drop
+        log_path = os.path.join(run, "actions.log")
+        before = open(log_path).read()
+        try:
+            with open(log_path, "a") as f:
+                f.write("APPROVED on the review page by Phone\n")
+            reset("waiting")
+            r = tap({"do": "drop", "why": "closed"})
+            assert "you approved a Submit" in J(r)["message"] and typed_laptop == [] and ws_now[0].calls == []
+        finally:
+            with open(log_path, "w") as f:
+                f.write(before)
+        # an unpaired device: nothing
+        reset("waiting")
+        assert tap({"do": "drop", "why": "closed"}, cookie=None)[0] == 403 and ws_now[0].calls == [] and typed_laptop == []
     finally:
         sheet.open_other, sheet.open_worksheet = real_sheet
         review.type_into = real_type_into
         review.end_session = real_end
-        for name in (laptop_file,):
+        for name in (laptop_file, os.path.join(run, assist.DROP_FILE)):
             if os.path.exists(name):
                 os.remove(name)
         assist.write_private(os.path.join(run, "state.json"), state)

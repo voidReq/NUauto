@@ -11,7 +11,8 @@ Mark-done tunnel (that one forwards 8765). This module holds what the app's home
     anything typed with no answer behind it, the screen when it asked; Approve / Decline with a note: the guard waits up
     to assist.WAIT for you, a later Approve is a pass for that one action, assist.take_grant); its whole last message and
     a reply typed into its terminal (tmux), as if you typed it there; the browser view's link and password (captchas:
-    you solve them there, then reply "done"); "Did it go through?" when it ended; Interrupt (Esc), End session (/exit).
+    you solve them there, then reply "done"); "Did it go through?" when it ended; Interrupt (Esc), End session (/exit),
+    End: drop it (the row becomes Failed with a reason, no question after: drop_and_end).
     Every answer goes in the run's actions.log with the device's name.
   - the queue (remote.py) for the app's Company sites: each row's group and what it waits for; Start now.
 
@@ -333,6 +334,35 @@ def mark_laptop(s, by):
     return "Left for the laptop: marked in your sheet, and the homelab won't start it again."
 
 
+def drop_and_end(s, why, by):
+    """End: drop it (a posting that has closed, a duplicate, a bad location): the row becomes Failed through sheet.drop
+    (the reason in its Notes), the run won't ask "Did it go through?" (assist.DROP_FILE), then /exit. Nothing ends when
+    the row can't be dropped, nor after a Submit you approved in this run (that one needs its answer)."""
+    from nuauto import assist
+    from nuauto import sheet
+    st, number = s["state"], s["info"].get("row")
+    if why not in sheet.DROP_REASONS:
+        return {"message": "Unknown reason."}
+    if assist.approved_submit(s["run"]):
+        return {"message": "Not dropped: you approved a Submit in this session. End it and say whether it went through."}
+    if not st.get("row_url") or not number:
+        return {"message": "Not dropped: this session doesn't know its sheet row. End it, then drop the row in Apply."}
+    try:
+        ws = sheet.open_other(interactive=False) if st.get("tab") == "other" else sheet.open_worksheet(interactive=False)
+        sheet.drop(ws, int(number), st["row_url"], why)
+    except sheet.SheetError as e:
+        return {"message": f"Not dropped: {e}"}
+    except Exception as e:  # (no details: they may hold the sheet's own text)
+        return {"message": f"Not dropped: the sheet could not be changed ({type(e).__name__})."}
+    assist.write_private(os.path.join(s["run"], assist.DROP_FILE), {"by": by, "why": why, "at": time.time()})
+    assist.log(s["run"], f"REVIEW PAGE: dropped ({why}) and ended the session (by {by})")
+    try:
+        end_session(s)
+    except ValueError:  # its terminal shows a shell: the assistant had ended already
+        pass
+    return {"message": f"Dropped: {st_company(s)} is marked Failed ({sheet.DROP_REASONS[why]}).", "closing": True}
+
+
 def hook_alive(pid):
     """True while the guard's hook that asked is still waiting (that process, still the hook). No pid: assume so."""
     if not pid:
@@ -474,6 +504,8 @@ def act(s, body, by):
             message = mark_laptop(s, by)
             end_session(s)
             return {"message": message}
+        if do == "drop" and word != "prompt" and kind not in ("finish", "answered"):  # End: drop it (closed, a duplicate...)
+            return drop_and_end(s, str(body.get("why") or ""), by)
         if do == "finish" and kind == "answered":
             return {"message": "Already answered: its session is closing.", "closing": True}
         if do == "finish" and kind == "finish" and body.get("answer") == "laptop":
@@ -613,7 +645,8 @@ def demo_setup():
         os.makedirs(d, mode=0o700, exist_ok=True)
         where = f"{'Other jobs row' if tab == 'other' else 'row'} {r.number}"
         assist.write_private(os.path.join(d, "state.json"), {"company": x["company"], "job_title": x["job_title"],
-                                                             "where": where, "slot": n, "tmux": None, "tab": tab})
+                                                             "where": where, "slot": n, "tmux": None, "tab": tab,
+                                                             "row_url": r.url})
         if x.get("message"):
             assist.write_private(os.path.join(d, assist.MESSAGE), x["message"].encode())
         if x.get("approval"):

@@ -1215,6 +1215,7 @@ import glob  # noqa: E402
 from nuauto import screen  # noqa: E402
 
 LAPTOP_SESSION = ("import json, os; open(os.path.join(os.environ[%r], %r), 'w').write('{}')" % (assist.STATE_ENV, assist.LAPTOP_FILE))
+DROP_SESSION = LAPTOP_SESSION.replace(repr(assist.LAPTOP_FILE), repr(assist.DROP_FILE))
 patched = {"screen.Screen": screen.Screen, "session": assist.session, "ask_line": assist.ask_line, "approved": assist.approved_submit,
            "outcome": remote.record_outcome, "discord": daily.discord, "page_url": review.page_url,
            "open_other": sheet.open_other, "open_worksheet": sheet.open_worksheet}
@@ -1271,6 +1272,13 @@ try:
     time.sleep(1.1)
     drive(LAPTOP_SESSION, approved=True)
     assert outcomes == [("other", 5, "https://jobs.example.org/apply-page", True, "laptop")] and asked_line == []
+    # dropped.json (End: drop it; the row is Failed already): no question, no ping, recorded as a No; the sheet untouched
+    time.sleep(1.1)
+    run_dir = drive(DROP_SESSION)
+    assert asked_line == [] and pings == [] and not os.path.exists(os.path.join(run_dir, assist.ATTENTION)), (asked_line, pings)
+    assert outcomes == [("other", 5, "https://jobs.example.org/apply-page", False, "n")], outcomes
+    log_text = open(os.path.join(run_dir, "actions.log")).read()
+    assert "dropped on the review page" in log_text and "stays Approved" not in log_text and stopped == [1]
     # no laptop.json: the question as before, the finish attention and the ping, the answer recorded
     time.sleep(1.1)
     run_dir = drive("pass", answer="n")

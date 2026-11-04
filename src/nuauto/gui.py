@@ -2498,7 +2498,11 @@ def assistant_post(body):
     s = review.session(int(slot)) if str(slot).isdigit() else None
     if not s or ("key" in body and body["key"] != review.key(s)):  # (key: the page's session; its slot may hold the next)
         raise Refused("That session has ended.")
-    return review.act(s, body, device_name())
+    r = review.act(s, body, device_name())
+    if body.get("do") == "drop" and r.get("closing"):  # End: drop it changed its row: the lists read it again
+        _queue["at"] = 0
+        other_changed() if s["state"].get("tab") == "other" else APP.refresh_rows(force=True)
+    return r
 
 
 DEMO_PROBE = {"ok": True, "hostname": "demo-homelab", "tailscale": "100.64.0.42", "dir": True, "venv": True, "uv": True,
