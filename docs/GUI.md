@@ -86,7 +86,9 @@ A question from a run (an unknown form field, an option to pick, "did it submit?
                  button says "Open posting"; cards add Posted and, when the posting says so, Who can apply; a posting
                  that could not be read comes last, "not scored" (Why says what failed: judge it from its link).
                  Search box (words or "quoted phrases", all must appear, any case, in title, company, place, kind of
-                 work, tag, skills, description, qualifications) and a kind-of-work menu narrow the list; the order
+                 work, tag, function, skills, description, qualifications; skill:c / skill:"machine learning" an exact
+                 skill, each part of "C/C++" counting, never "CAD"; tag:x your interest tag or a job function; featured
+                 (or is:featured) NUworks' Featured tag; jobs.search_terms, 2026-11-04) and a kind-of-work menu narrow the list; the order
                  stays. Esc clears the search. A text search shows every match as its own card (8 at a time, "Show
                  more"; the posting cut short), each with its own Approve / Not for me buttons (y / n keys are off there;
                  a decided card turns into one line with Change). The job you were on is left undecided; clearing the
@@ -101,7 +103,10 @@ A question from a run (an unknown form field, an option to pick, "did it submit?
                  and Start, How Start works folded; (the other tab, laid out the same, 2026-10-18, my request: "same
                  buttons, same subtext") no limit, how many are ready and applied, Run on, How Apply works folded. Then one
                  toolbar: Search this tab (words, all must appear, any case, in company, title, notes, site, kind of work,
-                 status, pay, place (a state's name finds its code: "virginia" finds "Richmond, VA"; 2026-11-03); Ctrl+F; Esc clears), a kind-of-work menu (with counts), Sort, Add a job. Then the rows in
+                 status, pay, place (a state's name finds its code: "virginia" finds "Richmond, VA"; 2026-11-03), and
+                 (2026-11-04) the saved posting: its skills, functions, tag (in each row: jobs.search_view) and text (the
+                 first 6000 characters, jobs.posting_text: /api/jobs/text, asked for once the search has words, not in
+                 the lists: 4x their size); skill:, tag:, featured as in Review (app.js searchTerms, the same rules); Ctrl+F; Esc clears), a kind-of-work menu (with counts), Sort, Add a job. Then the rows in
                  sections (<details>: what is left to do open, the rest folded, each with its count; your choice kept for
                  the session; a search opens every section with a match).
                  NUworks sections: Ready to apply (Approved, numbered in the order Start goes: the Sort menu IS that

@@ -591,7 +591,7 @@ def job_facts(r, data, d=None):
     return {"match": (scores.get(i) or {}).get("match"), "pay": pay, "year_asked": jobs.year_asked(d, scores.get(i)), "pay_hour": hour[1] if hour else None,
             "score": p["rank"] if p else None, "score_text": jobs.rank_text(p) if p else None,
             "category": cat, "category_label": jobs.category_label(cat) if cat else None, **jobs.posted_view(listed.get(i)),
-            "place": insights.place_text(d.get("location"))}
+            "place": insights.place_text(d.get("location")), **jobs.search_view(d, insights.tag_of(d) if d else None)}
 
 
 def company_rows(rows, facts=False):
@@ -941,8 +941,9 @@ def review(mode, q="", category="", source="nuworks", quick=False):
     for r in todo:
         counts[r["category"]] = counts.get(r["category"], 0) + 1
     terms = jobs.search_terms(q)
+    listed = jobs.load("list.json", {}) if any(k == "featured" for k, _ in terms) else {}  # (an internship: never featured)
     shown = [r for r in todo if (not category or r["category"] == category)
-             and jobs.search_match(r, details[r["id"]], terms)]
+             and jobs.search_match(r, details[r["id"]], terms, featured=bool((listed.get(r["id"]) or {}).get("featured")))]
     out, urgent_ids = [], {r["id"] for r in urgent}
     for r in shown:
         d = details[r["id"]]
@@ -1658,6 +1659,7 @@ def intern_facts(urls):
                          "pay": pay, "pay_hour": hour[1] if hour else None, "posted_text": intern.posted_text(x),
                          "year_asked": jobs.year_asked(d, s), "place": insights.place_text(d.get("location")),
                          "category": cat, "category_label": jobs.category_label(cat) if cat else None,
+                         **jobs.search_view(d, insights.tag_of(d) if d else None),
                          **closing_of(jobs.closes(d) if d else None)}
     return out
 
@@ -1714,6 +1716,31 @@ def sheet_get():
         out[tab] = {"exists": True, "rows": [row_view(r, locked=manage.movable(r, tab, "move"),
                                                       remove_locked=manage.movable(r, tab, "remove")) for r in rows]}
     return {"tabs": out, "names": manage.TABS, "busy": running("apply", "nuworks_side")}
+
+
+def job_texts(tab="nuworks"):
+    """The posting text of every row of an Apply tab, {url: text} (jobs.posting_text), for its search box: asked for
+    the first time the search has words in it, not carried in every list (2026-11-04)."""
+    from nuauto import apply
+    from nuauto import intern
+    if tab == "other":
+        rows, _ = other_rows_v(fresh=False)
+        ids = {x["url"]: i for i, x in intern.load("listings.json", {}).items()} if intern.ENABLED else {}
+        def details(r):
+            i = ids.get(intern.real_url(r.url))
+            return (intern.load(f"details/{i}.json", None) if i else None) or {}
+    else:
+        need_rows()
+        with APP.lock:
+            rows = APP.rows
+        details = apply.row_details
+    out = {}
+    for r in rows:
+        if r.url and r.url not in out:
+            text = jobs.posting_text(details(r))
+            if text:
+                out[r.url] = text
+    return {"texts": out}
 
 
 def jobs_tab(tab="nuworks", order="default", recheck=False):
@@ -2619,6 +2646,7 @@ GET_ROUTES = {
     "/api/apply": lambda q: apply_list(q.get("order", "default")),
     "/api/jobs": lambda q: jobs_tab("other" if q.get("tab") == "other" else "nuworks", q.get("order", "default"),
                                     q.get("recheck") == "1"),
+    "/api/jobs/text": lambda q: job_texts("other" if q.get("tab") == "other" else "nuworks"),
     "/api/insights": lambda q: insights_get(q.get("source", "nuworks")),
     "/api/company": lambda q: company(),
     "/api/task": lambda q: {"task": APP.task.view(int(q.get("after", 0) or 0)) if APP.task else None},
