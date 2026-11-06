@@ -66,7 +66,7 @@ SUBMIT_RE = re.compile(r"^\s*(submit|submit (my |your |the )?application|send( m
                        r"finish|complete( my)? application|confirm( and submit)?)\s*$", re.I)
 ENTER_KEYS = {"enter", "numpadenter", "return"}
 BASH_COMMANDS = {"answer", "guess", "guesses", "save", "once", "confirm", "alias", "blank", "email", "wait", "link-login",
-                 "letter"}
+                 "letter", "past"}
 MAX_ANSWER = 300  # one line; enough for a "30 word limit" answer, not an essay (an essay is typed into its field)
 MAX_WHY = 200     # a guess's reason: a few words
 REF_LINE = re.compile(r'^(?P<indent>\s*)-\s+(?P<role>[a-z]+)(?:\s+"(?P<name>(?:[^"\\]|\\.)*)")?(?P<attrs>[^\n]*?)\[ref=(?P<ref>[^\]\s]+)\](?P<tail>[^\n]*)$')
@@ -1013,6 +1013,8 @@ def _bank(argv):
         entries = b.entries
         if a.cmd not in ("guesses", "letter") and not (a.label or "").strip():
             out = {"error": f"{a.cmd} needs the field's label."}
+        elif a.cmd == "past":
+            out = past_answers(a.label)
         elif a.cmd == "letter":
             out = draft_letter(state, a.para)
         elif a.cmd == "guesses":
@@ -1077,6 +1079,30 @@ def _bank(argv):
                 out = {"status": "leave_blank", "saved": True}
     log(d, f"bank {a.cmd} {a.label!r} -> {out.get('status') or out.get('error')}")
     print(json.dumps(out))
+
+
+def past_answers(label):
+    """`past "<label>"`: the user's earlier long answers (answers.past: their question shares the most words with this
+    one), in full: material for this application's draft, never pasted in by themselves."""
+    found = [{k: e.get(k) for k in ("question", "text", "company", "date")} for e in answers.past(label)]
+    return {"status": "past", "answers": found,
+            "next": ("Material for your draft only: write this application's own answer from them (its company, its "
+                     "question, its length limit), type it, record it with guess --essay, and show it in the end list. "
+                     "Say which earlier answer you drew on.") if found else
+                    "No earlier long answer like this one: draft it from the writeups and notes."}
+
+
+def keep_long_answers(d, log_):
+    """At the session's end: the long answers it typed (record_typed) go to the user's long answers (answers.keep_long:
+    not saved answers, not a cover letter)."""
+    with open(os.path.join(d, "state.json")) as f:
+        st = json.load(f)
+    if not st.get("long"):
+        return
+    n = answers.keep_long(st["long"], {"company": st.get("company"), "title": st.get("job_title"),
+                                       "site": host(st.get("job_url") or ""), "tab": st.get("tab")})
+    if n:
+        log_.write(f"Kept {n} long answer{'s' if n > 1 else ''} for reference (Answers > Long answers).")
 
 
 LETTER = "cover letter"  # the letter's entry in the run's guesses (the end list shows it in full)
@@ -1255,6 +1281,10 @@ def record_typed(state, tool, inp):
         if not value or placeholder_of(value) != "" or SEARCH_BOX.search(field) or target.get("role") == "searchbox":
             continue
         typed[field] = value[:MAX_ANSWER]
+        # a long answer (an essay, "2 accomplishments"): kept in full, for answers.keep_long at the session's end (never
+        # a cover letter: a new one per application, your call)
+        if len(value.split()) >= answers.LONG_WORDS and LETTER not in field.lower() and name != "browser_select_option":
+            state.setdefault("long", {})[field] = value[:answers.MAX_LONG]
 
 
 def hook(kind):
@@ -1787,6 +1817,10 @@ def after_session(d, started, log_):
     except Exception as e:  # never in the way of the y/n question that follows
         log_.write(f"Could not remove the cover letter ({type(e).__name__}).")
     try:
+        keep_long_answers(d, log_)
+    except Exception as e:  # never in the way of the y/n question that follows
+        log_.write(f"Could not keep its long answers ({type(e).__name__}).")
+    try:
         with open(os.path.join(d, "state.json")) as f:
             sites = json.load(f).get("password_sites") or []
         secrets_ = accounts.passwords(sites)
@@ -2021,10 +2055,14 @@ def run_locked(number, other, row, url, where, tab, slot, slot_lock, hand=False,
             view.stop()
     laptop = view and os.path.exists(os.path.join(d, LAPTOP_FILE))
     dropped = view and not laptop and os.path.exists(os.path.join(d, DROP_FILE))
+    free = view and not laptop and not dropped and os.path.exists(os.path.join(d, FREE_FILE))
     if laptop:  # you chose "do it on the laptop" on the review page: nothing went out here, the row is marked
         log_.write(f"{where.capitalize()}: left for the laptop (marked in the sheet); not submitted here.")
     if dropped:  # you chose "End: drop it" on the review page: the row is Failed already (review.drop_and_end)
         log_.write(f"{where.capitalize()}: dropped on the review page (marked Failed in the sheet); not submitted.")
+    if free:  # you chose "End: requires free-response" on the review page: the row is marked, nothing went out
+        log_.write(f"{where.capitalize()}: wants answers in your own words (tagged free-response in the sheet); not submitted.")
+        dropped = True  # (from here on like a drop: no "Did it go through?", the row is left as it is)
     if view and not laptop and not dropped:  # the review page asks too: its Yes / No types your answer here (review.py)
         import time as t_
         write_private(os.path.join(d, ATTENTION), {"kind": "finish", "since": t_.time(), "time": t_.time(), "said": ""})
@@ -2036,9 +2074,14 @@ def run_locked(number, other, row, url, where, tab, slot, slot_lock, hand=False,
     try:
         while not laptop and not dropped:
             reply = ask_line(f"\nDid you press Submit for {where} ({row.company}) and see the confirmation? "
-                             "[y = yes / n = no]: ", FINISH_WAIT if view else None)
+                             "[y = yes / n = no / f = no: it wants answers in my own words (tag it free-response)]: ",
+                             FINISH_WAIT if view else None)
             if reply is None:
                 log_.write(f"No answer within {FINISH_WAIT // 3600} h: {where} left as it was (check it yourself).")
+                break
+            if reply == "f":
+                mark_free(other, row, log_)
+                reply = "n"
                 break
             if reply in ("y", "n"):
                 break
@@ -2075,11 +2118,27 @@ def run_locked(number, other, row, url, where, tab, slot, slot_lock, hand=False,
               f"{row.number}`).")
 
 
+def mark_free(other, row, log_):
+    """You answered f at "Did you press Submit?": the row gets the free-response mark (sheet.mark_free_response)."""
+    from nuauto import sheet
+    try:
+        ws = sheet.open_other() if other else sheet.open_worksheet()
+        sheet.mark_free_response(ws, row.number, row.url)
+        log_.write("Tagged free-response in the sheet (it stays as it was, for the assistant later).")
+    except Exception as e:  # (no details: they may hold the sheet's own text)
+        log_.write(f"Could not tag it free-response in the sheet ({type(e).__name__}): add it yourself.")
+
+
 # At the end of a row's Notes when the homelab's browser can't do it (a site that refuses an automated browser shows it
 # a sign-in page with no way in): the homelab never starts it again; you do it on the laptop (sheet.mark_on_laptop).
 LAPTOP_MARK = "DO ON THE LAPTOP: the homelab's browser was refused"
 LAPTOP_FILE = "laptop.json"  # in a homelab run folder: you chose "do it on the laptop" (no "Did it go through?" then)
 DROP_FILE = "dropped.json"  # in a homelab run folder: you chose "End: drop it" (the row is Failed; no "Did it go through?")
+# At the end of a row's Notes when its application wants answers in your own words (2026-11-06, your request): you ended
+# the session with "End: requires free-response" (the review page) or answered f (the terminal). The app shows the row
+# with a "free-response" tag; it stays where it was, for the assistant again later (sheet.mark_free_response).
+FREE_MARK = "FREE RESPONSE: the application wants answers in your own words"
+FREE_FILE = "free_response.json"  # in a homelab run folder: you chose "End: requires free-response" (no "Did it go through?")
 
 BROWSER_DIR = "browser"  # in the run folder: the browser tool's own output (downloads, snapshots) and the resume copy
 

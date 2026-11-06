@@ -145,7 +145,8 @@ A question from a run (an unknown form field, an option to pick, "did it submit?
                  my request); an internship's from its posting (gui.intern_facts), else
                  "no close date · posted N days ago"; "asks for juniors+" (jobs.year_asked: the class year a posting asks for,
                  when above yours; from NUworks' class levels, the scorer's class_req, an internship's year_req); the queue's
-                 place; "do it on the laptop" when the homelab's browser was refused), what to do next, Open, and More (⋯;
+                 place; "do it on the laptop" when the homelab's browser was refused; "free-response" when its assistant
+                 was ended with End: requires free-response, row_view free_response), what to do next, Open, and More (⋯;
                  on a phone in the row's top right corner). The dropdown (GET /api/job?tab=&url=, read when it opens, open
                  rows stay open across redraws): where, pay, close date; kind of work and your tags (AR/XR...), the class
                  year asked, job functions, skills and the like (NUworks' own labels); the posting, cut short with
@@ -204,7 +205,9 @@ A question from a run (an unknown form field, an option to pick, "did it submit?
                  insights.py, also `nuauto insights` in a terminal. Read-only; pay that doesn't read as $10-150/h
                  counts as not listed
   Answers        the answer bank as a table (exact-match rules unchanged); locked while a run uses it. NUworks / Other
-                 jobs switch: the Other jobs bank (answers_other.json) is its own table; the NUworks one has a "NUworks
+                 jobs / Long answers switch: Long answers (2026-11-06) lists local/long_answers.json read-only, newest
+                 first, each answer folded (question, company, date, words; the text hidden in --view); the Other jobs
+                 bank (answers_other.json) is its own table; the NUworks one has a "NUworks
                  only" column (never used for Other jobs; default on for start/end date and co-op term). Columns: question,
                  answer, type (any / text / dropdown), always ask, other wordings. Search (Ctrl+F) narrows it to questions,
                  answers and aliases with that text. Other wordings (aliases): a dialog, one per line (a wording may hold
@@ -265,7 +268,9 @@ A question from a run (an unknown form field, an option to pick, "did it submit?
                  its terminal (Interrupt), its latest message, Ready to submit (what, on which page, what you haven't
                  confirmed, the screen when it asked; Approve / Decline with a note), the end question (Yes / No / No: do
                  it on the laptop), a question Claude Code asks in its own terminal (answer it there; the reply box stays
-                 off), Reply, End session, End: do it on the laptop, End: drop it (the row Failed with a reason, then /exit). It asks again every 4 s; what you type is kept
+                 off), Reply, and one End menu (2026-11-06): End session, End: requires free-response (the row tagged
+                 free-response, stays as it was), End: do it on the laptop, End: drop it (the row Failed with a reason,
+                 then /exit); the end question also has "No: it wants free-response answers". It asks again every 4 s; what you type is kept
                  (docs/REMOTE.md, AN ASSISTANT'S SCREEN). The screen keeps the session it opened on (its key,
                  review.key): a session that ended, a slot nobody runs in, or the next session started in that slot
                  goes back to Apply's Assistants tab with a toast (2026-10-28, my request: it showed "No session there",
@@ -512,7 +517,7 @@ API (JSON; all need the cookie; POSTs need X-NUauto: 1)
                              {"action": move, "tab", "row", "url", "new_url"} -> {"tab", "row"}; {"action": remove, "tab", "row", "url"}
   GET  /api/insights?source= pool / applied numbers (pay, places, categories) and the sheet tab's statuses; source=intern:
                              the Summer internships and the Other jobs tab (when internships are on; the reply says source)
-  GET  /api/answers?bank=    entries + version (bank other: answers_other.json); POST /api/answers {"bank", "entries",
+  GET  /api/answers?bank=    entries + version (bank other: answers_other.json; bank long: {"long": [...], "words"}, read-only); POST /api/answers {"bank", "entries",
                              "version"}. answers.json entries carry nuworks_only; leave_blank is kept while empty
   GET  /api/settings         settings (no secrets; logins: {sites, new}, never a password); POST /api/settings {"resume_label", "week_start", "max_per_week", "accounts_email",
                              "assist_effort", "assist_read_paths", "assist_writeups", "assist_slots" (1-3), "assist_discord" (bool), "transcript_path",

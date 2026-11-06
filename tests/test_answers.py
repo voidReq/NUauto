@@ -229,4 +229,33 @@ assert answers.json_ui_allowed()
 json.dump({"pid": os.getppid() + 100000}, open(config.GUI_LOCK_PATH, "w"))
 assert not answers.json_ui_allowed()
 
+# long answers (2026-11-06): kept when 50+ words, not a saved answer, not kept twice; past finds the closest questions
+_long_dir = tempfile.mkdtemp()
+_real_local = config.LOCAL_DIR
+config.LOCAL_DIR, config.LONG_ANSWERS_PATH = _long_dir, os.path.join(_long_dir, "long_answers.json")
+config.OTHER_ANSWERS_PATH = os.path.join(_long_dir, "answers_other.json")
+try:
+    essay = " ".join(f"w{i}" for i in range(60))
+    saved_essay = " ".join(f"s{i}" for i in range(55))
+    answers.save([answers.new_entry("why us", saved_essay, "text")])
+    about = {"company": "Acme", "title": "Firmware Intern", "site": "acme.example", "tab": "other"}
+    assert answers.load_long() == {}
+    n = answers.keep_long({"Describe 2 accomplishments*": essay, "Short*": "a few words", "Why us?": saved_essay + "  ",
+                           "Why Acme?": "  " + essay.replace(" ", "\n ")}, about)
+    data = answers.load_long()
+    assert n == 2 and len(data) == 2, data                              # short and saved ones left out
+    e = data[answers.long_key("Describe 2 accomplishments*", essay)]
+    assert e["text"] == essay and e["words"] == 60 and e["company"] == "Acme" and e["tab"] == "other" and e["date"]
+    assert oct(os.stat(config.LONG_ANSWERS_PATH).st_mode & 0o777) == "0o600"
+    assert answers.keep_long({"  DESCRIBE 2 accomplishments* ": essay}, about) == 0  # the same question and text: once
+    assert answers.keep_long({"Describe 3 accomplishments": essay + " more"}, {"company": "Beacon"}) == 1
+    found = answers.past("List 3 accomplishments you are proud of")
+    assert [x["question"] for x in found][0] == "Describe 3 accomplishments" and len(found) == 2, found
+    assert answers.past("Your phone number") == [] and answers.past("x", data={}) == []
+    with open(config.LONG_ANSWERS_PATH, "w") as f:
+        f.write("{bad json")
+    assert answers.load_long() == {}                                    # an unreadable file: none (never a crash)
+finally:
+    config.LOCAL_DIR = _real_local
+
 print("All answer-bank checks passed.")

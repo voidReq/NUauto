@@ -547,12 +547,28 @@ def mark_on_laptop(ws, row_number, url, why=""):
     of its Notes (assist.LAPTOP_MARK), so the homelab never starts it again and you see it is yours, on the laptop.
     Nothing else changes; once there, the mark is kept."""
     from nuauto import assist
+    _mark_end(ws, row_number, url, assist.LAPTOP_MARK, why)
+
+
+def mark_free_response(ws, row_number, url):
+    """A row whose application asks for answers in your own words (you ended its assistant with "End: requires
+    free-response", 2026-11-06, your request): a mark at the end of its Notes (assist.FREE_MARK); the app shows it as a
+    "free-response" tag, so you know which jobs need more effort and can start the assistant on them again later.
+    Nothing else changes (the row stays where it was); once there, the mark is kept."""
+    from nuauto import assist
+    _mark_end(ws, row_number, url, assist.FREE_MARK, "", site_owed=True)
+
+
+def _mark_end(ws, row_number, url, mark, why, site_owed=False):
+    """mark (with why) at the end of an Approved / Needs Human row's Notes (site_owed: also an Applied row still owing
+    its company site, whose Notes keep starting with SITE_MARK). Once there, never twice."""
     current = _row_for(ws, row_number, url)
-    if current.status not in ("Approved", "Needs Human"):
+    owed = site_owed and current.status == "Applied" and current.notes.startswith(SITE_MARK)
+    if current.status not in ("Approved", "Needs Human") and not owed:
         raise SheetError(f"Row {row_number} is {current.status or 'empty'}: nothing to mark.")
-    if assist.LAPTOP_MARK in current.notes:
+    if mark in current.notes:
         return
-    text = f"{current.notes} | {assist.LAPTOP_MARK}" + (f" ({why})" if why else "")
+    text = f"{current.notes} | {mark}" + (f" ({why})" if why else "")
     ws.update(range_name=f"E{row_number}", values=[[text.strip(" |")]], value_input_option="RAW")
 
 

@@ -544,7 +544,7 @@ try:
         typed_laptop.append((sess["slot"], text_, os.path.exists(laptop_file)))
 
     def reset(attention, approval_on=False, **state_over):
-        for name in (assist.LAPTOP_FILE, assist.DROP_FILE):
+        for name in (assist.LAPTOP_FILE, assist.DROP_FILE, assist.FREE_FILE):
             if os.path.exists(os.path.join(run, name)):
                 os.remove(os.path.join(run, name))
         assist.write_private(os.path.join(run, "state.json"), {**state, "tab": "other", "row_url": ROW_URL, **state_over})
@@ -726,11 +726,73 @@ try:
         # an unpaired device: nothing
         reset("waiting")
         assert tap({"do": "drop", "why": "closed"}, cookie=None)[0] == 403 and ws_now[0].calls == [] and typed_laptop == []
+
+        # End: requires free-response (2026-11-06): the free-response mark at the end of the row's Notes (the real
+        # sheet.mark_free_response), free_response.json written (no "Did it go through?" after), then /exit; the row
+        # keeps its status; the screen goes back to the list
+        free_file = os.path.join(run, assist.FREE_FILE)
+        FREE = assist.FREE_MARK
+        reset("waiting")
+        ws_now[0] = fresh_sheet()
+        r = tap({"do": "free"})
+        assert r[0] == 200 and J(r)["closing"] is True and "tagged free-response in your sheet" in J(r)["message"], r[2]
+        assert typed_laptop == [(1, "/exit", False)] and ws_now[0].calls == ["E7"] and opened == [("other", False)]
+        assert ws_now[0].values[6][4] == f"match 90% | {FREE}" and ws_now[0].values[6][3] == "Approved", ws_now[0].values[6]
+        assert oct(os.stat(free_file).st_mode & 0o777) == "0o600" and assist.read_json(free_file)["by"] == "Phone"
+        assert "requires free-response (by Phone)" in open(os.path.join(run, "actions.log")).read()
+        r = tap({"do": "free"})    # again: still marked once
+        assert ws_now[0].calls == ["E7"] and ws_now[0].values[6][4].count(FREE) == 1
+        # a Needs Human row (NUworks tab), and an Applied row still owing its company site: marked, status kept
+        for status, notes in (("Needs Human", "External application: acme.example -> https://acme.example/j"),
+                              ("Applied", sheet.SITE_MARK + " (the posting asks for it)")):
+            reset("waiting", tab="jobs")
+            ws_now[0] = fresh_sheet(status=status, notes=notes)
+            assert "tagged free-response" in J(tap({"do": "free"}))["message"], status
+            assert ws_now[0].values[6][4] == f"{notes} | {FREE}" and ws_now[0].values[6][3] == status and opened[0] == ("jobs", False), (status, ws_now[0].values[6], opened)
+        # an Applied row owing nothing, a changed row, a sheet that can't be read: ended, and you are told
+        for sheet_now, says in ((fresh_sheet(status="Applied"), "could not be tagged free-response (SheetError)"),
+                                (fresh_sheet(url="https://jobs.example.org/another"), "its sheet row has changed"),
+                                (RuntimeError("Google is down"), "could not be tagged free-response (RuntimeError)")):
+            reset("waiting")
+            ws_now[0] = sheet_now
+            r = tap({"do": "free"})
+            assert J(r)["closing"] is True and says in J(r)["message"] and "Google" not in r[2].decode(), (says, J(r))
+            assert typed_laptop == [(1, "/exit", False)] and os.path.exists(free_file), says
+        # not while Claude Code asks its own question, nor at the finish question (its own No), nor once answered
+        for kind in ("approve", "finish", "answered"):
+            reset(kind)
+            ws_now[0] = fresh_sheet()
+            assert J(tap({"do": "free"}))["message"] == "Nothing to do." and typed_laptop == [] and not os.path.exists(free_file), kind
+            assert ws_now[0].calls == [], kind
+        # a Submit you approved in this run: it needs its answer first
+        try:
+            with open(log_path, "a") as f:
+                f.write("APPROVED on the review page by Phone\n")
+            reset("waiting")
+            r = tap({"do": "free"})
+            assert "you approved a Submit" in J(r)["message"] and typed_laptop == [] and ws_now[0].calls == []
+            assert not os.path.exists(free_file)
+        finally:
+            with open(log_path, "w") as f:
+                f.write(before)
+        # No: it wants free-response answers (the finish question): tagged, then n typed (the run records n, never Applied)
+        reset("finish")
+        ws_now[0] = fresh_sheet()
+        r = tap({"do": "finish", "answer": "free"})
+        assert r[0] == 200 and J(r)["closing"] is True and "tagged free-response" in J(r)["message"], r[2]
+        assert typed_laptop == [(1, "n", False)] and ws_now[0].values[6][4].count(FREE) == 1
+        assert assist.read_json(os.path.join(run, assist.ATTENTION))["answer"] == "n"
+        reset("waiting")
+        assert J(tap({"do": "finish", "answer": "free"}))["message"] == "Nothing to do." and typed_laptop == []
+        # an unpaired device: nothing
+        reset("waiting")
+        ws_now[0] = fresh_sheet()
+        assert tap({"do": "free"}, cookie=None)[0] == 403 and ws_now[0].calls == [] and typed_laptop == []
     finally:
         sheet.open_other, sheet.open_worksheet = real_sheet
         review.type_into = real_type_into
         review.end_session = real_end
-        for name in (laptop_file, os.path.join(run, assist.DROP_FILE)):
+        for name in (laptop_file, os.path.join(run, assist.DROP_FILE), os.path.join(run, assist.FREE_FILE)):
             if os.path.exists(name):
                 os.remove(name)
         assist.write_private(os.path.join(run, "state.json"), state)
@@ -865,11 +927,18 @@ try:
             page.reload()
             page.wait_for_selector("[data-testid=as-yes]")
             assert page.locator("[data-testid=as-no]").count() == 1 and page.locator("[data-testid=as-no-laptop]").count() == 1
-            assert page.locator("[data-testid=as-laptop]").count() == 0 and page.locator("[data-testid=as-send]").count() == 0
+            assert page.locator("[data-testid=as-no-free]").count() == 1
+            assert page.locator("[data-testid=as-end]").count() == 0 and page.locator("[data-testid=as-send]").count() == 0
             assist.write_private(os.path.join(run, assist.ATTENTION), {"kind": "waiting", "since": 1, "time": 1, "said": ""})
             page.reload()
-            page.wait_for_selector("[data-testid=as-exit]")
-            assert page.locator("[data-testid=as-laptop]").count() == 1 and page.locator("[data-testid=as-interrupt]").count() == 1
+            # one End menu: End session, End: requires free-response, End: do it on the laptop, End: drop it…
+            page.wait_for_selector("[data-testid=as-end]")
+            assert page.locator("[data-testid=as-interrupt]").count() == 1 and page.locator("[data-testid=as-end-exit]").count() == 0
+            page.click("[data-testid=as-end]")
+            assert [t.strip() for t in page.locator(".more .menu [role=menuitem]").all_inner_texts()] == [
+                "End session", "End: requires free-response", "End: do it on the laptop", "End: drop it…"]
+            page.keyboard.press("Escape")
+            assert page.locator(".more .menu").count() == 0
             # a slot nobody runs in (or a session that just ended): back to Apply's Assistants tab, with a toast
             page.goto(f"{ORIGIN}/#/assistant/3")
             page.wait_for_selector("[data-testid=tab-assistants][aria-selected=true]")

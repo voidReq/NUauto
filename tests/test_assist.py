@@ -893,6 +893,29 @@ verdict, why = assist.decide(st, B + "browser_click", {"ref": "e90"})           
 assert verdict == "ask" and "NOT CONFIRMED BY YOU" in why and "Graduation date* = 'May 2029' (resume: B.S." in why, why
 assert "Why Acme?* = 'essay draft: I wrote drone firmware...'" in why and "First Name* = 'Jamie'" in why
 assert "NOT CONFIRMED" in assist.decide(st, B + "browser_press_key", {"key": "Enter"})[1]  # Enter asks the same way
+# long answers (2026-11-06): the guard keeps a 50+ word value it typed in full (typed keeps 300 characters), never a
+# cover letter or a picked option; the session's end adds them to the long answers; `past` shows them to the agent
+config.LONG_ANSWERS_PATH = os.path.join(tmp, "long_answers.json")
+long_text = " ".join(["accomplished"] * 70)
+st_long = {**fresh(), "typed": {}}
+assist.record_typed(st_long, B + "browser_type", {"ref": "e12", "text": long_text})
+assist.record_typed(st_long, B + "browser_type", {"ref": "e13", "text": "Boston"})
+assist.record_typed(st_long, B + "browser_type", {"ref": "e999", "element": "Cover letter", "text": long_text})
+assist.record_typed(st_long, B + "browser_select_option", {"ref": "e20", "values": [long_text]})
+assist.record_typed(st_long, B + "browser_type", {"ref": "e12", "text": long_text, "submit": True})  # a search: no
+assert st_long["long"] == {"First Name*": long_text} and len(st_long["typed"]["First Name*"]) == assist.MAX_ANSWER, st_long
+d_long = tempfile.mkdtemp()
+with open(os.path.join(d_long, "state.json"), "w") as f:
+    json.dump({**st_long, "company": "Acme", "job_title": "T", "job_url": "https://acme.example/j/1", "tab": "jobs"}, f)
+lines_long = []
+assist.keep_long_answers(d_long, type("L", (), {"write": lambda self, m: lines_long.append(m)})())
+kept = list(answers.load_long().values())
+assert [(k["question"], k["company"], k["site"], k["tab"]) for k in kept] == [("First Name*", "Acme", "acme.example", "jobs")], kept
+assert lines_long == ["Kept 1 long answer for reference (Answers > Long answers)."], lines_long
+p = bank("past", "Your first name")
+assert p["status"] == "past" and p["answers"][0]["text"] == long_text and "Material for your draft" in p["next"], p
+assert bank("past", "Phone")["answers"] == [] and "error" in bank("past")
+assert assist.check_bash(fresh(), " ".join(ANSWER_CMD) + ' past "Describe two accomplishments"') is None
 # the end list: the user's answers settle every guess (save: reused next time; once: always-ask; confirm: an essay)
 assert bank("save", "Graduation date*", "May 2029")["saved"]
 assert bank("save", "Relocate?*", "No", *YN)["saved"]                                     # the user changed this one

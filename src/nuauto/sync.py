@@ -187,7 +187,8 @@ ACCOUNTS = "accounts.json"                       # in local/; {site: login} (onl
 SETTINGS = "local_config.json"                   # in local/; merged per setting
 PROFILE = "profile.json"                         # in local/; the NUworks resume label (Apply runs on the homelab too)
 RATINGS = "ratings.json"                         # in data/; merged per job
-FILES = (SETTINGS, PROFILE, RATINGS)             # the {key: value} files merge_dict merges
+LONG = "long_answers.json"                       # in local/; the long answers kept for reference, merged per answer
+FILES = (SETTINGS, PROFILE, RATINGS, LONG)       # the {key: value} files merge_dict merges
 MACHINE_KEYS = {"tools"}                         # settings of the laptop alone (its tool paths): the laptop's always win
 SHARED_FILES = set()                             # which of FILES the last share() merged (push copies the others)
 BASE = "share_base.json"                         # in local/ (laptop): the banks and FILES as both machines last agreed
@@ -482,7 +483,9 @@ def share():
     for n in FILES:  # only what the homelab has (a missing or unreadable copy there: push() copies this one)
         if isinstance(theirs.get(n), dict):
             # no merge yet: the laptop's copy as it is (what push() used to copy over), never an old copy's leftovers
-            result, c = merge_into_file(n, base[n] if n in base else theirs[n], theirs[n], laptop=True)
+            # (the long answers: both machines' from the start, each machine adds its own sessions')
+            first = {} if n == LONG else theirs[n]
+            result, c = merge_into_file(n, base[n] if n in base else first, theirs[n], laptop=True)
             if result is not None:
                 files[n] = result
                 changed_both += [f"{k} ({n})" for k in c]

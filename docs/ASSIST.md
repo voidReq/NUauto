@@ -90,7 +90,7 @@ times out (60 s; the homelab waits longer for my tap) blocks (hooks' "onFailure"
 GUESS, THEN ASK ONCE (2026-10-11, my call: "fill the questions with their best guess and then navigate to the end,
 asking all their questions at once")
 - Answer bank commands (the agent's only Bash; assist.BASH_COMMANDS): answer, guess, guesses, save, once, confirm,
-  alias, blank, letter, email, wait, link-login. Answers are one line (300 characters); with options, exactly one of
+  alias, blank, letter, email, wait, link-login, past. Answers are one line (300 characters); with options, exactly one of
   them. Each command holds local/answers.lock (no answer lost between sessions).
 - A field the bank can't answer gets the agent's best guess (from my resume, notes, writeups, the posting, my saved
   answers), recorded with `guess` and a reason (200 characters). Never over a saved answer, one I gave this run, or a
@@ -108,6 +108,12 @@ asking all their questions at once")
   self-identify questions work the same way and are never declined unless that is the saved answer (2026-10-09).
 - Longer answers (essays, "why this company"): typed into the field as a draft, recorded as `guess --essay`; I
   approve or edit the full text in the end list.
+- Long answers kept (2026-11-06, my request: "I've answered '2 accomplishments' several times"): the guard keeps in full
+  every value of 50+ words the agent types (assist.record_typed: not a cover letter, not a picked option); the session's
+  end adds them to local/long_answers.json (assist.keep_long_answers -> answers.keep_long: not one that is a saved
+  answer, not twice), with company, title, site, date. Answers > Long answers lists them. Before drafting, the agent runs
+  `past "<label>"` (assist.past_answers -> answers.past: the 5 whose question shares the most words, numbers count) and
+  writes this application's answer from them; never filled in by code, the draft is still a guess I approve.
 - Other jobs rows: answers.json minus its NUworks-only entries, after local/answers_other.json; everything saved goes to
   answers_other.json (assist.Bank).
 
@@ -185,3 +191,7 @@ THE END, AND THE HOMELAB'S APPROVALS
 - A site that refuses the homelab's browser (a fake sign-in page): "End: do it on the laptop" marks the row's Notes
   (assist.LAPTOP_MARK, sheet.mark_on_laptop); the homelab skips it and the GUI shows "do it on the laptop" (2026-10-11;
   no disguising the browser).
+- An application that wants answers in my own words (2026-11-06, my request): "End: requires free-response" on the page
+  (one End menu with the others), "No: it wants free-response answers" at its end question, or f at the terminal's
+  "did you press Submit?": the row's Notes get assist.FREE_MARK at the end (sheet.mark_free_response), the GUI shows a
+  "free-response" tag, the row stays as it was for a later session. docs/REMOTE.md.

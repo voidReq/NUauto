@@ -121,6 +121,12 @@ THE QUEUE (remote.py; nuauto-assist.timer every 10 minutes runs `nuauto assist a
   row's Notes get "DO ON THE LAPTOP..." (assist.LAPTOP_MARK, at the end): the homelab never starts it again, and the
   laptop's GUI shows "do it on the laptop" on it (start the assistant there, or apply yourself). NUauto never disguises
   its browser to get past such a site.
+- (2026-11-06, my request) An application that wants answers in my own words: "End: requires free-response" (or "No:
+  it wants free-response answers" at "Did it go through?"; f in a terminal): no question after, the row's Notes get
+  "FREE RESPONSE..." (assist.FREE_MARK, at the end; sheet.mark_free_response, also on an Applied row still owing its
+  site), and Apply shows a "free-response" tag on it. The row stays as it was: the queue never restarts a row that had a
+  session, and I start it again when I have the time (review.mark_free; free_response.json, assist.FREE_FILE). Not
+  after a Submit approved in that run (that one needs its answer).
 - A session where you approved a Submit but nobody answered "Did it go through?" (24 h, assist.FINISH_WAIT, or Ctrl+C)
   is never started again, not even by Start now: check the site and mark the row, or `nuauto assist start other 12 --again`.
 - The record file can't be read: the queue starts nothing until you fix or remove it (it could start a row twice).
@@ -170,13 +176,15 @@ AN ASSISTANT'S SCREEN (#/assistant/<slot> in the homelab's app; review.view / ac
                     something was typed meanwhile doesn't count (the agent is told to ask again).
   Reply             typed into its terminal (tmux send-keys; a newline = Ctrl+J, so several lines go as one message), as
                     if you typed it there. Only into the pane the session started in, and never when that pane shows a
-                    shell (the assistant ended). End session (/exit) and End: do it on the laptop.
+                    shell (the assistant ended). One End menu (2026-11-06, my request: "one dropdown"): End session
+                    (/exit), End: requires free-response (above), End: do it on the laptop, End: drop it.
                     End: drop it (a posting that has closed, a duplicate, a bad location; 2026-11-04, my request): the
                     row becomes Failed through sheet.drop with the reason (like Drop in Apply), dropped.json
                     (assist.DROP_FILE) keeps the run from asking "Did it go through?", then /exit; back to the list.
                     Nothing ends if the row can't be dropped, nor after a Submit approved in that run
                     (review.drop_and_end).
-  Ended             Did it go through? Yes / No / No: do it on the laptop (typed into the launcher's question). One tap:
+  Ended             Did it go through? Yes / No / No: it wants free-response answers / No: do it on the laptop (typed into
+                    the launcher's question; the free-response one tags the row first, then types n). One tap:
                     back to Apply > Assistants, and the screen says your answer until the run closes. A session you
                     answered is no longer listed or counted there (gui.assistants), though it holds its slot a few
                     seconds more while it writes the sheet and cleans up (2026-10-23, my request).
@@ -210,6 +218,9 @@ WHAT LIVES WHERE (with NUauto on the homelab; which secret files each machine ha
        missing file or a copy saved from an old read wipes nothing): delete answers in the GUI's Answers screen, which
        records the deletion (local/answers_gone.json) for both machines; one deleted by editing the file comes back
        from the other copy. A file that can't be read (bad JSON, e.g. while you edit it) is left alone.
+  long_answers.json   both machines (2026-11-06): each machine's assistant sessions add their long answers
+       (answers.keep_long); merged both ways with the settings (sync.FILES, per answer). The first merge is a union
+       (sync.LONG), so neither machine's answers are lost.
   local_config.json, profile.json, data/ratings.json   both machines (2026-10-14: either page can change them), merged
        the same way per setting / per job (sync.merge_dict): the side that changed it wins; both: the laptop's (it
        says which); a key one side removed is removed. The laptop's tool paths ("tools") are always the laptop's. An

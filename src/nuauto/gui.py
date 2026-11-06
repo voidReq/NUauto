@@ -546,6 +546,7 @@ def row_view(r, **extra):
     from nuauto import assist
     return {"row": r.number, "company": r.company, "title": r.title, "url": r.url, "status": r.status,
             "notes": r.notes, "date": r.date, "on_laptop": assist.LAPTOP_MARK in (r.notes or ""),
+            "free_response": assist.FREE_MARK in (r.notes or ""),
             "reapply": sheet.reapplying(r), **extra}
 
 
@@ -1891,7 +1892,13 @@ def bank_path(bank):
 
 
 def answers_get(bank="nuworks"):
-    """One bank's entries. answers.json entries carry nuworks_only as it applies (the default list, or the entry's own)."""
+    """One bank's entries. answers.json entries carry nuworks_only as it applies (the default list, or the entry's own).
+    bank "long": the long answers kept for reference (answers.keep_long), newest first; read-only here."""
+    if bank == "long":
+        kept = sorted(answers.load_long().values(), key=lambda e: e.get("date", ""), reverse=True)
+        if VIEW:  # what you wrote is personal: the list shows, the text doesn't
+            kept = [{**e, "text": "(hidden in view-only mode)"} for e in kept]
+        return {"bank": "long", "long": kept, "words": answers.LONG_WORDS}
     path = bank_path(bank)
     entries = answers.load(path)
     if bank != "other":
@@ -2526,7 +2533,7 @@ def assistant_post(body):
     if not s or ("key" in body and body["key"] != review.key(s)):  # (key: the page's session; its slot may hold the next)
         raise Refused("That session has ended.")
     r = review.act(s, body, device_name())
-    if body.get("do") == "drop" and r.get("closing"):  # End: drop it changed its row: the lists read it again
+    if body.get("do") in ("drop", "free") and r.get("closing"):  # End: drop it / free-response changed its row: read it again
         _queue["at"] = 0
         other_changed() if s["state"].get("tab") == "other" else APP.refresh_rows(force=True)
     return r
