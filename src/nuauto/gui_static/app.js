@@ -1619,9 +1619,10 @@ screens.apply = async (view) => {
 function closeMenus() { document.querySelectorAll(".menu").forEach((m) => { m.previousSibling.setAttribute("aria-expanded", "false"); m.remove(); }); }
 document.addEventListener("click", (e) => { if (!e.target.closest(".more")) closeMenus(); });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && document.querySelector(".menu")) closeMenus(); });
-function menuButton(label, testid, items) {
-  const wrap = el("span", { class: "more" });
-  const btn = el("button", { class: "btn small ghost", text: "⋯", title: "More", "aria-label": label, "aria-haspopup": "menu",
+// look: the button's own text and class (default: a small "⋯"); up: the menu opens above it, from its left edge
+function menuButton(label, testid, items, look = {}) {
+  const wrap = el("span", { class: look.up ? "more up" : "more" });
+  const btn = el("button", { class: look.cls || "btn small ghost", text: look.text || "⋯", title: look.text ? null : "More", "aria-label": label, "aria-haspopup": "menu",
     "aria-expanded": "false", testid, onclick: () => {
       const was = !!wrap.querySelector(".menu");
       closeMenus();
@@ -1762,6 +1763,14 @@ function assistantsPane({ d, here, there }) {
 // of offering another; with every slot in use, Start waits. On the homelab's page (and the laptop linked to it): the
 // queue's place for the row; its Apply runs where Run on says (the homelab's page: there).
 function assistantStart(d, r, tab, testid, args) {
+  // you ended an assistant here with "End: requires free-response": the tag, so you see which jobs need more effort
+  const start = assistantStartLaptop(d, r, tab, testid, args);
+  return r.free_response ? el("span", { class: "row" }, el("span", { class: "chip accent", testid: `${testid}-free`,
+    title: "The application wants answers in your own words (you ended its assistant with End: requires free-response)",
+    text: "free-response" }), start) : start;
+}
+
+function assistantStartLaptop(d, r, tab, testid, args) {
   // the homelab's browser was refused there (on the homelab's own page the queue's chip says so)
   if (r.on_laptop && !onHomelab() && !(d.homelab || []).find((s) => s.tab === tab && s.row === r.row)) {
     return el("span", { class: "row" }, el("span", { class: "chip warn", testid: `${testid}-laptop`, title: "The site showed the homelab's browser a sign-in page with no way in. The homelab won't start it again.",
@@ -2000,8 +2009,23 @@ screens.answers = async (view) => {
   let data, rows = [], filter = "", bank = sessionStorage.getItem("answersBank") || "nuworks";  // or "other": the Other jobs tab's
   async function reload() {
     try { data = await api.get(`/api/answers?bank=${bank}`); } catch (e) { fill(view, el("div", { class: "note fail", text: e.message })); return; }
-    rows = data.entries.map((e) => ({ ...e, aliases: [...(e.aliases || [])] }));
+    rows = (data.entries || []).map((e) => ({ ...e, aliases: [...(e.aliases || [])] }));
     draw();
+  }
+  // the long answers the assistant typed (50+ words, not a saved answer, not a cover letter): kept for reference, and
+  // shown to the agent as material when it drafts a like answer (its past command); read-only
+  function drawLong(seg) {
+    const shown = data.long.filter((e) => !filter || [e.question, e.text, e.company, e.title].join(" ").toLowerCase().includes(filter));
+    fill(view, el("div", { class: "card" },
+      el("div", { class: "row between" }, el("h2", { text: "Long answers" }), seg),
+      el("p", { class: "small muted", text: `Every answer of ${data.words} words or more the assistant typed into an application (yours, or its draft you approved), unless it is a saved answer or a cover letter. Never filled in by themselves: when the assistant drafts a like answer, it reads these first, and you still approve its draft. Kept in local/long_answers.json on both machines.` }),
+      el("input", { type: "search", placeholder: "Search (Ctrl+F)", value: filter, "aria-label": "Search answers", "data-find": true, testid: "answers-search",
+        oninput: (e) => { filter = e.target.value.toLowerCase(); draw(); $("input[aria-label='Search answers']").focus(); } }),
+      shown.length ? el("ul", { class: "list", testid: "long-answers" }, ...shown.map((e, i) => el("li", { testid: `long-${i}` },
+        el("details", {}, el("summary", {}, el("b", { text: e.question }), el("span", { class: "small muted",
+          text: ` · ${[e.company, e.title, e.date, `${e.words} words`].filter(Boolean).join(" · ")}` })),
+          el("pre", { class: "log", text: e.text })))))
+        : el("p", { class: "empty", text: data.long.length ? "None match." : "None yet: they are kept when an assistant session ends." })));
   }
   // Other wordings, one per line (a wording may hold commas: "…on CPT, OPT, or STEM OPT…")
   function wordings(r) {
@@ -2021,6 +2045,10 @@ screens.answers = async (view) => {
   }
   function setBank(b) { bank = b; sessionStorage.setItem("answersBank", b); filter = ""; reload(); }
   function draw() {
+    const seg = el("div", { class: "seg", role: "group", "aria-label": "Which answers" },
+      ...[["nuworks", "NUworks"], ["other", "Other jobs"], ["long", "Long answers"]].map(([k, t]) =>
+        el("button", { "aria-pressed": String(bank === k), testid: `bank-${k}`, text: t, onclick: () => setBank(k) })));
+    if (bank === "long") return drawLong(seg);
     const shown = rows.map((r, i) => [r, i]).filter(([r]) => !filter || [r.question, r.answer, ...r.aliases].join(" ").toLowerCase().includes(filter));
     const tbody = el("tbody", {}, ...shown.map(([r, i]) => el("tr", { testid: `answer-row-${i}` },
       el("td", {}, el("input", { type: "text", value: r.question, "aria-label": "Question", oninput: (e) => { r.question = e.target.value; } })),
@@ -2036,9 +2064,6 @@ screens.answers = async (view) => {
         title: r.aliases.join("\n") || null, text: r.aliases.length ? plural(r.aliases.length, "other wording") : "Add a wording", onclick: () => wordings(r) })),
       el("td", { class: "narrow" }, el("button", { class: "btn small ghost", text: "Remove", "aria-label": `Remove ${r.question}`,
         onclick: () => { rows.splice(i, 1); draw(); } })))));
-    const seg = el("div", { class: "seg", role: "group", "aria-label": "Which answers" },
-      ...[["nuworks", "NUworks"], ["other", "Other jobs"]].map(([k, t]) =>
-        el("button", { "aria-pressed": String(bank === k), testid: `bank-${k}`, text: t, onclick: () => setBank(k) })));
     fill(view, el("div", { class: "card" },
       el("div", { class: "row between" }, el("h2", { text: bank === "other" ? "Answers for Other jobs" : "Your answers" }), seg),
       el("p", { class: "small muted", text: bank === "other" ?
@@ -2169,6 +2194,7 @@ screens.assistant = async (view) => {
         el("p", { class: "small muted", text: "Yes marks the row Applied (dated today)." }),
         el("div", { class: "row" }, btn("Yes, it went through", "btn primary", { do: "finish", answer: "y" }, "Saving…", "as-yes"),
           btn("No", "btn", { do: "finish", answer: "n" }, "Saving…", "as-no"),
+          btn("No: it wants free-response answers", "btn", { do: "finish", answer: "free" }, "Saving…", "as-no-free"),
           btn("No: do it on the laptop", "btn", { do: "finish", answer: "laptop" }, "Saving…", "as-no-laptop"))));
     }
     if (chat) {
@@ -2178,10 +2204,12 @@ screens.assistant = async (view) => {
         el("label", { class: "field" }, "Reply", el("span", { class: "muted small", text: "Typed into its terminal, as if you typed it there. Several lines go as one message." }), reply),
         el("div", { class: "row" }, btn("Send", "btn primary", () => ({ do: "reply", text: reply.value }), "Sending…", "as-send")),
         el("hr", { class: "sep" }),
-        el("p", { class: "small muted", text: "Done (it submitted, or you stop here)? End the session; then it asks whether it went through. A site that refuses the homelab's browser (a sign-in page with no way in): End: do it on the laptop. The row is marked in your sheet, and the homelab never starts it again. A posting that has closed (or one you won't apply to): End: drop it." }),
-        el("div", { class: "row" }, btn("End session", "btn", { do: "exit" }, "Ending…", "as-exit"),
-          btn("End: do it on the laptop", "btn", { do: "laptop" }, "Ending…", "as-laptop"),
-          d.row ? el("button", { class: "btn danger", text: "End: drop it…", testid: "as-drop", onclick: dropIt }) : null)));
+        el("p", { class: "small muted", text: "Done (it submitted, or you stop here)? End session; then it asks whether it went through. An application that wants answers in your own words: End: requires free-response (the row is tagged free-response and stays, for the assistant later). A site that refuses the homelab's browser (a sign-in page with no way in): End: do it on the laptop (the homelab never starts it again). A posting that has closed (or one you won't apply to): End: drop it." }),
+        el("div", { class: "row" }, menuButton("End the session", "as-end", [
+          ["End session", "exit", () => send({ do: "exit" })],
+          ["End: requires free-response", "free", () => send({ do: "free" }), d.row ? null : "This session doesn't know its sheet row"],
+          ["End: do it on the laptop", "laptop", () => send({ do: "laptop" })],
+          ...(d.row ? [["End: drop it…", "drop", dropIt, null, true]] : [])], { text: "End ▾", cls: "btn", up: true }))));
     }
     fill(view, ...parts);
     term.textContent = d.terminal || "(not readable)";

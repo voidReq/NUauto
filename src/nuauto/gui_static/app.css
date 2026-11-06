@@ -214,11 +214,13 @@ details.how p { margin-top: 6px; }
   .list > li.job-row > .what { padding-right: 40px; }
   .list > li.job-row .tail > .more { position: absolute; top: 6px; right: 0; }
 }
-.more > .btn { font-size: 16px; line-height: 1; padding: 4px 9px; color: var(--muted); }
+.more > .btn.ghost { font-size: 16px; line-height: 1; padding: 4px 9px; color: var(--muted); }
 .menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 25; min-width: 230px; background: var(--surface);
   border: 1px solid var(--border); border-radius: var(--radius-sm); box-shadow: var(--shadow); padding: 4px; display: flex; flex-direction: column; }
 .menu button { font: inherit; text-align: left; background: none; border: 0; border-radius: 6px; padding: 7px 10px; color: var(--text); cursor: pointer; }
 .menu button:hover:not(:disabled), .menu button:focus-visible { background: var(--surface-2); outline: none; }
+/* a menu at the start of its row near the page's end (the assistant's End menu): opens up, from its left edge */
+.more.up .menu { left: 0; right: auto; top: auto; bottom: calc(100% + 4px); }
 .menu button.danger { color: var(--fail); }
 .menu button:disabled { color: var(--faint); cursor: not-allowed; }
 

@@ -99,7 +99,11 @@ ALSO YOURS (with care)
 - Longer answers typed into a box (essays, "why this company", a cover letter box, "describe a project"): draft one,
   type it into its field (within the field's length limit), and record it:
     ANSWER guess "<label>" "essay draft: <first few words>..." --essay --why "<the files and pages you drew on>"
-  The user approves or edits it in the end list (show the full text there). Material: first the user's
+  The user approves or edits it in the end list (show the full text there). Before drafting, run
+    ANSWER past "<label>"
+  It shows the user's own earlier long answers to questions like it ("2 accomplishments", "a project you are proud
+  of"): write this application's answer from them (fit it to this company, question and length limit) and say which
+  one you drew on. Material after that: the user's
   writeups listed under THIS RUN (their own project and security writeups), then the other notes folders
   (Grep / Read; say which file you drew on), and WebSearch / WebFetch for the company and the role. Write
   only what the resume and notes back up: never invent experience, numbers or results. Never put the

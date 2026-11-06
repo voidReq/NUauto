@@ -87,6 +87,9 @@ WORK_DIR = os.path.join(STATE_DIR, "work")   # batch files exchanged with the Cl
 ANSWERS_PATH = os.path.join(LOCAL_DIR, "answers.json")
 # The Other jobs tab's own answers (nuauto assist other): checked first, then answers.json minus its NUworks-only entries.
 OTHER_ANSWERS_PATH = os.path.join(LOCAL_DIR, "answers_other.json")
+# Long answers (50+ words) the assistant typed into applications, kept for reference (2026-11-06, your request; not an
+# answer bank: never filled in by themselves; the agent's `past` command shows them as material: answers.past).
+LONG_ANSWERS_PATH = os.path.join(LOCAL_DIR, "long_answers.json")
 PROFILE_PATH = os.path.join(LOCAL_DIR, "profile.json")
 # Extra hosts allowed ONLY while apply.py clicks the one-click re-login (see browser.relogin).
 SSO_HOSTS = {"shibboleth-northeastern-csm.symplicity.com", "neuidmsso.neu.edu"}

@@ -169,7 +169,7 @@ STATE ON DISK (STATE_DIR = repo root; app-data folder when packaged; a temp fold
           daily-<stamp>.txt, web.log, review.log, deploy.log.
   local/  personal and secret, mode 700, never committed; both machines unless noted.
           Settings: local_config.json, profile.json, onboard.json, settings.lock. Answers: answers.json,
-          answers_other.json, answers_gone.json, answers.lock, accounts.json, accounts.lock, share_base.json (laptop).
+          answers_other.json, answers_gone.json, answers.lock, long_answers.json (answers.keep_long), accounts.json, accounts.lock, share_base.json (laptop).
           Google: token.json, google_login.txt, client_secret.json, gmail_token.json, gmail_login.txt, discord_webhook.txt.
           NUworks: session_cookies.json, browser_profile/, browser_profile.lock. Assistant: assist_profile/ (+ _2, _3),
           assist_slot<N>.lock, assist_sites/, assist_rows/, resume.pdf, transcript.pdf (the homelab's copies).

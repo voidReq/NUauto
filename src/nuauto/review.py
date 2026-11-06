@@ -11,8 +11,9 @@ Mark-done tunnel (that one forwards 8765). This module holds what the app's home
     anything typed with no answer behind it, the screen when it asked; Approve / Decline with a note: the guard waits up
     to assist.WAIT for you, a later Approve is a pass for that one action, assist.take_grant); its whole last message and
     a reply typed into its terminal (tmux), as if you typed it there; the browser view's link and password (captchas:
-    you solve them there, then reply "done"); "Did it go through?" when it ended; Interrupt (Esc), End session (/exit),
-    End: drop it (the row becomes Failed with a reason, no question after: drop_and_end).
+    you solve them there, then reply "done"); "Did it go through?" when it ended; Interrupt (Esc), and one End menu:
+    End session (/exit), End: requires free-response (the row tagged, no question after: mark_free), End: do it on the
+    laptop, End: drop it (the row becomes Failed with a reason, no question after: drop_and_end).
     Every answer goes in the run's actions.log with the device's name.
   - the queue (remote.py) for the app's Company sites: each row's group and what it waits for; Start now.
 
@@ -318,20 +319,48 @@ def mark_laptop(s, by):
     gets the mark the homelab's queue keeps off (sheet.mark_on_laptop). Returns what to tell you."""
     from nuauto import assist
     from nuauto import sheet
-    st = s["state"]
     assist.write_private(os.path.join(s["run"], assist.LAPTOP_FILE), {"by": by, "at": time.time()})
     assist.log(s["run"], f"REVIEW PAGE: do it on the laptop (by {by})")
+    why = _mark_row(s, lambda ws, n, url: sheet.mark_on_laptop(ws, n, url, "the site showed it a sign-in page with no way in"))
+    if why == "changed":
+        return "Left for the laptop, but its sheet row has changed: mark it yourself."
+    if why:  # the queue still knows (its record): never again by itself
+        return f"Left for the laptop; the sheet could not be marked ({why})."
+    return "Left for the laptop: marked in your sheet, and the homelab won't start it again."
+
+
+def mark_free(s, by):
+    """You chose "End: requires free-response" (2026-11-06, your request): the run won't ask "Did it go through?"
+    (assist.FREE_FILE), and the sheet row gets the free-response tag (sheet.mark_free_response); it stays where it was,
+    for the assistant again later. Returns what to tell you."""
+    from nuauto import assist
+    from nuauto import sheet
+    assist.write_private(os.path.join(s["run"], assist.FREE_FILE), {"by": by, "at": time.time()})
+    assist.log(s["run"], f"REVIEW PAGE: requires free-response (by {by})")
+    why = _mark_row(s, sheet.mark_free_response)
+    if why == "changed":
+        return "Ended, but its sheet row has changed: tag it free-response yourself."
+    if why:
+        return f"Ended; the sheet could not be tagged free-response ({why})."
+    return f"{st_company(s)}: tagged free-response in your sheet. It stays as it was, for the assistant later."
+
+
+def _mark_row(s, mark):
+    """mark(ws, row number, url) on this session's sheet row. None when done; "changed" when the row holds something
+    else now; otherwise the error's kind (no details: they may hold the sheet's own text)."""
+    from nuauto import sheet
+    st = s["state"]
     try:
         ws = sheet.open_other(interactive=False) if st.get("tab") == "other" else sheet.open_worksheet(interactive=False)
         number = s["info"].get("row")
         row = next((r for r in sheet.read_rows(ws) if r.number == number), None)
         if row is None or (st.get("row_url") and row.url != st["row_url"]) or \
                 (not st.get("row_url") and row.company != st.get("company")):
-            return "Left for the laptop, but its sheet row has changed: mark it yourself."
-        sheet.mark_on_laptop(ws, number, row.url, "the site showed it a sign-in page with no way in")
-    except Exception as e:  # the queue still knows (its record): never again by itself
-        return f"Left for the laptop; the sheet could not be marked ({type(e).__name__})."
-    return "Left for the laptop: marked in your sheet, and the homelab won't start it again."
+            return "changed"
+        mark(ws, number, row.url)
+    except Exception as e:
+        return type(e).__name__
+    return None
 
 
 def drop_and_end(s, why, by):
@@ -506,10 +535,24 @@ def act(s, body, by):
             return {"message": message}
         if do == "drop" and word != "prompt" and kind not in ("finish", "answered"):  # End: drop it (closed, a duplicate...)
             return drop_and_end(s, str(body.get("why") or ""), by)
+        if do == "free" and word != "prompt" and kind not in ("finish", "answered"):  # End: requires free-response
+            if assist.approved_submit(s["run"]):
+                return {"message": "Not ended: you approved a Submit in this session. End it and say whether it went through."}
+            message = mark_free(s, by)
+            try:
+                end_session(s)
+            except ValueError:  # its terminal shows a shell: the assistant had ended already
+                pass
+            return {"message": message, "closing": True}
         if do == "finish" and kind == "answered":
             return {"message": "Already answered: its session is closing.", "closing": True}
         if do == "finish" and kind == "finish" and body.get("answer") == "laptop":
             message = mark_laptop(s, by)
+            type_into(s, "n")
+            answered(s, "n")
+            return {"message": message, "closing": True}
+        if do == "finish" and kind == "finish" and body.get("answer") == "free":
+            message = mark_free(s, by)
             type_into(s, "n")
             answered(s, "n")
             return {"message": message, "closing": True}

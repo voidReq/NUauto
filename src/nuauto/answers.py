@@ -125,6 +125,74 @@ def forget(path, questions):
     set_gone({**g, bank: {**(g.get(bank) or {}), **{q: _event(True) for q in questions}}})
 
 
+# ---- long answers (local/long_answers.json; 2026-11-06, your request: "I've answered '2 accomplishments' several times")
+# Every answer of LONG_WORDS words or more the company-site assistant typed into an application (yours, or its draft you
+# approved), unless it is a saved answer or a cover letter: {key: {question, text, words, company, title, site, tab, date}}.
+# For reference only: never filled in by itself. You read them on the Answers screen; the agent's `past "<label>"` shows
+# the closest ones as material for a new draft (which you still approve in its end list). Merged between the laptop and
+# the homelab like the settings (sync.FILES).
+LONG_WORDS = 50
+MAX_LONG = 20000  # characters kept of one answer
+
+
+def long_key(question, text):
+    import hashlib
+    return hashlib.sha256(f"{norm(question)}\n{' '.join(text.split())}".encode()).hexdigest()[:16]
+
+
+def load_long(path=None):
+    """{key: entry}; {} when there are none (or the file can't be read)."""
+    try:
+        with open(path or config.LONG_ANSWERS_PATH) as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def keep_long(items, about, path=None):
+    """Add these {question: text} answers (about: company, title, site, tab) to the long answers, skipping short ones,
+    ones already kept (the same question and text) and ones that are a saved answer of either bank. Returns how many
+    were added. Under the settings lock (sync merges this file under it too)."""
+    path = path or config.LONG_ANSWERS_PATH
+    saved = {" ".join(str(e.get("answer") or "").split()) for p in (config.ANSWERS_PATH, config.OTHER_ANSWERS_PATH)
+             for e in (load(p) if os.path.exists(p) else [])}
+    with config.settings_lock():
+        data = load_long(path)
+        added = 0
+        for question, text in items.items():
+            text = str(text or "").strip()[:MAX_LONG]
+            words = len(text.split())
+            if words < LONG_WORDS or " ".join(text.split()) in saved:
+                continue
+            k = long_key(question, text)
+            if k in data:
+                continue
+            data[k] = {"question": str(question)[:500], "text": text, "words": words, "date": date.today().isoformat(),
+                       **{f: str(about.get(f) or "") for f in ("company", "title", "site", "tab")}}
+            added += 1
+        if added:
+            tmp = path + ".tmp"
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w") as f:
+                json.dump(data, f, indent=2)
+            os.replace(tmp, path)
+    return added
+
+
+def past(label, data=None, n=5):
+    """The kept long answers whose question shares the most words with label (at most n, the newest first among
+    equals): material for a new draft. [] when none share a word."""
+    import re as re_
+    words = lambda t: {w for w in re_.findall(r"[a-z0-9]+", t.lower()) if len(w) > 2 or w.isdigit()}  # noqa: E731 (2 vs 3 accomplishments)
+    want = words(label)
+    data = load_long() if data is None else data
+    scored = [(len(want & words(e.get("question", ""))), e.get("date", ""), e) for e in data.values()]
+    scored = [x for x in scored if x[0]]
+    scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    return [x[2] for x in scored[:n]]
+
+
 def nuworks_only(entry):
     """True if this answers.json entry is for NUworks co-ops only (never used for an Other jobs tab job)."""
     flag = entry.get("nuworks_only")

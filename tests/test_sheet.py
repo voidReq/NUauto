@@ -329,6 +329,28 @@ expect(SheetError, lambda: sheet.mark_on_laptop(ws, 9, "https://x/job"))        
 expect(SheetError, lambda: sheet.mark_on_laptop(ws, 2, "https://x/job"))                 # row 2 holds another job
 assert ws.calls == []
 
+# mark_free_response (End: requires free-response, 2026-11-06): the same, at the END of Notes, once; also on an Applied
+# row still owing its company site (its Notes keep starting with SITE_MARK); the status never changes
+FREE = assist.FREE_MARK
+for status, notes in (("Needs Human", "External application: acme.example -> https://acme.example/j | match 80%"),
+                      ("Approved", "match 90%"), ("Approved", ""),
+                      ("Applied", sheet.SITE_MARK + " (it asks for both). match 70%")):
+    ws = laptop_ws(status, notes)
+    sheet.mark_free_response(ws, 4, "https://x/job")
+    sheet.mark_free_response(ws, 4, "https://x/job")                                       # once: nothing more
+    assert ws.values[3][4] == (f"{notes} | {FREE}" if notes else FREE) and ws.values[3][3] == status, (status, ws.values[3])
+    assert len(ws.calls) == 1, status
+ws = laptop_ws("Needs Human", f"x | {assist.LAPTOP_MARK}")                                  # beside the laptop mark
+sheet.mark_free_response(ws, 4, "https://x/job")
+assert ws.values[3][4] == f"x | {assist.LAPTOP_MARK} | {FREE}"
+for status, notes in (("Applied", "on NUworks"), ("Failed", "x"), ("Proposed", "x"), ("Rejected", sheet.SITE_MARK)):
+    ws = laptop_ws(status, notes)                                                          # refused, nothing written
+    expect(SheetError, lambda: sheet.mark_free_response(ws, 4, "https://x/job"))
+    assert ws.calls == [] and ws.values[3][4] == notes, status
+ws = laptop_ws()
+expect(SheetError, lambda: sheet.mark_free_response(ws, 4, "https://x/another-job"))   # the row now holds another job
+assert ws.calls == []
+
 # Google allows about 60 reads a minute: every client NUauto makes waits and retries when told to slow down (429)
 import os  # noqa: E402
 import tempfile  # noqa: E402

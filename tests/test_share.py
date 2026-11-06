@@ -326,8 +326,14 @@ try:
     write_bank(HOMELAB, "answers.json", [e("city", "Boston"), e("phone", "1")])
     write_accounts(LAPTOP, {"acme.com": login("pw1", "2026-10-01")})
     write_accounts(HOMELAB, {"beta.com": login("pw2", "2026-10-02")})
+    # the long answers (answers.keep_long): each machine's sessions add their own; the first merge keeps both
+    for folder, key in ((LAPTOP, "aaa"), (HOMELAB, "bbb")):
+        with open(os.path.join(folder, sync.LONG), "w") as f:
+            json.dump({key: {"question": key, "text": "words " * 60}}, f)
     ok, printed = run_share()
     assert ok and printed == "" and calls == ["shared-out", "shared-in"]
+    for folder in (LAPTOP, HOMELAB):
+        assert sorted(json.load(open(os.path.join(folder, sync.LONG)))) == ["aaa", "bbb"], folder
     for folder in (LAPTOP, HOMELAB):
         assert sorted(names(read_bank(folder, "answers.json"))) == ["city", "email", "phone"], folder
         assert set(read_accounts(folder)) == {"acme.com", "beta.com"}, folder

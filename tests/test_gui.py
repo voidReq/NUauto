@@ -217,6 +217,12 @@ try:
     edited[0]["answer"] = "Demo S. Student"
     saved = post("/api/answers", {"entries": edited, "version": bank["version"]})
     assert saved["entries"][0]["answer"] == "Demo S. Student"
+    # the long answers (answers.keep_long): read-only, newest first; none yet is an empty list
+    assert get("/api/answers?bank=long") == {"bank": "long", "long": [], "words": 50}
+    with open(os.path.join(STATE, "local", "long_answers.json"), "w") as f:
+        json.dump({"a": {"question": "Describe 2 accomplishments", "text": "x " * 60, "date": "2026-11-01"},
+                   "b": {"question": "Why us?", "text": "y " * 60, "date": "2026-11-05"}}, f)
+    assert [e["question"] for e in get("/api/answers?bank=long")["long"]] == ["Why us?", "Describe 2 accomplishments"]
     post("/api/settings", {"week_start": "next tuesday"}, expect=409)
     # the company-site assistant: account email, effort, the folders it may read; its logins as Bitwarden's import file
     s0 = get("/api/settings")
@@ -478,6 +484,11 @@ try:
     marked = get("/api/other")
     assert [(x["row"], x["on_laptop"]) for x in marked["ready"]] == [(2, True)] and marked["applied"][0]["on_laptop"] is False, marked
     assert marked["ready"][0]["notes"].startswith("match 90% | DO ON THE LAPTOP")
+    assert all(x["free_response"] is False for x in marked["ready"] + marked["applied"])
+    # a row tagged free-response (assist.FREE_MARK at the end of its Notes, End: requires free-response) says so too
+    data["rows"][1][4] = "match 90% | FREE RESPONSE: the application wants answers in your own words"
+    json.dump(data, open(other_file, "w"))
+    assert [(x["row"], x["free_response"], x["on_laptop"]) for x in get("/api/other")["ready"]] == [(2, True, False)]
     data["rows"][1][4] = ""
     json.dump(data, open(other_file, "w"))
     assert get("/api/other")["ready"][0]["on_laptop"] is False
