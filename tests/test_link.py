@@ -271,6 +271,25 @@ try:
         assert "on the homelab" in page.inner_text("#view")
         page.click("[data-testid=as-approve]")                                  # approved from the laptop's window
         page.wait_for_selector("[data-testid=as-approval]:has-text('Approved: it is submitting now')", timeout=30000)
+        # Leaving its screen while its read is on its way (slow through the link): that read never asks again and never
+        # draws over the next screen (2026-11-12: a Submit to approve took over Review)
+        page.evaluate("""() => { const f = window.fetch; window.__asReads = 0;
+          window.fetch = (u, o) => { if (String(u).includes("/api/homelab/assistant/1")) { window.__asReads++;
+            return new Promise((r) => setTimeout(r, 2000)).then(() => f(u, o)); } return f(u, o); }; }""")
+        page.wait_for_function("() => window.__asReads > 0", timeout=15000)
+        page.evaluate("() => { location.hash = '#/review'; }")
+        page.wait_for_selector("[data-testid=mode-approve]")
+        reads = page.evaluate("() => window.__asReads")
+        page.wait_for_timeout(7000)
+        assert page.evaluate("() => window.__asReads") == reads, "the assistant's screen kept asking after you left it"
+        assert page.locator("[data-testid=as-status]").count() == 0 and page.evaluate("location.hash") == "#/review"
+        # an assistant that starts waiting for you: a toast with Open, and the screen you're on stays
+        page.evaluate("() => { NUauto.S.waitingSeen = new Set(); return NUauto.pollState(); }")
+        page.wait_for_selector("[data-testid=toast]:has-text('the assistant:') button")
+        assert page.evaluate("location.hash") == "#/review" and page.locator("[data-testid=as-status]").count() == 0
+        page.locator("[data-testid=toast]:has-text('the assistant:') button").first.click()
+        page.wait_for_selector("[data-testid=as-status]")
+        assert page.evaluate("location.hash").startswith("#/assistant/h")
         # Company site needed: the homelab's queue on each row; with Run on: the homelab, each row's Apply starts it there
         # (the other tab's ready rows too)
         page.goto(base + "/#/apply")

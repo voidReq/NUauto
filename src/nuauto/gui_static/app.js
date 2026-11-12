@@ -220,10 +220,27 @@ async function pollState() {
   S.assistants = S.state.assistants;
   if ((sheetChanged || assistantsChanged) && S.screen && S.screen.refresh) S.screen.refresh();
   if (S.screen && S.screen.update) S.screen.update(S.state);
+  noticeAssistants(S.state.todo);
   const t = S.state.task;  // this machine's run: followed unless a run on the homelab is being followed and still going
   if (t && t.state === "running" && !S.taskTimer && (S.taskWhere !== "homelab" || !(S.task && S.task.state === "running"))) {
     S.taskWhere = "here";
     pollTask();
+  }
+}
+
+// An assistant that starts waiting for you (a Submit to approve, a question, the end question): a toast with Open, on
+// whatever screen you are; the screen you're on stays (2026-11-12, my request). Only one with a screen in this app or the
+// homelab's page (the laptop's own sessions: their terminal window, and a desktop notification). What already waits when
+// the page opens is on Today, no toast.
+function noticeAssistants(todo) {
+  const now = new Map((todo || []).filter((t) => t.kind === "assistant").map((t) => [`${t.tab}-${t.row}:${t.status}`, t]));
+  const before = S.waitingSeen;
+  S.waitingSeen = new Set(now.keys());
+  if (!before) return;
+  for (const [k, t] of now) {
+    if (before.has(k) || !t.screen || location.hash === t.screen) continue;
+    toast(`${t.company || "An assistant"} · the assistant: ${t.text}`, { action: t.status === "approve" ? "Review" : "Open", ms: 30000,
+      onaction: () => { if (t.screen.startsWith("#")) location.hash = t.screen; else openExternal(t.screen); } });
   }
 }
 
@@ -2229,17 +2246,22 @@ screens.assistant = async (view) => {
     location.replace("#/apply");
   }
 
+  // left: you went to another screen. A read still on its way then (slow through the homelab link) stops there: it
+  // never draws over that screen, never sends you to Apply, never asks again (2026-11-12: a Submit to approve took
+  // over Review). view is the page's one #view, connected whichever screen it shows.
+  let left = false;
   async function load() {
     clearTimeout(timer);
+    if (left) return;
     let now;
     try {
       now = await api.get(`${api_}/${encodeURIComponent(slot)}`);
     } catch (e) {
-      if (!view.isConnected || S.gone) return;
+      if (left || S.gone) return;
       if (S.offline) { timer = setTimeout(load, 4000); return; }  // the homelab can't be reached a moment: ask again
       return ended();
     }
-    if (!view.isConnected) return;
+    if (left) return;
     if (who && now.key !== who) return ended();
     d = now; who = d.key;
     if (d.version !== version) { version = d.version; draw(); } else { term.textContent = d.terminal || "(not readable)"; }
@@ -2247,7 +2269,7 @@ screens.assistant = async (view) => {
     timer = setTimeout(load, 4000);
   }
   await load();
-  return { leave: () => clearTimeout(timer) };
+  return { leave: () => { left = true; clearTimeout(timer); } };
 };
 
 // ---- Settings

@@ -168,7 +168,8 @@ EMAIL CODES AND LINKS (2026-10-11, my call; mail.py)
 NEEDS YOU (2026-10-11, my request)
 - When a session waits for me (its turn ended: a question, the end list) or shows a permission question (a Submit to
   approve), a desktop notification says so, with the agent's first line (Discord on the homelab); the GUI's chip says
-  "waiting for you" / "approve in its window". Claude Code's own Stop / Notification / UserPromptSubmit hooks
+  "waiting for you" / "approve in its window", and a homelab session that starts waiting pops a toast in the app (never a
+  jump to its screen: docs/GUI.md, Today). Claude Code's own Stop / Notification / UserPromptSubmit hooks
   (`assist.py attention`; the agent can't call it) write the run folder's attention.json, cleared when I answer or a
   browser call finishes; it never blocks or changes a turn. Idle reminders are left out.
 

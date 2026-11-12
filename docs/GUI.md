@@ -63,6 +63,9 @@ A question from a run (an unknown form field, an option to pick, "did it submit?
                  waits on you): the assistants that wait for you first (approve, answer, did it go through: its screen, or "in
                  its terminal window"), then each item with its due date, soonest first (a company site to finish, a
                  company-site application, a job closing soon); each opens where you do it (Apply, Review)
+                 An assistant that starts waiting for you while the app is open (a Submit to approve, a question, the
+                 end question; one with a screen: the homelab's) pops a toast on any screen, Review / Open going to its
+                 screen; the screen you're on stays (app.noticeAssistants; 2026-11-12, my request)
   Review         one pool job at a time. Approve mode: Approve (y) adds it to the sheet as Approved at once
                  (or, for one of your Proposed rows, which Review shows first, turns that row Approved).
                  Each card shows Match (and the bar it needed), Score (+ your taste once the model has 5 yes and 5 no),
@@ -276,6 +279,8 @@ A question from a run (an unknown form field, an option to pick, "did it submit?
                  goes back to Apply's Assistants tab with a toast (2026-10-28, my request: it showed "No session there",
                  or switched to the new session as if it were the same). Its taps carry the key; the server refuses one
                  for a session no longer in that slot (gui.assistant_post).
+                 Leaving it stops its reads: one still on its way (slow through the link) never draws over the next
+                 screen or asks again (2026-11-12: a Submit to approve took over Review; tests/test_link.py)
 
 SETUP WIZARD (onboard.py + gui_static/setup.js; each step checks itself; a step opens when you click it, the first one
 not done is open at the start; "You're set up" + Go to Today at the end; Settings reuses some steps' bodies)
