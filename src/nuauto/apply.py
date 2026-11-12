@@ -537,7 +537,7 @@ def submit_nuworks_side(row, ws, io=None):
     try:
         browser.lock_profile("nuauto assist (NUworks side)")  # launch() below then reuses this lock
     except browser.ProfileBusy as e:  # another run has the NUworks browser: nothing opened, the row goes on the retry list
-        note = (f"NUworks side NOT submitted: {str(e).rstrip('.')}: Apply > Company sites, or `nuauto assist "
+        note = (f"NUworks side NOT submitted: {str(e).rstrip('.')}: Apply > Still owed, or `nuauto assist "
                 f"nuworks {row.number}`.")
         log.write(note)
         sheet.append_note(ws, row.number, row.url, note)

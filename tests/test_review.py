@@ -544,7 +544,7 @@ try:
         typed_laptop.append((sess["slot"], text_, os.path.exists(laptop_file)))
 
     def reset(attention, approval_on=False, **state_over):
-        for name in (assist.LAPTOP_FILE, assist.DROP_FILE, assist.FREE_FILE):
+        for name in (assist.LAPTOP_FILE, assist.DROP_FILE, assist.FREE_FILE, assist.END_FILE):
             if os.path.exists(os.path.join(run, name)):
                 os.remove(os.path.join(run, name))
         assist.write_private(os.path.join(run, "state.json"), {**state, "tab": "other", "row_url": ROW_URL, **state_over})
@@ -788,11 +788,62 @@ try:
         reset("waiting")
         ws_now[0] = fresh_sheet()
         assert tap({"do": "free"}, cookie=None)[0] == 403 and ws_now[0].calls == [] and typed_laptop == []
+
+        # End: it went through / End: not submitted (2026-11-12): the answer in end_answer.json BEFORE /exit is typed (the
+        # launcher takes it instead of asking "Did it go through?"), then answered; the sheet is the launcher's, not touched
+        end_file = os.path.join(run, assist.END_FILE)
+        ended_with = []
+        review.end_session = lambda sess: ended_with.append(assist.end_answer(sess["run"], time.time()))
+        for do, a, says in (("end_yes", "y", "is marked Applied."), ("end_no", "n", "left as it was")):
+            reset("waiting")
+            ended_with.clear()
+            r = tap({"do": do})
+            assert r[0] == 200 and J(r)["closing"] is True and says in J(r)["message"], (do, r[2])
+            assert ended_with == [a] and oct(os.stat(end_file).st_mode & 0o777) == "0o600", (do, ended_with)
+            assert assist.read_json(end_file)["by"] == "Phone" and ws_now[0].calls == [] and opened == [], do
+            # (the launcher marks it answered once it takes the answer: until then the page shows it as it is)
+            assert assist.read_json(os.path.join(run, assist.ATTENTION))["kind"] == "waiting"
+            assert f"ended the session: {'it went through' if a == 'y' else 'not submitted'} (by Phone)" in open(log_path).read()
+            os.remove(end_file)
+        # what Yes does, by the session's kind: a NUworks job's NUworks side goes by itself; a by-hand row and a Still
+        # owed one have none (the screen says so too: view's nuworks_side / site)
+        for over, says, side in (({"tab": "jobs"}, "Applied, and its NUworks side is submitted by itself.", True),
+                                 ({"tab": "jobs", "hand": True}, "is marked Applied.", False),
+                                 ({"tab": "jobs", "site": True}, "done on the company site.", False),
+                                 ({}, "is marked Applied.", False)):
+            reset("waiting", **over)
+            v = J(get("/api/assistant/1", cookie=KEY))
+            assert v["nuworks_side"] is side and v["site"] is bool(over.get("site")), (over, v)
+            assert J(tap({"do": "end_yes"}))["message"].endswith(says), over
+            os.remove(end_file)
+        # not while Claude Code asks its own question; once answered: closing; at the finish question: that answer typed
+        reset("approve")
+        ended_with.clear()
+        assert J(tap({"do": "end_yes"}))["message"].startswith("Not sent: Claude Code is asking") and ended_with == []
+        assert not os.path.exists(end_file)
+        reset("answered")
+        assert J(tap({"do": "end_no"}))["message"].startswith("Already answered") and not os.path.exists(end_file)
+        reset("finish")
+        r = J(tap({"do": "end_yes"}))
+        assert typed_laptop == [(1, "y", False)] and r["closing"] is True and not os.path.exists(end_file), (typed_laptop, r)
+        # /exit could not be typed (no tmux, the run is over): the answer file goes again, so a run never reads a stale one
+        def no_tmux(sess):
+            raise ValueError("this session is not in a tmux session")
+        review.end_session = no_tmux
+        reset("waiting")
+        r = J(tap({"do": "end_yes"}))
+        assert r["message"].startswith("Could not do that") and not os.path.exists(end_file), r
+        assert assist.read_json(os.path.join(run, assist.ATTENTION))["kind"] == "waiting"
+        review.end_session = lambda sess: fake_type(sess, "/exit")
+        # an unpaired device: nothing
+        reset("waiting")
+        assert tap({"do": "end_yes"}, cookie=None)[0] == 403 and not os.path.exists(end_file)
     finally:
         sheet.open_other, sheet.open_worksheet = real_sheet
         review.type_into = real_type_into
         review.end_session = real_end
-        for name in (laptop_file, os.path.join(run, assist.DROP_FILE), os.path.join(run, assist.FREE_FILE)):
+        for name in (laptop_file, os.path.join(run, assist.DROP_FILE), os.path.join(run, assist.FREE_FILE),
+                     os.path.join(run, assist.END_FILE)):
             if os.path.exists(name):
                 os.remove(name)
         assist.write_private(os.path.join(run, "state.json"), state)
@@ -931,12 +982,14 @@ try:
             assert page.locator("[data-testid=as-end]").count() == 0 and page.locator("[data-testid=as-send]").count() == 0
             assist.write_private(os.path.join(run, assist.ATTENTION), {"kind": "waiting", "since": 1, "time": 1, "said": ""})
             page.reload()
-            # one End menu: End session, End: requires free-response, End: do it on the laptop, End: drop it…
+            # one End menu, each with its answer (no question after, 2026-11-12): End: it went through, End: not
+            # submitted, End: requires free-response, End: do it on the laptop, End: drop it…
             page.wait_for_selector("[data-testid=as-end]")
-            assert page.locator("[data-testid=as-interrupt]").count() == 1 and page.locator("[data-testid=as-end-exit]").count() == 0
+            assert page.locator("[data-testid=as-interrupt]").count() == 1 and page.locator("[data-testid=as-end-yes]").count() == 0
             page.click("[data-testid=as-end]")
             assert [t.strip() for t in page.locator(".more .menu [role=menuitem]").all_inner_texts()] == [
-                "End session", "End: requires free-response", "End: do it on the laptop", "End: drop it…"]
+                "End: it went through", "End: not submitted", "End: requires free-response", "End: do it on the laptop",
+                "End: drop it…"]
             page.keyboard.press("Escape")
             assert page.locator(".more .menu").count() == 0
             # a slot nobody runs in (or a session that just ended): back to Apply's Assistants tab, with a toast

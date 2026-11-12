@@ -217,6 +217,10 @@ COMPANY-SITE AGENT (`nuauto assist`; every rule: docs/ASSIST.md, read it before 
   only NUauto's {{NEW_PASSWORD}} / {{PASSWORD}} placeholders, never on the sign-ins in accounts.NEVER (Google, Microsoft,
   Apple, LinkedIn, GitHub, Northeastern, Duo, Bitwarden...). Bash only the answer-bank commands; reads only inside allowed paths, never secrets.
 - It guesses what my answers don't cover, records each guess, and asks me everything at once before Submit.
+- (2026-11-12, my call: "so we don't have jobs going to still owed") After my Yes on a homelab session (its End menu
+  carries the answer: End: it went through / not submitted, no second question), a NUworks job's NUworks side is sent
+  by itself: apply.submit_nuworks_side, no window, nobody to ask; NUworks busy = queued, the timer retries
+  (assist.nuworks_side_now / nuworks_side_due). A question it can't answer = Still owed. docs/ASSIST.md.
 
 NUWORKS LOGIN / AUTH FLOW (read this before touching the browser)
 - NUworks sessions expire after a few hours. Expired = any page shows the "Sign In / Please

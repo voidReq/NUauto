@@ -42,9 +42,11 @@ APPLY ON THE HOMELAB (2026-10-14, my call: "Allow it on the homelab")
   submit, so two at once could each see room for the last one. A run on the homelab takes the turn there (until it
   ends); a run on the laptop asks the homelab for it over ssh first (homelab unreachable: it goes ahead and says so; a
   laptop's turn lapses after 3 h, NUWORKS_TURN_HOURS). The other one is refused, saying which machine is applying.
-- The NUworks side of a company-site application the homelab's assistant did is never sent by itself (nobody watches the
-  session's end there): the row gets "NUworks side NOT submitted yet" and Apply's Still owed (either machine's page)
-  offers Submit on NUworks too.
+- The NUworks side of a company-site application the homelab's assistant did goes by itself (2026-11-12, my request; it
+  used to wait in Still owed for my tap): right after Yes, with no window, under the NUworks turn; if NUworks is busy
+  (an Apply run, the update, a by-hand session, the laptop's turn) the row stays queued ("NUworks side queued ...") and
+  the timer every 10 minutes sends it. A question the bank can't answer stops it before Submit: then Still owed (either
+  machine's page) offers Submit on NUworks too, as does a row still queued after an hour (docs/ASSIST.md, WHICH ROWS).
 - The NUworks session is the one `nuauto login` on the laptop copies there (the one-click re-login renews it); one that
   needs your password stops the run (Needs Human), as on the laptop: log in on the laptop.
 
@@ -85,7 +87,8 @@ PAIR YOUR PHONE (once per device)
   computer (asks the homelab for a one-time link over ssh and opens it: press Pair).
   nuauto review devices / nuauto review unpair <name>|--all     (or Settings > Homelab > Paired devices > Unpair)
 
-THE QUEUE (remote.py; nuauto-assist.timer every 10 minutes runs `nuauto assist auto`)
+THE QUEUE (remote.py; nuauto-assist.timer every 10 minutes runs `nuauto assist auto`; first it sends the oldest queued
+NUworks side, any hour, whatever remote_auto says: assist.nuworks_side_due)
 - On with "remote_auto" (and remote_assist), per sheet tab: true = both; {"nuworks": true, "other": false} = each on
   its own (2026-10-13, my request; Settings > Homelab has a switch for each). A tab that is off starts
   nothing by itself; its rows still show in Apply with Start now. Hours: "remote_hours": [9, 22] (the default:
@@ -156,9 +159,10 @@ RUN ONE BY HAND
   Company-site assistant > "Message me on Discord" (local_config.json "assist_discord", default on; daily.discord_assistant,
   read from the file each time) turns exactly these off, plus "assistants started"; the morning message, alerts, deploys
   and `review pair --discord` still go. Mine is off (2026-10-27): I check the app.
-- Ends like on the laptop: /exit (or End session on its screen), then "Did you press Submit...?" (the screen's Yes / No
-  types the answer there) y = Applied. The virtual screen stops with it. No answer in 24 h: the row stays as it was
-  (check it yourself) and the slot is free again.
+- Ends from its screen's End menu with the answer in it (End: it went through / not submitted: no question after), or
+  like on the laptop: /exit in tmux, then "Did you press Submit...?" (the screen's Yes / No types the answer there) y =
+  Applied. The virtual screen stops with it. No answer in 24 h: the row stays as it was (check it yourself) and the slot
+  is free again.
 
 AN ASSISTANT'S SCREEN (#/assistant/<slot> in the homelab's app; review.view / act, served by gui.py)
 - Read like a chat, newest at the bottom; it opens at what it wants from you, asks again every 4 s (what you type is
@@ -176,8 +180,12 @@ AN ASSISTANT'S SCREEN (#/assistant/<slot> in the homelab's app; review.view / ac
                     something was typed meanwhile doesn't count (the agent is told to ask again).
   Reply             typed into its terminal (tmux send-keys; a newline = Ctrl+J, so several lines go as one message), as
                     if you typed it there. Only into the pane the session started in, and never when that pane shows a
-                    shell (the assistant ended). One End menu (2026-11-06, my request: "one dropdown"): End session
-                    (/exit), End: requires free-response (above), End: do it on the laptop, End: drop it.
+                    shell (the assistant ended). One End menu (2026-11-06, my request: "one dropdown"), each with its
+                    answer, so no question after (2026-11-12, my request): End: it went through (= Yes: Applied, and a
+                    NUworks job's NUworks side then goes by itself; a Still owed row: its company site done), End: not
+                    submitted (= No), End: requires free-response (above), End: do it on the laptop, End: drop it.
+                    The first two write the answer in the run folder (assist.END_FILE, review.end_with) before /exit;
+                    if /exit can't be typed the file goes again and nothing changes.
                     End: drop it (a posting that has closed, a duplicate, a bad location; 2026-11-04, my request): the
                     row becomes Failed through sheet.drop with the reason (like Drop in Apply), dropped.json
                     (assist.DROP_FILE) keeps the run from asking "Did it go through?", then /exit; back to the list.

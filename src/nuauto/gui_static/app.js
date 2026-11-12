@@ -2208,7 +2208,7 @@ screens.assistant = async (view) => {
     if (word === "finish") {
       parts.push(el("div", { class: "card attn", id: "as-ask", testid: "as-finish" },
         el("h2", { text: "The session ended. Did you approve Submit, and did the site confirm the application?" }),
-        el("p", { class: "small muted", text: "Yes marks the row Applied (dated today)." }),
+        el("p", { class: "small muted", text: `Yes marks the row ${d.site ? "done on the company site" : "Applied (dated today)"}${d.nuworks_side ? ", then submits the same job on NUworks by itself" : ""}.` }),
         el("div", { class: "row" }, btn("Yes, it went through", "btn primary", { do: "finish", answer: "y" }, "Saving…", "as-yes"),
           btn("No", "btn", { do: "finish", answer: "n" }, "Saving…", "as-no"),
           btn("No: it wants free-response answers", "btn", { do: "finish", answer: "free" }, "Saving…", "as-no-free"),
@@ -2221,9 +2221,10 @@ screens.assistant = async (view) => {
         el("label", { class: "field" }, "Reply", el("span", { class: "muted small", text: "Typed into its terminal, as if you typed it there. Several lines go as one message." }), reply),
         el("div", { class: "row" }, btn("Send", "btn primary", () => ({ do: "reply", text: reply.value }), "Sending…", "as-send")),
         el("hr", { class: "sep" }),
-        el("p", { class: "small muted", text: "Done (it submitted, or you stop here)? End session; then it asks whether it went through. An application that wants answers in your own words: End: requires free-response (the row is tagged free-response and stays, for the assistant later). A site that refuses the homelab's browser (a sign-in page with no way in): End: do it on the laptop (the homelab never starts it again). A posting that has closed (or one you won't apply to): End: drop it." }),
+        el("p", { class: "small muted", text: `Done? End: it went through marks the row ${d.site ? "done on the company site" : "Applied (dated today)"}${d.nuworks_side ? ", then submits the same job on NUworks by itself" : ""}. End: not submitted leaves it as it was. An application that wants answers in your own words: End: requires free-response (the row is tagged free-response and stays, for the assistant later). A site that refuses the homelab's browser (a sign-in page with no way in): End: do it on the laptop (the homelab never starts it again). A posting that has closed (or one you won't apply to): End: drop it. No question after any of them.` }),
         el("div", { class: "row" }, menuButton("End the session", "as-end", [
-          ["End session", "exit", () => send({ do: "exit" })],
+          ["End: it went through", "yes", () => send({ do: "end_yes" })],
+          ["End: not submitted", "no", () => send({ do: "end_no" })],
           ["End: requires free-response", "free", () => send({ do: "free" }), d.row ? null : "This session doesn't know its sheet row"],
           ["End: do it on the laptop", "laptop", () => send({ do: "laptop" })],
           ...(d.row ? [["End: drop it…", "drop", dropIt, null, true]] : [])], { text: "End ▾", cls: "btn", up: true }))));

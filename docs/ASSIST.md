@@ -34,8 +34,19 @@ WHICH ROWS (assist.py + prompts/ASSIST_PROMPT.md, `nuauto assist <row>`; added 2
 - After a company-site row (NUworks tab) is Applied, the same job is submitted on NUworks by apply.submit_nuworks_side
   (the tested NUworks code; every popup check except the off-site-link stop; outcome appended to Notes). Retry:
   `nuauto assist nuworks <row>` (laptop, or the GUI; never from an agent's shell; assist.nuworks_side_blocked refuses a
-  second submit once Submit was clicked there). On the homelab it never goes by itself: the row's Notes say "NUworks
-  side NOT submitted yet" and Apply's Still owed offers it.
+  second submit once Submit was clicked there).
+- On the homelab it goes by itself (2026-11-12, my request: "so we don't have jobs going to still owed"; it used to wait
+  for my tap in Still owed): after Yes the row gets "NUworks side queued <date time>" (assist.QUEUED, queued_note) and
+  the launcher submits it at once (assist.nuworks_side_now): the same apply.submit_nuworks_side, with no window (nobody
+  watches it; screenshots and the log as always) and nobody to ask (answers.NoTerminalIO: a question the bank can't
+  answer stops it before Submit, "NUworks side NOT submitted: ..." and Still owed offers it). One NUworks run at a time:
+  not beside a by-hand session, a run holding the NUworks browser (Apply, the update) or the laptop's NUworks turn; then
+  it stays queued and the homelab's timer (`nuauto assist auto`, every 10 minutes, any hour, whatever remote_auto says:
+  assist.nuworks_side_due) sends the oldest queued one per run. On the laptop, when the homelab holds the NUworks turn,
+  the row is queued for the homelab too (with remote_assist; else "NOT submitted" and Still owed). Where a row stands is
+  read from its Notes (assist.nuworks_side_state: the latest NUworks-side note counts). A row queued over an hour, or
+  with no homelab assistant to send it, shows in Still owed again (assist.queued_stuck). Never from an agent's shell
+  (CLAUDECODE). Rows already in Still owed before this stay there (tap Submit on NUworks too).
 
 WHAT IT IS
 - Laptop, real terminal, me watching (`nuauto assist` needs a tty). Or the homelab (my call 2026-10-11, "remote_assist"):
@@ -191,8 +202,12 @@ THE END, AND THE HOMELAB'S APPROVALS
 - Homelab: a Submit-type action has no terminal to ask in. The guard puts it on NUauto's page (a screenshot, and
   Discord), and waits up to 9 minutes for my tap. Decline or no answer blocks it. A late Approve is a pass for that
   one action, on that page, with the same typed values, for 10 minutes. Anything typed meanwhile, or another page, voids
-  the question or pass. Captchas I solve on its screen. After the session its page asks "did it go through?" (waits
-  24 h, then leaves the row as it was); the queue never restarts a row whose approved Submit has no outcome.
+  the question or pass. Captchas I solve on its screen. Its End menu carries the answer (2026-11-12, my request:
+  "eliminating the second popup"): "End: it went through" (= y) / "End: not submitted" (= n) put it in the run folder
+  (assist.END_FILE, review.end_with) before /exit, and the launcher takes it without asking (only if given within 2
+  minutes of the session's end, assist.END_FRESH: an /exit that didn't take then means the question asks again). A session that ends by
+  itself (or /exit typed in tmux) still gets "did it go through?" on its page (waits 24 h, then leaves the row as it
+  was); the queue never restarts a row whose approved Submit has no outcome.
 - A site that refuses the homelab's browser (a fake sign-in page): "End: do it on the laptop" marks the row's Notes
   (assist.LAPTOP_MARK, sheet.mark_on_laptop); the homelab skips it and the GUI shows "do it on the laptop" (2026-10-11;
   no disguising the browser).

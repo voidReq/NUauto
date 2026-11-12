@@ -12,8 +12,9 @@ Mark-done tunnel (that one forwards 8765). This module holds what the app's home
     to assist.WAIT for you, a later Approve is a pass for that one action, assist.take_grant); its whole last message and
     a reply typed into its terminal (tmux), as if you typed it there; the browser view's link and password (captchas:
     you solve them there, then reply "done"); "Did it go through?" when it ended; Interrupt (Esc), and one End menu:
-    End session (/exit), End: requires free-response (the row tagged, no question after: mark_free), End: do it on the
-    laptop, End: drop it (the row becomes Failed with a reason, no question after: drop_and_end).
+    End: it went through / End: not submitted (the answer given there, no question after: end_with), End: requires
+    free-response (the row tagged, no question after: mark_free), End: do it on the laptop, End: drop it (the row
+    becomes Failed with a reason, no question after: drop_and_end).
     Every answer goes in the run's actions.log with the device's name.
   - the queue (remote.py) for the app's Company sites: each row's group and what it waits for; Start now.
 
@@ -267,7 +268,8 @@ def still_typed(s, snippet):
     return snippet in " ".join(" ".join(box).split())
 
 
-ENDED = ("Did you press Submit", "left for the laptop", "Not submitted")  # what its terminal shows once Claude Code ended
+# what its terminal shows once Claude Code ended (assist.ENDED_ON_PAGE: you answered with the End menu)
+ENDED = ("Did you press Submit", "left for the laptop", "Not submitted", "Ended on the review page")
 
 
 def end_session(s, wait=4.0):
@@ -392,6 +394,34 @@ def drop_and_end(s, why, by):
     return {"message": f"Dropped: {st_company(s)} is marked Failed ({sheet.DROP_REASONS[why]}).", "closing": True}
 
 
+def end_with(s, answer, by):
+    """End: it went through (y) / End: not submitted (n) (2026-11-12, your request: "eliminating the second popup"): the
+    answer goes in the run folder first (assist.END_FILE: the launcher takes it instead of asking "Did it go through?",
+    and marks the run answered), then /exit. y marks the row Applied, and a NUworks job's NUworks side is then submitted
+    by itself (assist.nuworks_side_now)."""
+    from nuauto import assist
+    path = os.path.join(s["run"], assist.END_FILE)
+    assist.write_private(path, {"answer": answer, "by": by, "at": time.time()})
+    try:
+        end_session(s)
+    except (ValueError, OSError, subprocess.TimeoutExpired):  # not typed (the run is over, no tmux): it asks as before
+        os.remove(path)
+        raise
+    assist.log(s["run"], f"REVIEW PAGE ended the session: {'it went through' if answer == 'y' else 'not submitted'} (by {by})")
+    if answer == "n":
+        return {"message": f"{st_company(s)}: ended, left as it was.", "closing": True}
+    done = ("done on the company site." if s["state"].get("site") else
+            "Applied, and its NUworks side is submitted by itself." if nuworks_side_after(s) else "Applied.")
+    return {"message": f"Ended: {st_company(s)} is marked {done}", "closing": True}
+
+
+def nuworks_side_after(s):
+    """Whether a Yes for this session also submits the job on NUworks (assist.run_locked): a NUworks job done on its
+    company site; not an Other jobs row, a by-hand row (that was NUworks itself), nor a Still owed one (NUworks had it)."""
+    st = s["state"]
+    return st.get("tab") != "other" and not st.get("hand") and not st.get("site")
+
+
 def hook_alive(pid):
     """True while the guard's hook that asked is still waiting (that process, still the hook). No pid: assume so."""
     if not pid:
@@ -477,7 +507,8 @@ def view(s):
     out = {**summary(s), "message": s["message"] if word not in ("finish", "answered") else "",
            "terminal": terminal(s), "tmux": s["state"].get("tmux") or "", "version": version(s), "approval": None,
            "browser": ({"url": s["view"]["url"], "password": s["view"].get("password") or ""}
-                       if s["view"].get("url") else None)}
+                       if s["view"].get("url") else None),
+           "site": bool(s["state"].get("site")), "nuworks_side": nuworks_side_after(s)}
     if a:
         dec = read_answer(s) or {}
         mine = a.get("waiting") and dec.get("id") == a.get("id")  # answered; the guard has not picked it up yet
@@ -529,6 +560,14 @@ def act(s, body, by):
             end_session(s)
             assist.log(s["run"], f"REVIEW PAGE ended the session (by {by})")
             return {"message": "Ending the session."}
+        if do in ("end_yes", "end_no") and kind == "finish":  # (it had just ended by itself: the end question's answer)
+            do, body = "finish", {**body, "answer": "y" if do == "end_yes" else "n"}
+        if do in ("end_yes", "end_no") and kind == "answered":
+            return {"message": "Already answered: its session is closing.", "closing": True}
+        if do in ("end_yes", "end_no"):  # End: it went through / End: not submitted (no question after)
+            if word == "prompt":
+                return {"message": busy}
+            return end_with(s, "y" if do == "end_yes" else "n", by)
         if do == "laptop" and word != "prompt" and kind != "finish":  # End: do it on the laptop
             message = mark_laptop(s, by)
             end_session(s)

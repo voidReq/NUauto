@@ -565,10 +565,18 @@ try:
         assert isinstance(code, str) and remote.live_claims() == [], bad
     code, _ = run_main(["queue"], server=False)
     assert "homelab" in code
-    code, out = run_main(["auto"], remote_on=False)                                            # the timer's: quietly nothing when off
-    assert code is None and out == ""
-    code, out = run_main(["auto"], remote_on=True)                                             # on, but remote_auto off: also nothing
-    assert code is None and out == ""
+    real_due, due_calls = assist.nuworks_side_due, []
+    assist.nuworks_side_due = lambda: due_calls.append((config.IS_SERVER, config.REMOTE_ASSIST))
+    try:
+        code, out = run_main(["auto"], remote_on=False)                                        # the timer's: quietly nothing when off
+        assert code is None and out == ""
+        code, out = run_main(["auto"], remote_on=True)                                         # on, but remote_auto off: also nothing
+        assert code is None and out == ""
+        # ... but the queued NUworks sides are looked at every time, whatever remote_auto and the hours say (it checks
+        # remote_assist itself)
+        assert due_calls == [(True, False), (True, True)], due_calls
+    finally:
+        assist.nuworks_side_due = real_due
     code, _ = run_main(["queue"], remote_on=False)
     assert "remote_assist" in code
     code, _ = run_main(["bogus"])
@@ -749,6 +757,8 @@ def fake_start(tab, rown):
 
 
 remote.start = fake_start
+real_side_due = assist.nuworks_side_due
+assist.nuworks_side_due = lambda: None  # (the queued NUworks sides: their own checks below)
 
 
 def run_auto(server=True, remote_on=True, auto_on=True):
@@ -797,6 +807,7 @@ try:
     assert [x for x, _ in go] == [cb] and "had a session already" in rest[0][1]
 finally:
     daily.discord, review.page_url = real_daily, real_page
+    assist.nuworks_side_due = real_side_due
     restore("queue_now", "in_hours", "start", "ended", "STARTUP_CHECK", "AUTO_PATH")
     config.LOCAL = {k: v for k, v in config.LOCAL.items() if k != "remote_auto"}
 
@@ -1323,6 +1334,220 @@ finally:
     sheet.mark_site_done, sheet.mark_applied_by_hand, assist.nuworks_side = real_site_done, real_by_hand, real_nuworks_side
     screen.Screen, assist.session, assist.ask_line = patched["screen.Screen"], patched["session"], patched["ask_line"]
     sheet.open_worksheet = patched["open_worksheet"]
+
+# ---- (2026-11-12, your request) a company-site application's NUworks side goes by itself on the homelab; one End menu
+# answer instead of "Did it go through?"
+from contextlib import contextmanager  # noqa: E402
+
+from nuauto import apply as apply_  # noqa: E402
+from nuauto import browser  # noqa: E402
+
+
+class CellSheet:
+    """The NUworks tab in memory (gspread's get_all_values / update)."""
+    title = "NUworks"
+
+    def __init__(self, rows):
+        self.values, self.calls = [list(sheet.HEADERS)] + [list(r) for r in rows], []
+
+    def get_all_values(self):
+        return [list(r) for r in self.values]
+
+    def update(self, range_name, values, value_input_option=None):
+        self.calls.append(range_name)
+        m = re.match(r"([A-F])(\d+)", range_name)
+        for i, v in enumerate(values[0]):
+            self.values[int(m.group(2)) - 1]["ABCDEF".index(m.group(1)) + i] = v
+
+
+EXT = "External application: careers.example.com -> https://careers.example.com/j/77"
+END_YES = ("import json, os, time; open(os.path.join(os.environ[%r], %r), 'w').write(json.dumps({'answer': %%r, "
+           "'at': time.time() - %%d}))" % (assist.STATE_ENV, assist.END_FILE))
+saved = {"now": assist.nuworks_side_now, "turn": remote.nuworks_turn, "side": assist.nuworks_side, "remote": config.REMOTE_ASSIST}
+side_calls = []
+try:
+    # the homelab, End: it went through on a NUworks job done on its company site: no question, no ping; Applied, the
+    # queued note, then its NUworks side at once (nuworks_side_now)
+    for answer in ("y", "n"):
+        time.sleep(1.1)  # run folders are named by the second
+        ws = CellSheet([[nu, "ExtCo", "Intern", "Needs Human", EXT, ""]])
+        side_calls.clear()
+        assist.nuworks_side_now = lambda w, n, url: side_calls.append((w, n, url)) or ("sent", "NUworks side submitted too (confirmed by NUworks page).")
+        stopped.clear(), asked_line.clear(), outcomes.clear(), pings.clear()
+        screen.Screen = FakeScreen
+        assist.session = lambda d, *a, **k: [sys.executable, "-c", END_YES % (answer, 5)]
+        assist.ask_line = lambda prompt, timeout=None: asked_line.append(prompt) or "y"
+        assist.approved_submit = lambda d: True
+        remote.record_outcome = lambda tab, rown, url, approved, answer: outcomes.append((tab, rown, url, approved, answer))
+        daily.discord = lambda text: pings.append(text)
+        sheet.open_worksheet = lambda *a, **k: ws
+        sheet.open_other = lambda *a, **k: (_ for _ in ()).throw(AssertionError("the Other jobs tab"))
+        row2 = sheet.parse_rows(ws.get_all_values())[0]
+        slot, lock = assist.take_slot({"row": 2, "tab": "jobs"})
+        before = set(glob.glob(os.path.join(config.LOGS_DIR, "*assist_row2")))
+        config.IS_SERVER = True
+        out, sys.stdout = sys.stdout, io.StringIO()
+        try:
+            assist.run_locked(2, False, row2, "https://careers.example.com/j/77", "row 2", "jobs", slot, lock)
+        finally:
+            sys.stdout = out
+            config.IS_SERVER = REAL_FLAGS[0]
+            lock.close()
+        (run_dir,) = set(glob.glob(os.path.join(config.LOGS_DIR, "*assist_row2"))) - before
+        log_text = open(os.path.join(run_dir, "actions.log")).read()
+        assert asked_line == [] and pings == [], (answer, asked_line, pings)
+        att = json.load(open(os.path.join(run_dir, assist.ATTENTION)))               # answered, not the end question
+        assert att["kind"] == "answered" and att["answer"] == answer, att
+        assert outcomes == [("jobs", 2, "https://careers.example.com/j/77", True, answer)], outcomes
+        assert f"{assist.ENDED_ON_PAGE}: {'it went through' if answer == 'y' else 'not submitted'}." in log_text
+        if answer == "y":
+            status, notes = ws.values[1][3], ws.values[1][4]
+            assert status == "Applied" and notes.startswith("Applied on the company site") and assist.QUEUED in notes, ws.values[1]
+            assert assist.nuworks_side_state(notes) == "queued", notes
+            assert side_calls == [(ws, 2, nu)], side_calls
+            assert "NUworks side: NUworks side submitted too" in log_text, log_text
+        else:
+            assert ws.calls == [] and side_calls == [] and "stays Needs Human" in log_text
+
+    # an End-menu answer given long before the session ended (its /exit did not take then): asked as before
+    time.sleep(1.1)
+    ws = CellSheet([[nu, "ExtCo", "Intern", "Needs Human", EXT, ""]])
+    asked_line.clear(), side_calls.clear()
+    assist.session = lambda d, *a, **k: [sys.executable, "-c", END_YES % ("y", assist.END_FRESH + 60)]
+    assist.ask_line = lambda prompt, timeout=None: asked_line.append(prompt) or "n"
+    slot, lock = assist.take_slot({"row": 2, "tab": "jobs"})
+    config.IS_SERVER = True
+    out, sys.stdout = sys.stdout, io.StringIO()
+    try:
+        assist.run_locked(2, False, sheet.parse_rows(ws.get_all_values())[0], "https://careers.example.com/j/77", "row 2",
+                          "jobs", slot, lock)
+    finally:
+        sys.stdout = out
+        config.IS_SERVER = REAL_FLAGS[0]
+        lock.close()
+    assert len(asked_line) == 1 and ws.calls == [] and side_calls == [], (asked_line, ws.calls)
+
+    # the laptop: Yes at its terminal, then the homelab is applying on NUworks: with the homelab's assistant on, queued
+    # for it (its timer sends it); without, a NOT submitted note (Apply's Still owed offers it)
+    @contextmanager
+    def busy_turn():
+        raise remote.NuworksBusy("the homelab is applying on NUworks now.")
+        yield
+    remote.nuworks_turn = busy_turn
+    assist.nuworks_side = lambda *a, **k: (_ for _ in ()).throw(AssertionError("went ahead while busy"))
+    for remote_on, state_now in ((True, "queued"), (False, "retry")):
+        time.sleep(1.1)
+        ws = CellSheet([[nu, "ExtCo", "Intern", "Needs Human", EXT, ""]])
+        assist.ask_line = lambda prompt, timeout=None: "y"
+        config.REMOTE_ASSIST = remote_on
+        slot, lock = assist.take_slot({"row": 2, "tab": "jobs"})
+        out, sys.stdout = sys.stdout, io.StringIO()
+        try:
+            assist.run_locked(2, False, sheet.parse_rows(ws.get_all_values())[0], "https://careers.example.com/j/77",
+                              "row 2", "jobs", slot, lock)
+        finally:
+            printed, sys.stdout = sys.stdout.getvalue(), out
+            lock.close()
+        assert ws.values[1][3] == "Applied" and assist.nuworks_side_state(ws.values[1][4]) == state_now, (remote_on, ws.values[1])
+        assert ("submits it by itself" if remote_on else "Still owed") in printed, printed
+finally:
+    assist.nuworks_side_now, remote.nuworks_turn, assist.nuworks_side = saved["now"], saved["turn"], saved["side"]
+    config.REMOTE_ASSIST = saved["remote"]
+    screen.Screen, assist.session, assist.ask_line, assist.approved_submit = (patched["screen.Screen"], patched["session"],
+                                                                              patched["ask_line"], patched["approved"])
+    remote.record_outcome, daily.discord, review.page_url = patched["outcome"], patched["discord"], patched["page_url"]
+    sheet.open_other, sheet.open_worksheet = patched["open_other"], patched["open_worksheet"]
+    config.IS_SERVER = REAL_FLAGS[0]
+
+# nuworks_side_now: the tested NUworks code with no window and nobody to ask, one NUworks run at a time
+QUEUED_ROW = [nu, "ExtCo", "Intern", "Applied", "Applied on the company site (nuauto assist; you pressed Submit). "
+              + assist.queued_note(), "2026-11-12"]
+saved = {"submit": apply_.submit_nuworks_side, "session": assist.nuworks_session, "lock": browser.lock_profile,
+         "turn": remote.nuworks_turn, "now": assist.nuworks_side_now, "headless": os.environ.get("AUTO_HEADLESS"),
+         "cc": os.environ.get("CLAUDECODE")}
+seen = []
+try:
+    os.environ.pop("AUTO_HEADLESS", None), os.environ.pop("CLAUDECODE", None)
+    apply_.submit_nuworks_side = lambda row, w, io_: seen.append((row.number, type(io_).__name__, os.environ.get("AUTO_HEADLESS"),
+                                                                  browser._profile_lock is not None)) or "NUworks side submitted too (confirmed by NUworks page)."
+    assist.nuworks_session = lambda: False
+    ws = CellSheet([QUEUED_ROW])
+    assert assist.nuworks_side_now(ws, 2, nu) == ("sent", "NUworks side submitted too (confirmed by NUworks page).")
+    assert seen == [(2, "NoTerminalIO", "1", True)], seen                      # no window, nobody to ask, the browser held
+    assert "AUTO_HEADLESS" not in os.environ and browser._profile_lock is None     # put back, let go
+    # not queued any more (sent meanwhile), another job in the row, not Applied: nothing sent
+    for row_ in ([*QUEUED_ROW[:4], QUEUED_ROW[4] + " NUworks side submitted too (confirmed by NUworks page).", QUEUED_ROW[5]],
+                 [nu + "x", *QUEUED_ROW[1:]], [*QUEUED_ROW[:3], "Needs Human", *QUEUED_ROW[4:]]):
+        seen.clear()
+        assert assist.nuworks_side_now(CellSheet([row_]), 2, nu)[0] == "skip" and seen == [], row_
+    # busy: a by-hand session on NUworks, the NUworks browser held, the laptop's turn: it stays queued, nothing noted
+    for setup in ("session", "profile", "turn"):
+        seen.clear()
+        ws = CellSheet([QUEUED_ROW])
+        assist.nuworks_session = (lambda: True) if setup == "session" else (lambda: False)
+        browser.lock_profile = ((lambda what: (_ for _ in ()).throw(browser.ProfileBusy("in use"))) if setup == "profile"
+                                else saved["lock"])
+        remote.nuworks_turn = busy_turn if setup == "turn" else saved["turn"]
+        assert assist.nuworks_side_now(ws, 2, nu) == ("busy", assist.NUWORKS_LATER), setup
+        assert seen == [] and ws.calls == [] and browser._profile_lock is None, setup
+    browser.lock_profile, remote.nuworks_turn, assist.nuworks_session = saved["lock"], saved["turn"], lambda: False
+    # never from an agent's shell
+    os.environ["CLAUDECODE"] = "1"
+    status, why = assist.nuworks_side_now(CellSheet([QUEUED_ROW]), 2, nu)
+    assert status == "busy" and "Claude Code" in why and seen == []
+    os.environ.pop("CLAUDECODE")
+
+    # the timer (nuworks_side_due): the oldest queued row, one per run; quiet when none; only the homelab with its assistant
+    sent = []
+    assist.nuworks_side_now = lambda w, n, url: sent.append(n) or ("sent", "done")
+    old_q = re.sub(r"\d{4}-\d\d-\d\d \d\d:\d\d", "2020-01-01 09:00", QUEUED_ROW[4])
+    rows_ = [QUEUED_ROW, [nu + "3", "Old", "I", "Applied", old_q, ""],
+             [nu + "4", "Retry", "I", "Applied", "NUworks side NOT submitted: no answer.", ""],
+             [nu + "5", "Done", "I", "Applied", QUEUED_ROW[4] + " NUworks side submitted too.", ""]]
+    sheet.open_worksheet = lambda *a, **k: CellSheet(rows_)
+    config.IS_SERVER, config.REMOTE_ASSIST = True, True
+    out, sys.stdout = sys.stdout, io.StringIO()
+    try:
+        assist.nuworks_side_due()
+        assert sent == [3], sent
+        sheet.open_worksheet = lambda *a, **k: CellSheet(rows_[2:])
+        assist.nuworks_side_due()
+        assert sent == [3]
+        quiet = sys.stdout.getvalue()
+        sheet.open_worksheet = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("Google is down: token xyz"))
+        assist.nuworks_side_due()
+        failed = sys.stdout.getvalue()[len(quiet):]
+        for flags in ((False, True), (True, False)):
+            config.IS_SERVER, config.REMOTE_ASSIST = flags
+            assist.nuworks_side_due()
+    finally:
+        sys.stdout = out
+    assert quiet == "NUworks side of row 3 (Old): done\n", quiet
+    assert failed == "", failed                                                  # quiet (it shows in Still owed after an hour)
+finally:
+    apply_.submit_nuworks_side, assist.nuworks_session, browser.lock_profile = saved["submit"], saved["session"], saved["lock"]
+    remote.nuworks_turn, assist.nuworks_side_now = saved["turn"], saved["now"]
+    for k, env in (("headless", "AUTO_HEADLESS"), ("cc", "CLAUDECODE")):
+        os.environ.pop(env, None) if saved[k] is None else os.environ.__setitem__(env, saved[k])
+    sheet.open_worksheet = patched["open_worksheet"]
+    config.IS_SERVER, config.REMOTE_ASSIST = REAL_FLAGS
+
+# Apply's Still owed (gui.company_rows' retry list): a fresh queued NUworks side is left out (it goes by itself); one that
+# did not go out, or stayed queued over an hour, or has no homelab assistant to send it, is in it; a done one is not
+fresh_q, old_q2 = assist.queued_note(), assist.queued_note(datetime.now() - timedelta(hours=2))
+owed_rows = sheet.parse_rows([list(sheet.HEADERS)] + [
+    [nu + "1", "Fresh", "I", "Applied", f"Applied on the company site. {fresh_q}", ""],
+    [nu + "2", "Stuck", "I", "Applied", f"Applied on the company site. {old_q2}", ""],
+    [nu + "3", "Missed", "I", "Applied", f"x {fresh_q} NUworks side NOT submitted: No answer for 'Start'.", ""],
+    [nu + "4", "Sent", "I", "Applied", f"x {old_q2} NUworks side submitted too (confirmed by NUworks page).", ""]])
+real_remote = config.REMOTE_ASSIST
+try:
+    config.REMOTE_ASSIST = True
+    assert [r["company"] for r in gui.company_rows(owed_rows)[3]] == ["Stuck", "Missed"]
+    config.REMOTE_ASSIST = False
+    assert [r["company"] for r in gui.company_rows(owed_rows)[3]] == ["Fresh", "Stuck", "Missed"]
+finally:
+    config.REMOTE_ASSIST = real_remote
 
 # its hours are New York time whatever clock the process runs on (a shell over ssh is often UTC)
 from datetime import timezone  # noqa: E402
