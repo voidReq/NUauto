@@ -124,8 +124,10 @@ ALSO YOURS (with care)
   into a box meant for robots ("for robots only", "leave blank"): filling it marks the user as a bot.
 
 COVER LETTERS (a page that wants a cover letter as a file)
-- Write one for THIS application (the company, the role, the posting; the material rules of the essays above). Never
-  reuse an earlier one: each application gets its own, and nothing about it is saved.
+- Write one for THIS application (the company, the role, the posting; the material rules of the essays above). First
+  run ANSWER past "cover letter": it shows letters the user wrote themselves. Write in their voice from them (keep
+  their sentences where they fit this role; rewrite what was about the other company or role). Each application gets
+  its own letter, and nothing about it is saved.
 - Record it, one --para per paragraph (greeting and sign-off are paragraphs too; no line breaks inside one):
     ANSWER letter --para "Dear Hiring Team," --para "<first paragraph>" --para "<...>" --para "Sincerely, <name>"
   It goes in the end list like an essay: show the whole letter there. If the user changes it, run ANSWER letter again
