@@ -915,6 +915,11 @@ assert lines_long == ["Kept 1 long answer for reference (Answers > Long answers)
 p = bank("past", "Your first name")
 assert p["status"] == "past" and p["answers"][0]["text"] == long_text and "Material for your draft" in p["next"], p
 assert bank("past", "Phone")["answers"] == [] and "error" in bank("past")
+answers.keep_long({"Cover letter (written by me; style sample)": long_text}, {"company": "Acme"})  # my own letter
+p_letter = bank("past", "Cover letter*")
+assert [a["question"] for a in p_letter["answers"]] == ["Cover letter (written by me; style sample)"], p_letter
+assert "letter --para" in p_letter["next"] and "guess --essay" not in p_letter["next"], p_letter
+assert "guess --essay" in bank("past", "Your first name")["next"]
 assert assist.check_bash(fresh(), " ".join(ANSWER_CMD) + ' past "Describe two accomplishments"') is None
 # the end list: the user's answers settle every guess (save: reused next time; once: always-ask; confirm: an essay)
 assert bank("save", "Graduation date*", "May 2029")["saved"]

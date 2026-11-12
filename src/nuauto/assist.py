@@ -1083,13 +1083,21 @@ def _bank(argv):
 
 def past_answers(label):
     """`past "<label>"`: the user's earlier long answers (answers.past: their question shares the most words with this
-    one), in full: material for this application's draft, never pasted in by themselves."""
+    one), in full: material for this application's draft, never pasted in by themselves. `past "cover letter"`: the
+    letters the user wrote themselves (2026-11-12, their request), for their voice."""
     found = [{k: e.get(k) for k in ("question", "text", "company", "date")} for e in answers.past(label)]
-    return {"status": "past", "answers": found,
-            "next": ("Material for your draft only: write this application's own answer from them (its company, its "
-                     "question, its length limit), type it, record it with guess --essay, and show it in the end list. "
-                     "Say which earlier answer you drew on.") if found else
-                    "No earlier long answer like this one: draft it from the writeups and notes."}
+    if not found:
+        next_ = "No earlier long answer like this one: draft it from the writeups and notes."
+    elif label_key(label) == LETTER:
+        next_ = ("The user's own earlier letters: write THIS application's letter in their voice from them (their "
+                 "wording, their sentence style, what they chose to mention; keep their sentences where they fit this "
+                 "role, rewrite what was about the other company or role), record it with letter --para, and show it "
+                 "in the end list. Say which letter you drew on.")
+    else:
+        next_ = ("Material for your draft only: write this application's own answer from them (its company, its "
+                 "question, its length limit), type it, record it with guess --essay, and show it in the end list. "
+                 "Say which earlier answer you drew on.")
+    return {"status": "past", "answers": found, "next": next_}
 
 
 def keep_long_answers(d, log_):

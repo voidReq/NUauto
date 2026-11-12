@@ -123,6 +123,10 @@ COVER LETTERS (2026-10-16, my call: "approved letters shouldn't be saved, there'
   PDF (letter.py: plain text, Helvetica, letter size) in the run's browser/upload/: the one cover letter the guard lets
   be uploaded. The session's end removes the PDF and its text (assist.after_session). Never in the answer bank. Works
   on company sites and NUworks.
+- My own letters as samples (2026-11-12, my request: "style their new responses in my writing"): before writing, the
+  agent runs `past "cover letter"`: letters I wrote myself, kept in local/long_answers.json under a question with
+  "cover letter" in it (added by hand; the agent's own letters are still never kept). It writes in my voice from them
+  (assist.past_answers: its next step says letter --para, not guess --essay).
 
 ACCOUNTS (added 2026-10-10, my call; accounts.py)
 - The agent makes the accounts job sites ask for, with local_config.json "accounts_email" (else the answer bank's email)
