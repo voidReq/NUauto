@@ -22,7 +22,8 @@ guess, recorded with `guess`; at the last page it asks you everything at once (`
 for next time. The Submit question lists every guess you haven't confirmed, every answer you changed, and anything
 typed that came from neither the bank nor a guess (review_lines).
 When you /exit, the terminal asks whether you submitted; y marks the row Applied (dated today), then the
-same job is submitted on NUworks too (apply.submit_nuworks_side, the tested NUworks code). For an Other jobs tab
+same job is submitted on NUworks too (apply.submit_nuworks_side, the tested NUworks code; on the homelab by itself,
+with no window: nuworks_side_now, and its timer retries one NUworks was too busy for). For an Other jobs tab
 row, y only marks it Applied (those rows have no weekly or total cap), and its answers come from Bank.
 
 Code checks every call (Claude Code hooks -> `assist.py hook pre|post`, logic in decide / update_after):
@@ -2051,13 +2052,14 @@ def run_locked(number, other, row, url, where, tab, slot, slot_lock, hand=False,
         print(f"  Its password (this run only): {view.password}")
     log_.write("Starting the agent. Captchas, email codes and Submit are yours. Type /exit in the session when done.")
     import time
-    started = time.time()
+    started = ended = time.time()
     try:
         subprocess.run(cmd, env={**os.environ, STATE_ENV: d, **({"DISPLAY": view.display} if view else {})},
                        cwd=config.STATE_DIR)
     except KeyboardInterrupt:
         pass
     finally:
+        ended = time.time()
         after_session(d, started, log_)
         if view:
             view.stop()
@@ -2071,16 +2073,20 @@ def run_locked(number, other, row, url, where, tab, slot, slot_lock, hand=False,
     if free:  # you chose "End: requires free-response" on the review page: the row is marked, nothing went out
         log_.write(f"{where.capitalize()}: wants answers in your own words (tagged free-response in the sheet); not submitted.")
         dropped = True  # (from here on like a drop: no "Did it go through?", the row is left as it is)
-    if view and not laptop and not dropped:  # the review page asks too: its Yes / No types your answer here (review.py)
+    said = end_answer(d, ended) if view and not laptop and not dropped else None  # End: it went through / not submitted
+    if said:  # the page says so (not the question) until the run closes; the lists leave it out (gui.assistants)
+        write_private(os.path.join(d, ATTENTION), {"kind": "answered", "answer": said, "since": time.time(), "said": ""})
+        log_.write(f"{ENDED_ON_PAGE}: {'it went through' if said == 'y' else 'not submitted'}.")
+    if view and not laptop and not dropped and not said:  # the review page asks too: its Yes / No types your answer here (review.py)
         import time as t_
         write_private(os.path.join(d, ATTENTION), {"kind": "finish", "since": t_.time(), "time": t_.time(), "said": ""})
         from nuauto import daily
         from nuauto import review
         daily.discord_assistant(f"**NUauto: {row.company}**\nSession ended ({where}). Did it go through? Answer on the review page: "
                       f"{review.page_url(slot)}")
-    reply = "laptop" if laptop else "n" if dropped else None
+    reply = "laptop" if laptop else "n" if dropped else said
     try:
-        while not laptop and not dropped:
+        while not laptop and not dropped and not said:
             reply = ask_line(f"\nDid you press Submit for {where} ({row.company}) and see the confirmation? "
                              "[y = yes / n = no / f = no: it wants answers in my own words (tag it free-response)]: ",
                              FINISH_WAIT if view else None)
@@ -2112,18 +2118,24 @@ def run_locked(number, other, row, url, where, tab, slot, slot_lock, hand=False,
     log_.write(f"{where.capitalize()} marked Applied (dated today).")
     if other or hand:  # an Other jobs tab job is not on NUworks; a by-hand row was the NUworks application itself
         return
-    if config.IS_SERVER:  # NUworks submits only when you start them (a terminal, or a tap on NUauto's page): not here
-        sheet.append_note(ws, row.number, row.url, HOMELAB_NUWORKS_NOTE.format(row=row.number))
-        log_.write(f"The NUworks side waits for you: Apply > Company sites (NUauto's page), or `nuauto assist nuworks "
-                   f"{row.number}`.")
+    if config.IS_SERVER:  # (2026-11-12, your request) its NUworks side goes by itself: now, else the timer's next run
+        sheet.append_note(ws, row.number, row.url, queued_note())
+        log_.write("NUworks side: submitting the same job on NUworks now, by itself (no window; Ctrl+C stops)...")
+        status, text = nuworks_side_now(ws, row.number, row.url)
+        log_.write(f"NUworks side: {text}")
         return
     from nuauto import remote
     try:
         with remote.nuworks_turn():
             nuworks_side(ws, row.number)
     except remote.NuworksBusy as e:
-        print(f"The NUworks side is not submitted now: {e} Retry it from Apply > Company sites (or `nuauto assist nuworks "
-              f"{row.number}`).")
+        if config.REMOTE_ASSIST:  # the homelab's timer submits it once NUworks is free (nuworks_side_due)
+            sheet.append_note(ws, row.number, row.url, queued_note())
+            print(f"The NUworks side is not submitted now: {e} The homelab submits it by itself once NUworks is free.")
+        else:  # Apply's Still owed offers it
+            sheet.append_note(ws, row.number, row.url, f"NUworks side NOT submitted: {str(e).rstrip('.')}.")
+            print(f"The NUworks side is not submitted now: {e} Retry it from Apply > Still owed (or `nuauto assist "
+                  f"nuworks {row.number}`).")
 
 
 def mark_free(other, row, log_):
@@ -2147,6 +2159,25 @@ DROP_FILE = "dropped.json"  # in a homelab run folder: you chose "End: drop it" 
 # with a "free-response" tag; it stays where it was, for the assistant again later (sheet.mark_free_response).
 FREE_MARK = "FREE RESPONSE: the application wants answers in your own words"
 FREE_FILE = "free_response.json"  # in a homelab run folder: you chose "End: requires free-response" (no "Did it go through?")
+# In a homelab run folder: you ended the session with "End: it went through" (y) or "End: not submitted" (n) on its screen
+# (2026-11-12, your request: one End menu, no second question after): the launcher takes that answer instead of asking.
+END_FILE = "end_answer.json"
+ENDED_ON_PAGE = "Ended on the review page"  # the launcher's line then (review.ENDED waits for it in its terminal)
+
+
+END_FRESH = 120  # seconds: an End-menu answer counts only if given this close to the session's end (end_answer)
+
+
+def end_answer(d, ended):
+    """Your answer from the End menu (END_FILE in the run folder d): "y", "n", or None (not given there; or given over
+    END_FRESH before the session ended at `ended`: its /exit did not take then, so the end question asks again)."""
+    try:
+        with open(os.path.join(d, END_FILE)) as f:
+            data = json.load(f)
+        a, at = data.get("answer"), float(data.get("at"))
+    except (OSError, ValueError, AttributeError, TypeError):
+        return None
+    return a if a in ("y", "n") and at >= ended - END_FRESH else None
 
 BROWSER_DIR = "browser"  # in the run folder: the browser tool's own output (downloads, snapshots) and the resume copy
 
@@ -2180,10 +2211,105 @@ def ask_line(prompt, timeout=None):
     return line.strip().lower()
 
 
-# In Notes after a homelab run of a NUworks job; "NUworks side NOT submitted" puts the row in the GUI's retry list.
-HOMELAB_NUWORKS_NOTE = ("NUworks side NOT submitted yet (the company site was done on the homelab; its NUworks side waits "
-                        "for you): Apply > Company sites in NUauto (the laptop's or the homelab's page), or `nuauto "
-                        "assist nuworks {row}` on the laptop.")
+# The NUworks side of a company-site application (2026-11-12, your request: "so we don't have jobs going to still owed"):
+# after a homelab session's Yes the row's Notes get QUEUED and the homelab submits it by itself (nuworks_side_now: at once,
+# else its timer every 10 minutes, nuworks_side_due); the laptop queues it there too when NUworks was busy. Its outcome
+# note follows. Notes with a NOT_SENT text after the last QUEUED: it did not go out; Apply's Still owed offers it to you.
+QUEUED = "NUworks side queued"
+NOT_SENT = ("NUworks side NOT submitted", "before Submit; not submitted")
+QUEUED_STUCK = 3600  # seconds: a row queued this long without going out shows in Still owed again (queued_stuck)
+
+
+def queued_note(now=None):
+    from datetime import datetime
+    return f"{QUEUED} {(now or datetime.now()):%Y-%m-%d %H:%M}: NUauto on the homelab submits it by itself."
+
+
+def nuworks_side_state(notes):
+    """Where a NUworks-tab row's NUworks side stands, from its Notes (the latest NUworks-side note counts): "done" (it
+    went out, or Submit was clicked there: nuworks_side_blocked), "queued" (the homelab submits it by itself), "retry"
+    (it did not go out: yours, in Apply's Still owed), or None (nothing about it)."""
+    if nuworks_side_blocked(notes):
+        return "done"
+    queued, not_sent = notes.rfind(QUEUED), max(notes.rfind(m) for m in NOT_SENT)
+    if queued >= 0 and queued > not_sent:
+        return "queued"
+    return "retry" if not_sent >= 0 else None
+
+
+def queued_stuck(notes, now=None):
+    """A queued NUworks side that did not go out by itself (queued over QUEUED_STUCK ago, or no homelab assistant to
+    send it): Apply's Still owed shows it again, with Submit on NUworks too."""
+    from datetime import datetime
+    if not config.REMOTE_ASSIST:
+        return True
+    stamps = re.findall(re.escape(QUEUED) + r" (\d{4}-\d\d-\d\d \d\d:\d\d)", notes)
+    if not stamps:
+        return True
+    since = datetime.strptime(stamps[-1], "%Y-%m-%d %H:%M")
+    return ((now or datetime.now()) - since).total_seconds() > QUEUED_STUCK
+
+
+NUWORKS_LATER = ("NUworks is busy now (an Apply run, the update, a by-hand session or the laptop's turn): it stays queued "
+                 "and the homelab tries again every 10 minutes.")
+
+
+def nuworks_side_now(ws, number, url):
+    """(homelab; 2026-11-12, your request) Submit a queued row's NUworks side now, by itself: the tested NUworks code
+    (apply.submit_nuworks_side: Apply's checks, a screenshot before Submit, the confirmation checked after), with no
+    window (nobody watches it) and nobody to ask (a question the answer bank can't answer stops it before Submit: the
+    row goes to Still owed with why). One NUworks run at a time: not beside a by-hand session, a run holding the NUworks
+    browser (Apply, the update), or the laptop's NUworks turn. Never from an agent's shell (CLAUDECODE).
+    Returns (status, what to say): "sent" (its outcome is in Notes), "busy" (stays queued: the timer tries again),
+    "skip" (the row is not queued any more)."""
+    from nuauto import apply
+    from nuauto import browser
+    from nuauto import remote
+    from nuauto import sheet
+    if os.environ.get("CLAUDECODE"):
+        return "busy", "not from a Claude Code session (it submits a real application): it stays queued."
+    if nuworks_session():
+        return "busy", NUWORKS_LATER
+    try:
+        browser.lock_profile("nuauto assist (NUworks side, by itself)")  # submit_nuworks_side's launch() reuses it
+    except browser.ProfileBusy:
+        return "busy", NUWORKS_LATER
+    headless = os.environ.get("AUTO_HEADLESS")
+    try:
+        if nuworks_session():  # (one could have started meanwhile; with the browser held, no other can now)
+            return "busy", NUWORKS_LATER
+        with remote.nuworks_turn():
+            row = next((r for r in sheet.read_rows(ws) if r.number == number), None)
+            if row is None or row.url != url or row.status != "Applied" or nuworks_side_state(row.notes) != "queued":
+                return "skip", "the row is not queued for it any more: nothing sent."
+            os.environ["AUTO_HEADLESS"] = "1"
+            return "sent", apply.submit_nuworks_side(row, ws, answers.NoTerminalIO())
+    except remote.NuworksBusy:
+        return "busy", NUWORKS_LATER
+    finally:
+        browser.unlock_profile()
+        if headless is None:
+            os.environ.pop("AUTO_HEADLESS", None)
+        else:
+            os.environ["AUTO_HEADLESS"] = headless
+
+
+def nuworks_side_due():
+    """(homelab, its timer every 10 minutes: `nuauto assist auto`) The oldest queued NUworks side, submitted now
+    (nuworks_side_now). One per run: a submit takes a minute or two, the timer's run has 5. Any hour: it pings nobody."""
+    from nuauto import sheet
+    if not (config.IS_SERVER and config.REMOTE_ASSIST):
+        return
+    try:
+        ws = sheet.open_worksheet(interactive=False)
+        due = [r for r in sheet.read_rows(ws) if r.status == "Applied" and nuworks_side_state(r.notes) == "queued"]
+    except Exception:  # quiet, like the rest of the timer's run (the Google login has its own warnings); a row that
+        return          # stays queued shows in Still owed again after QUEUED_STUCK (queued_stuck)
+    if not due:
+        return
+    r = min(due, key=lambda r: (re.findall(re.escape(QUEUED) + r" ([\d: -]{16})", r.notes) or [""])[-1])
+    status, text = nuworks_side_now(ws, r.number, r.url)
+    print(f"NUworks side of row {r.number} ({r.company}): {text}")
 
 
 def nuworks_side_blocked(notes):

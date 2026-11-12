@@ -131,7 +131,7 @@ assert run_limited({3}, row=3) == [3]
 # the NUworks side when another process has the NUworks browser: no crash, nothing opened, "NOT submitted" in Notes
 # (so the row is on the GUI's retry list) and a retry still allowed
 import subprocess, sys
-from nuauto import assist, browser, config, gui
+from nuauto import assist, browser, config
 tmp = tempfile.mkdtemp()
 config.LOCAL_DIR, config.LOGS_DIR, config.PROFILE_LOCK_PATH = tmp, tmp, os.path.join(tmp, "browser_profile.lock")
 holder = subprocess.Popen([sys.executable, "-c", "import sys\nfrom nuauto import browser, config\n"
@@ -149,7 +149,7 @@ finally:
     sheet.append_note, apply.sync_playwright = saved
     holder.communicate("")
 assert notes == [(9, note)] and "probe.py" in note and "nuauto assist nuworks 9" in note, notes
-assert note.startswith(gui.NUWORKS_SIDE_NOT_SENT[0]) and assist.nuworks_side_blocked(note) is None, note
+assert note.startswith(assist.NOT_SENT[0]) and assist.nuworks_side_state(note) == "retry", note
 
 # Start's order (apply.apply_order: `--order`, the GUI's Sort menu): a named order or your own steps. A tie on one step
 # goes to the next, a row missing a step's value comes after the rest there, the last ties in sheet order

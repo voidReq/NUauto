@@ -564,9 +564,6 @@ def closing_of(day):
             "past": left is not None and left < 0, "soon": left is not None and 0 <= left <= jobs.URGENT_DAYS}
 
 
-NUWORKS_SIDE_NOT_SENT = ("NUworks side NOT submitted", "before Submit; not submitted")
-
-
 def facts_data():
     """What job_facts reads, loaded once per list: the scores, the pool by job id, the kinds of work, the job list (each
     posting's day and Featured tag at the last update)."""
@@ -597,7 +594,8 @@ def job_facts(r, data, d=None):
 
 def company_rows(rows, facts=False):
     """agent: Needs Human rows for the assistant; other: Needs Human rows only you can finish; site: Applied rows
-    whose company site still wants you; retry: Applied rows whose NUworks side did not go out (nuauto assist nuworks).
+    whose company site still wants you; retry: Applied rows whose NUworks side did not go out (nuauto assist nuworks), or
+    was queued for the homelab and did not go out by itself (assist.queued_stuck; a fresh one is left out: it goes alone).
     facts: each row also gets its match % and pay (the Apply tabs; the menu counts skip reading them)."""
     from nuauto import assist
     data = facts_data() if facts else None
@@ -616,8 +614,8 @@ def company_rows(rows, facts=False):
         elif r.status == "Applied" and r.notes.startswith(sheet.SITE_MARK):
             url, why = assist.site_target(r)  # the posting's link to the company site: the assistant can apply there
             site.append(view(r, target=url, host=urlparse(url).hostname if url else None, why=why))
-        elif r.status == "Applied" and any(m in r.notes for m in NUWORKS_SIDE_NOT_SENT) \
-                and assist.nuworks_side_blocked(r.notes) is None:
+        elif r.status == "Applied" and (assist.nuworks_side_state(r.notes) == "retry" or (  # it did not go out, or
+                assist.nuworks_side_state(r.notes) == "queued" and assist.queued_stuck(r.notes))):  # not by itself
             retry.append(view(r))
     return agent, other, site, retry
 

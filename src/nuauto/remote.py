@@ -526,7 +526,10 @@ def record_started(c, auto=True):
 
 
 def auto():
-    """The timer's run: start what the queue allows now. Quiet when there is nothing to do."""
+    """The timer's run: a queued NUworks side first (assist.nuworks_side_due: any hour, whatever remote_auto says), then
+    start what the queue allows now. Quiet when there is nothing to do."""
+    from nuauto import assist
+    assist.nuworks_side_due()
     tabs = auto_tabs()
     if not (config.IS_SERVER and config.REMOTE_ASSIST and tabs):
         return

@@ -65,7 +65,8 @@ Job pool
 Company-site agent
   assist.py       the agent. run() / run_locked() start `claude`; hook_main() -> hook() -> pre_hook() / decide() /
                   update_after() is the guard; bank() the answer-bank command; assist_target(), by_hand_target(),
-                  other_target(), nuworks_side(); slot / site / row locks; Bank (which answer file a run uses).
+                  other_target(), nuworks_side(), nuworks_side_now() / nuworks_side_due() / nuworks_side_state() (the
+                  homelab's NUworks side by itself); slot / site / row locks; Bank (which answer file a run uses).
   accounts.py     the job-site logins the agent makes: site(), password_for() (placeholders), never(), candidates_for(),
                   export() / to_bitwarden(), import_own().
   mail.py         read-only Gmail: lookup() (pick, find_code, find_link), login(), ready() / days_left().
@@ -144,7 +145,9 @@ MAIN FLOWS
     assist.run: find_row, check_limits (NUworks rows), row + slot + job-site locks, the homelab's claim; run_locked: a
     logs/<stamp>_assist_row<N>/ dir with mcp.json + settings.json (hooks), `claude` with the Playwright MCP browser. Every
     tool call -> `assist.py hook pre|post` -> decide() / update_after(); answer-bank Bash -> bank(). After /exit, "did you
-    submit?"; y -> sheet.mark_applied_by_hand -> (company-site NUworks rows) nuworks_side -> apply.submit_nuworks_side.
+    submit?" (on the homelab the End menu's answer, END_FILE, instead); y -> sheet.mark_applied_by_hand -> (company-site
+    NUworks rows) nuworks_side -> apply.submit_nuworks_side; on the homelab the QUEUED note, then nuworks_side_now (no
+    window), and the timer's nuworks_side_due (remote.auto) for one NUworks was busy for.
     `assist nuworks <row>` retries only that last step.
   The homelab's page and queue
     nuauto-web -> web.main -> gui.serve_remote (paired devices, port 8766; review.py serves the Assistants screens).

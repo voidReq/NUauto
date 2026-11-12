@@ -127,7 +127,8 @@ A question from a run (an unknown form field, an option to pick, "did it submit?
                  Human rows only you can finish there: a cover letter, a transcript; the assistant can work them on NUworks
                  with you, or a chip says why not), Still owed (submitted on NUworks, the company site still wants you:
                  the assistant's Apply when the posting's link to that site is known (assist.site_target; else a "no
-                 assistant" chip says why), and Mark the company site done; the NUworks side to send again: Submit on NUworks too), Applied ("not on
+                 assistant" chip says why), and Mark the company site done; the NUworks side to send again: Submit on NUworks too (one
+                 queued for the homelab only once it didn't go by itself within an hour: assist.queued_stuck)), Applied ("not on
                  NUworks" chip when NUworks has no application for it: it doesn't count toward the total; the job's own
                  hiring stage at the last check (jobs.application_answer): "job interviewing", then amber "job stopped
                  interviewing" or "job filled" (sheet.maybe_filled: it may be filled; withdrawing on NUworks frees its
@@ -271,9 +272,11 @@ A question from a run (an unknown form field, an option to pick, "did it submit?
                  its terminal (Interrupt), its latest message, Ready to submit (what, on which page, what you haven't
                  confirmed, the screen when it asked; Approve / Decline with a note), the end question (Yes / No / No: do
                  it on the laptop), a question Claude Code asks in its own terminal (answer it there; the reply box stays
-                 off), Reply, and one End menu (2026-11-06): End session, End: requires free-response (the row tagged
-                 free-response, stays as it was), End: do it on the laptop, End: drop it (the row Failed with a reason,
-                 then /exit); the end question also has "No: it wants free-response answers". It asks again every 4 s; what you type is kept
+                 off), Reply, and one End menu (2026-11-06), each with its answer, no question after (2026-11-12):
+                 End: it went through (Applied; a NUworks job's NUworks side then goes by itself), End: not submitted,
+                 End: requires free-response (the row tagged free-response, stays as it was), End: do it on the laptop,
+                 End: drop it (the row Failed with a reason, then /exit); the end question (a session that ended by
+                 itself) also has "No: it wants free-response answers". It asks again every 4 s; what you type is kept
                  (docs/REMOTE.md, AN ASSISTANT'S SCREEN). The screen keeps the session it opened on (its key,
                  review.key): a session that ended, a slot nobody runs in, or the next session started in that slot
                  goes back to Apply's Assistants tab with a toast (2026-10-28, my request: it showed "No session there",

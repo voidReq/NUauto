@@ -170,9 +170,20 @@ COMPANY-SITE AGENT (assist.py, prompts/ASSIST_PROMPT.md)
 THE HOMELAB (remote.py, review.py, link.py, screen.py, deploy.py, sync.py; gui.py in REMOTE mode)
 - Assistant on the homelab (remote_assist only): the browser view listens on web_listen_host (the Tailscale IP; never every
   address), the shared screen itself on 127.0.0.1 only, behind a password made per run and shown only in the session's
-  terminal; the agent reads only the writeups copy and the resume; the NUworks side of a company-site application done
-  there waits for your tap (Apply's Still owed, either machine's page) | screen.listen_host, commands; config (IS_SERVER
+  terminal; the agent reads only the writeups copy and the resume | screen.listen_host, commands; config (IS_SERVER
   read paths); assist.run, assist.main | test_screen, test_assist
+- (2026-11-12, my call: "so we don't have jobs going to still owed") The NUworks side of a company-site application done
+  there goes by itself after my Yes (the row was Approved and I approved its company-site Submit): the tested NUworks
+  code (apply.submit_nuworks_side: Apply's checks, screenshot before Submit, confirmation after, the click mark first),
+  no window, nobody to ask (a question stops it before Submit: Still owed); one NUworks run at a time (not beside a
+  by-hand session, the NUworks browser in use, or the laptop's NUworks turn: it stays queued, the timer retries, one
+  per run); only a row still Applied, same link, whose latest NUworks-side note is "queued"; never from an agent's
+  shell (CLAUDECODE); a row queued over an hour shows in Still owed again | assist.nuworks_side_now, nuworks_side_due,
+  nuworks_side_state, queued_stuck; remote.auto | test_remote, test_assist
+- The End menu's answer (End: it went through / not submitted) is written before /exit and removed if /exit can't be
+  typed; the launcher reads only "y" / "n" from it, given within assist.END_FRESH of the session's end (a stale one, an
+  /exit that didn't take, is ignored), else it asks as before | review.end_with, assist.end_answer |
+  test_review, test_remote, test_assist
 - A Submit-type action there is approved only on NUauto's page (Assistants screen), by a paired device: the guard writes the
   question (what, page, review_lines, a screenshot) and waits up to assist.WAIT for an answer with that question's id; no
   answer or an error = blocked. A later Approve is a pass for exactly that action on that page with the same typed values
@@ -225,7 +236,8 @@ THE WINDOW (gui.py, gui_static/)
 - From a Claude Code shell (CLAUDECODE) the real window opens its own window only: --no-open is refused and the ready line prints no secret; agents use --demo (fake) or --view (real data, read-only), and never click Start | gui.main, gui.printed_url | test_gui, test_view
 - `--view` can't change or start anything: every POST but Quit refused, no Task, no lock, no sync, answers / logs hidden | gui.VIEW (Handler.do_POST, App.start, run_group) | test_view
 - One window server at a time (a second start opens a window on the first, with a secret that can do nothing else) | gui.running_instance, /api/window | test_gui (second start)
-- Runs you watch get a visible browser (AUTO_HEADLESS cleared for apply, logins, the NUworks side) | gui.VISIBLE | no test
+- Runs you watch get a visible browser (AUTO_HEADLESS cleared for apply, logins, the NUworks side you start) | gui.VISIBLE | no test
+  (the homelab's own NUworks side after an assistant's Yes runs with no window: nobody watches it; assist.nuworks_side_now)
 - Answer-bank edits: refused while a run uses the NUworks bank, refused if a run saved an answer since you opened it, duplicate questions/aliases refused; a deleted question is recorded so the homelab's copy drops it too | gui.answers_put, answers.forget | test_gui, test_share
 - Checks never open a login page or show a secret | sheet.open_worksheet(interactive=False), health.* | test_health (interactive False; webhook not shown)
 - Demo mode never touches real files or the network: it needs its own NUAUTO_STATE_DIR, its browser has a proxy that does not exist and aborts every non-NUworks request, the sheet and claude are fakes | config.py (DEMO check), browser.launch, demo.serve_nuworks | test_demo (refuses without its own folder)

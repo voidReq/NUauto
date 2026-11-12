@@ -512,6 +512,40 @@ assert "check NUworks" in blocked("NUworks side: Submit clicked but no confirmat
 assert "check NUworks" in blocked("NUworks side: stopped by Ctrl+C after Submit was clicked; check NUworks.")
 assert blocked("NUworks side: stopped by Ctrl+C before Submit; not submitted.") is None
 
+# where the NUworks side stands (2026-11-12): the latest NUworks-side note counts; queued = the homelab sends it by itself
+from datetime import datetime as _dt  # noqa: E402
+state_of, Q = assist.nuworks_side_state, assist.queued_note(_dt(2026, 11, 12, 14, 3))
+assert Q.startswith(assist.QUEUED + " 2026-11-12 14:03:")
+assert state_of("Applied on the company site.") is None
+assert state_of(f"Applied on the company site. {Q}") == "queued"
+assert state_of(f"x {Q} NUworks side NOT submitted: No answer for 'Start date'.") == "retry"
+assert state_of(f"x {Q} NUworks side: stopped by Ctrl+C before Submit; not submitted.") == "retry"
+assert state_of(f"x NUworks side NOT submitted: busy. {Q}") == "queued"           # queued again after an older miss
+assert state_of(f"x {Q} NUworks side submitted too (confirmed by NUworks page).") == "done"
+assert state_of(f"x {Q} {NUWORKS_CLICK_MARK}") == "done"
+assert state_of("NUworks side NOT submitted yet (the company site was done on the homelab...)") == "retry"  # older rows
+real_remote = config.REMOTE_ASSIST
+try:
+    config.REMOTE_ASSIST = True
+    assert not assist.queued_stuck(f"x {Q}", now=_dt(2026, 11, 12, 15, 3))           # an hour: still its to send
+    assert assist.queued_stuck(f"x {Q}", now=_dt(2026, 11, 12, 15, 4))               # longer: Still owed shows it again
+    assert not assist.queued_stuck(f"{assist.queued_note(_dt(2026, 11, 1))} {Q}", now=_dt(2026, 11, 12, 14, 30))  # the latest
+    assert assist.queued_stuck("x " + assist.QUEUED + " soon", now=_dt(2026, 11, 12))   # no time in it: shown
+    config.REMOTE_ASSIST = False
+    assert assist.queued_stuck(f"x {Q}", now=_dt(2026, 11, 12, 14, 4))               # no homelab assistant to send it
+finally:
+    config.REMOTE_ASSIST = real_remote
+# the End menu's answer in a run folder (review.end_with)
+end_d = tempfile.mkdtemp()
+assert assist.end_answer(end_d, 1000) is None
+for content, want in (('{"answer": "y", "at": 990}', "y"), ('{"answer": "n", "by": "Phone", "at": 1005}', "n"),
+                      ('{"answer": "y", "at": 1000.5}', "y"),                       # (written just after: the race)
+                      ('{"answer": "y", "at": 870}', None),                          # its /exit did not take then: asked
+                      ('{"answer": "y"}', None), ('{"answer": "y", "at": "soon"}', None),
+                      ('{"answer": "maybe", "at": 999}', None), ("[]", None), ("not json", None)):
+    open(os.path.join(end_d, assist.END_FILE), "w").write(content)
+    assert assist.end_answer(end_d, 1000) == want, content
+
 # ---- the Other jobs tab: jobs that are not on NUworks
 from nuauto import sheet  # noqa: E402
 
