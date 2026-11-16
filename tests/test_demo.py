@@ -51,7 +51,7 @@ def rows():
 # the fake sheet runs the real sheet.py rules
 by = rows()
 assert by["Harbor Embedded"].status == "Approved" and by["Iron Valley Medical"].status == "Needs Human"
-assert sheet.check_limits_safe(list(by.values())) == (5, 6)  # one applied 10 days ago: total only
+assert sheet.check_limits_safe(list(by.values())) == (5, 7)  # two sent before this week (10 and 9 days ago): total only
 ws = sheet.open_worksheet(interactive=False)
 sheet.unapprove(ws, by["Quarry Hardware"].number, by["Quarry Hardware"].url)
 assert rows()["Quarry Hardware"].status == "Proposed"

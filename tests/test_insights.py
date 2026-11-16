@@ -101,10 +101,44 @@ assert [x["label"] for x in s3["statuses"]] == ["Applied", "Accepted", "Rejected
 # interviews (Interview, and Accepted over it) of all sent rows; the ring lists Interview in the sheet's order
 s4 = insights.summarize(pool, details, [row(2, "1", "Applied"), row(3, "6", "Interview"), row(4, "2", "Accepted"), row(5, "3", "Rejected")], today=TODAY)
 assert [x["label"] for x in s4["statuses"]] == ["Applied", "Interview", "Accepted", "Rejected"], s4["statuses"]
-assert s4["applied"]["count"] == 4 and s4["interviews"] == {"interviews": 2, "sent": 4, "percent": 50}, s4["interviews"]
-assert "Interviews: 2 of 4 sent (50%)" in insights.text(s4)
-assert insights.summarize(pool, details, [], today=TODAY)["interviews"] == {"interviews": 0, "sent": 0, "percent": None}
+assert s4["applied"]["count"] == 4 and s4["interviews"] == {"interviews": 2, "second": 0, "sent": 4, "percent": 50}, s4["interviews"]
+assert "Interviews: 2 of 4 sent (50%)" in insights.text(s4) and "second round" not in insights.text(s4)
+assert insights.summarize(pool, details, [], today=TODAY)["interviews"] == {"interviews": 0, "second": 0, "sent": 0, "percent": None}
+# a second-round interview (Interview 2) is sent, had an interview, and is counted apart too; the ring has it after Interview
+s5 = insights.summarize(pool, details, [row(2, "1", "Interview 2"), row(3, "6", "Interview"), row(4, "2", "Applied")], today=TODAY)
+assert [x["label"] for x in s5["statuses"]] == ["Applied", "Interview", "Interview 2"], s5["statuses"]
+assert s5["applied"]["count"] == 3 and s5["interviews"] == {"interviews": 2, "second": 1, "sent": 3, "percent": 67}, s5["interviews"]
+assert "Interviews: 2 of 3 sent (67%), 1 at a second round" in insights.text(s5)
 assert insights.summarize(pool, details, None, today=TODAY)["interviews"] is None
+
+# sets and facets (the GUI's chips): one set at a time, narrowed by every chosen facet
+assert s["pick"] == "pool" and s["only"] == [] and s["view"] == s["pool"]
+assert [(x["key"], x["count"]) for x in s["sets"]] == [("pool", 5), ("applied", 3)], s["sets"]  # empty sets left out
+fs = {x["key"]: x for x in s["facets"]}  # the pool's: two in Massachusetts, one remote, kinds of work, your tags
+assert fs["ma"]["count"] == 2 and fs["remote"]["count"] == 1 and fs["cat:security"]["count"] == 2 and fs["tag:AR/XR"]["count"] == 1
+assert [x["key"] for x in s["facets"]] == [k for k in insights.facet_order() if k in fs] and not any(x["on"] for x in s["facets"])
+assert fs["ma"]["label"] == "Massachusetts" and fs["cat:security"]["label"] == "Security" and fs["tag:AR/XR"]["label"] == "AR/XR"
+v = insights.summarize(pool, details, rows, categories={"6": "hardware"}, today=TODAY, pick="pool", only=["ma"])
+assert v["only"] == ["ma"] and v["view"]["count"] == 2 and v["view"]["in_ma"] == 2 and v["pool"]["count"] == 5
+assert [(x["key"], x["count"]) for x in v["sets"]] == [("pool", 2), ("applied", 2)]  # each set's count under the facets
+vf = {x["key"]: x for x in v["facets"]}
+assert vf["ma"]["on"] and vf["ma"]["count"] == 2 and vf["cat:security"]["count"] == 1 and "remote" not in vf  # remote: none in MA
+v2 = insights.summarize(pool, details, rows, today=TODAY, pick="pool", only=["ma", "cat:security"])
+assert v2["view"]["count"] == 1 and v2["only"] == ["ma", "cat:security"]
+v3 = insights.summarize(pool, details, rows, categories={"6": "hardware"}, today=TODAY, pick="applied", only=["cat:hardware", "nonsense", "tag:nobody"])
+assert v3["pick"] == "applied" and v3["only"] == ["cat:hardware"] and v3["view"]["count"] == 1  # unknown facets dropped
+v4 = insights.summarize(pool, details, rows, today=TODAY, pick="pool", only=["ma", "remote"])  # a chosen one stays, at 0
+assert v4["view"]["count"] == 0 and {x["key"]: x["count"] for x in v4["facets"] if x["on"]} == {"ma": 0, "remote": 0}
+assert insights.summarize(pool, details, rows, today=TODAY, pick="bogus")["pick"] == "pool"
+# the interview sets: Interview holds Interview 2 and Accepted rows too; Interview 2 only the second rounds
+iv = insights.summarize(pool, details, [row(2, "1", "Interview 2"), row(3, "6", "Interview"), row(4, "2", "Accepted"),
+                                        row(5, "3", "Rejected"), row(6, "5", "Applied")], today=TODAY, pick="interview")
+assert {x["key"]: x["count"] for x in iv["sets"]} == {"pool": 5, "applied": 5, "interview": 3, "interview2": 1, "accepted": 1, "rejected": 1}
+assert iv["view"]["count"] == 3 and {x["key"] for x in iv["facets"]} >= {"ma", "cat:security"}
+assert insights.summarize(pool, details, [row(2, "1", "Applied")], today=TODAY, pick="rejected")["sets"][-1] == {"key": "rejected", "label": "Rejected", "count": 0}
+# several places (an internship): Massachusetts if any is
+assert insights.states_of({"location": "Austin, TX; Boston, MA"}) == {"TX", "MA"} and insights.states_of({"states": ["US-MA"]}) == {"MA"}
+assert insights.facets({"location": "Remote, USA"}, None) == {"remote"} and insights.facets({}, "nonsense") == {"cat:other"}
 
 # empty everything: no crash, nothing made up
 e = insights.summarize([], {}, [], today=TODAY)

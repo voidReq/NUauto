@@ -45,7 +45,7 @@ GIT
 
 HARD LIMITS
 - Under 100 applications total.
-- Weekly cap, enforced in code (count sent rows (Applied, Interview, Accepted, Rejected) with a date in the current week; refuse to
+- Weekly cap, enforced in code (count sent rows (Applied, Interview, Interview 2, Accepted, Rejected) with a date in the current week; refuse to
   run past the limit). sheet.py: MAX_PER_WEEK = 11 is the default, changeable in the GUI (Settings > Applying > Applications per week, local_config.json "max_per_week", 1-30; sheet.max_per_week()), MAX_TOTAL = 99 (decided 2026-10-03). A week =
   fixed 7-day periods from local_config.json "week_start" (sheet.week_window); without it, the last
   7 days. Mine: week_start 2026-10-06 (reset because I started applying late), then every 7 days.
@@ -134,7 +134,7 @@ ANSWER BANK (answers.json)
 SHEET
 Columns (row 1): URL, Company, Title, Status, Notes, Date. setup_sheet.py made them (one-time,
 never overwrites existing data), with the Status dropdown and row 1 frozen.
-Status values: Proposed, Approved, Applied, Failed, Needs Human, Interview, Accepted, Rejected
+Status values: Proposed, Approved, Applied, Failed, Needs Human, Interview, Interview 2, Accepted, Rejected
 - Proposed: job added by me (or suggested), not approved yet.
 - Approved: I approved it. The script only ever acts on these rows.
 - Applied: submitted. Fill in Date.
@@ -145,11 +145,13 @@ Status values: Proposed, Approved, Applied, Failed, Needs Human, Interview, Acce
   Rejected (those may still be set straight from Applied); a row's More menu, same as Accepted / Rejected, back to Applied
   too. A sent status like them: both limits, never leaves the NUworks tab, never removed, date kept (sheet.SENT). Also on
   the Other jobs tab. Mine to record: never read from NUworks (its job-level "interviewing" is another thing).
+  Interview 2 (added 2026-11-16, my request): a second-round interview. The same in every way as Interview (the menu's
+  Mark interview 2, back to Interview or Applied; Insights counts it as an interview, and apart as a second round).
 - Failed / Needs Human: script stopped. Put the reason in Notes.
 - Notes starting "Dropped <date>: <reason>" (sheet.drop, added 2026-10-12, my request): a Failed row I chose not to apply
   to (closed, a duplicate, a bad location): Drop in a row's More menu on the GUI's Apply screen (both machines' pages,
   every tab). Only Approved / Needs Human rows; the row stays as a record, so Review never re-offers it.
-  Withdrawn (my call, 2026-11-04): an Applied or Interview row I withdrew on the site: Drop > I withdrew it (the one
+  Withdrawn (my call, 2026-11-04): an Applied or Interview (2) row I withdrew on the site: Drop > I withdrew it (the one
   reason on a sent row). Failed like any drop, its date kept: it stops counting toward the weekly cap and the total.
 - Notes starting "ALSO APPLY ON COMPANY SITE" (SITE_MARK): submitted on NUworks, but the
   company also wants its own site; I do that part.

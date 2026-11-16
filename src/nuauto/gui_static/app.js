@@ -669,9 +669,10 @@ function markRow(kind, t, tab) {  // tab "other": a row of the sheet's Other job
   });
 }
 
-// What happened to a sent application: an Interview, Accepted or Rejected (or back to Applied). It still counts toward your
-// limits (it went out); the sheet's row says when you marked it.
-const SENT = ["Applied", "Interview", "Accepted", "Rejected"];
+// What happened to a sent application: an Interview, a second one (Interview 2), Accepted or Rejected (or back to Applied).
+// It still counts toward your limits (it went out); the sheet's row says when you marked it.
+const SENT = ["Applied", "Interview", "Interview 2", "Accepted", "Rejected"];
+const OUTCOMES = ["Interview", "Interview 2", "Accepted", "Rejected"];
 async function outcomeRow(t, outcome, tab) {
   try {
     await working("Updating the sheet…", api.post("/api/mark", { action: "outcome", outcome, row: t.row, url: t.url, tab }));
@@ -695,10 +696,10 @@ function reapplyRow(t, undo) {
 
 // Drop: you won't apply (closed, a duplicate, a bad location): the row becomes Failed with the reason in its Notes,
 // leaves every queue and stays in the sheet as your record (sheet.drop), so Review never offers the job again.
-// An application you withdrew (Applied or Interview; my call, 2026-11-04): Drop > I withdrew it, the one reason there.
+// An application you withdrew (Applied or Interview (2); my call, 2026-11-04): Drop > I withdrew it, the one reason there.
 // Failed like any drop, so it stops counting toward the weekly cap and the total (sheet.drop, WITHDRAWN_FROM).
 const DROP_REASONS = [["closed", "It has closed"], ["duplicate", "A duplicate"], ["location", "Bad location"], ["other", "Other reason"]];
-const WITHDRAWN_FROM = ["Applied", "Interview"];
+const WITHDRAWN_FROM = ["Applied", "Interview", "Interview 2"];
 function dropRow(t, tab) {  // tab "other": a row of the sheet's Other jobs tab
   const sent = WITHDRAWN_FROM.includes(t.status), where = `${t.company} · ${t.title || ""} (${tab === "other" ? "Other jobs " : ""}row ${t.row})`;
   modal((box, close) => box.append(
@@ -1167,6 +1168,7 @@ const NU_SECTIONS = [
   ["owed", "Still owed", "Submitted on one side; the other side still needs doing."],
   ["applied", "Applied", null],
   ["interview", "Interview", null],
+  ["interview2", "Interview 2", null],
   ["accepted", "Accepted", null],
   ["rejected", "Rejected", null],
   ["proposed", "Proposed", "Waiting for your OK: Review shows them first."],
@@ -1178,6 +1180,7 @@ const OTHER_SECTIONS = [
   ["expired", "Closed postings", "Approved, but the posting's closing date has passed: the assistant skips them. Drop one (More) to clear it."],
   ["applied", "Applied", null],
   ["interview", "Interview", null],
+  ["interview2", "Interview 2", null],
   ["accepted", "Accepted", null],
   ["rejected", "Rejected", null],
   ["proposed", "Proposed", "Waiting for your OK: Review shows them first."],
@@ -1437,6 +1440,8 @@ screens.apply = async (view) => {
       about = [SENT.includes(r.status) && r.date ? `applied ${r.date}` : null, r.notes ? r.notes.slice(0, 140) : null].filter(Boolean).join(" · ");
       const nu = r.nuworks;  // what NUworks said at the last check (the twice-daily update)
       if (r.status === "Interview") chips.push(el("span", { class: "chip interview", testid: `interview-${r.row}`, text: "interview" }));
+      if (r.status === "Interview 2") chips.push(el("span", { class: "chip interview", testid: `interview2-${r.row}`, text: "interview 2",
+        title: "A second-round interview" }));
       if (nu && nu.current && nu.applied === false) chips.push(el("span", { class: "chip warn", testid: `not-on-nuworks-${r.row}`,
         text: "not on NUworks", title: `NUworks has no application for this job (checked ${nu.checked}): it doesn't count toward your total.` }));
       // the job's own hiring stage (sheet.maybe_filled, jobs.application_answer), never yours: NUworks doesn't show that
@@ -1482,10 +1487,10 @@ screens.apply = async (view) => {
   function rowMenu(d, key, r, other) {
     const t = other ? "other" : undefined, to = other ? "nuworks" : "other", busy = d.busy ? "A run is using the sheet: wait for it to end" : null;
     const live = r.status === "Approved" || r.status === "Needs Human";
-    // what happened, on a sent row: Interview / Accepted / Rejected (the one it is now: back to Applied)
-    const heard = !SENT.includes(r.status) ? [] : ["Interview", "Accepted", "Rejected"].map((o) => r.status === o ?
+    // what happened, on a sent row: Interview / Interview 2 / Accepted / Rejected (the one it is now: back to Applied)
+    const heard = !SENT.includes(r.status) ? [] : OUTCOMES.map((o) => r.status === o ?
       ["Back to Applied", "applied", () => outcomeRow(r, "Applied", t)] :
-      [`Mark ${o.toLowerCase()}`, o.toLowerCase(), () => outcomeRow(r, o, t)]);
+      [`Mark ${o.toLowerCase()}`, o.toLowerCase().replace(" ", ""), () => outcomeRow(r, o, t)]);
     // re-apply (the NUworks tab): Apply withdraws it on NUworks, then sends it again with your new resume
     const again = other ? [] : r.reapply && r.status === "Approved" ? [["Undo re-apply", "unreapply", () => reapplyRow(r, true), busy]] :
       [["Re-apply with the new resume…", "reapply", () => reapplyRow(r, false), r.status === "Applied" ? busy : "Only an Applied application is re-applied"]];
@@ -1526,7 +1531,7 @@ screens.apply = async (view) => {
 
   // The other tab's head, laid out like the week's: no limit here, how many are ready and sent, Run on, how Apply works
   function otherCard(d) {
-    const s = d.sections, sent = s.applied.length + s.interview.length + s.accepted.length + s.rejected.length;
+    const s = d.sections, sent = s.applied.length + s.interview.length + s.interview2.length + s.accepted.length + s.rejected.length;
     const where = onHomelab() ? "in a browser on the homelab, whose screen you watch and answer from here" :
       "in its own terminal window and browser here" + (canRunThere() ? " (Run on: the homelab: on the homelab, you answer it on its screen)" : "");
     return el("div", { class: "card", testid: "apply-other-head" },
@@ -1900,10 +1905,11 @@ function svg(tag, attrs, ...kids) {
 }
 // Status colors (state, not series): each always shown with its label and count in the legend.
 const STATUS_COLOR = { Proposed: "var(--off)", Approved: "var(--accent)", Applied: "var(--ok)", "Needs Human": "var(--warn)", Failed: "var(--fail)",
-  Interview: "var(--interview)", Accepted: "var(--win)", Rejected: "var(--reject)" };
-// Ring (and legend) order, chosen with the dataviz palette validator so no two neighbors are the hard-to-tell pairs
-// (red/amber, green/amber next to each other); labels, counts and 2px gaps carry identity too.
-const RING = ["Applied", "Interview", "Needs Human", "Accepted", "Proposed", "Failed", "Rejected", "Approved"];
+  Interview: "var(--interview)", "Interview 2": "var(--interview2)", Accepted: "var(--win)", Rejected: "var(--reject)" };
+// Ring (and legend) order, chosen with the dataviz palette validator (every order of the 9, the ring's wrap included) so
+// every two neighbors stay apart under each color-vision deficiency, in light and dark (worst: ΔE 8.3; 2026-11-16, when
+// Interview 2 came); labels, counts and 2px gaps carry identity too.
+const RING = ["Applied", "Proposed", "Interview", "Approved", "Interview 2", "Needs Human", "Accepted", "Failed", "Rejected"];
 const usd = (x) => x === null || x === undefined ? "—" : `$${x >= 100 || Number.isInteger(x) ? Math.round(x) : x.toFixed(2)}`;
 
 function donut(items, total) {
@@ -1959,26 +1965,51 @@ function tile(label, value, note, testid) {
     el("div", { class: "tile-value", text: value }), note ? el("div", { class: "tile-note", text: note }) : null);
 }
 
-// Two sets when Summer internships are on (state.internships): the NUworks co-ops and the internships, each with its own
-// pool, applications and sheet tab; the choice is remembered for the session.
+// Two sources when Summer internships are on (state.internships): the NUworks co-ops and the internships, each with its own
+// pool, applications and sheet tab. Within one: a set of jobs (your pool, applied, interview...: insights.SETS) narrowed by
+// tags the jobs carry (Massachusetts, a kind of work, one of your tags: insights.facets), several at once (2026-11-16).
+// The choices are remembered for the session.
+const SET_HEAD = { pool: "in your pool", applied: "you applied to", interview: "that gave you an interview",
+  interview2: "at a second interview", accepted: "that accepted you", rejected: "that turned you down" };
+const facetId = (k) => `ins-only-${k.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
 screens.insights = async (view) => {
-  let d, which = "pool";
+  let d, asked = 0, only = [];
   let source = sessionStorage.getItem("insightsSource") === "intern" ? "intern" : "nuworks";
-  async function load() {
-    try { d = await api.get(`/api/insights?source=${source}`); } catch (e) { fill(view, el("div", { class: "note fail", text: e.message })); return false; }
+  let pick = sessionStorage.getItem("insightsSet") || "pool";
+  try { only = JSON.parse(sessionStorage.getItem("insightsOnly") || "[]"); } catch (e) { only = []; }
+  async function load() {  // the newest click wins: an older answer arriving late is dropped
+    const n = ++asked, q = new URLSearchParams({ source, set: pick });
+    if (only.length) q.set("only", JSON.stringify(only));
+    let got;
+    try { got = await api.get(`/api/insights?${q}`); } catch (e) { if (n === asked) fill(view, el("div", { class: "note fail", text: e.message })); return false; }
+    if (n !== asked) return false;
+    d = got;
+    [pick, only] = [d.pick, d.only];  // what the numbers are for (a set or tag this source lacks falls away)
+    sessionStorage.setItem("insightsSet", pick);
+    sessionStorage.setItem("insightsOnly", JSON.stringify(only));
     if (d.statuses) d.statuses.sort((x, y) => RING.indexOf(x.label) - RING.indexOf(y.label));
     return true;
   }
+  async function go(k, o) { pick = k; only = o; if (await load()) draw(); }
   if (!await load()) return {};
   function draw() {
-    const g = d[which], p = g.pay, intern = d.source === "intern", ii = d.internships;  // ii: internships on (its term)
+    const g = d.view, p = g.pay, intern = d.source === "intern", ii = d.internships;  // ii: internships on (its term)
     source = d.source;
     const sources = ii ? el("div", { class: "seg", role: "group", "aria-label": "Which jobs", testid: "ins-source" },
       ...[["nuworks", "NUworks co-ops"], ["intern", `${ii.term} internships`]].map(([k, t]) => el("button", { "aria-pressed": String(source === k),
         testid: `ins-source-${k}`, text: t, onclick: async () => { source = k; sessionStorage.setItem("insightsSource", k); if (await load()) draw(); } }))) : null;
-    const seg = el("div", { class: "seg", role: "group", "aria-label": "Which jobs" },
-      ...[["pool", `Your pool (${d.pool.count})`], ["applied", `Applied (${d.applied.count})`]].map(([k, t]) =>
-        el("button", { "aria-pressed": String(which === k), testid: `ins-${k}`, text: t, onclick: () => { which = k; draw(); } })));
+    const sets = el("div", { class: "seg wrap", role: "group", "aria-label": "Which set of jobs", testid: "ins-sets" },
+      ...d.sets.map((x) => el("button", { "aria-pressed": String(pick === x.key), testid: `ins-${x.key}`, text: `${x.label} (${x.count})`,
+        title: x.key === "interview" ? "Interview, Interview 2 and Accepted rows" : x.key === "applied" ? "Every application you sent" : null,
+        onclick: () => go(x.key, only) })));
+    const on = d.facets.filter((f) => f.on);
+    const facets = d.facets.length ? el("div", { class: "frow", role: "group", "aria-label": "Only jobs tagged", testid: "ins-facets" },
+      el("span", { class: "flabel small muted", text: "Only" }),
+      ...d.facets.map((f) => el("button", { class: "chip toggle", "aria-pressed": String(f.on), testid: facetId(f.key),
+        title: f.on ? `Showing only ${f.label}: click to drop it` : `${f.count} of these ${f.count === 1 ? "is" : "are"} ${f.label}`,
+        onclick: () => go(pick, f.on ? only.filter((k) => k !== f.key) : [...only, f.key]) },
+        f.label, el("span", { class: "tag-n", text: String(f.count) }))),
+      on.length ? el("button", { class: "btn small ghost", testid: "ins-only-clear", text: "Clear", onclick: () => go(pick, []) }) : null) : null;
     const status = d.statuses === null ? el("div", { class: "card" }, el("h2", { text: "Your sheet" }),
       el("p", { class: "empty", text: "Can't read the sheet right now; the pool numbers below still work." })) :
       el("div", { class: "card", testid: "ins-status" }, el("h2", { text: intern ? "Where your internship applications stand" : "Where your applications stand" }),
@@ -1987,13 +2018,16 @@ screens.insights = async (view) => {
             el("span", { class: "swatch", "data-status": s.label }), el("span", { text: s.label }), el("b", { text: String(s.count) })))))
           : el("p", { class: "empty", text: "Nothing in your sheet yet." }),
         d.interviews && d.interviews.sent ? el("p", { class: "small muted", testid: "ins-interviews",
-          text: `Interviews: ${d.interviews.interviews} of ${d.interviews.sent} sent (${d.interviews.percent}%). Counts Interview and Accepted.` }) : null);
-    const body = !g.count ? [el("p", { class: "empty", testid: "ins-empty", text: which === "applied" ? "Nothing applied yet. Applied rows show up here." :
-      intern ? "Your internship pool is empty: the next internship update fills it." : "Your pool is empty. Check for new jobs on Today." })] : [
+          text: `Interviews: ${d.interviews.interviews} of ${d.interviews.sent} sent (${d.interviews.percent}%)` +
+            (d.interviews.second ? `, ${d.interviews.second} at a second round` : "") + ". Counts Interview, Interview 2 and Accepted." }) : null);
+    const empty = on.length ? "None of these carry every tag you picked: drop one above." : pick === "pool" ?
+      (intern ? "Your internship pool is empty: the next internship update fills it." : "Your pool is empty. Check for new jobs on Today.") :
+      pick === "applied" ? "Nothing applied yet. Applied rows show up here." : "None yet.";
+    const body = !g.count ? [el("p", { class: "empty", testid: "ins-empty", text: empty })] : [
       el("div", { class: "tiles" },
         tile("Median pay", p.median === null ? "—" : `${usd(p.median)}/h`, p.mid_low !== null ? `most ${usd(p.mid_low)}–${usd(p.mid_high)}` : null, "tile-pay"),
         tile("In Massachusetts", `${g.in_ma} of ${g.count}`, `${g.states} state${g.states === 1 ? "" : "s"} in all`, "tile-ma"),
-        which === "pool" ? tile("Closing this week", String(g.closing_week), "in your pool", "tile-closing") :
+        pick === "pool" ? tile("Closing this week", String(g.closing_week), "in your pool", "tile-closing") :
           tile("Pay listed", `${p.listed} of ${g.count}`, null, "tile-listed")),
       el("div", { class: "card", testid: "ins-pay" }, el("div", { class: "row between" }, el("h2", { text: "Hourly pay" }),
         el("span", { class: "small muted", text: p.listed ? `${p.listed} of ${g.count} list pay · all ${usd(p.low)}–${usd(p.high)}` : "none listed" })),
@@ -2012,8 +2046,11 @@ screens.insights = async (view) => {
       el("div", { class: "card", testid: "ins-years" }, el("h2", { text: "Class year asked" }),
         g.years.length ? hbars(g.years, "years-bars") : el("p", { class: "small muted", text: "None ask for a year above yours." }),
         g.years.length ? el("p", { class: "small muted", text: `${g.years.reduce((n, y) => n + y.count, 0)} of ${g.count} ask for a year above yours; the rest ask for your year or name none.` }) : null)];
+    const head = `${intern ? "Internships" : "Jobs"} ${SET_HEAD[pick] || ""}` + on.map((f) => ` · ${f.label}`).join("");
     fill(view, sources ? el("div", { class: "row toolbar" }, sources) : null, status,
-      el("div", { class: "row between ins-head" }, el("h2", { text: which === "pool" ? `${intern ? "Internships" : "Jobs"} in your pool` : `${intern ? "Internships" : "Jobs"} you applied to` }), seg), ...body);
+      el("div", { class: "ins-filters", testid: "ins-filters" },
+        el("div", { class: "frow" }, el("span", { class: "flabel small muted", text: "Jobs" }), sets), facets),
+      el("h2", { class: "ins-head", testid: "ins-head", text: head }), ...body);
     view.querySelectorAll(".swatch").forEach((s) => { s.style.background = STATUS_COLOR[s.dataset.status] || "var(--off)"; });
     sizeBars(view);
   }

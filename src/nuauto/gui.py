@@ -1084,23 +1084,30 @@ def review_done():
     return {}
 
 
-def insights_get(source="nuworks"):
-    """Pay, places, kinds of work (pool and applied) and the sheet tab's statuses: the NUworks co-ops, or (source
-    intern) the Summer internships and the Other jobs tab. The pool numbers work without the sheet."""
+def insights_get(source="nuworks", pick="pool", only=""):
+    """Pay, places, kinds of work and the sheet tab's statuses: the NUworks co-ops, or (source intern) the Summer
+    internships and the Other jobs tab. pick: one of insights.SETS (your pool, applied, interview...); only: a JSON
+    list of facet keys narrowing it (Massachusetts, a kind of work, one of your tags). The pool numbers work without
+    the sheet."""
     from nuauto import insights
     from nuauto import intern
+    try:
+        only = json.loads(only) if only else []
+    except ValueError:
+        only = []
+    only = [k for k in only if isinstance(k, str)] if isinstance(only, list) else []
     both = {"internships": {"on": True, "term": intern.TERM} if intern.ENABLED else None}  # the screen's switch
     if source == "intern" and intern.ENABLED:
         try:
             rows = other_rows(fresh=False)
         except Exception:
             rows = None
-        return {**insights.collect_intern(rows), "source": "intern", **both}
+        return {**insights.collect_intern(rows, pick, only), "source": "intern", **both}
     try:
         APP.refresh_rows()
     except Exception:
         pass
-    return {**insights.collect(APP.rows), "source": "nuworks", **both}
+    return {**insights.collect(APP.rows, pick, only), "source": "nuworks", **both}
 
 
 def job_detail(tab, url):
@@ -1498,7 +1505,7 @@ def mark(body):
     try:
         if action == "site":
             sheet.mark_site_done(ws, int(row), url)
-        elif action == "outcome":  # what happened: Interview / Accepted / Rejected (or back to Applied)
+        elif action == "outcome":  # what happened: Interview (2) / Accepted / Rejected (or back to Applied)
             from nuauto import setup_sheet
             if (config.SHEET_ID, other) not in _dropdown_set:  # (a sheet made before these statuses: its dropdown allows them
                 setup_sheet.ensure_dropdown(ws)                 # now; once per start is enough)
@@ -1782,12 +1789,13 @@ def jobs_tab(tab="nuworks", order="default", recheck=False):
     def view(r, **extra):
         more = facts.get(intern.real_url(r.url), {}) if other else {**closing(r), **job_facts(r, data), **on_nuworks(r)}
         return locks(row_view(r, **more, **extra))
-    s = {k: [] for k in ("approved", "agent", "manual", "owed", "ready", "expired", "applied", "interview", "accepted", "rejected", "proposed",
-                         "closed", "rest")}
+    s = {k: [] for k in ("approved", "agent", "manual", "owed", "ready", "expired", "applied", "interview", "interview2", "accepted", "rejected",
+                         "proposed", "closed", "rest")}
     a = assistants()
     out = {"tab": tab, "name": manage.TABS[tab], "busy": running("apply", "nuworks_side"), **a, "sheet_version": version,
            "queue": queue_info() if REMOTE else _homelab.get("queue") if a["linked"] and config.REMOTE_ASSIST else None}
-    later = {"Applied": "applied", "Interview": "interview", "Accepted": "accepted", "Rejected": "rejected", "Proposed": "proposed", "Failed": "closed"}
+    later = {"Applied": "applied", "Interview": "interview", "Interview 2": "interview2", "Accepted": "accepted", "Rejected": "rejected",
+             "Proposed": "proposed", "Failed": "closed"}
     if other:
         for r in rows:
             if r.status == "Approved":
@@ -1810,7 +1818,7 @@ def jobs_tab(tab="nuworks", order="default", recheck=False):
                 s[later.get(r.status, "rest")].append(view(r))
         out.update(week=run["week"], why_not=run["why_not"], limited=run["limited"], history=run["history"],
                    order=order if known_order(order) else "default", sort=sort_menu())
-    for k in ("applied", "interview", "accepted", "rejected", "closed"):
+    for k in ("applied", "interview", "interview2", "accepted", "rejected", "closed"):
         s[k].sort(key=lambda x: x["date"] or "", reverse=True)  # newest first
     out["sections"] = s
     return out
@@ -2652,7 +2660,7 @@ GET_ROUTES = {
     "/api/jobs": lambda q: jobs_tab("other" if q.get("tab") == "other" else "nuworks", q.get("order", "default"),
                                     q.get("recheck") == "1"),
     "/api/jobs/text": lambda q: job_texts("other" if q.get("tab") == "other" else "nuworks"),
-    "/api/insights": lambda q: insights_get(q.get("source", "nuworks")),
+    "/api/insights": lambda q: insights_get(q.get("source", "nuworks"), q.get("set", "pool"), q.get("only", "")),
     "/api/company": lambda q: company(),
     "/api/task": lambda q: {"task": APP.task.view(int(q.get("after", 0) or 0)) if APP.task else None},
     "/api/answers": lambda q: answers_get(q.get("bank", "nuworks")),

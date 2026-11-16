@@ -2,6 +2,9 @@
 are, and where your applications stand: the NUworks co-ops (data/, the sheet's NUworks tab) and, when they are on, the
 Summer internships apart (data/intern/, the sheet's Other jobs tab). Read-only.
 
+The GUI picks one set of jobs (SETS: your pool, or sent rows by status) and narrows it by tags the jobs carry (facets:
+Massachusetts, remote, a kind of work, one of your tags), several at once (my request, 2026-11-16).
+
   nuauto insights        the same numbers as the GUI's Insights screen, in the terminal
 
 Pay is NUworks' own "pay" text ("$24-$30 per hour"). Yearly pay of $1,000 or more becomes hourly (/ 2080 hours);
@@ -30,6 +33,13 @@ STATES = {"AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas", "C
 TOP_PLACES = 5
 TOP_SKILLS = 20
 TOP_FUNCTIONS = 8
+# Had an interview: Interview, a second round (Interview 2) or Accepted (an accepted one is counted as having had one)
+INTERVIEWED = ("Interview", "Interview 2", "Accepted")
+# The sets of jobs Insights picks from: (key, label, the sheet statuses in it; None: the pool, "sent": every sent row)
+SETS = [("pool", "Your pool", None), ("applied", "Applied", "sent"), ("interview", "Interview", INTERVIEWED),
+        ("interview2", "Interview 2", ("Interview 2",)), ("accepted", "Accepted", ("Accepted",)),
+        ("rejected", "Rejected", ("Rejected",))]
+ALWAYS_SHOWN = ("pool", "applied")  # the other sets show once they hold a job
 _NUM = r"\$?\s*(\d[\d,]*(?:\.\d+)?)\s*(k)?"
 PAY_RE = re.compile(_NUM + r"(?:\s*(?:-|–|to)\s*" + _NUM + r")?.*?\b(?:per|an|a|/)\s*(hour|hr|year|yr)", re.I)
 
@@ -75,11 +85,45 @@ def place_text(location):
     return " ".join([text, *sorted(states)]).strip()
 
 
+def states_of(d):
+    """US state codes a saved posting is in: its "states" ("US-MA") and each of its places (several split on ";")."""
+    codes = {s[3:] for s in d.get("states") or [] if str(s).startswith("US-")}
+    return codes | {s for _, s in (place(p) for p in str(d.get("location") or "").split(";")) if s}
+
+
 def tag_of(d):
     """The name of your interest tag (jobs.job_tag) a saved posting matches, or None. A posting may lack parts: an
     internship's has no skills, a job NUauto holds nothing on is {}."""
     return jobs.job_tag({"title": d.get("title") or "", "description": d.get("description") or "",
                          "qualifications": d.get("qualifications") or "", "skills": d.get("skills") or []})
+
+
+def facets(d, cat):
+    """The tags a job carries that narrow Insights: "ma" (any of its places in Massachusetts), "remote", "cat:<kind of
+    work>", "tag:<your tag>"."""
+    keys = {"ma"} if "MA" in states_of(d) else set()
+    if re.search(r"\bremote\b", str(d.get("location") or ""), re.I):
+        keys.add("remote")
+    if cat:
+        keys.add("cat:" + (cat if cat in jobs.CATEGORIES else "other"))
+    tag = tag_of(d) if d else None
+    if tag:
+        keys.add("tag:" + tag)
+    return keys
+
+
+def facet_order():
+    """Every facet key that can exist, in the order the chips show: places, your kinds of work, your tags."""
+    return ["ma", "remote", *(f"cat:{c}" for c in [*jobs.CATEGORIES, "other"] if c), *(f"tag:{t['name']}" for t in jobs.PREFS["tags"])]
+
+
+def facet_label(key):
+    if key == "ma":
+        return "Massachusetts"
+    if key == "remote":
+        return "Remote"
+    kind, _, name = key.partition(":")
+    return jobs.category_label(name) if kind == "cat" else name
 
 
 def counted(counter, top=None, order=None):
@@ -121,7 +165,7 @@ def group(entries, today):
                 "buckets": [{"label": label, "count": buckets.get(label, 0)} for _, _, label in PAY_BUCKETS]},
         "places": counted(places, top=TOP_PLACES),
         "cities": counted(cities)[:3],
-        "in_ma": places.get("Massachusetts", 0),
+        "in_ma": sum(1 for d, _ in entries if "MA" in states_of(d)),  # any of its places: the Massachusetts tag's count
         "states": sum(1 for k in places if k in STATES.values()),
         "categories": counted(cats, top=8),
         "skills": counted(skills)[:TOP_SKILLS],  # no folded "Other": a skill the top leaves out is not one kind of thing
@@ -133,18 +177,22 @@ def group(entries, today):
 
 
 def interview_rate(statuses):
-    """{interviews, sent, percent} from a Counter of sheet statuses: Interview and Accepted rows over every sent row."""
+    """{interviews, second, sent, percent} from a Counter of sheet statuses: INTERVIEWED rows over every sent row;
+    second: the rows at a second round (Interview 2)."""
     from nuauto import sheet
     sent = sum(statuses[s] for s in sheet.SENT)
-    n = statuses["Interview"] + statuses["Accepted"]
-    return {"interviews": n, "sent": sent, "percent": round(100 * n / sent) if sent else None}
+    n = sum(statuses[s] for s in INTERVIEWED)
+    return {"interviews": n, "second": statuses["Interview 2"], "sent": sent, "percent": round(100 * n / sent) if sent else None}
 
 
-def summarize(pool, details, rows, categories=None, today=None, id_of=None, scores=None):
+def summarize(pool, details, rows, categories=None, today=None, id_of=None, scores=None, pick="pool", only=()):
     """Everything the Insights screen and `nuauto insights` show. pool: data/pool.json entries; details: {id: job
     data}; rows: sheet.Row list (or None when the sheet can't be read); categories: {id: category} for jobs the pool
     no longer lists; id_of: a row's link -> its job id (default: NUworks' own, jobs.job_id); scores: {id: the scorer's
-    reading} (the class year a description asks for)."""
+    reading} (the class year a description asks for).
+    pick: a SETS key; only: facet keys. "view" holds the numbers for the picked set's jobs carrying every one of them;
+    "sets" and "facets" are the screen's chips: each with how many jobs it would show next to what is already chosen
+    (a facet that would show none is left out, unless it is chosen)."""
     from nuauto import sheet
     today = today or date.today()
     categories = categories or {}
@@ -154,33 +202,49 @@ def summarize(pool, details, rows, categories=None, today=None, id_of=None, scor
         cat = (in_pool.get(job_id) or {}).get("category") or categories.get(job_id)
         d = details.get(job_id) or {}
         ask = jobs.year_asked(d, (scores or {}).get(job_id))
-        return ({**d, "year_asked": ask} if ask else d), cat
+        d = {**d, "year_asked": ask} if ask else d
+        return d, cat, facets(d, cat)
 
-    applied = [entry((id_of or jobs.job_id)(r.url)) for r in rows or [] if r.status in sheet.SENT]
+    sent = [(r.status, entry((id_of or jobs.job_id)(r.url))) for r in rows or [] if r.status in sheet.SENT]
+    sets = {key: [e for status, e in sent if holds == "sent" or status in holds] if holds else [entry(r["id"]) for r in pool]
+            for key, _, holds in SETS}
+    pick = pick if pick in sets else "pool"
+    known = {k for e in sets["pool"] + sets["applied"] for k in e[2]}
+    only = [k for k in facet_order() if k in set(only or ()) and k in known]
+    match = lambda e, keys: set(keys) <= e[2]
+    jobs_of = lambda es: [(d, cat) for d, cat, _ in es]
     statuses = Counter(r.status for r in rows or [] if r.status)
     return {
-        "pool": group([entry(r["id"]) for r in pool], today),
-        "applied": group(applied, today),
+        "pool": group(jobs_of(sets["pool"]), today),
+        "applied": group(jobs_of(sets["applied"]), today),
+        "pick": pick, "only": only,
+        "view": group(jobs_of([e for e in sets[pick] if match(e, only)]), today),
+        "sets": [{"key": key, "label": label, "count": sum(1 for e in sets[key] if match(e, only))}
+                 for key, label, _ in SETS if key in ALWAYS_SHOWN or key == pick or sets[key]],
+        "facets": [f for f in ({"key": k, "label": facet_label(k), "on": k in only,
+                                "count": sum(1 for e in sets[pick] if match(e, {*only, k}))} for k in facet_order())
+                   if f["on"] or f["count"]],
         "statuses": None if rows is None else counted(statuses, order=sheet.STATUSES),
         "rows": None if rows is None else sum(statuses.values()),
-        # interviews: Interview and Accepted rows (an accepted one is counted as having had one) over all sent rows
+        # interviews: Interview, Interview 2 and Accepted rows (an accepted one counts as having had one) over all sent rows
         "interviews": None if rows is None else interview_rate(statuses),
     }
 
 
-def collect(rows):
+def collect(rows, pick="pool", only=()):
     """summarize() on this machine's data/ (the NUworks co-ops; rows: the sheet's NUworks tab)."""
     return summarize(jobs.load("pool.json", []), jobs.load_details(), rows, jobs.load("categories.json", {}),
-                     scores=jobs.load("scores.json", {}))
+                     scores=jobs.load("scores.json", {}), pick=pick, only=only)
 
 
-def collect_intern(rows):
+def collect_intern(rows, pick="pool", only=()):
     """summarize() on the Summer internships (data/intern/; rows: the sheet's Other jobs tab, matched to the lists'
     postings by link: an Other job that is on no list counts, with nothing known about it)."""
     from nuauto import intern
     by_url = {x["url"]: i for i, x in intern.load("listings.json", {}).items()}
     return summarize(intern.load("pool.json", []), intern.load_details(), rows, intern.load("categories.json", {}),
-                     id_of=lambda url: by_url.get(intern.clean_url(url)), scores=intern.load("scores.json", {}))
+                     id_of=lambda url: by_url.get(intern.clean_url(url)), scores=intern.load("scores.json", {}),
+                     pick=pick, only=only)
 
 
 def money(x):
@@ -202,7 +266,8 @@ def text(s):
         out += bar_lines(s["statuses"])
         iv = s["interviews"]
         if iv and iv["sent"]:
-            out.append(f"  Interviews: {iv['interviews']} of {iv['sent']} sent ({iv['percent']}%)")
+            second = f", {iv['second']} at a second round" if iv["second"] else ""
+            out.append(f"  Interviews: {iv['interviews']} of {iv['sent']} sent ({iv['percent']}%){second}")
         out.append("")
     for key, name in (("pool", "Your pool"), ("applied", "Applied")):
         g = s[key]

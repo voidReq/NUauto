@@ -180,7 +180,8 @@ year's lists are new repos: changing the term moves the addresses with it); off 
 - `nuauto intern fetch <url> [--browser]` reads one posting now (nothing saved); `intern stats` shows each step.
 
 INSIGHTS (insights.py; `nuauto insights`, the GUI's Insights): read-only pay, places and kinds of work for the pool and
-for sent rows, co-ops and internships apart. Yearly pay of $1,000+ becomes hourly (2080 hours); anything not $10-$150
+for sent rows (or one status of them), narrowed by tags (Massachusetts, a kind of work, your tags), co-ops and
+internships apart. Yearly pay of $1,000+ becomes hourly (2080 hours); anything not $10-$150
 an hour counts as not listed, never a guess.
 
 RESUME
