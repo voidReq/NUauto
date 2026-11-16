@@ -19,11 +19,11 @@ from google.auth.exceptions import RefreshError
 from nuauto import config
 
 HEADERS = ["URL", "Company", "Title", "Status", "Notes", "Date"]
-STATUSES = ["Proposed", "Approved", "Applied", "Failed", "Needs Human", "Interview", "Accepted", "Rejected"]
-# An application went out: Applied, and what you heard back (my request, 2026-10-16; Interview 2026-10-28). All count toward
-# the limits.
-SENT = ("Applied", "Interview", "Accepted", "Rejected")
-OUTCOMES = ("Interview", "Accepted", "Rejected")
+STATUSES = ["Proposed", "Approved", "Applied", "Failed", "Needs Human", "Interview", "Interview 2", "Accepted", "Rejected"]
+# An application went out: Applied, and what you heard back (my request, 2026-10-16; Interview 2026-10-28; Interview 2, a
+# second-round interview, 2026-11-16). All count toward the limits.
+SENT = ("Applied", "Interview", "Interview 2", "Accepted", "Rejected")
+OUTCOMES = ("Interview", "Interview 2", "Accepted", "Rejected")
 MAX_PER_WEEK = 11  # the default weekly cap (raised from 8 on 2026-10-03); local_config "max_per_week" changes it
 MAX_PER_WEEK_CEILING = 30  # the most a setting may ask for
 MAX_TOTAL = 99     # CLAUDE.md says "under 100"
@@ -82,7 +82,7 @@ def counted(r):
 
 
 def applied_dates(rows):
-    """Dates of all sent rows (Applied, Interview, Accepted, Rejected; and those being re-applied: reapplying). A missing or odd
+    """Dates of all sent rows (Applied, Interview, Interview 2, Accepted, Rejected; and those being re-applied: reapplying). A missing or odd
     date is an error, not a guess."""
     dates = []
     for r in rows:
@@ -596,7 +596,7 @@ def mark_applied_by_hand(ws, row_number, url, how="by hand"):
 
 
 def set_outcome(ws, row_number, url, outcome):
-    """What you heard back on a sent row: Interview, Accepted or Rejected (or back to Applied, a mark undone). Its date stays (the
+    """What you heard back on a sent row: Interview, Interview 2, Accepted or Rejected (or back to Applied, a mark undone). Its date stays (the
     day it went out: it still counts that week); a note says when you marked it. Only a sent row still holding this job."""
     if outcome not in SENT:
         raise SheetError(f"Unknown outcome {outcome!r}.")
@@ -613,7 +613,7 @@ DROP_MARK = "Dropped"   # Notes prefix of a row you chose not to apply to (drop)
 DROP_REASONS = {"closed": "the posting has closed", "duplicate": "a duplicate of another row",
                 "location": "the location doesn't work", "other": "not applying",
                 "withdrawn": "you withdrew the application"}  # (only this one on a sent row: drop)
-WITHDRAWN_FROM = ("Applied", "Interview")  # sent rows a withdrawn application is dropped from
+WITHDRAWN_FROM = ("Applied", "Interview", "Interview 2")  # sent rows a withdrawn application is dropped from
 
 
 def drop(ws, row_number, url, why="other"):
@@ -621,14 +621,14 @@ def drop(ws, row_number, url, why="other"):
     in front. It leaves every queue (they take Approved and Needs Human rows only) and stays as your record, so Review
     never offers the job again. Only an Approved or Needs Human row still holding this job, never one whose Submit
     click is unresolved. why: a DROP_REASONS key.
-    why "withdrawn" (my call, 2026-11-04: "i applied ... then withdrew"): only an Applied or Interview row, the
+    why "withdrawn" (my call, 2026-11-04: "i applied ... then withdrew"): only an Applied or Interview (2) row, the
     application you withdrew. It becomes Failed like any drop, so it stops counting toward the weekly cap and the total
     (they count sent rows only); its date stays as the record of when it went out."""
     current = _row_for(ws, row_number, url)
     if why == "withdrawn":
         if current.status not in WITHDRAWN_FROM:
             raise SheetError(f"Row {row_number} is {current.status or 'empty'}: only a sent application (Applied or "
-                             "Interview) is dropped as withdrawn.")
+                             "Interview, Interview 2) is dropped as withdrawn.")
     elif current.status not in ("Approved", "Needs Human"):
         raise SheetError(f"Row {row_number} is {current.status or 'empty'}: only Approved or Needs Human rows are dropped"
                          + (" (one you withdrew: Drop > I withdrew it)." if current.status in WITHDRAWN_FROM else "."))

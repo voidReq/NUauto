@@ -124,8 +124,15 @@ try:
     ins = get("/api/insights")  # the demo: 8 pool jobs, one paid yearly (made hourly), one with no pay
     assert ins["pool"]["count"] == 8 and ins["pool"]["pay"]["listed"] == 7 and ins["rows"] == sum(x["count"] for x in ins["statuses"])
     by_status = {x["label"]: x["count"] for x in ins["statuses"]}
-    assert ins["applied"]["count"] == sum(by_status.get(s, 0) for s in ("Applied", "Interview", "Accepted", "Rejected"))
-    assert by_status["Interview"] == 1 and ins["interviews"]["interviews"] == 1 and ins["interviews"]["sent"] == ins["applied"]["count"]
+    assert ins["applied"]["count"] == sum(by_status.get(s, 0) for s in ("Applied", "Interview", "Interview 2", "Accepted", "Rejected"))
+    assert by_status["Interview"] == 1 and by_status["Interview 2"] == 1 and ins["interviews"]["interviews"] == 2
+    assert ins["interviews"]["second"] == 1 and ins["interviews"]["sent"] == ins["applied"]["count"]
+    # one set of jobs at a time, narrowed by tags (several at once); the numbers in "view"
+    assert ins["pick"] == "pool" and ins["only"] == [] and ins["view"] == ins["pool"]
+    assert {x["key"]: x["count"] for x in ins["sets"]}["interview"] == 2 and {x["key"] for x in ins["sets"]} >= {"pool", "applied", "interview2"}
+    ma = get("/api/insights?set=applied&only=" + urllib.parse.quote(json.dumps(["ma"])))
+    assert ma["pick"] == "applied" and ma["only"] == ["ma"] and ma["view"]["count"] == ma["view"]["in_ma"] <= ins["applied"]["count"]
+    assert get("/api/insights?set=nope&only=%5Bbroken")["pick"] == "pool"  # a bad ask: the plain pool, not an error
     assert {"skills", "functions", "tags"} <= set(ins["pool"]) and ins["pool"]["skills"], ins["pool"]  # the demo's jobs list skills
     applying = get("/api/apply")["rows"]
     detail = get("/api/job?tab=nuworks&url=" + urllib.parse.quote(applying[0]["url"]))  # an Apply row's dropdown: its saved posting
@@ -607,6 +614,11 @@ try:
     assert sent["row"] in [r["row"] for r in get("/api/jobs?tab=nuworks")["sections"]["applied"]]
     # Interview (2026-10-28): its own section (the demo has one already), on to Accepted, back to Applied; limits unchanged
     assert get("/api/jobs?tab=nuworks")["sections"]["interview"], "the demo has an Interview row"
+    assert get("/api/jobs?tab=nuworks")["sections"]["interview2"], "the demo has an Interview 2 row (a second round)"
+    post("/api/mark", {"action": "outcome", "outcome": "Interview 2", "row": sent["row"], "url": sent["url"]})
+    secs = get("/api/jobs?tab=nuworks")["sections"]
+    assert sent["row"] in [r["row"] for r in secs["interview2"]] and get("/api/state")["week"] == week_now
+    post("/api/mark", {"action": "outcome", "outcome": "Applied", "row": sent["row"], "url": sent["url"]})
     post("/api/mark", {"action": "outcome", "outcome": "Interview", "row": sent["row"], "url": sent["url"]})
     secs = get("/api/jobs?tab=nuworks")["sections"]
     assert sent["row"] in [r["row"] for r in secs["interview"]] and sent["row"] not in [r["row"] for r in secs["applied"]]
@@ -802,7 +814,7 @@ try:
         page.click(f"[data-testid=more-nuworks-{applied_row}]")
         page.wait_for_selector("div.menu")
         assert [b.inner_text() for b in page.locator("div.menu button").all()] == \
-            ["Mark interview", "Mark accepted", "Mark rejected", "Re-apply with the new resume…", "I applied myself", "Drop (I withdrew it)…",
+            ["Mark interview", "Mark interview 2", "Mark accepted", "Mark rejected", "Re-apply with the new resume…", "I applied myself", "Drop (I withdrew it)…",
              "Move to Summer 2027 internships…", "Remove from the sheet…"]  # (what you heard back, re-apply, withdrew: on a sent row)
         for key in ("mark", "move", "remove"):
             assert page.locator(f"[data-testid=more-nuworks-{applied_row}-{key}]").is_disabled(), key  # (with a reason in its title)
@@ -817,6 +829,7 @@ try:
         assert page.get_attribute(f"[data-testid=more-nuworks-{applied_row}-remove]", "title")
         assert page.locator(f"[data-testid=more-nuworks-{applied_row}-rejected]").is_enabled()
         assert page.locator(f"[data-testid=more-nuworks-{applied_row}-interview]").is_enabled()
+        assert page.locator(f"[data-testid=more-nuworks-{applied_row}-interview2]").inner_text() == "Mark interview 2"
         page.keyboard.press("Escape")
         page.wait_for_selector("div.menu", state="detached")
         # an Interview row (2026-10-28): its own section and chip; its menu: back to Applied, accepted, rejected
@@ -827,10 +840,22 @@ try:
         assert page.locator(f"[data-testid=interview-{iv_row}]").inner_text() == "interview"
         page.click(f"[data-testid=more-nuworks-{iv_row}]")
         page.wait_for_selector("div.menu")
-        assert [b.inner_text() for b in page.locator("div.menu button").all()][:3] == ["Back to Applied", "Mark accepted", "Mark rejected"]
+        assert [b.inner_text() for b in page.locator("div.menu button").all()][:4] == ["Back to Applied", "Mark interview 2", "Mark accepted", "Mark rejected"]
         page.keyboard.press("Escape")
         page.wait_for_selector("div.menu", state="detached")
         interview.locator("summary").click()
+        # an Interview 2 row (a second round, 2026-11-16): its own section and chip; its menu: back to Interview or Applied
+        second = page.locator("[data-testid=section-nuworks-interview2]")
+        assert second.count() == 1 and second.get_attribute("open") is None
+        second.locator("summary").click()
+        iv2_row = second.locator("li").first.get_attribute("data-testid").split("-")[-1]
+        assert page.locator(f"[data-testid=interview2-{iv2_row}]").inner_text() == "interview 2"
+        page.click(f"[data-testid=more-nuworks-{iv2_row}]")
+        page.wait_for_selector("div.menu")
+        assert [b.inner_text() for b in page.locator("div.menu button").all()][:4] == ["Mark interview", "Back to Applied", "Mark accepted", "Mark rejected"]
+        page.keyboard.press("Escape")
+        page.wait_for_selector("div.menu", state="detached")
+        second.locator("summary").click()
         applied.locator("summary").click()
         page.click("[data-testid=tab-other]")
         page.wait_for_selector("[data-testid=section-other-ready]")  # the Other jobs tab is the second tab of Apply
@@ -870,7 +895,7 @@ try:
         # /api/jobs: the same Approved rows, in Start's order, as /api/apply; every section is there for both tabs
         jobs = get("/api/jobs?tab=nuworks")
         assert [r["row"] for r in jobs["sections"]["approved"]] == [r["row"] for r in get("/api/apply")["rows"]]
-        every = {"approved", "agent", "manual", "owed", "ready", "expired", "applied", "interview", "accepted", "rejected", "proposed", "closed", "rest"}  # (both tabs: the other tab's stay empty)
+        every = {"approved", "agent", "manual", "owed", "ready", "expired", "applied", "interview", "interview2", "accepted", "rejected", "proposed", "closed", "rest"}  # (both tabs: the other tab's stay empty)
         assert set(jobs["sections"]) == every and jobs["sections"]["ready"] == [], list(jobs["sections"])
         assert jobs["tab"] == "nuworks" and jobs["order"] == "default" and jobs["week"] == get("/api/apply")["week"] and "history" in jobs
         assert [r["company"] for r in jobs["sections"]["agent"]] == ["Iron Valley Medical"], jobs["sections"]["agent"]
@@ -1091,6 +1116,30 @@ fetch("{target}", {{method: "POST", credentials: "include", body: {json.dumps(bo
         widths = page.eval_on_selector_all("[data-testid=where-bars] .hb-bar", "bs => bs.map(b => b.getBoundingClientRect().width)")
         assert widths and min(widths) > 0 and widths[0] == max(widths), widths
         assert "$" in page.inner_text("[data-testid=tile-pay]") and "of 8" in page.inner_text("[data-testid=tile-ma]")
+        # the sets of jobs (one at a time) and the tags narrowing them (several at once)
+        assert page.locator("[data-testid=ins-sets] button").count() == len(ins["sets"])
+        assert page.inner_text("[data-testid=ins-head]") == "Jobs in your pool"
+        fac = {f["key"]: f for f in ins["facets"]}
+        assert "ma" in fac and page.locator("[data-testid=ins-facets] button.chip").count() == len(ins["facets"])
+        page.click("[data-testid=ins-only-ma]")
+        page.wait_for_selector("[data-testid=ins-only-ma][aria-pressed=true]")
+        assert page.inner_text("[data-testid=ins-head]") == "Jobs in your pool · Massachusetts"
+        assert page.inner_text("[data-testid=tile-ma]").split("\n")[1] == f"{fac['ma']['count']} of {fac['ma']['count']}"
+        in_ma = get("/api/insights?only=" + urllib.parse.quote(json.dumps(["ma"])))
+        kind = next(f["key"] for f in in_ma["facets"] if f["key"].startswith("cat:") and f["count"])  # a second tag: both apply
+        kid = "ins-only-" + re.sub(r"[^a-z0-9]+", "-", kind.lower())
+        with page.expect_response(lambda r: "/api/insights?" in r.url) as both:
+            page.click(f"[data-testid={kid}]")
+        assert both.value.json()["only"] == ["ma", kind], both.value.json()["only"]
+        page.wait_for_selector(f"[data-testid={kid}][aria-pressed=true]")
+        page.click("[data-testid=ins-only-clear]")
+        page.wait_for_selector("[data-testid=ins-only-ma][aria-pressed=false]")
+        assert page.inner_text("[data-testid=ins-head]") == "Jobs in your pool"
+        page.click("[data-testid=ins-interview2]")
+        page.wait_for_selector("[data-testid=ins-interview2][aria-pressed=true]")
+        second = {x["key"]: x["count"] for x in ins["sets"]}["interview2"]
+        assert page.inner_text("[data-testid=ins-head]") == "Jobs at a second interview" and f"Interview 2 ({second})" in page.inner_text("[data-testid=ins-interview2]")
+        assert f", {ins['interviews']['second']} at a second round" in page.inner_text("[data-testid=ins-interviews]")
         page.click("[data-testid=ins-applied]")
         page.wait_for_selector("[data-testid=ins-applied][aria-pressed=true]")
         assert f"Applied ({ins['applied']['count']})" in page.inner_text("[data-testid=ins-applied]")

@@ -134,11 +134,11 @@ A question from a run (an unknown form field, an option to pick, "did it submit?
                  interviewing" or "job filled" (sheet.maybe_filled: it may be filled; withdrawing on NUworks frees its
                  place in the total). Until 2026-10-26 an "interviewing (NUworks)" chip showed the job's is_interviewing
                  flag as if it were yours: it is about the job, set also on jobs you never applied to, and NUworks never
-                 shows a student whom an employer picked), Interview, Accepted, Rejected, Proposed, Dropped or failed, Other rows;
+                 shows a student whom an employer picked), Interview, Interview 2, Accepted, Rejected, Proposed, Dropped or failed, Other rows;
                  Recent runs here at the end. The
                  other tab: Ready to apply (Approved: the assistant; an internship whose posting has closed leaves it for
                  Closed postings, folded: sections.expired, not changed in the sheet, Drop clears it; the homelab's queue
-                 skips them too, intern.closes_func), Applied, Interview, Accepted, Rejected, Proposed, Dropped or
+                 skips them too, intern.closes_func), Applied, Interview, Interview 2, Accepted, Rejected, Proposed, Dropped or
                  failed, Other rows (Sort: score, match %, pay, sheet order, and on the homelab's page the queue's order
                  first; it changes the view only).
                  Every row looks alike: its company (click it: a dropdown, 2026-10-27) with the role under it, score / match % and pay ("score 105 = 75% match + 10 Boston + 20
@@ -166,14 +166,15 @@ A question from a run (an unknown form field, an option to pick, "did it submit?
                  sessions attention; a desktop notification says so too); every slot in use greys it out; one the homelab
                  runs (remote_assist) shows "assistant running on the homelab: open" / "...: waiting for you: open", its
                  screen in the app when linked, else in the browser). Mark the company site done; Submit on NUworks too.
-                 More: on a sent row Mark interview / Mark accepted / Mark rejected (the one it is now: Back to Applied; sheet.set_outcome;
-                 Interview, 2026-10-28: its own section and a pink "interview" chip); on the NUworks
+                 More: on a sent row Mark interview / Mark interview 2 / Mark accepted / Mark rejected (the one it is now: Back
+                 to Applied; sheet.set_outcome; Interview, 2026-10-28, and Interview 2, a second round, 2026-11-16: each its own
+                 section and a pink "interview" / "interview 2" chip); on the NUworks
                  tab Re-apply with the new resume (an Applied row: sheet.mark_reapply; Apply withdraws it on NUworks, then
                  sends it again, first date kept, never counted twice, even past the limit; "re-apply" chip; Undo re-apply
                  while still Approved: sheet.undo_reapply; 2026-10-28), I applied
                  myself, Drop (closed, a duplicate, a bad location, other; sheet.drop: Failed, "Dropped <date>: <reason>"
                  in Notes; only Approved / Needs Human rows, never while an assistant is on the row; on an Applied or
-                 Interview row: Drop (I withdrew it), the one reason "withdrawn": Failed, date kept, no longer counted
+                 Interview (2) row: Drop (I withdrew it), the one reason "withdrawn": Failed, date kept, no longer counted
                  toward either limit; 2026-11-04), Move to the other tab
                  (asks for the link there), Remove from the sheet (clears the row's cells: no row is renumbered). What a row
                  can't do is greyed out with why: Applied rows are never removed and never leave the NUworks tab (an
@@ -200,10 +201,17 @@ A question from a run (an unknown form field, an option to pick, "did it submit?
                  "At most" keeps what you typed. The menu's count is Approved + the assistant's rows + retries.
   Insights       NUworks co-ops / "<term> internships" switch when internships are on (2026-10-16; remembered for the
                  session): each its own pool, applications and sheet tab (insights.collect / collect_intern). Where that
-                 sheet tab stands (a status ring: arcs in an order checked for color-blind separation, with a labeled
-                 legend; under it "Interviews: N of M sent (P%)": Interview + Accepted rows over every sent row, 2026-10-28,
-                 insights.interview_rate), then for Your pool / Applied: median and usual pay, share in Massachusetts, closing this week
-                 (pool) or pay listed (applied); an hourly-pay histogram; by state (top 5 + Other, top cities); kind of
+                 sheet tab stands (a status ring: arcs in an order checked for color-blind separation, every two neighbors
+                 apart under each color-vision deficiency in light and dark, with a labeled legend; under it "Interviews: N of
+                 M sent (P%), K at a second round": Interview + Interview 2 + Accepted rows over every sent row, 2026-10-28,
+                 insights.interview_rate). Then the chips (2026-11-16, my request: "classify by more tags"): Jobs, one set
+                 at a time (insights.SETS: Your pool, Applied = every sent row, Interview = Interview + Interview 2 +
+                 Accepted, Interview 2, Accepted, Rejected; past the first two only once they hold a job), and Only, tags
+                 narrowing it, several at once, each a job must carry (insights.facets: Massachusetts (any of its places),
+                 Remote, each kind of work, each of your tags; a tag no job here carries is left out); every chip says how
+                 many jobs it would show next to what is chosen; Clear; the heading names them ("Jobs you applied to ·
+                 Massachusetts"); remembered for the session. For those jobs: median and usual pay, share in Massachusetts,
+                 closing this week (pool) or pay listed (the rest); an hourly-pay histogram; by state (top 5 + Other, top cities); kind of
                  work; skills and tags (NUworks' skill labels, top 20; your own tags from the preferences found in the text; an
                  internship list gives no skills), job function, class year asked (jobs.year_asked).
                  insights.py, also `nuauto insights` in a terminal. Read-only; pay that doesn't read as $10-150/h
@@ -515,7 +523,7 @@ API (JSON; all need the cookie; POSTs need X-NUauto: 1)
                              company, host, since, attention: {kind waiting|approve, since, said} while it waits for you)
                              and slots (how many may); queue (the homelab: review.queue_view, or {"error"}); the laptop's link
                              reads the homelab's. POST /api/mark {"action": applied|site|drop|outcome|reapply|unreapply, "row", "url", "why"
-                             (drop: closed|duplicate|location|other), "outcome" (Applied|Interview|Accepted|Rejected), "tab": "other"
+                             (drop: closed|duplicate|location|other), "outcome" (Applied|Interview|Interview 2|Accepted|Rejected), "tab": "other"
                              (Other jobs tab: applied, drop, outcome)}
   GET  /api/other            the Other jobs tab: exists, ready, applied, rest, sessions, slots (/api/jobs has them too)
   POST /api/other/add        {"url", "company", "title"} -> {"row"}: an Approved row there (the tab made if missing)
@@ -523,7 +531,9 @@ API (JSON; all need the cookie; POSTs need X-NUauto: 1)
   GET  /api/sheet/lookup?url=  the tab a link belongs in; for a NUworks job: known, company, title, match, in_pool, notes
   POST /api/sheet            {"action": add, "tab": nuworks|other, "url", "company", "title", "status"} -> {"tab", "row"};
                              {"action": move, "tab", "row", "url", "new_url"} -> {"tab", "row"}; {"action": remove, "tab", "row", "url"}
-  GET  /api/insights?source= pool / applied numbers (pay, places, categories) and the sheet tab's statuses; source=intern:
+  GET  /api/insights?source=&set=&only= the numbers (pay, places, categories) for one set (insights.SETS) narrowed by
+                             facet keys (only: a JSON list: "ma", "remote", "cat:<key>", "tag:<name>"; unknown ones dropped),
+                             the chips (sets, facets), pool / applied as before, the sheet tab's statuses; source=intern:
                              the Summer internships and the Other jobs tab (when internships are on; the reply says source)
   GET  /api/answers?bank=    entries + version (bank other: answers_other.json; bank long: {"long": [...], "words"}, read-only); POST /api/answers {"bank", "entries",
                              "version"}. answers.json entries carry nuworks_only; leave_blank is kept while empty

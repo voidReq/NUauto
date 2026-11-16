@@ -533,6 +533,10 @@ def setup(state_names=()):
         rows.append([_url(f"9002{k:02d}"), f"Earlier Co {k + 1}", "Engineering Co-op", "Interview" if k == 3 else "Applied",
                      ("Interview (marked demo). " if k == 3 else "") + "Submitted via apply.py (confirmed by NUworks page)",
                      day.isoformat()])
+    # a second-round interview on one sent before this week (so the week's count is as it was)
+    rows.append([_url("900290"), "Earlier Co 12", "Embedded Software Co-op", "Interview 2",
+                 "Interview 2 (marked demo). Interview (marked demo). Submitted via apply.py (confirmed by NUworks page)",
+                 (today - timedelta(days=9)).isoformat()])
     rows.append([_url("900130"), "Willow Devices", "Firmware Co-op", "Applied",
                  f"{sheet.SITE_MARK} (posting: \"you must also apply on our careers site\"). Submitted via apply.py",
                  (today - timedelta(days=1)).isoformat()])

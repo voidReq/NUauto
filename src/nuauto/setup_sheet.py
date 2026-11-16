@@ -16,7 +16,8 @@ import gspread
 from nuauto import config
 
 HEADERS = ["URL", "Company", "Title", "Status", "Notes", "Date"]
-STATUSES = ["Proposed", "Approved", "Applied", "Failed", "Needs Human", "Interview", "Accepted", "Rejected"]  # = sheet.STATUSES
+STATUSES = ["Proposed", "Approved", "Applied", "Failed", "Needs Human", "Interview", "Interview 2", "Accepted",
+            "Rejected"]  # = sheet.STATUSES
 LAST_ROW = 1000  # dropdown covers D2:D1000
 
 
@@ -34,6 +35,7 @@ STATUS_COLORS = {
     "Failed": ("#FCE8E6", "#C5221F"),
     "Needs Human": ("#FEF7E0", "#B06000"),
     "Interview": ("#FCE4F1", "#B3217A"),
+    "Interview 2": ("#F5C6E1", "#7A1250"),  # a second round: Interview's pink, deeper
     "Accepted": ("#CEEAD6", "#0D652D"),
     "Rejected": ("#F1F3F4", "#5F6368"),
 }
@@ -50,7 +52,7 @@ def status_dropdown(ws):
 
 
 def ensure_dropdown(ws):
-    """Set the Status dropdown on this tab again (every status, Interview, Accepted and Rejected too: a sheet made before them
+    """Set the Status dropdown on this tab again (every status, Interview, Interview 2, Accepted and Rejected too: a sheet made before them
     still has the old list). Changes no value. A sheet that can't take it (demo mode's) is left as it is."""
     try:
         ws.spreadsheet.batch_update({"requests": [status_dropdown(ws)]})
