@@ -1034,6 +1034,7 @@ try:
         assert page.locator("[data-testid=approved-list]").count() == 0  # nothing approved is left
         quarry = page.inner_text("[data-testid=section-nuworks-agent] li:has-text('Quarry Hardware') [data-testid=job-facts]")
         assert "68% match" in quarry and "pay " in quarry, quarry  # match / pay on the company-site rows too
+        assert page.locator("[data-testid=section-nuworks-agent] li:has-text('Quarry Hardware') [data-testid=featured]").count() == 1  # and featured
 
         # another site on this machine (another port: same site to the browser, so the cookie IS sent) tries to change
         # the sheet three ways. All must fail: no X-NUauto header / no JSON / a CORS preflight the server never allows.

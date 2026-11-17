@@ -1409,7 +1409,7 @@ screens.apply = async (view) => {
         title: `Sent ${r.date}. Apply withdraws it on NUworks, then sends it again with your new resume. It doesn't count again.` }));
       next = applyButton(d, r);
     } else if (key === "agent") {
-      chips = [dueChip(r)];
+      chips = [dueChip(r), featuredChip(r)];
       about = r.host;
       next = assistantStart(d, r, "jobs", `assist-${r.row}`, { body: { row: r.row } });
       open = linkOut(r.target, "Open");
