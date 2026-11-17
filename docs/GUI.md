@@ -146,7 +146,7 @@ A question from a run (an unknown form field, an option to pick, "did it submit?
                  closes, amber within a week, red once past; on Ready to apply also when the posting went up: "posted
                  Oct 21", green under a week, yellow under two, grey under three, older the date alone, and "featured"
                  when NUworks tags it Featured Posting at the last update (jobs.posted_view, from data/list.json; 2026-10-28,
-                 my request); an internship's from its posting (gui.intern_facts), else
+                 my request; on Company site needed too, 2026-11-17); an internship's from its posting (gui.intern_facts), else
                  "no close date · posted N days ago"; "asks for juniors+" (jobs.year_asked: the class year a posting asks for,
                  when above yours; from NUworks' class levels, the scorer's class_req, an internship's year_req); the queue's
                  place; "do it on the laptop" when the homelab's browser was refused; "free-response" when its assistant

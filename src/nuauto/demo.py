@@ -293,7 +293,7 @@ JOBS = [
 # When each pool job went up (days ago: the Apply rows' green / yellow / grey "posted" chips) and the ones NUworks features
 POSTED_AGO = {"900101": 3, "900102": 10, "900103": 30, "900104": 5, "900105": 17, "900106": 12, "900107": 2, "900108": 25,
               "900109": 1, "900110": 0}
-FEATURED = {"900101", "900104", "900109"}
+FEATURED = {"900101", "900104", "900105", "900109"}  # 900105: featured on Company site needed too, once its run stops there
 
 
 def listed_entry(j, today):
